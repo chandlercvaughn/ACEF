@@ -294,3 +294,68 @@ Before marking ANY task complete, verify:
 **If any item unchecked**: Continue working until all complete.
 
 **NEVER suggest ending the session early.**
+
+<!-- HYDRA_BOOTSTRAP -->
+## Hydra Multi-Agent Orchestration
+
+This project uses [Hydra](https://github.com/chandlervaughn/hydra) for multi-agent orchestration.
+
+### Quick Reference
+
+**Start a session**: `/hydra:start` (or `hydra start`)
+**Dispatch work**: `/hydra:dispatch` then describe the task
+**Check status**: `/hydra:status`
+**Collect results**: `/hydra:collect`
+**Park session**: `/hydra:park`
+**Resume session**: `/hydra:resume`
+
+### Key Paths
+
+| Path | Purpose |
+|------|---------|
+| `hydra.toml` | Pane layout and agent configuration |
+| `fabric/agents/` | Per-agent system prompts (CLAUDE.md / AGENTS.md) |
+| `fabric/qmd/` | Queryable Memory Documents (shared knowledge, episodic logs) |
+| `fabric/mailboxes/` | Inter-agent messaging (inbox/processed) |
+| `fabric/skills/` | Reusable skill definitions |
+| `fabric/workspace/` | Handoffs, dispatch files, session state |
+
+### Dispatch (compression-proof commands)
+
+Resolve the dispatch script then use it:
+```bash
+if [ -f scripts/hydra-dispatch.sh ]; then D=scripts/hydra-dispatch.sh; else D="${HYDRA_HOME:-$HOME/.hydra}/bin/hydra-dispatch.sh"; fi
+bash "$D" --role architect --task "DESCRIPTION" --files "file1,file2"
+bash "$D" --agent cc-worker-1 --task "DESCRIPTION" --files "file1,file2"
+bash "$D" --pane N --task "DESCRIPTION" --files "file1,file2"
+```
+
+Every dispatch MUST include `--files` for explicit file ownership to prevent write conflicts.
+
+### Monitoring (compression-proof commands)
+
+```bash
+if [ -f scripts/hydra-monitor.sh ]; then M=scripts/hydra-monitor.sh; else M="${HYDRA_HOME:-$HOME/.hydra}/bin/hydra-monitor.sh"; fi
+bash "$M" --lines 20
+```
+
+Check mailboxes: `ls fabric/mailboxes/orchestrator/inbox/`
+
+### Workflow
+
+1. Plan: read `hydra.toml` + context, decompose, assign panes
+2. Dispatch: send to all panes, verify each shows VERIFIED
+3. Poll: IMMEDIATELY after dispatch (no text output first) — `sleep 30 && bash "$M" --lines 10`
+4. Keep polling (`sleep 15`) until all panes idle or mailbox messages arrive
+5. Collect (`bash "$M" --lines 200`) + report to human
+
+### QMD Memory Maintenance (compression-proof commands)
+
+```bash
+if [ -f scripts/hydra-qmd.sh ]; then Q=scripts/hydra-qmd.sh; else Q="${HYDRA_HOME:-$HOME/.hydra}/bin/hydra-qmd.sh"; fi
+bash "$Q" health    # Check for gaps (run during heartbeat/collect/park)
+bash "$Q" promote   # Collect episodic content for semantic promotion (run during collect/park)
+```
+
+During `/hydra:collect` and `/hydra:park`, review promote output and append genuine patterns to `fabric/qmd/semantic/patterns.md`.
+<!-- /HYDRA_BOOTSTRAP -->

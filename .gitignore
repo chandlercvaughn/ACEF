@@ -39,3 +39,6 @@ junit.xml
 # Claude
 .claude/evidence/
 .claude/handoff/
+
+# Hydra infrastructure backups
+.hydra-backup/
