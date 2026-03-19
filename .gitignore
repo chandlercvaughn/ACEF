@@ -40,5 +40,8 @@ junit.xml
 .claude/evidence/
 .claude/handoff/
 
-# Hydra infrastructure backups
+# Hydra
+fabric/
+hydra.toml
 .hydra-backup/
+projects/
