@@ -1,0 +1,163 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://acef.ai/schemas/v1.1/transparency_disclosure.schema.json",
+  "title": "ACEF v1.1 Transparency Disclosure Payload (overlay)",
+  "description": "ACEF Core v1.1 overlay of transparency_disclosure. Inlines the v1.0 property set (kept backward-compatible) and adds conditional discriminator-keyed oneOf enforcement for the verification_badge variant (per VAL-VARIANT-004 and the v1.1 variant-registry entry for /payload/disclosure_subtype = 'verification_badge'). Records that do NOT set /payload/disclosure_subtype validate exactly as under v1.0. Records that set it to 'verification_badge' MUST satisfy the badge_id / claim / expires_at / signing_kid required-field set.",
+  "type": "object",
+  "required": ["disclosure_type"],
+  "properties": {
+    "variant": {
+      "type": "string",
+      "description": "Discriminator for payload variants from v1.0 (e.g., 'publication_evidence')."
+    },
+    "disclosure_subtype": {
+      "type": "string",
+      "description": "v1.1 discriminator field for transparency_disclosure variants. Values defined in v1.1 variant-registry.json. Currently includes: 'verification_badge'."
+    },
+    "disclosure_type": {
+      "type": "string",
+      "description": "Type of transparency disclosure.",
+      "enum": [
+        "instructions_for_use",
+        "capability_card",
+        "model_card",
+        "system_description",
+        "interpretability_spec",
+        "integration_guidance",
+        "downstream_risk_advisory",
+        "acceptable_use_policy",
+        "transparency_report",
+        "training_data_disclosure",
+        "other"
+      ]
+    },
+    "title": {
+      "type": "string",
+      "description": "Title of the disclosure document."
+    },
+    "document_version": {
+      "type": "string",
+      "description": "Version of the disclosure document."
+    },
+    "publication_date": {
+      "type": "string",
+      "description": "Date the disclosure was published (ISO 8601).",
+      "format": "date"
+    },
+    "audience": {
+      "type": "array",
+      "description": "Intended audience for the disclosure.",
+      "items": {"type": "string"}
+    },
+    "capabilities": {
+      "type": "array",
+      "description": "Capabilities described in the disclosure.",
+      "items": {"type": "string"}
+    },
+    "limitations": {
+      "type": "array",
+      "description": "Limitations described in the disclosure.",
+      "items": {"type": "string"}
+    },
+    "intended_use": {
+      "type": "string",
+      "description": "Intended use of the AI system as described in the disclosure."
+    },
+    "prohibited_uses": {
+      "type": "array",
+      "description": "Prohibited uses of the AI system.",
+      "items": {"type": "string"}
+    },
+    "risk_warnings": {
+      "type": "array",
+      "description": "Risk warnings included in the disclosure.",
+      "items": {"type": "string"}
+    },
+    "interpretation_guidance": {
+      "type": "string",
+      "description": "Guidance on how to interpret system outputs."
+    },
+    "explanation_methods": {
+      "type": "array",
+      "description": "Explanation methods available for system outputs.",
+      "items": {"type": "string"}
+    },
+    "confidence_indicators": {
+      "type": "string",
+      "description": "How confidence or uncertainty is communicated in system outputs."
+    },
+    "known_failure_modes": {
+      "type": "array",
+      "description": "Known failure modes described in the disclosure.",
+      "items": {"type": "string"}
+    },
+    "out_of_scope_uses": {
+      "type": "array",
+      "description": "Uses that are out of scope for the AI system.",
+      "items": {"type": "string"}
+    },
+    "api_documentation_ref": {
+      "type": "string",
+      "description": "Reference to API documentation."
+    },
+    "rate_limits": {
+      "type": "string",
+      "description": "API rate limit information."
+    },
+    "summary_published": {
+      "type": "boolean",
+      "description": "Whether the summary has been publicly published (publication_evidence variant)."
+    },
+    "publication_url": {
+      "type": "string",
+      "format": "uri",
+      "description": "URL where the disclosure is published (publication_evidence variant)."
+    },
+    "publication_content_hash": {
+      "type": "string",
+      "description": "SHA-256 hash of the published content (publication_evidence variant)."
+    },
+    "locale": {
+      "type": "string",
+      "description": "Language of the disclosure (BCP 47 tag)."
+    },
+    "reporting_period": {
+      "type": "string",
+      "description": "Reporting period covered by the disclosure."
+    },
+    "badge_id": {
+      "type": "string",
+      "description": "URN-shaped identifier for the verification badge (verification_badge variant)."
+    },
+    "claim": {
+      "type": "string",
+      "description": "Human-readable claim displayed by the verification badge (verification_badge variant)."
+    },
+    "expires_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp at which this badge claim expires (verification_badge variant)."
+    },
+    "signing_kid": {
+      "type": "string",
+      "description": "Key ID of the JWS key whose signature backs this badge (verification_badge variant)."
+    }
+  },
+  "additionalProperties": true,
+  "allOf": [
+    {
+      "$comment": "VAL-VARIANT-004 conditional oneOf enforcement for verification_badge. When /payload/disclosure_subtype is 'verification_badge', the badge-specific required-field set applies. When unset (or any other value), no additional constraint is imposed — preserving the v1.0 envelope's openness and existing variant flow (publication_evidence keyed on /payload/variant).",
+      "if": {
+        "type": "object",
+        "properties": {
+          "disclosure_subtype": {"const": "verification_badge"}
+        },
+        "required": ["disclosure_subtype"]
+      },
+      "then": {
+        "type": "object",
+        "required": ["badge_id", "claim", "expires_at", "signing_kid"]
+      }
+    }
+  ]
+}
