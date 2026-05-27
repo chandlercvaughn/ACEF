@@ -373,6 +373,24 @@ def _collect_results(
         )
         assessment.provision_summary.append(summary)
 
+        # ACEF-053: emit info diagnostic if any rule result for this
+        # provision came from a vendor-namespaced (x-*) rule_id or
+        # operator. Per spec §3.5 + §3.7 such rules MUST NOT affect
+        # provision_outcome, so the rollup excludes them; surface their
+        # presence so producers know their extension rules ran but did
+        # not influence the assessment.
+        x_rules = [r for r in prov_results if r.rule_id.startswith("x-")]
+        if x_rules:
+            assessment.structural_errors.append(
+                ValidationDiagnostic(
+                    "ACEF-053",
+                    f"Provision {prov_id} has {len(x_rules)} vendor-extension "
+                    f"rule(s) (x-*) whose outcomes were excluded from rollup "
+                    f"per spec §3.7. Rule IDs: "
+                    f"{', '.join(r.rule_id for r in x_rules)}",
+                ).to_dict()
+            )
+
         # ACEF-042: emit info diagnostic when a provision rolls up to
         # GAP_ACKNOWLEDGED so consumers can see at-a-glance which
         # provisions are passing only because an evidence_gap record

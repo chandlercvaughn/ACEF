@@ -85,7 +85,19 @@ class RecordEnvelope(ACEFBaseModel):
     def to_jsonl_dict(self) -> dict[str, Any]:
         """Convert to a dict suitable for JSONL serialization.
 
-        Excludes None values for clean output.
+        Excludes None values from optional fields. Fills sensible defaults
+        for fields the JSON Schema marks as required so emitted records
+        satisfy record-envelope.schema.json even when the in-memory
+        model has them as ``None``. The fields the Pydantic model types
+        as ``Optional`` for backward-compat but the schema requires:
+
+        - ``lifecycle_phase``  → defaults to ``"development"``
+        - ``obligation_role``  → defaults to ``"provider"``
+        - ``collector``        → defaults to ``{"name": "unknown", "version": ""}``
+
+        Callers that want explicit values should pass them through the
+        Package builder API, which has its own (typically richer)
+        defaulting logic in :meth:`acef.package.Package.record`.
         """
         data = self.model_dump(mode="json", exclude_none=True)
         # Ensure entity_refs always present even if empty
@@ -96,6 +108,14 @@ class RecordEnvelope(ACEFBaseModel):
                 "dataset_refs": [],
                 "actor_refs": [],
             }
+        # Spec-required envelope fields: fill sensible defaults if absent so
+        # the JSONL output validates against record-envelope.schema.json.
+        if "lifecycle_phase" not in data:
+            data["lifecycle_phase"] = LifecyclePhase.DEVELOPMENT.value
+        if "obligation_role" not in data:
+            data["obligation_role"] = ObligationRole.PROVIDER.value
+        if "collector" not in data:
+            data["collector"] = {"name": "unknown", "version": ""}
         return data
 
 

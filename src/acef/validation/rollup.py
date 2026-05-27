@@ -40,8 +40,15 @@ def compute_provision_outcome(
     if subject_scope is None:
         subject_scope = []
 
-    # Filter results for this provision
-    provision_results = [r for r in rule_results if r.provision_id == provision_id]
+    # Filter results for this provision. Per spec §3.5 + §3.7 "extension
+    # semantics", vendor-namespaced (x-*) rule outcomes MUST NOT affect
+    # standard ACEF conformance. Pull such rules out of the rollup —
+    # they remain visible in assessment.results[] for informational
+    # purposes but cannot drive provision_outcome.
+    provision_results = [
+        r for r in rule_results
+        if r.provision_id == provision_id and not r.rule_id.startswith("x-")
+    ]
 
     # Count by outcome and severity
     fail_count = 0

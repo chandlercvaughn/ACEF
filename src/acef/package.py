@@ -350,13 +350,21 @@ class Package:
                 code="ACEF-003",
             )
 
-        if isinstance(obligation_role, str):
+        # Resolve the schema-required envelope fields when callers omit
+        # them, so SDK-produced records carry concrete values rather than
+        # relying on to_jsonl_dict's emit-time defaults (which exist as a
+        # safety net for direct RecordEnvelope construction).
+        if obligation_role is None:
+            obligation_role = ObligationRole.PROVIDER
+        elif isinstance(obligation_role, str):
             obligation_role = ObligationRole(obligation_role)
         if isinstance(confidentiality, str):
             confidentiality = Confidentiality(confidentiality)
         if isinstance(trust_level, str):
             trust_level = TrustLevel(trust_level)
-        if isinstance(lifecycle_phase, str):
+        if lifecycle_phase is None:
+            lifecycle_phase = LifecyclePhase.DEVELOPMENT
+        elif isinstance(lifecycle_phase, str):
             lifecycle_phase = LifecyclePhase(lifecycle_phase)
 
         if isinstance(entity_refs, dict):
@@ -364,7 +372,20 @@ class Package:
         elif entity_refs is None:
             entity_refs = EntityRefs()
 
-        if isinstance(collector, dict):
+        if collector is None:
+            # Default collector to the package's producer info if available.
+            producer_name = (
+                self.metadata.producer.name
+                if self.metadata and self.metadata.producer
+                else "unknown"
+            )
+            producer_version = (
+                self.metadata.producer.version
+                if self.metadata and self.metadata.producer
+                else ""
+            )
+            collector = CollectorInfo(name=producer_name, version=producer_version)
+        elif isinstance(collector, dict):
             collector = CollectorInfo(**collector)
 
         parsed_attachments: list[AttachmentRef] = []

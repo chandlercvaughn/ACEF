@@ -212,13 +212,18 @@ def _evaluate_single_rule(
         if _matches_scope(r, scope_dict, subject_modalities=subject_modalities)
     ]
 
-    # If subject_id is specified, further filter to records referencing this subject
+    # If subject_id is specified, further filter to records that explicitly
+    # reference THIS subject. Spec §3.7 evaluates per-subject by default;
+    # a record with NO subject_refs is package-scope and should be
+    # evaluated only via a provision with evaluation_scope="package", NOT
+    # by being silently broadcast to every subject. The prior "empty matches
+    # all" behavior caused cross-subject leak of evidence/gaps from records
+    # intended for the whole package.
     if subject_id:
-        subject_filtered = [
+        filtered_records = [
             r for r in filtered_records
-            if not r.entity_refs.subject_refs or subject_id in r.entity_refs.subject_refs
+            if r.entity_refs.subject_refs and subject_id in r.entity_refs.subject_refs
         ]
-        filtered_records = subject_filtered
 
     # Look up operator
     operator_name = rule.rule
