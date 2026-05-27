@@ -40,6 +40,49 @@ def _regex_timeout_handler(signum: int, frame: Any) -> None:
     raise _RegexTimeoutError("Regex evaluation timed out")
 
 
+# Pattern constructs that exist in Python's ``re`` module but are NOT
+# valid ECMA-262 RegExp syntax. Spec §3.5 mandates ECMA-262; a strict
+# implementation would require an embedded JS engine. As a pragmatic
+# pre-validator we reject the constructs that most commonly diverge so
+# templates that pass ACEF v1 validation will also parse under a future
+# ECMA-262-true validator.
+_NON_ECMA262_CONSTRUCTS = (
+    # Python-only named group syntax — ECMA-262 uses (?<name>...)
+    (re.compile(r"\(\?P<"), "Python-only named-group syntax (?P<name>...) — ECMA-262 uses (?<name>...)"),
+    # Python-only named backreference
+    (re.compile(r"\(\?P="), "Python-only named-backreference (?P=name) — ECMA-262 uses \\k<name>"),
+    # Inline flags / scoped flags — ECMA-262 has no in-pattern flag syntax
+    (re.compile(r"\(\?[aiLmsux]+(?:-[aiLmsux]+)?[:\)]"), "Python-only inline flag syntax — ECMA-262 has no in-pattern flags"),
+    # Comment groups
+    (re.compile(r"\(\?#"), "Python-only comment group (?#...) — not part of ECMA-262"),
+    # Possessive quantifiers added in Python 3.11 are NOT in ECMA-262
+    (re.compile(r"[+*?]+\+"), "Possessive quantifier — not part of ECMA-262"),
+    # Python-only anchors
+    (re.compile(r"\\A"), "Python-only \\A anchor — ECMA-262 uses ^"),
+    (re.compile(r"\\Z"), "Python-only \\Z anchor — ECMA-262 uses $"),
+)
+
+
+def _validate_ecma262_compatible(pattern: str) -> None:
+    """Reject patterns that contain Python-specific (non-ECMA-262) constructs.
+
+    Spec §3.5 requires patterns to be valid ECMA-262 RegExp; this is a
+    static pre-validator. Patterns that pass this check still execute on
+    Python's ``re`` engine, so behaviors may still diverge at the
+    character-class level (e.g., ``\\d`` matches Unicode digits in Python
+    by default, vs ASCII-only in ECMA-262 without the ``u`` flag).
+    Documented as a known limitation; a future v0.5 may embed a JS engine
+    or a JS-to-Python transpiler for stricter conformance.
+    """
+    for compiled_check, message in _NON_ECMA262_CONSTRUCTS:
+        if compiled_check.search(pattern):
+            raise ACEFEvaluationError(
+                f"Regex pattern is not valid ECMA-262: {message}. "
+                f"Pattern: {pattern!r}",
+                code="ACEF-045",
+            )
+
+
 def _safe_regex_search(pattern: str, text: str) -> bool:
     """Execute a regex search with length limits and optional timeout.
 
@@ -47,6 +90,8 @@ def _safe_regex_search(pattern: str, text: str) -> bool:
     1. Limiting pattern length to _MAX_REGEX_PATTERN_LENGTH characters
     2. Limiting input text length to _MAX_REGEX_INPUT_LENGTH characters
     3. Applying a SIGALRM-based timeout on Unix systems (main thread only)
+    4. Pre-validating against known Python-only (non-ECMA-262) constructs
+       per :func:`_validate_ecma262_compatible`
 
     Args:
         pattern: ECMA-262 regex pattern from DSL rule.
@@ -58,6 +103,7 @@ def _safe_regex_search(pattern: str, text: str) -> bool:
     Raises:
         ACEFEvaluationError: If the pattern is too long, invalid, or times out.
     """
+    _validate_ecma262_compatible(pattern)
     if len(pattern) > _MAX_REGEX_PATTERN_LENGTH:
         raise ACEFEvaluationError(
             f"Regex pattern exceeds maximum length ({len(pattern)} > {_MAX_REGEX_PATTERN_LENGTH})",
