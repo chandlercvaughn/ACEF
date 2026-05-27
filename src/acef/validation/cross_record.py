@@ -1,0 +1,630 @@
+"""Cross-record validation phase for ACEF v1.1 bundles.
+
+Runs as a post-schema, post-integrity validation step. Only invoked when the
+manifest's resolved schema version is v1.1 — v1.0 bundles MUST NOT see any
+of these checks fire (regression-safety per VAL-REGRESSION-001).
+
+Implements the following assertions from contract.md:
+
+- VAL-VALIDATION-003: tenant uniformity (ACEF-075)
+- VAL-VALIDATION-004: cross-tenant entity reference (ACEF-020)
+- VAL-VALIDATION-005: causation_chain unsigned URN (ACEF-073)
+- VAL-VALIDATION-006: redaction_attestation_ref unresolvable (ACEF-078)
+- VAL-VALIDATION-007: non-public record without redaction_policy_version (ACEF-074)
+- VAL-VALIDATION-EXTERNAL-URN-001/002: external URN resolution via
+  manifest.namespaces['x-external'].bundleReferences (ACEF-073)
+- VAL-VALIDATION-VERSION-COMPAT-002: subscriber mode missing required records
+  (ACEF-080)
+- VAL-VALIDATION-LOAD-AUTHORITY-MATRIX-001: disposition authority matrix
+  (ACEF-080)
+
+Each function returns a list of ValidationDiagnostic. The engine merges
+them into the AssessmentBundle.structural_errors list.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Iterator
+from typing import Any
+
+from acef.errors import ValidationDiagnostic
+from acef.validation.authority_matrix import lookup as _matrix_lookup
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+
+def _records_iter(
+    records: list[dict[str, Any]],
+) -> Iterator[tuple[int, dict[str, Any]]]:
+    """Yield (idx, record_dict) for records that are dicts.
+
+    Defensive iteration — malformed entries (non-dict, missing fields) are
+    silently skipped here; the schema-validation phase has already emitted
+    diagnostics for them.
+    """
+    for idx, r in enumerate(records):
+        if isinstance(r, dict):
+            yield idx, r
+
+
+def _record_id_of(rec: dict[str, Any]) -> str:
+    rid = rec.get("record_id", "")
+    return rid if isinstance(rid, str) else ""
+
+
+def _record_type_of(rec: dict[str, Any]) -> str:
+    rt = rec.get("record_type", "")
+    return rt if isinstance(rt, str) else ""
+
+
+def _tenant_of(rec: dict[str, Any]) -> str | None:
+    """Return the tenant_label of a record, or None if unset / non-string."""
+    t = rec.get("tenant_label")
+    if isinstance(t, str) and t:
+        return t
+    return None
+
+
+def _entity_refs_of(rec: dict[str, Any]) -> list[str]:
+    """Collect every URN appearing in entity_refs.{subject,component,dataset,actor}_refs."""
+    er = rec.get("entity_refs")
+    if not isinstance(er, dict):
+        return []
+    out: list[str] = []
+    for key in ("subject_refs", "component_refs", "dataset_refs", "actor_refs"):
+        v = er.get(key)
+        if isinstance(v, list):
+            for item in v:
+                if isinstance(item, str) and item:
+                    out.append(item)
+    return out
+
+
+# ---------------------------------------------------------------------------
+# VAL-VALIDATION-003: tenant uniformity
+# ---------------------------------------------------------------------------
+
+
+def enforce_tenant_uniformity(
+    manifest: dict[str, Any],
+    records: list[dict[str, Any]],
+) -> list[ValidationDiagnostic]:
+    """Emit ACEF-075 if multiple distinct tenant_labels coexist when
+    analysis_mode is set.
+
+    Per contract VAL-VALIDATION-003: a v1.1 bundle with `analysis_mode` set
+    AND two or more distinct non-null tenant_label values across records
+    fails with ACEF-075. Records without tenant_label are ignored for the
+    uniformity check (they are valid neighbors of any single tenant).
+    """
+    analysis_mode = manifest.get("analysis_mode") if isinstance(manifest, dict) else None
+    if not analysis_mode:
+        return []
+
+    seen: dict[str, str] = {}  # tenant_label -> first record_id with that label
+    for _idx, rec in _records_iter(records):
+        t = _tenant_of(rec)
+        if t is None:
+            continue
+        if t not in seen:
+            seen[t] = _record_id_of(rec)
+
+    if len(seen) <= 1:
+        return []
+
+    labels_sorted = sorted(seen.keys())
+    return [
+        ValidationDiagnostic(
+            "ACEF-075",
+            (
+                "Bundle declares analysis_mode="
+                f"{analysis_mode!r} but records carry multiple distinct "
+                f"tenant_label values: {labels_sorted!r}. Per spec §6.4, a "
+                "single bundle must serve exactly one tenant when an "
+                "analysis_mode is in effect."
+            ),
+        )
+    ]
+
+
+# ---------------------------------------------------------------------------
+# VAL-VALIDATION-004: cross-tenant entity reference (entity inheritance)
+# ---------------------------------------------------------------------------
+
+
+def build_entity_tenant_map(
+    records: list[dict[str, Any]],
+) -> dict[str, str]:
+    """Build URN → tenant_label map by inheritance from declaring record.
+
+    Each entity URN inherits the tenant_label of the *first* record whose
+    entity_refs list it appears in. Records WITHOUT a tenant_label do not
+    contribute to the map (entities they reference remain unmapped); this
+    matches the contract VAL-VALIDATION-004 semantics — only tenant-tagged
+    records can claim ownership.
+
+    Iteration order is the input order, which the engine produces by
+    manifest record_files ordering (deterministic per §3.1.1).
+    """
+    mapping: dict[str, str] = {}
+    for _idx, rec in _records_iter(records):
+        t = _tenant_of(rec)
+        if t is None:
+            continue
+        for urn in _entity_refs_of(rec):
+            if urn not in mapping:
+                mapping[urn] = t
+    return mapping
+
+
+def enforce_cross_tenant_refs(
+    records: list[dict[str, Any]],
+    entity_tenant_map: dict[str, str],
+) -> list[ValidationDiagnostic]:
+    """Emit ACEF-020 for every record→entity reference that crosses tenants.
+
+    A record with tenant_label T1 referencing an entity URN whose inherited
+    tenant_label is T2 (T1 != T2) violates VAL-VALIDATION-004.
+    Records without tenant_label are not checked (the cross-tenant invariant
+    presumes both sides are tenant-tagged).
+    """
+    diags: list[ValidationDiagnostic] = []
+    for _idx, rec in _records_iter(records):
+        rec_tenant = _tenant_of(rec)
+        if rec_tenant is None:
+            continue
+        rec_id = _record_id_of(rec)
+        for urn in _entity_refs_of(rec):
+            owner_tenant = entity_tenant_map.get(urn)
+            if owner_tenant is None:
+                continue
+            if owner_tenant != rec_tenant:
+                diags.append(
+                    ValidationDiagnostic(
+                        "ACEF-020",
+                        (
+                            f"Cross-tenant entity reference: record "
+                            f"{rec_id!r} (tenant_label={rec_tenant!r}) "
+                            f"references entity {urn!r} owned by tenant "
+                            f"{owner_tenant!r}. Per spec §6.4, entity "
+                            "references MUST NOT cross tenant_label "
+                            "boundaries."
+                        ),
+                    )
+                )
+    return diags
+
+
+# ---------------------------------------------------------------------------
+# VAL-VALIDATION-005 / EXTERNAL-URN-001 / EXTERNAL-URN-002: causation_chain
+# ---------------------------------------------------------------------------
+
+
+def _declared_external_urns(manifest: dict[str, Any]) -> set[str]:
+    """Collect URNs declared in manifest.namespaces['x-external'].bundleReferences.
+
+    The convention (this operation's): an external bundle reference is an
+    object with at least a `urn` field naming an in-bundle-or-out-of-bundle
+    record. Optionally it may carry a `bundle_id` or `content_hash` field
+    for downstream resolution; we only need the URN strings for the
+    causation_chain rejection check.
+
+    Defensive parsing: any malformed structure is treated as "no
+    references" (returns an empty set). The schema validator catches
+    structural errors separately.
+    """
+    out: set[str] = set()
+    namespaces = manifest.get("namespaces")
+    if not isinstance(namespaces, dict):
+        return out
+    x_external = namespaces.get("x-external")
+    if not isinstance(x_external, dict):
+        return out
+    refs = x_external.get("bundleReferences")
+    if not isinstance(refs, list):
+        return out
+    for ref in refs:
+        if isinstance(ref, dict):
+            urn = ref.get("urn")
+            if isinstance(urn, str) and urn:
+                out.add(urn)
+        elif isinstance(ref, str) and ref:
+            # Allow a plain-string shorthand: bundleReferences: ["urn:...", ...]
+            out.add(ref)
+    return out
+
+
+def enforce_causation_chain_signed(
+    records: list[dict[str, Any]],
+    in_bundle_record_urns: set[str],
+    signature_count: int,
+    manifest: dict[str, Any],
+) -> list[ValidationDiagnostic]:
+    """Emit ACEF-073 for each unresolvable causation_chain URN.
+
+    A causation_chain URN is *resolved* when one of these holds:
+
+    1. It refers to a record present IN this bundle, AND this bundle has at
+       least one cryptographically verified signature (signature_count > 0).
+       (Spec §6.5 — causation chains across unsigned bundles cannot be
+       trusted.)
+    2. It refers to an external bundle, AND its URN is declared in
+       `manifest.namespaces['x-external'].bundleReferences`. (External
+       trust is asserted by the producer; further verification is out of
+       scope for this validator pass.)
+
+    Otherwise ACEF-073 fires.
+
+    Args:
+        records: All record dicts in the bundle.
+        in_bundle_record_urns: Set of record_id URNs that exist in this
+            bundle (precomputed by the engine).
+        signature_count: Count of cryptographically VERIFIED signatures on
+            this bundle (from integrity_checker.get_signature_info).
+        manifest: Manifest dict — read for external bundle references.
+    """
+    declared_external = _declared_external_urns(manifest)
+    diags: list[ValidationDiagnostic] = []
+
+    for _idx, rec in _records_iter(records):
+        chain = rec.get("causation_chain")
+        if not isinstance(chain, list) or not chain:
+            continue
+        rec_id = _record_id_of(rec)
+        for urn in chain:
+            if not isinstance(urn, str) or not urn:
+                # Malformed chain entry — schema layer already flagged it
+                continue
+            in_bundle = urn in in_bundle_record_urns
+            in_declared = urn in declared_external
+            if in_bundle and signature_count > 0:
+                continue  # case (1): resolved
+            if in_declared:
+                continue  # case (2): resolved
+            # Failed: emit a single ACEF-073 diagnostic naming the chain
+            # entry and why resolution failed
+            if in_bundle and signature_count == 0:
+                reason = (
+                    "resolves to an in-bundle record, but the bundle is "
+                    "unsigned (zero verified JWS signatures); causation "
+                    "chains require a signed owning bundle"
+                )
+            else:
+                reason = (
+                    "neither resolves to an in-bundle record nor is "
+                    "declared in manifest.namespaces['x-external']"
+                    ".bundleReferences"
+                )
+            diags.append(
+                ValidationDiagnostic(
+                    "ACEF-073",
+                    (f"causation_chain URN {urn!r} on record {rec_id!r} {reason}."),
+                )
+            )
+    return diags
+
+
+# ---------------------------------------------------------------------------
+# VAL-VALIDATION-006 / 007: redaction policy + attestation
+# ---------------------------------------------------------------------------
+
+
+def enforce_redaction_policy_version(
+    records: list[dict[str, Any]],
+) -> list[ValidationDiagnostic]:
+    """Emit ACEF-074 for non-public records missing redaction_policy_version.
+
+    A record is "non-public" when confidentiality is set to any value other
+    than 'public' (or is absent — which defaults to public, so absent is
+    OK). Per VAL-VALIDATION-007 the policy version is required at the
+    validator level (not at the schema level — schemas treat the field as
+    optional).
+    """
+    diags: list[ValidationDiagnostic] = []
+    for _idx, rec in _records_iter(records):
+        conf = rec.get("confidentiality")
+        if not isinstance(conf, str) or conf == "public":
+            continue
+        version = rec.get("redaction_policy_version")
+        if isinstance(version, str) and version:
+            continue
+        rec_id = _record_id_of(rec)
+        diags.append(
+            ValidationDiagnostic(
+                "ACEF-074",
+                (
+                    f"Record {rec_id!r} has confidentiality={conf!r} "
+                    "(non-public) but no redaction_policy_version. Per "
+                    "spec §6.3, non-public records MUST declare the "
+                    "redaction policy semver under which they were "
+                    "produced."
+                ),
+            )
+        )
+    return diags
+
+
+def enforce_redaction_attestation_ref(
+    records: list[dict[str, Any]],
+    in_bundle_record_urns: set[str],
+) -> list[ValidationDiagnostic]:
+    """Emit ACEF-078 when redaction_attestation_ref points to an unknown URN.
+
+    Per VAL-VALIDATION-006: when a record sets `redaction_attestation_ref`
+    and the URN does not resolve to a record in this bundle, fail with
+    ACEF-078 (NOT ACEF-022 — the codex policy carved out ACEF-078 for this
+    specific case so general dangling-entity-ref errors don't subsume it).
+
+    Records without a `redaction_attestation_ref` are not checked here —
+    the *conditional-required* enforcement (i.e., must be set on non-public
+    records) is a separate question we don't yet enforce because the brief
+    is silent on whether the attestation ref is mandatory or merely
+    strongly recommended. This function only checks resolvability when the
+    field is present.
+    """
+    diags: list[ValidationDiagnostic] = []
+    for _idx, rec in _records_iter(records):
+        ref = rec.get("redaction_attestation_ref")
+        if not isinstance(ref, str) or not ref:
+            continue
+        if ref in in_bundle_record_urns:
+            continue
+        rec_id = _record_id_of(rec)
+        diags.append(
+            ValidationDiagnostic(
+                "ACEF-078",
+                (
+                    f"Record {rec_id!r} has redaction_attestation_ref="
+                    f"{ref!r} but no record with that URN exists in the "
+                    "bundle. Per spec §6.3, the attestation reference "
+                    "MUST resolve to an in-bundle record."
+                ),
+            )
+        )
+    return diags
+
+
+# ---------------------------------------------------------------------------
+# VAL-VALIDATION-VERSION-COMPAT-002: mode-gated required records
+# ---------------------------------------------------------------------------
+
+# Subscriber mode requires at least one of each of these record types.
+# Public-artifact / canary / unattributed_artifact do not require additional
+# record types beyond standard v1.0 envelope content; F-M1-VALIDATOR-RULES
+# handles the *forbidden*-type side of mode-gating (VAL-VALIDATION-010).
+_SUBSCRIBER_REQUIRED_TYPES: tuple[str, ...] = (
+    "authorized_test_scope",
+    "harness_attestation",
+)
+
+
+def enforce_mode_gates(
+    manifest: dict[str, Any],
+    records: list[dict[str, Any]],
+) -> list[ValidationDiagnostic]:
+    """Emit ACEF-080 when analysis_mode requires record types that are absent.
+
+    Per VAL-VALIDATION-VERSION-COMPAT-002 (and the spec §6.6 mode-gating
+    semantics): a bundle declaring `analysis_mode: "subscriber"` MUST
+    contain at least one `authorized_test_scope` AND at least one
+    `harness_attestation` record. Missing either emits ACEF-080.
+    """
+    if not isinstance(manifest, dict):
+        return []
+    mode = manifest.get("analysis_mode")
+    if mode != "subscriber":
+        return []
+
+    present_types: set[str] = set()
+    for _idx, rec in _records_iter(records):
+        rt = _record_type_of(rec)
+        if rt:
+            present_types.add(rt)
+
+    missing = [rt for rt in _SUBSCRIBER_REQUIRED_TYPES if rt not in present_types]
+    if not missing:
+        return []
+
+    return [
+        ValidationDiagnostic(
+            "ACEF-080",
+            (
+                "Bundle declares analysis_mode='subscriber' but is missing "
+                f"required mode-gated record types: {missing!r}. Per spec "
+                "§6.6, subscriber-mode bundles MUST carry at least one "
+                "authorized_test_scope AND at least one harness_attestation."
+            ),
+        )
+    ]
+
+
+# ---------------------------------------------------------------------------
+# VAL-VALIDATION-LOAD-AUTHORITY-MATRIX-001: disposition authority matrix
+# ---------------------------------------------------------------------------
+
+
+def _actor_role_map(manifest: dict[str, Any]) -> dict[str, str]:
+    """Return actor_id URN → role string from manifest.entities.actors."""
+    out: dict[str, str] = {}
+    entities = manifest.get("entities") if isinstance(manifest, dict) else None
+    if not isinstance(entities, dict):
+        return out
+    actors = entities.get("actors")
+    if not isinstance(actors, list):
+        return out
+    for actor in actors:
+        if not isinstance(actor, dict):
+            continue
+        actor_id = actor.get("actor_id")
+        role = actor.get("role")
+        if isinstance(actor_id, str) and isinstance(role, str):
+            out[actor_id] = role
+    return out
+
+
+def _is_disposition_record(rec: dict[str, Any]) -> bool:
+    """True iff record is a risk_treatment with treatment_subtype=external_disposition."""
+    if _record_type_of(rec) != "risk_treatment":
+        return False
+    payload = rec.get("payload")
+    if not isinstance(payload, dict):
+        return False
+    return payload.get("treatment_subtype") == "external_disposition"
+
+
+def enforce_disposition_authority(
+    manifest: dict[str, Any],
+    records: list[dict[str, Any]],
+) -> list[ValidationDiagnostic]:
+    """Emit ACEF-080 for disposition records that violate the §14.5 matrix.
+
+    For each `disposition_record` (risk_treatment with
+    treatment_subtype=external_disposition) whose
+    `payload.authority_check.authority_granted: true`, look up the
+    associated actor's role and the authority_class, and consult the
+    matrix. A denied cell fires ACEF-080.
+
+    The authority_class is read from `payload.authority_check.authority_class`
+    (per Freddy brief §14.5 semantics). The actor URN is read from
+    `payload.authority_check.actor_ref` (the disposition's authorizing
+    actor). If actor_ref is absent, we fall back to the first
+    `entity_refs.actor_refs` URN. If neither yields a known actor, we
+    cannot evaluate the matrix and skip the record (the schema layer is
+    responsible for requiring the actor field; this validator is silent
+    rather than double-counting).
+    """
+    actor_role = _actor_role_map(manifest)
+    diags: list[ValidationDiagnostic] = []
+
+    for _idx, rec in _records_iter(records):
+        if not _is_disposition_record(rec):
+            continue
+        payload = rec.get("payload", {})
+        auth = payload.get("authority_check") if isinstance(payload, dict) else None
+        if not isinstance(auth, dict):
+            continue
+        if auth.get("authority_granted") is not True:
+            # No granted claim = nothing to check; only the *granted=true*
+            # case can violate the matrix.
+            continue
+
+        ac = auth.get("authority_class")
+        if not isinstance(ac, str) or not ac:
+            continue
+
+        actor_ref = auth.get("actor_ref")
+        if not isinstance(actor_ref, str) or not actor_ref:
+            # Fall back to first entity_refs.actor_refs URN.
+            er = rec.get("entity_refs", {})
+            if isinstance(er, dict):
+                actors = er.get("actor_refs")
+                if isinstance(actors, list) and actors:
+                    first = actors[0]
+                    if isinstance(first, str):
+                        actor_ref = first
+
+        role = actor_role.get(actor_ref) if isinstance(actor_ref, str) else None
+        if role is None:
+            # Unknown actor — emit ACEF-080 (the matrix lookup defaults to
+            # denied for unknown actor types; a granted disposition with no
+            # resolvable actor is itself a §14.5 violation).
+            rec_id = _record_id_of(rec)
+            diags.append(
+                ValidationDiagnostic(
+                    "ACEF-080",
+                    (
+                        f"disposition_record {rec_id!r} grants authority_class="
+                        f"{ac!r} but the authorizing actor "
+                        f"({actor_ref!r}) is not declared in "
+                        "manifest.entities.actors. Per §14.5, authority "
+                        "grants require a mapped actor with an explicit "
+                        "role."
+                    ),
+                )
+            )
+            continue
+
+        if _matrix_lookup(ac, role):
+            continue  # cell is granted — OK
+
+        rec_id = _record_id_of(rec)
+        diags.append(
+            ValidationDiagnostic(
+                "ACEF-080",
+                (
+                    f"disposition_record {rec_id!r} grants authority_class="
+                    f"{ac!r} to actor {actor_ref!r} (role={role!r}), but the "
+                    "§14.5 authority matrix denies that "
+                    "(authority_class × actor_role) pair. Reject."
+                ),
+            )
+        )
+    return diags
+
+
+# ---------------------------------------------------------------------------
+# Top-level entry point
+# ---------------------------------------------------------------------------
+
+
+def run_cross_record_validation(
+    manifest: dict[str, Any],
+    records: list[dict[str, Any]],
+    *,
+    signature_count: int,
+) -> list[ValidationDiagnostic]:
+    """Run all v1.1 cross-record checks and return diagnostics.
+
+    Called by the engine ONLY when `schema_version == "v1.1"`. v1.0 bundles
+    do not pass through this function (regression-safety).
+
+    Args:
+        manifest: Parsed acef-manifest.json content.
+        records: All record dicts loaded from the bundle's JSONL files,
+            in deterministic order.
+        signature_count: Verified-signature count from
+            integrity_checker.get_signature_info (used by the
+            causation_chain check).
+    """
+    diags: list[ValidationDiagnostic] = []
+
+    # Build URN set once — used by both causation_chain and
+    # redaction_attestation_ref resolution.
+    in_bundle_urns: set[str] = set()
+    for _idx, rec in _records_iter(records):
+        rid = _record_id_of(rec)
+        if rid:
+            in_bundle_urns.add(rid)
+
+    # 1. Tenant uniformity
+    diags.extend(enforce_tenant_uniformity(manifest, records))
+
+    # 2. Cross-tenant entity references (entity inheritance)
+    entity_tenant_map = build_entity_tenant_map(records)
+    diags.extend(enforce_cross_tenant_refs(records, entity_tenant_map))
+
+    # 3. causation_chain URN resolution
+    diags.extend(
+        enforce_causation_chain_signed(
+            records,
+            in_bundle_urns,
+            signature_count,
+            manifest,
+        )
+    )
+
+    # 4. Redaction policy version (conditional-required)
+    diags.extend(enforce_redaction_policy_version(records))
+
+    # 5. Redaction attestation ref (URN resolvability)
+    diags.extend(enforce_redaction_attestation_ref(records, in_bundle_urns))
+
+    # 6. Mode-gated required record types
+    diags.extend(enforce_mode_gates(manifest, records))
+
+    # 7. Disposition authority matrix
+    diags.extend(enforce_disposition_authority(manifest, records))
+
+    return diags

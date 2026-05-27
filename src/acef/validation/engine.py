@@ -323,6 +323,21 @@ def validate_bundle(
     reference_diagnostics = check_references(manifest_data, all_records_data, bundle_path)
     all_diagnostics.extend(reference_diagnostics)
 
+    # Phase 3b: Cross-record validation (v1.1 only)
+    # Gated on schema_version so v1.0 bundles are byte-equivalent to pre-v0.4
+    # validator behavior (VAL-REGRESSION-001).  Reads verified-signature
+    # count from get_signature_info for the causation_chain check.
+    if schema_version == "v1.1":
+        from acef.validation.cross_record import run_cross_record_validation
+
+        _xr_sig_count, _ = get_signature_info(bundle_path)
+        cross_record_diagnostics = run_cross_record_validation(
+            manifest_data,
+            all_records_data,
+            signature_count=_xr_sig_count,
+        )
+        all_diagnostics.extend(cross_record_diagnostics)
+
     # Record all structural errors
     for diag in all_diagnostics:
         assessment.structural_errors.append(diag.to_dict())
