@@ -342,8 +342,17 @@ def op_evidence_freshness(
 
     try:
         ref_dt = datetime.fromisoformat(ref_str.replace("Z", "+00:00"))
-    except ValueError:
-        return True, []
+    except ValueError as exc:
+        # The reference date was supplied but is malformed. Spec §3.5 lists
+        # ACEF-045 (invalid pattern parameter) and ACEF-043 (invalid pointer)
+        # as the per-parameter validation errors; for evidence_freshness the
+        # closest match is ACEF-045 because the value is a malformed pattern
+        # of a date string. Raising surfaces the problem rather than
+        # silently passing the rule.
+        raise ACEFEvaluationError(
+            f"evidence_freshness reference date is not valid ISO 8601: {ref_str!r}: {exc}",
+            code="ACEF-045",
+        ) from exc
 
     cutoff = ref_dt - timedelta(days=max_days)
 
@@ -352,11 +361,17 @@ def op_evidence_freshness(
     for rec in records:
         try:
             rec_dt = datetime.fromisoformat(rec.timestamp.replace("Z", "+00:00"))
-            if rec_dt >= cutoff:
-                evidence_refs.append(rec.record_id)
-            else:
-                all_fresh = False
-        except ValueError:
+        except ValueError as exc:
+            # A record with a malformed timestamp cannot satisfy a freshness
+            # check; surface the bad data as ACEF-050 (malformed JSONL
+            # content) rather than silently flipping the rule to FAILED.
+            raise ACEFEvaluationError(
+                f"Record {rec.record_id} has invalid timestamp {rec.timestamp!r}: {exc}",
+                code="ACEF-050",
+            ) from exc
+        if rec_dt >= cutoff:
+            evidence_refs.append(rec.record_id)
+        else:
             all_fresh = False
 
     return all_fresh, evidence_refs

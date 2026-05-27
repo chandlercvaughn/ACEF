@@ -195,18 +195,67 @@ def _collect_results(
     *,
     subject_scope: list[str] | None = None,
 ) -> None:
-    """Collect rule results and compute provision summaries."""
+    """Collect rule results and compute provision summaries.
+
+    Provision IDs are iterated in sorted order so that the produced
+    ``assessment.provision_summary`` list is deterministic across runs
+    regardless of Python's hash randomization. Without sorting,
+    ``set`` iteration would order entries by PYTHONHASHSEED-salted hashes,
+    producing byte-different Assessment Bundles for the same input —
+    violating the spec §3.7 reproducibility contract.
+    """
     assessment.results.extend(results)
     seen_provisions: set[str] = set()
     for r in results:
         seen_provisions.add(r.provision_id)
-    for prov_id in seen_provisions:
+    for prov_id in sorted(seen_provisions):
         prov_results = [r for r in results if r.provision_id == prov_id]
         summary = compute_provision_outcome(
             prov_id, profile_id, prov_results, records,
             subject_scope=subject_scope or [],
         )
         assessment.provision_summary.append(summary)
+
+
+def _parse_iso_instant(value: str) -> datetime | None:
+    """Parse an ISO 8601 timestamp or date into a UTC datetime.
+
+    Accepts both ``"YYYY-MM-DDTHH:MM:SSZ"`` (Zulu) and
+    ``"YYYY-MM-DDTHH:MM:SS+00:00"`` forms, and bare ``"YYYY-MM-DD"`` dates
+    (which become midnight UTC of that day). Returns ``None`` on parse
+    failure so callers can decide how to react.
+
+    Note: lexicographic comparison of mixed-format ISO strings is unsafe
+    (``"2026-01-01T00:00:00Z" > "2026-01-01"``), so date / instant
+    comparisons MUST go through this helper before comparing.
+    """
+    if not value:
+        return None
+    candidate = value.strip()
+    if candidate.endswith("Z"):
+        candidate = candidate[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(candidate)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def _is_before(a: str, b: str) -> bool:
+    """Return True iff timestamp ``a`` is strictly before ``b``.
+
+    Parses both via :func:`_parse_iso_instant`. If either side fails to
+    parse, falls back to lexicographic comparison (preserves the legacy
+    behavior so producers with malformed dates still get a deterministic
+    answer rather than a crash).
+    """
+    pa = _parse_iso_instant(a)
+    pb = _parse_iso_instant(b)
+    if pa is None or pb is None:
+        return a < b
+    return pa < pb
 
 
 def _evaluate_profiles(
@@ -281,10 +330,15 @@ def _evaluate_profiles(
                 )
             ]
 
-        # ACEF-032: Emit info diagnostic for provisions not yet effective
+        # ACEF-032: Emit info diagnostic AND mark provisions not-yet-effective.
+        # Per spec §3.6 the rules for these provisions MUST produce a
+        # ``skipped`` outcome rather than being evaluated normally — a
+        # provision that is not yet legally in force cannot fail.
+        not_yet_effective: set[str] = set()
         for prov in provisions_to_evaluate:
             if prov.effective_date and evaluation_instant:
-                if evaluation_instant < prov.effective_date:
+                if _is_before(evaluation_instant, prov.effective_date):
+                    not_yet_effective.add(prov.provision_id)
                     assessment.structural_errors.append(
                         ValidationDiagnostic(
                             "ACEF-032",
@@ -293,6 +347,42 @@ def _evaluate_profiles(
                             f"evaluation: {evaluation_instant})",
                         ).to_dict()
                     )
+
+        # Synthesize SKIPPED results for not-yet-effective provisions so the
+        # roll-up algorithm reports ``skipped`` for them (spec §3.7 step 3).
+        if not_yet_effective:
+            from acef.models.assessment import RuleResult
+            from acef.models.enums import RuleOutcome, RuleSeverity
+
+            for prov in provisions_to_evaluate:
+                if prov.provision_id not in not_yet_effective:
+                    continue
+                skipped_results: list[RuleResult] = []
+                for rule in prov.evaluation:
+                    skipped_results.append(
+                        RuleResult(
+                            rule_id=rule.rule_id,
+                            provision_id=prov.provision_id,
+                            profile_id=profile_id,
+                            rule_severity=rule.severity,
+                            outcome=RuleOutcome.SKIPPED,
+                            message=(
+                                f"Provision not yet effective "
+                                f"(effective_date={prov.effective_date}, "
+                                f"evaluation_instant={evaluation_instant})"
+                            ),
+                            evidence_refs=[],
+                            subject_scope=[],
+                        )
+                    )
+                if skipped_results:
+                    _collect_results(assessment, skipped_results, profile_id, records)
+
+        # Exclude not-yet-effective provisions from further evaluation.
+        provisions_to_evaluate = [
+            p for p in provisions_to_evaluate
+            if p.provision_id not in not_yet_effective
+        ]
 
         # Split provisions into package-scoped and per-subject (default)
         package_scoped = [p for p in provisions_to_evaluate if p.evaluation_scope == "package"]
