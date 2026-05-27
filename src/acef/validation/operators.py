@@ -99,14 +99,59 @@ def _safe_regex_search(pattern: str, text: str) -> bool:
         return re.search(pattern, text) is not None
 
 
+def _validate_pointer_syntax(pointer: str) -> None:
+    """Validate that ``pointer`` is a syntactically well-formed JSON Pointer.
+
+    Per RFC 6901 + spec §3.5: a JSON Pointer is either the empty string or
+    begins with ``/``. The reference fragment form (``#/...``) is not
+    accepted here because the spec uses bare pointers. Syntactically invalid
+    pointers MUST emit ACEF-043 — distinct from the "missing-path" case
+    handled by :func:`_resolve_pointer`.
+    """
+    if pointer == "":
+        return
+    if not isinstance(pointer, str) or not pointer.startswith("/"):
+        raise ACEFEvaluationError(
+            f"Invalid JSON Pointer (must be empty or start with '/'): {pointer!r}",
+            code="ACEF-043",
+        )
+    # Construct the parsed pointer to surface RFC 6901 syntax errors
+    # (e.g., a stray ``~`` not followed by ``0`` or ``1``).
+    try:
+        jsonpointer.JsonPointer(pointer)
+    except jsonpointer.JsonPointerException as exc:
+        raise ACEFEvaluationError(
+            f"Invalid JSON Pointer syntax: {pointer!r}: {exc}",
+            code="ACEF-043",
+        ) from exc
+
+
 def _resolve_pointer(record_data: dict[str, Any], pointer: str) -> Any:
     """Resolve a JSON Pointer (RFC 6901) against a record dict.
 
-    Returns None if the path doesn't exist (missing-path behavior per spec).
+    Returns None if the path doesn't exist (missing-path behavior per spec
+    §3.5). Syntactically invalid pointers raise :class:`ACEFEvaluationError`
+    with code ``ACEF-043`` — callers MUST call :func:`_validate_pointer_syntax`
+    first on user-supplied pointers (typically once per rule), then this
+    function for per-record resolution.
     """
+    # Build a JsonPointer object explicitly so we can distinguish a parse
+    # error (already raised by _validate_pointer_syntax) from a
+    # "path didn't resolve" miss. jsonpointer.resolve_pointer raises
+    # JsonPointerException for both cases, conflating them.
     try:
-        return jsonpointer.resolve_pointer(record_data, pointer)
+        ptr = jsonpointer.JsonPointer(pointer)
+    except jsonpointer.JsonPointerException as exc:
+        # Defensive: callers should have pre-validated, but raise ACEF-043
+        # rather than silently returning None if they didn't.
+        raise ACEFEvaluationError(
+            f"Invalid JSON Pointer syntax: {pointer!r}: {exc}",
+            code="ACEF-043",
+        ) from exc
+    try:
+        return ptr.resolve(record_data)
     except jsonpointer.JsonPointerException:
+        # Path is well-formed but does not exist in this record.
         return None
 
 

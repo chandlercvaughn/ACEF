@@ -75,12 +75,28 @@ def compute_provision_outcome(
                 warning_count += 1
                 has_warning_failed = True
 
-    # Check for evidence gaps for this provision
-    has_evidence_gap = any(
-        r.record_type == "evidence_gap"
-        and provision_id in r.provisions_addressed
-        for r in records
-    )
+    # Check for evidence gaps for this provision, honoring subject_scope.
+    # Spec §3.7 evaluates provisions per-subject by default. An evidence_gap
+    # record bound only to subject A must NOT mask missing evidence when the
+    # provision is being assessed for subject B. Filter the gap-detection to
+    # records whose entity_refs.subject_refs intersect subject_scope (or are
+    # empty, meaning package-wide acknowledgment that applies to every
+    # subject).
+    def _gap_applies(r: RecordEnvelope) -> bool:
+        if r.record_type != "evidence_gap":
+            return False
+        if provision_id not in r.provisions_addressed:
+            return False
+        if not subject_scope:
+            # Caller is doing package-scope evaluation; any gap applies.
+            return True
+        gap_subjects = list(r.entity_refs.subject_refs) if r.entity_refs else []
+        if not gap_subjects:
+            # Package-wide gap with no subject binding applies to all subjects.
+            return True
+        return any(s in subject_scope for s in gap_subjects)
+
+    has_evidence_gap = any(_gap_applies(r) for r in records)
 
     # 7-step precedence algorithm (first match wins)
     if total == 0:

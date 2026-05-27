@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import unicodedata
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +20,23 @@ import rfc8785
 
 # Chunk size for streaming binary file hashing (64 KB)
 _HASH_CHUNK_SIZE = 65536
+
+# UTF-8 BOM — spec §3.1.3 #1 forbids its presence in any JSON in the hash domain.
+_UTF8_BOM = "﻿"
+
+
+class ACEFCanonicalizationError(ValueError):
+    """Raised when a file in the hash domain violates RFC 8785 / spec §3.1.3
+    canonicalization rules (BOM present, non-NFC text, illegal JSONL whitespace,
+    missing trailing newline, etc.).
+
+    The validation engine maps this to error code ACEF-051 ("JSON not
+    canonicalized per RFC 8785") at validation time.
+    """
+
+    def __init__(self, message: str, *, path: Path | None = None) -> None:
+        super().__init__(message)
+        self.path = path
 
 
 def canonicalize(data: Any) -> bytes:
@@ -73,14 +91,39 @@ def sha256_file(path: Path) -> str:
         Lowercase hex-encoded SHA-256 digest.
     """
     if path.suffix == ".json":
-        content = path.read_text(encoding="utf-8")
+        # Per spec §3.1.3 #1: JSON in the hash domain MUST be valid UTF-8 with
+        # NFC normalization and no BOM (U+FEFF). Verify these constraints
+        # before hashing rather than silently accepting non-conformant input.
+        raw_bytes = path.read_bytes()
+        if raw_bytes.startswith(b"\xef\xbb\xbf"):
+            raise ACEFCanonicalizationError(
+                f"JSON file has UTF-8 BOM (forbidden by spec §3.1.3 #1): {path}",
+                path=path,
+            )
+        try:
+            content = raw_bytes.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise ACEFCanonicalizationError(
+                f"JSON file is not valid UTF-8 (spec §3.1.3 #1): {path}: {exc}",
+                path=path,
+            ) from exc
+        # NFC enforcement: spec §3.1.3 #1 requires NFC normalization.
+        # Parsing + re-canonicalizing via RFC 8785 normalizes string values
+        # the same way for any input, but we still reject non-NFC source
+        # files because the bytes-on-disk identity should match what a
+        # spec-conformant producer would emit.
+        if unicodedata.normalize("NFC", content) != content:
+            raise ACEFCanonicalizationError(
+                f"JSON file is not UTF-8 NFC normalized (spec §3.1.3 #1): {path}",
+                path=path,
+            )
         canonical = canonicalize_json_str(content)
         return sha256_hex(canonical)
     elif path.suffix == ".jsonl":
         return sha256_jsonl_file(path)
     else:
-        # M-SCOUT-3: Stream binary files in chunks to avoid loading
-        # potentially large artifacts entirely into memory.
+        # Stream binary files in chunks to avoid loading potentially large
+        # artifacts entirely into memory.
         return _sha256_file_streaming(path)
 
 
@@ -109,25 +152,81 @@ def _sha256_file_streaming(path: Path) -> str:
 def sha256_jsonl_file(path: Path) -> str:
     """Compute SHA-256 of a JSONL file with per-line canonicalization.
 
-    Each line is parsed, canonicalized via RFC 8785, and followed by \\n.
-    The hash is over the concatenation of all canonicalized lines.
+    Per spec §3.1.3 #2 the file MUST end with ``\\n`` after the last record,
+    MUST NOT contain empty lines, and MUST NOT contain leading or trailing
+    whitespace on any line. There MUST be no UTF-8 BOM. This function
+    enforces those constraints rather than silently sanitizing the input,
+    so that two producers cannot accidentally produce the same hash from
+    inputs that the spec defines as forbidden.
 
     Args:
         path: Path to the JSONL file.
 
     Returns:
         Lowercase hex-encoded SHA-256 digest.
+
+    Raises:
+        ACEFCanonicalizationError: If the file violates spec §3.1.3 #2.
     """
+    raw_bytes = path.read_bytes()
+    if raw_bytes.startswith(b"\xef\xbb\xbf"):
+        raise ACEFCanonicalizationError(
+            f"JSONL file has UTF-8 BOM (forbidden by spec §3.1.3 #2): {path}",
+            path=path,
+        )
+    if raw_bytes and not raw_bytes.endswith(b"\n"):
+        raise ACEFCanonicalizationError(
+            f"JSONL file does not end with newline (spec §3.1.3 #2): {path}",
+            path=path,
+        )
+    try:
+        text = raw_bytes.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ACEFCanonicalizationError(
+            f"JSONL file is not valid UTF-8 (spec §3.1.3 #2): {path}: {exc}",
+            path=path,
+        ) from exc
+
     hasher = hashlib.sha256()
-    with open(path, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
+    if not text:
+        return hasher.hexdigest()
+
+    # Split on '\n'; with a trailing newline this yields N+1 elements where
+    # the last is the empty string after the final newline. Iterate up to
+    # the last real line; reject any blank or whitespace-only line.
+    lines = text.split("\n")
+    # The trailing newline produces an empty final element; drop it.
+    if lines and lines[-1] == "":
+        lines = lines[:-1]
+    for line_number, line in enumerate(lines, start=1):
+        if not line:
+            raise ACEFCanonicalizationError(
+                f"JSONL line {line_number} is empty (forbidden by spec §3.1.3 #2): {path}",
+                path=path,
+            )
+        if line != line.strip():
+            raise ACEFCanonicalizationError(
+                f"JSONL line {line_number} has leading or trailing whitespace "
+                f"(forbidden by spec §3.1.3 #2): {path}",
+                path=path,
+            )
+        if unicodedata.normalize("NFC", line) != line:
+            raise ACEFCanonicalizationError(
+                f"JSONL line {line_number} is not UTF-8 NFC normalized "
+                f"(spec §3.1.3 #1): {path}",
+                path=path,
+            )
+        try:
             data = json.loads(line)
-            canonical = canonicalize(data)
-            hasher.update(canonical)
-            hasher.update(b"\n")
+        except json.JSONDecodeError as exc:
+            raise ACEFCanonicalizationError(
+                f"JSONL line {line_number} is not valid JSON (spec §3.1.3 #2): "
+                f"{path}: {exc}",
+                path=path,
+            ) from exc
+        canonical = canonicalize(data)
+        hasher.update(canonical)
+        hasher.update(b"\n")
     return hasher.hexdigest()
 
 

@@ -218,19 +218,29 @@ def create_detached_jws(
     """
     alg = _detect_algorithm(private_key)
 
-    # Build JWS header
-    header: dict[str, Any] = {"alg": alg}
-    if kid:
-        header["kid"] = kid
+    # Build JWS header.
+    # Per spec §3.1.3 #5: the header MUST include `alg`, `kid`, and `x5c` or
+    # `jwk`. ``kid`` is mandatory — refusing to omit it preserves the
+    # key-rotation/identification contract.
+    if not kid:
+        raise ACEFSigningError(
+            "JWS 'kid' parameter is required (spec §3.1.3 mandates kid in every header)",
+            code="ACEF-013",
+        )
+    header: dict[str, Any] = {"alg": alg, "kid": kid}
     if x5c:
         header["x5c"] = x5c
     else:
-        # M2 (Scout R2): Auto-embed public key as JWK when no x5c provided.
-        # Spec Section 3.1.3: header MUST include x5c or jwk.
+        # Auto-embed public key as JWK when no x5c provided.
+        # Spec §3.1.3: header MUST include x5c or jwk.
         header["jwk"] = _derive_jwk(private_key)
 
-    # Encode header
-    header_b64 = _base64url_encode(json.dumps(header, separators=(",", ":")).encode("utf-8"))
+    # Encode header. sort_keys=True ensures any two callers building the same
+    # logical header (same alg/kid/x5c-or-jwk) produce byte-identical JWS
+    # output, preserving the determinism contract from spec §3.1.3 / §6.5.
+    header_b64 = _base64url_encode(
+        json.dumps(header, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    )
     payload_b64 = _base64url_encode(payload)
 
     # Sign

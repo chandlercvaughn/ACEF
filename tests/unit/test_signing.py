@@ -86,7 +86,7 @@ class TestCreateDetachedJWS:
     def test_rs256_produces_valid_jws(self, rsa_key_pair):
         private_key, _ = rsa_key_pair
         payload = b'{"test": "data"}'
-        jws = create_detached_jws(payload, private_key)
+        jws = create_detached_jws(payload, private_key, kid="test-key")
 
         parts = jws.split(".")
         assert len(parts) == 3
@@ -96,7 +96,7 @@ class TestCreateDetachedJWS:
     def test_es256_produces_valid_jws(self, ec_key_pair):
         private_key, _ = ec_key_pair
         payload = b"test payload"
-        jws = create_detached_jws(payload, private_key)
+        jws = create_detached_jws(payload, private_key, kid="test-key")
 
         parts = jws.split(".")
         assert len(parts) == 3
@@ -104,7 +104,7 @@ class TestCreateDetachedJWS:
 
     def test_jws_header_contains_alg(self, rsa_key_pair):
         private_key, _ = rsa_key_pair
-        jws = create_detached_jws(b"data", private_key)
+        jws = create_detached_jws(b"data", private_key, kid="test-key")
         import base64
         header_b64 = jws.split(".")[0]
         header_b64_padded = header_b64 + "=" * (4 - len(header_b64) % 4)
@@ -127,14 +127,14 @@ class TestVerifyDetachedJWS:
     def test_rs256_verify_succeeds(self, rsa_key_pair):
         private_key, public_key = rsa_key_pair
         payload = b'{"content": "hashes"}'
-        jws = create_detached_jws(payload, private_key)
+        jws = create_detached_jws(payload, private_key, kid="test-key")
         header = verify_detached_jws(jws, payload, public_key)
         assert header["alg"] == "RS256"
 
     def test_es256_verify_succeeds(self, ec_key_pair):
         private_key, public_key = ec_key_pair
         payload = b"test data"
-        jws = create_detached_jws(payload, private_key)
+        jws = create_detached_jws(payload, private_key, kid="test-key")
         header = verify_detached_jws(jws, payload, public_key)
         assert header["alg"] == "ES256"
 
@@ -142,7 +142,7 @@ class TestVerifyDetachedJWS:
         private_key, _ = rsa_key_pair
         _, wrong_public = rsa_key_pair_alt
         payload = b"secure data"
-        jws = create_detached_jws(payload, private_key)
+        jws = create_detached_jws(payload, private_key, kid="test-key")
         with pytest.raises(ACEFSigningError, match="verification failed"):
             verify_detached_jws(jws, payload, wrong_public)
 
@@ -150,21 +150,21 @@ class TestVerifyDetachedJWS:
         private_key, _ = ec_key_pair
         _, wrong_public = ec_key_pair_alt
         payload = b"secure data"
-        jws = create_detached_jws(payload, private_key)
+        jws = create_detached_jws(payload, private_key, kid="test-key")
         with pytest.raises(ACEFSigningError, match="verification failed"):
             verify_detached_jws(jws, payload, wrong_public)
 
     def test_tampered_payload_fails(self, rsa_key_pair):
         private_key, public_key = rsa_key_pair
         payload = b"original"
-        jws = create_detached_jws(payload, private_key)
+        jws = create_detached_jws(payload, private_key, kid="test-key")
         with pytest.raises(ACEFSigningError):
             verify_detached_jws(jws, b"tampered", public_key)
 
     def test_verify_with_key_data(self, rsa_key_pair):
         private_key, public_key = rsa_key_pair
         payload = b"data"
-        jws = create_detached_jws(payload, private_key)
+        jws = create_detached_jws(payload, private_key, kid="test-key")
 
         key_data = public_key.public_bytes(
             serialization.Encoding.PEM,

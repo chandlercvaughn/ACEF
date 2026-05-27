@@ -126,18 +126,47 @@ class TestSHA256JSONL:
         expected = hasher.hexdigest()
         assert result == expected
 
-    def test_skips_empty_lines(self, tmp_dir: Path):
+    def test_rejects_empty_lines(self, tmp_dir: Path):
+        """Spec §3.1.3 #2 forbids empty lines in JSONL files.
+
+        sha256_jsonl_file must reject (not silently sanitize) malformed
+        input so that two producers cannot accidentally produce the same
+        hash from inputs the spec defines as non-conformant.
+        """
+        from acef.integrity import ACEFCanonicalizationError
+
         path = tmp_dir / "test.jsonl"
         path.write_text('{"a":1}\n\n{"b":2}\n', encoding="utf-8")
 
-        result = sha256_jsonl_file(path)
+        with pytest.raises(ACEFCanonicalizationError, match="empty"):
+            sha256_jsonl_file(path)
 
-        hasher = hashlib.sha256()
-        hasher.update(canonicalize({"a": 1}))
-        hasher.update(b"\n")
-        hasher.update(canonicalize({"b": 2}))
-        hasher.update(b"\n")
-        assert result == hasher.hexdigest()
+    def test_rejects_missing_trailing_newline(self, tmp_dir: Path):
+        from acef.integrity import ACEFCanonicalizationError
+
+        path = tmp_dir / "test.jsonl"
+        path.write_text('{"a":1}', encoding="utf-8")
+
+        with pytest.raises(ACEFCanonicalizationError, match="newline"):
+            sha256_jsonl_file(path)
+
+    def test_rejects_leading_whitespace(self, tmp_dir: Path):
+        from acef.integrity import ACEFCanonicalizationError
+
+        path = tmp_dir / "test.jsonl"
+        path.write_text(' {"a":1}\n', encoding="utf-8")
+
+        with pytest.raises(ACEFCanonicalizationError, match="whitespace"):
+            sha256_jsonl_file(path)
+
+    def test_rejects_bom(self, tmp_dir: Path):
+        from acef.integrity import ACEFCanonicalizationError
+
+        path = tmp_dir / "test.jsonl"
+        path.write_bytes(b'\xef\xbb\xbf{"a":1}\n')
+
+        with pytest.raises(ACEFCanonicalizationError, match="BOM"):
+            sha256_jsonl_file(path)
 
 
 class TestComputeContentHashes:
