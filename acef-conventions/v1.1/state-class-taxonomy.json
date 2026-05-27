@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://acef.ai/schemas/v1.1/state-class-taxonomy.json",
+  "title": "ACEF State Class Taxonomy",
+  "description": "The seven hard-coded state classes that every harness_attestation record MUST cite via its state_class field (brief §6.7, design decision D3). The list is closed in v0.4 — a state_class value outside this enum emits ACEF-076. For each class, fake_green_test_required indicates whether a fake-green test (per SPEC-FRD §24.5) is mandatory to prove the state cannot be reached without the bound evidence, and required_bound_evidence_types lists the ACEF record types that MUST appear in bound_evidence_refs for an attestation in this class to validate clean.",
+  "state_classes": [
+    {
+      "state_class_id": "step",
+      "description": "An atomic execution step in an agent run (one tool invocation, one model call, one read-back). Per SPEC-FRD §10.6, every step that transitions internal state MUST be attested with bound evidence proving the step actually executed against real inputs and produced the claimed output.",
+      "fake_green_test_required": true,
+      "required_bound_evidence_types": ["event_log"]
+    },
+    {
+      "state_class_id": "finding",
+      "description": "A finding_record state transition (e.g., draft → confirmed, confirmed → dismissed, or initial creation). Per SPEC-FRD §2.7, internal findings are the source of truth and every promotion or demotion MUST be attested with the reproduction evidence and verifier output that justified the transition.",
+      "fake_green_test_required": true,
+      "required_bound_evidence_types": ["finding_record", "event_log"]
+    },
+    {
+      "state_class_id": "coverage_cell",
+      "description": "A coverage_cell entry inside an Assessment Bundle transitioning from uncovered to covered (or covered-but-stale → covered-fresh). Per SPEC-FRD §24.5, coverage transitions MUST be attested with the evaluation evidence and freshness-window data that justified the transition; coverage cannot be claimed without bound evidence.",
+      "fake_green_test_required": true,
+      "required_bound_evidence_types": ["evaluation_report", "coverage_cell"]
+    },
+    {
+      "state_class_id": "regression",
+      "description": "A regression_definition (risk_treatment variant V2) state transition (candidate → active → paused → retired). Per SPEC-FRD §15.4, promotion to active MUST be attested with a promotion_attestation_ref binding to fix-verification evidence; demotion MUST be attested with the cadence and reproduction evidence that justified retirement.",
+      "fake_green_test_required": true,
+      "required_bound_evidence_types": ["risk_treatment", "evaluation_report"]
+    },
+    {
+      "state_class_id": "delivery",
+      "description": "A delivery_verdict state transition (claimed_delivered → verified_delivered, or claimed_delivered → delivery_failed). Per SPEC-FRD §10.6 read-back doctrine, verified_delivered MUST be attested with read_back evidence whose digest matches the write_attempt request_digest plus a harness_attestation_ref binding to the read-back verifier.",
+      "fake_green_test_required": true,
+      "required_bound_evidence_types": ["delivery_verdict", "event_log"]
+    },
+    {
+      "state_class_id": "badge",
+      "description": "A badge_state (transparency_disclosure variant V4) transition between supported / unsupported / degraded / suspended. Per SPEC-FRD §4 product modes, badge transitions MUST be attested with the evidence_freshness_window and coverage data that justifies the new badge — a badge cannot be raised without bound coverage and freshness evidence.",
+      "fake_green_test_required": true,
+      "required_bound_evidence_types": ["transparency_disclosure", "coverage_cell"]
+    },
+    {
+      "state_class_id": "attestation",
+      "description": "A harness_attestation about another harness_attestation (meta-attestation). Per SPEC-FRD §10.6 prove-it doctrine, the attestation layer itself MUST be attestable — an attestation that supersedes, revokes, or chains to a prior attestation MUST cite that prior attestation in bound_evidence_refs and produce its own fake-green test proving the meta-state cannot be reached without the upstream attestation.",
+      "fake_green_test_required": true,
+      "required_bound_evidence_types": ["harness_attestation"]
+    }
+  ]
+}
