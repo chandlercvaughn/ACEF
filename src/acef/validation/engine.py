@@ -328,7 +328,13 @@ def validate_bundle(
     # validator behavior (VAL-REGRESSION-001).  Reads verified-signature
     # count from get_signature_info for the causation_chain check.
     if schema_version == "v1.1":
+        # Importing the bundled_freddy submodule auto-registers the
+        # ``x-freddy/voice-rubric-emission`` lint pattern (WS3.10 /
+        # VAL-VALIDATION-012). Done at first v1.1 dispatch so v1.0
+        # validation paths remain byte-equivalent to pre-v0.4 behavior.
+        import acef.validation.namespace_lints.bundled_freddy  # noqa: F401
         from acef.validation.cross_record import run_cross_record_validation
+        from acef.validation.namespace_lints import run_namespace_lints
         from acef.validation.v1_1_rules import run_v1_1_rules
 
         _xr_sig_count, _ = get_signature_info(bundle_path)
@@ -366,6 +372,21 @@ def validate_bundle(
             assessment_bundle=_assessment_data,
         )
         all_diagnostics.extend(v1_1_rule_diagnostics)
+
+        # Phase 3d: Vendor-namespace lint hooks (WS3.10 /
+        # F-M1-NAMESPACE-LINT-HOOK). Registered patterns under
+        # ``x-<vendor>/*`` namespaces emit Core error codes (notably
+        # ACEF-077 for x-freddy/voice-rubric-emission). Unregistered
+        # namespaces are a silent no-op (VAL-VALIDATION-013); the
+        # bundled_freddy submodule imported above auto-registers the
+        # default x-freddy pattern. Per VAL-VALIDATION-LINT-INVOCATION-001
+        # this runs BEFORE structural_errors is finalized so the lint
+        # blocks otherwise-success acceptance.
+        namespace_lint_diagnostics = run_namespace_lints(
+            manifest_data,
+            all_records_data,
+        )
+        all_diagnostics.extend(namespace_lint_diagnostics)
 
     # Record all structural errors
     for diag in all_diagnostics:
