@@ -29,7 +29,7 @@ PY_VERSION=$(python --version 2>&1)
 echo "==> Active Python: $PY_VERSION"
 
 case "$PY_VERSION" in
-  *"Python 3.11"*|*"Python 3.12"*|*"Python 3.13"*)
+  *"Python 3.11"*|*"Python 3.12"*|*"Python 3.13"*|*"Python 3.14"*)
     ;;
   *)
     echo "ERROR: Python 3.11+ required (per pyproject.toml). Got: $PY_VERSION" >&2
