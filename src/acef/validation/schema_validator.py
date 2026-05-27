@@ -59,10 +59,15 @@ def validate_record_schemas(
                 )
             )
 
-        # Validate payload against type-specific schema
+        # Validate payload against type-specific schema. Always validate
+        # when record_type is present — even an empty {} payload must be
+        # checked so that schema-mandated required fields can fire ACEF-004
+        # and unknown record types can fire ACEF-003. Previously
+        # `if payload:` short-circuited the entire validation for empty
+        # dicts, letting malformed records evade Phase 1 checks.
         record_type = record.get("record_type", "")
-        payload = record.get("payload", {})
-        if record_type and payload:
+        payload = record.get("payload", {}) if isinstance(record.get("payload"), dict) else {}
+        if record_type:
             payload_errors = validate_against_schema(payload, record_type)
             for error in payload_errors:
                 # Don't report as error if schema not found (ACEF-003 instead)

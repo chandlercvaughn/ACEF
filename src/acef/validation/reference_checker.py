@@ -117,10 +117,46 @@ def check_references(
 
         # Check attachment paths and advisory hash (ACEF-027)
         if bundle_dir:
+            from acef.errors import ACEFFormatError
+            from acef.loader import _validate_path as _loader_validate_path
+
             for j, att in enumerate(rec.get("attachments", [])):
                 att_path = att.get("path", "")
                 if att_path:
+                    # Reject paths that fail loader path validation (NUL bytes,
+                    # NFC, '.', '..', backslash, absolute) BEFORE constructing
+                    # a filesystem path. Then verify the resolved path stays
+                    # inside the artifacts/ root so even a syntactically
+                    # passing path cannot escape via symlinks or unusual
+                    # filesystem behavior.
+                    try:
+                        _loader_validate_path(att_path)
+                    except ACEFFormatError as exc:
+                        diagnostics.append(
+                            ValidationDiagnostic(
+                                "ACEF-052",
+                                f"Attachment path invalid: {att_path!r}: {exc}",
+                                path=f"/records/{i}/attachments/{j}/path",
+                            )
+                        )
+                        continue
                     full_path = bundle_dir / att_path
+                    try:
+                        resolved = full_path.resolve()
+                        artifacts_root = (bundle_dir / "artifacts").resolve()
+                        # Attachments live anywhere in the bundle (artifacts/
+                        # is most common, but spec allows any relative path).
+                        # Enforce containment to bundle_dir at minimum.
+                        resolved.relative_to(bundle_dir.resolve())
+                    except (ValueError, OSError):
+                        diagnostics.append(
+                            ValidationDiagnostic(
+                                "ACEF-052",
+                                f"Attachment path escapes bundle root: {att_path!r}",
+                                path=f"/records/{i}/attachments/{j}/path",
+                            )
+                        )
+                        continue
                     if not full_path.exists():
                         diagnostics.append(
                             ValidationDiagnostic(

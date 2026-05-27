@@ -125,10 +125,15 @@ def validate_bundle(
     except (ValueError, IndexError):
         pass  # Malformed version — schema validation will catch it
 
-    # Load all records from JSONL files
+    # Load all records from JSONL files. Wrap each parse / model
+    # conversion so a single malformed line surfaces as ACEF-050 / ACEF-004
+    # rather than crashing the validator before Phase 1 diagnostics are
+    # collected.
+    from acef.errors import ACEFFormatError as _ACEFFormatErr
     all_records_data: list[dict[str, Any]] = []
     all_records: list[RecordEnvelope] = []
     record_file_type_mismatches: list[ValidationDiagnostic] = []
+    early_load_diagnostics: list[ValidationDiagnostic] = []
     for rf in manifest_data.get("record_files", []):
         rf_path_str = rf.get("path", "")
         if not rf_path_str:
@@ -142,30 +147,60 @@ def validate_bundle(
         declared_type = rf.get("record_type", "")
         rf_path = bundle_path / rf_path_str
         if rf_path.exists():
-            with open(rf_path, "r", encoding="utf-8") as f:
-                for line_number, line in enumerate(f, start=1):
-                    line = line.strip()
-                    if line:
-                        rec_data = json.loads(line)
-                        # Cross-check: every record's record_type must match
-                        # the manifest's declared record_type for the file
-                        # it appears in. A malicious bundle could otherwise
-                        # place mismatched records in a file labeled with a
-                        # benign type to bypass downstream type-based
-                        # filtering (structural review P2 finding).
-                        actual_type = rec_data.get("record_type", "")
-                        if declared_type and actual_type and actual_type != declared_type:
-                            record_file_type_mismatches.append(
-                                ValidationDiagnostic(
-                                    "ACEF-025",
-                                    f"Record type mismatch in {rf_path_str}:{line_number}: "
-                                    f"file declares {declared_type!r} but record has "
-                                    f"{actual_type!r}",
-                                    path=f"/{rf_path_str}",
-                                )
-                            )
-                        all_records_data.append(rec_data)
-                        all_records.append(dict_to_record_envelope(rec_data))
+            try:
+                file_lines = open(rf_path, "r", encoding="utf-8").readlines()
+            except (OSError, UnicodeDecodeError) as exc:
+                early_load_diagnostics.append(
+                    ValidationDiagnostic(
+                        "ACEF-050",
+                        f"Cannot read record file {rf_path_str}: {exc}",
+                        path=f"/{rf_path_str}",
+                    )
+                )
+                continue
+            for line_number, line in enumerate(file_lines, start=1):
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                try:
+                    rec_data = json.loads(stripped)
+                except json.JSONDecodeError as exc:
+                    early_load_diagnostics.append(
+                        ValidationDiagnostic(
+                            "ACEF-050",
+                            f"Malformed JSONL at {rf_path_str}:{line_number}: {exc}",
+                            path=f"/{rf_path_str}",
+                        )
+                    )
+                    continue
+                # Cross-check: every record's record_type must match
+                # the manifest's declared record_type for the file
+                # it appears in. A malicious bundle could otherwise
+                # place mismatched records in a file labeled with a
+                # benign type to bypass downstream type-based
+                # filtering (structural review finding).
+                actual_type = rec_data.get("record_type", "")
+                if declared_type and actual_type and actual_type != declared_type:
+                    record_file_type_mismatches.append(
+                        ValidationDiagnostic(
+                            "ACEF-025",
+                            f"Record type mismatch in {rf_path_str}:{line_number}: "
+                            f"file declares {declared_type!r} but record has "
+                            f"{actual_type!r}",
+                            path=f"/{rf_path_str}",
+                        )
+                    )
+                all_records_data.append(rec_data)
+                try:
+                    all_records.append(dict_to_record_envelope(rec_data))
+                except _ACEFFormatErr as exc:
+                    early_load_diagnostics.append(
+                        ValidationDiagnostic(
+                            "ACEF-004",
+                            f"Cannot construct RecordEnvelope from {rf_path_str}:{line_number}: {exc}",
+                            path=f"/{rf_path_str}",
+                        )
+                    )
 
     # Initialize assessment
     package_id = manifest_data.get("metadata", {}).get("package_id", "")
@@ -184,8 +219,10 @@ def validate_bundle(
     schema_diagnostics.extend(validate_record_schemas(all_records_data))
     all_diagnostics.extend(schema_diagnostics)
 
-    # Surface record-file type-mismatch diagnostics gathered during load.
+    # Surface record-file type-mismatch and early-load diagnostics gathered
+    # during JSONL parse.
     all_diagnostics.extend(record_file_type_mismatches)
+    all_diagnostics.extend(early_load_diagnostics)
 
     # Phase 2: Integrity verification
     integrity_diagnostics = check_integrity(bundle_path)

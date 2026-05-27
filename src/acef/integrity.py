@@ -246,23 +246,43 @@ def compute_content_hashes(bundle_dir: Path) -> dict[str, str]:
     """
     hashes: dict[str, str] = {}
 
+    def _add_if_real_file(file_path: Path, root: Path) -> None:
+        """Add ``file_path`` to the hash domain if it is a regular file
+        contained within ``root``. Rejects symlinks (which could escape
+        the bundle root via dangling targets) and any path whose
+        resolved location escapes ``root``.
+
+        Spec §3.1.1: paths in the manifest are relative to the bundle
+        root, with no ``.``/``..`` segments — symlinks bypass that
+        invariant by encoding traversal in filesystem state instead of
+        path text, so they are rejected outright here.
+        """
+        # is_symlink check first so we don't follow the link before testing.
+        if file_path.is_symlink():
+            return
+        if not file_path.is_file():
+            return
+        try:
+            resolved = file_path.resolve()
+            resolved.relative_to(root.resolve())
+        except (ValueError, OSError):
+            return
+        rel = file_path.relative_to(bundle_dir).as_posix()
+        hashes[rel] = sha256_file(file_path)
+
     manifest_path = bundle_dir / "acef-manifest.json"
-    if manifest_path.exists():
+    if manifest_path.exists() and not manifest_path.is_symlink():
         hashes["acef-manifest.json"] = sha256_file(manifest_path)
 
     records_dir = bundle_dir / "records"
     if records_dir.exists():
         for file_path in sorted(records_dir.rglob("*")):
-            if file_path.is_file():
-                rel = file_path.relative_to(bundle_dir).as_posix()
-                hashes[rel] = sha256_file(file_path)
+            _add_if_real_file(file_path, records_dir)
 
     artifacts_dir = bundle_dir / "artifacts"
     if artifacts_dir.exists():
         for file_path in sorted(artifacts_dir.rglob("*")):
-            if file_path.is_file():
-                rel = file_path.relative_to(bundle_dir).as_posix()
-                hashes[rel] = sha256_file(file_path)
+            _add_if_real_file(file_path, artifacts_dir)
 
     return dict(sorted(hashes.items()))
 
