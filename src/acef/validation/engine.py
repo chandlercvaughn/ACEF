@@ -112,6 +112,7 @@ def validate_bundle(
     # Load all records from JSONL files
     all_records_data: list[dict[str, Any]] = []
     all_records: list[RecordEnvelope] = []
+    record_file_type_mismatches: list[ValidationDiagnostic] = []
     for rf in manifest_data.get("record_files", []):
         rf_path_str = rf.get("path", "")
         if not rf_path_str:
@@ -122,13 +123,31 @@ def validate_bundle(
         # reference checking runs.
         if not _validate_record_file_path(rf_path_str):
             continue
+        declared_type = rf.get("record_type", "")
         rf_path = bundle_path / rf_path_str
         if rf_path.exists():
             with open(rf_path, "r", encoding="utf-8") as f:
-                for line in f:
+                for line_number, line in enumerate(f, start=1):
                     line = line.strip()
                     if line:
                         rec_data = json.loads(line)
+                        # Cross-check: every record's record_type must match
+                        # the manifest's declared record_type for the file
+                        # it appears in. A malicious bundle could otherwise
+                        # place mismatched records in a file labeled with a
+                        # benign type to bypass downstream type-based
+                        # filtering (structural review P2 finding).
+                        actual_type = rec_data.get("record_type", "")
+                        if declared_type and actual_type and actual_type != declared_type:
+                            record_file_type_mismatches.append(
+                                ValidationDiagnostic(
+                                    "ACEF-025",
+                                    f"Record type mismatch in {rf_path_str}:{line_number}: "
+                                    f"file declares {declared_type!r} but record has "
+                                    f"{actual_type!r}",
+                                    path=f"/{rf_path_str}",
+                                )
+                            )
                         all_records_data.append(rec_data)
                         all_records.append(dict_to_record_envelope(rec_data))
 
@@ -148,6 +167,9 @@ def validate_bundle(
     schema_diagnostics = validate_manifest_schema(manifest_data)
     schema_diagnostics.extend(validate_record_schemas(all_records_data))
     all_diagnostics.extend(schema_diagnostics)
+
+    # Surface record-file type-mismatch diagnostics gathered during load.
+    all_diagnostics.extend(record_file_type_mismatches)
 
     # Phase 2: Integrity verification
     integrity_diagnostics = check_integrity(bundle_path)
@@ -284,9 +306,47 @@ def _evaluate_profiles(
             )
             continue
 
-        # ACEF-033: Check module version compatibility
-        # Templates are compatible within the same major version (spec S6.2)
-        # (spec S6.2: Core 1.x compatible with Profiles 1.x)
+        # ACEF-031: Manifest declares a template_version for this profile
+        # that disagrees with the template loaded from the registry.
+        # ACEF-033: Module compatibility — spec §6.2 requires Core and
+        # Profiles within the same major version.
+        manifest_profile_decl: dict[str, Any] | None = None
+        for _decl in manifest_data.get("profiles", []):
+            if _decl.get("profile_id") == profile_id:
+                manifest_profile_decl = _decl
+                break
+
+        declared_template_version = (
+            manifest_profile_decl.get("template_version") if manifest_profile_decl else None
+        )
+        if declared_template_version and declared_template_version != template.version:
+            assessment.structural_errors.append(
+                ValidationDiagnostic(
+                    "ACEF-031",
+                    f"Template version mismatch for {profile_id!r}: manifest "
+                    f"declares {declared_template_version!r} but registry has "
+                    f"{template.version!r}",
+                ).to_dict()
+            )
+
+        # Core/Profiles compatibility: both must share major version per §6.2.
+        try:
+            _versioning = manifest_data.get("versioning", {})
+            _core_v = _versioning.get("core_version", "")
+            _profiles_v = _versioning.get("profiles_version", "")
+            if _core_v and _profiles_v:
+                core_major_v = int(_core_v.split(".")[0])
+                profiles_major_v = int(_profiles_v.split(".")[0])
+                if core_major_v != profiles_major_v:
+                    assessment.structural_errors.append(
+                        ValidationDiagnostic(
+                            "ACEF-033",
+                            f"Incompatible module versions: core_version={_core_v!r} "
+                            f"profiles_version={_profiles_v!r} (major versions must match per §6.2)",
+                        ).to_dict()
+                    )
+        except (ValueError, IndexError):
+            pass
 
         # ACEF-044: Check for duplicate rule_ids within the template
         seen_rule_ids: set[str] = set()

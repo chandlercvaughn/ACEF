@@ -54,8 +54,22 @@ def check_integrity(bundle_dir: Path) -> list[ValidationDiagnostic]:
         )
         return diagnostics
 
-    # Verify content hashes
-    hash_errors = verify_content_hashes(bundle_dir, expected_hashes)
+    # Verify content hashes. The hashing routines (sha256_file,
+    # sha256_jsonl_file) raise ACEFCanonicalizationError on files that
+    # violate spec §3.1.3 canonicalization rules (BOM, non-NFC, illegal
+    # JSONL whitespace, missing trailing newline). Catch and map to
+    # ACEF-051 so the validator surfaces a structured diagnostic rather
+    # than propagating a raw exception.
+    from acef.integrity import ACEFCanonicalizationError as _CanonErr
+
+    try:
+        hash_errors = verify_content_hashes(bundle_dir, expected_hashes)
+    except _CanonErr as exc:
+        rel = str(exc.path.relative_to(bundle_dir)) if exc.path else "?"
+        diagnostics.append(
+            ValidationDiagnostic("ACEF-051", str(exc), path=f"/{rel}")
+        )
+        hash_errors = []
     for error_msg in hash_errors:
         if "mismatch" in error_msg.lower():
             diagnostics.append(
@@ -117,7 +131,7 @@ def _check_signatures(bundle_dir: Path, content_hashes_bytes: bytes) -> list[Val
     5. On invalid signature, emit ACEF-012.
     """
     from acef.errors import ACEFSigningError
-    from acef.integrity import canonicalize_json_str
+    from acef.integrity import ACEFCanonicalizationError, canonicalize_json_str
     from acef.signing import verify_detached_jws
 
     diagnostics: list[ValidationDiagnostic] = []
