@@ -1,0 +1,74 @@
+[
+  {
+    "artifact_name": "management_review",
+    "discriminator_field": "/payload/review_type",
+    "discriminator_value": "management_review",
+    "record_type": "risk_register"
+  },
+  {
+    "artifact_name": "post_market_monitoring_plan",
+    "discriminator_field": "/payload/review_type",
+    "discriminator_value": "post_market_monitoring_plan",
+    "record_type": "risk_register"
+  },
+  {
+    "artifact_name": "risk_testing_log",
+    "discriminator_field": "/payload/treatment_subtype",
+    "discriminator_value": "testing_log",
+    "record_type": "risk_treatment"
+  },
+  {
+    "artifact_name": "marking_standards_compliance",
+    "discriminator_field": "/payload/marking_subtype",
+    "discriminator_value": "standards_compliance",
+    "record_type": "transparency_marking"
+  },
+  {
+    "artifact_name": "interaction_disclosure",
+    "discriminator_field": "/payload/disclosure_subtype",
+    "discriminator_value": "interaction",
+    "record_type": "disclosure_labeling"
+  },
+  {
+    "artifact_name": "biometric_disclosure",
+    "discriminator_field": "/payload/disclosure_subtype",
+    "discriminator_value": "biometric",
+    "record_type": "disclosure_labeling"
+  },
+  {
+    "artifact_name": "logging_spec",
+    "discriminator_field": "/payload/event_type",
+    "discriminator_value": "logging_spec",
+    "record_type": "event_log"
+  },
+  {
+    "artifact_name": "gpai_annex_xi_model_doc",
+    "discriminator_field": "/payload/variant",
+    "discriminator_value": "gpai_annex_xi_model_doc",
+    "record_type": "evaluation_report"
+  },
+  {
+    "artifact_name": "ai_use_case_inventory_entry",
+    "discriminator_field": "/payload/variant",
+    "discriminator_value": "ai_use_case_inventory_entry",
+    "record_type": "governance_policy"
+  },
+  {
+    "artifact_name": "mark_detectability_test",
+    "discriminator_field": "/payload/variant",
+    "discriminator_value": "mark_detectability_test",
+    "record_type": "evaluation_report"
+  },
+  {
+    "artifact_name": "training_competency_record",
+    "discriminator_field": "/payload/variant",
+    "discriminator_value": "training_competency_record",
+    "record_type": "governance_policy"
+  },
+  {
+    "artifact_name": "publication_evidence",
+    "discriminator_field": "/payload/variant",
+    "discriminator_value": "publication_evidence",
+    "record_type": "transparency_disclosure"
+  }
+]

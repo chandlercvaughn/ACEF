@@ -1,0 +1,23 @@
+{
+  "assessment-bundle.schema.json": "7f03de87c52930d132a4c0629571e71daa99feeded228aa4b8625bd1dae0fa0a",
+  "conformity_declaration.schema.json": "3bb29c74fe99dc5294861419aef95c0aeaa1b8be7efcec874bbf1a909f18e2c9",
+  "copyright_rights_reservation.schema.json": "2e3053ac42c780f29f2791ea4df5676e0f2db9aff5bb129361ada70a387dc4fc",
+  "data_provenance.schema.json": "2044d9017453969d083c40461efcdc269f981b26f24b8272fa2a9012796e5780",
+  "dataset_card.schema.json": "1d6560cf2f0cd6274e194265355bd45afc1cec8614d1e864215cccbaabc6e541",
+  "disclosure_labeling.schema.json": "2411379832023952037f9a615addbcb68528363107172a558d68f0a9062319f9",
+  "evaluation_report.schema.json": "100b824eef0c0cf5db64d53df597144524d298a306a20dc9f9bbcde82ed99591",
+  "event_log.schema.json": "ec558db219b1b561b723d2eeceb3e78e7efa1a333c25b0170e585ff2b2dd19b2",
+  "evidence_gap.schema.json": "a6bf346dc820211fb9879c52f83de0420fa3dcd3845ba75f0ef5c60a898c12ec",
+  "governance_policy.schema.json": "418b83b40e61e1a93b7f975f959c100c96a3bcd9426e0cf1d27de9e2036a9f8c",
+  "human_oversight_action.schema.json": "d173fd3e17024e6013da8f378b6679727c22dea86e1302a81b650b264aec08c7",
+  "incident_report.schema.json": "1eac62ac6990edec8fa108e8539aa83c9633703c6338fbde5332613ad250f023",
+  "license_record.schema.json": "3cd4d4098b7cb017feb191fdb085f7eb4c59cca783dca80e0587c68efe67b021",
+  "manifest.schema.json": "f52df2c4688b96a0eb1a4a81aab05c3b3b051baac72c2aed02834783b52fdd6a",
+  "record-envelope.schema.json": "e04a4656979f66ac7ce675c5ce8745aa4e905a3ed92a1f1c7185a71836967a94",
+  "risk_register.schema.json": "22de1ab3a6da4938067183665d38cf73e3f64ef21e4805f0ba03feceaa6fd28e",
+  "risk_treatment.schema.json": "3277a0a57b51e15088882c56b49be40520ee2fdcf455abb4b23ce72dd42dc335",
+  "template.schema.json": "576e6101610276d5d56c3a030f98f5b0e385ec3db40825b3eb514fc0674f3222",
+  "transparency_disclosure.schema.json": "f8ed413da73e24197c4171947972d5c503f0be77252cb27366a592284119f216",
+  "transparency_marking.schema.json": "be0ca67034f372d6d7376fdd34377b78e9e59233500dab829c6d0803394ad4d0",
+  "variant-registry.json": "a9650a9993494f9f083664be7285aecc66a03dd1663dad38279e6b8596d225d0"
+}

@@ -1,0 +1,157 @@
+{
+  "ACEF-001": {
+    "category": "schema",
+    "description": "Incompatible module versions in versioning block",
+    "severity": "fatal"
+  },
+  "ACEF-002": {
+    "category": "schema",
+    "description": "Manifest fails JSON Schema validation",
+    "severity": "fatal"
+  },
+  "ACEF-003": {
+    "category": "schema",
+    "description": "Unknown record_type \u2014 no schema in registry",
+    "severity": "error"
+  },
+  "ACEF-004": {
+    "category": "schema",
+    "description": "Record payload fails record-type JSON Schema validation",
+    "severity": "fatal"
+  },
+  "ACEF-010": {
+    "category": "integrity",
+    "description": "File hash mismatch",
+    "severity": "fatal"
+  },
+  "ACEF-011": {
+    "category": "integrity",
+    "description": "Merkle root mismatch",
+    "severity": "fatal"
+  },
+  "ACEF-012": {
+    "category": "integrity",
+    "description": "Invalid or expired signature",
+    "severity": "fatal"
+  },
+  "ACEF-013": {
+    "category": "integrity",
+    "description": "Unsupported JWS algorithm",
+    "severity": "fatal"
+  },
+  "ACEF-014": {
+    "category": "integrity",
+    "description": "Hash index completeness failure",
+    "severity": "fatal"
+  },
+  "ACEF-020": {
+    "category": "reference",
+    "description": "Dangling entity_refs \u2014 URN references nonexistent entity",
+    "severity": "error"
+  },
+  "ACEF-021": {
+    "category": "reference",
+    "description": "Duplicate URNs within the package",
+    "severity": "error"
+  },
+  "ACEF-022": {
+    "category": "reference",
+    "description": "record_files entry references nonexistent file",
+    "severity": "error"
+  },
+  "ACEF-023": {
+    "category": "reference",
+    "description": "Attachment path references file not in artifacts/",
+    "severity": "error"
+  },
+  "ACEF-025": {
+    "category": "reference",
+    "description": "Record count mismatch between manifest and actual JSONL",
+    "severity": "error"
+  },
+  "ACEF-026": {
+    "category": "reference",
+    "description": "Duplicate record_id within the package",
+    "severity": "error"
+  },
+  "ACEF-027": {
+    "category": "reference",
+    "description": "Attachment hash does not match content-hashes.json entry",
+    "severity": "warning"
+  },
+  "ACEF-030": {
+    "category": "profile",
+    "description": "Unknown profile_id \u2014 no matching template",
+    "severity": "error"
+  },
+  "ACEF-031": {
+    "category": "profile",
+    "description": "Unknown template_version",
+    "severity": "error"
+  },
+  "ACEF-032": {
+    "category": "profile",
+    "description": "Provision not yet effective \u2014 rules produce skipped outcome",
+    "severity": "info"
+  },
+  "ACEF-033": {
+    "category": "profile",
+    "description": "Incompatible module versions between bundle and template",
+    "severity": "error"
+  },
+  "ACEF-040": {
+    "category": "evaluation",
+    "description": "Required evidence type missing",
+    "severity": "error"
+  },
+  "ACEF-041": {
+    "category": "evaluation",
+    "description": "Evidence freshness exceeded",
+    "severity": "warning"
+  },
+  "ACEF-042": {
+    "category": "evaluation",
+    "description": "evidence_gap acknowledged for provision",
+    "severity": "info"
+  },
+  "ACEF-043": {
+    "category": "evaluation",
+    "description": "Invalid JSON Pointer in rule field parameter",
+    "severity": "error"
+  },
+  "ACEF-044": {
+    "category": "evaluation",
+    "description": "Duplicate rule_id in template",
+    "severity": "error"
+  },
+  "ACEF-045": {
+    "category": "evaluation",
+    "description": "Invalid ECMA-262 regex pattern in rule value",
+    "severity": "error"
+  },
+  "ACEF-050": {
+    "category": "format",
+    "description": "Malformed JSONL line",
+    "severity": "fatal"
+  },
+  "ACEF-051": {
+    "category": "format",
+    "description": "JSON not canonicalized per RFC 8785",
+    "severity": "fatal"
+  },
+  "ACEF-052": {
+    "category": "format",
+    "description": "Path contains .. segments or non-UTF-8-NFC characters",
+    "severity": "error"
+  },
+  "ACEF-053": {
+    "category": "format",
+    "description": "Vendor extension field affects conformance outcome",
+    "severity": "error"
+  },
+  "ACEF-060": {
+    "category": "merge",
+    "description": "Conflicting records from multiple packages",
+    "severity": "warning"
+  }
+}
