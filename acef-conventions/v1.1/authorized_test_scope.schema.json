@@ -1,0 +1,197 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://acef.ai/schemas/v1.1/authorized_test_scope.schema.json",
+  "title": "ACEF Authorized Test Scope",
+  "description": "Payload schema for authorized_test_scope records. Declares the authorized boundary for outside-customer testing of a target AI system: which surfaces may be probed, which identities may be used, side-effect policy, sandbox boundary, ownership proof, effective window, and authorizing actor. Cross-vendor concept: any agent-reliability product testing a third-party AI system must declare authorized scope per brief freddy-on-acef-requirements-v0.1.md §3.1.",
+  "type": "object",
+  "required": [
+    "scope_id",
+    "scope_version",
+    "subject_ref",
+    "authorized_surfaces",
+    "authorized_identities",
+    "side_effect_policy",
+    "sandbox_boundary",
+    "ownership_proof",
+    "effective_from",
+    "authorizing_actor_ref"
+  ],
+  "properties": {
+    "scope_id": {
+      "type": "string",
+      "description": "URN identifier for this authorized test scope.",
+      "pattern": "^urn:acef:scope:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "scope_version": {
+      "type": "string",
+      "description": "Semver-shaped version of this scope. Required to be present even on initial issue."
+    },
+    "subject_ref": {
+      "type": "string",
+      "description": "URN reference to the ai_system or ai_model being tested."
+    },
+    "authorized_surfaces": {
+      "type": "array",
+      "description": "Surfaces that the test harness is authorized to interact with.",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["surface_type", "surface_identifier", "authorization_level"],
+        "properties": {
+          "surface_type": {
+            "type": "string",
+            "enum": [
+              "chat_endpoint",
+              "api_endpoint",
+              "tool_endpoint",
+              "rag_endpoint",
+              "browser_target",
+              "package_target",
+              "cli_target",
+              "container_target",
+              "docs_target"
+            ]
+          },
+          "surface_identifier": {
+            "type": "string",
+            "description": "Stable identifier for the surface (URL, package coordinate, etc.)."
+          },
+          "authorization_level": {
+            "type": "string",
+            "enum": ["read_only", "read_write_sandbox", "production_capable_owner_authorized"]
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "authorized_identities": {
+      "type": "array",
+      "description": "Identities the test harness is authorized to operate as.",
+      "items": {
+        "type": "object",
+        "required": ["identity_type", "identity_ref", "scope_constraint"],
+        "properties": {
+          "identity_type": {
+            "type": "string",
+            "enum": ["test_account", "service_principal", "delegated_grant", "freddy_managed_mailbox"]
+          },
+          "identity_ref": {"type": "string"},
+          "scope_constraint": {"type": "string"}
+        },
+        "additionalProperties": true
+      }
+    },
+    "side_effect_policy": {
+      "type": "object",
+      "description": "Policy governing test-side-effects on the target system.",
+      "required": ["default_disposition", "explicit_allowlist", "explicit_denylist"],
+      "properties": {
+        "default_disposition": {
+          "type": "string",
+          "enum": ["default_deny", "default_allow_sandbox_only"]
+        },
+        "explicit_allowlist": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["action_class", "rationale"],
+            "properties": {
+              "action_class": {"type": "string"},
+              "rationale": {"type": "string"}
+            },
+            "additionalProperties": true
+          }
+        },
+        "explicit_denylist": {
+          "type": "array",
+          "items": {"type": "string"}
+        }
+      },
+      "additionalProperties": true
+    },
+    "sandbox_boundary": {
+      "type": "object",
+      "description": "How the sandbox boundary is enforced and verified.",
+      "required": ["ownership_ledger_ref", "preflight_method"],
+      "properties": {
+        "ownership_ledger_ref": {"type": "string"},
+        "preflight_method": {
+          "type": "string",
+          "enum": ["resource_naming_scheme", "tenant_label", "dedicated_subaccount", "preflight_probe"]
+        }
+      },
+      "additionalProperties": true
+    },
+    "ownership_proof": {
+      "type": "object",
+      "description": "Evidence that the authorizing party owns or controls the subject system.",
+      "required": ["proof_method", "proof_artifact_ref", "verified_at"],
+      "properties": {
+        "proof_method": {
+          "type": "string",
+          "enum": ["dns_txt", "well_known_file", "http_header", "github_oauth", "sso_assertion"]
+        },
+        "proof_artifact_ref": {"type": "string"},
+        "verified_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "additionalProperties": true
+    },
+    "effective_from": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Earliest moment the scope is in force."
+    },
+    "effective_until": {
+      "type": ["string", "null"],
+      "format": "date-time",
+      "description": "Latest moment the scope is in force. Null means open-ended. Validator MUST enforce effective_until > effective_from when non-null; this ordering rule is enforced at the validator level (cross-field), not in the schema."
+    },
+    "authorizing_actor_ref": {
+      "type": "string",
+      "description": "URN reference to the actor (customer representative) that authorized this scope."
+    },
+    "kill_switch_ref": {
+      "type": "string",
+      "description": "URN reference to the kill-switch endpoint or actor authorized to halt testing. REQUIRED when any authorized_surface has authorization_level 'production_capable_owner_authorized' (enforced via allOf below)."
+    }
+  },
+  "allOf": [
+    {
+      "description": "Rule from brief §3.1 validation rules: production_capable_owner_authorized authorization may only be granted with ownership_proof.proof_method drawn from the three methods that prove system ownership (dns_txt, well_known_file, sso_assertion). OAuth and HTTP header prove control of an account but not ownership of the underlying system. Additionally, kill_switch_ref becomes required when any surface carries this authorization level.",
+      "if": {
+        "type": "object",
+        "properties": {
+          "authorized_surfaces": {
+            "type": "array",
+            "contains": {
+              "type": "object",
+              "properties": {
+                "authorization_level": {"const": "production_capable_owner_authorized"}
+              },
+              "required": ["authorization_level"]
+            }
+          }
+        },
+        "required": ["authorized_surfaces"]
+      },
+      "then": {
+        "properties": {
+          "ownership_proof": {
+            "type": "object",
+            "properties": {
+              "proof_method": {
+                "enum": ["dns_txt", "well_known_file", "sso_assertion"]
+              }
+            },
+            "required": ["proof_method"]
+          }
+        },
+        "required": ["kill_switch_ref"]
+      }
+    }
+  ],
+  "additionalProperties": true
+}

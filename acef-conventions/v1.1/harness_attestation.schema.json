@@ -1,0 +1,113 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://acef.ai/schemas/v1.1/harness_attestation.schema.json",
+  "title": "ACEF Harness Attestation",
+  "description": "Payload schema for harness_attestation records. The durable proof that a state transition (in one of the seven state classes step/finding/coverage_cell/regression/delivery/badge/attestation) was earned by bound evidence and a verifier signed off on the transition. Implements the Prove-It Doctrine per brief freddy-on-acef-requirements-v0.1.md §3.6 / §10.6. verifier.verifier_class MUST NOT be 'persona' or 'llm' — those classes lack the determinism required to attest state transitions and are excluded from the enum.",
+  "type": "object",
+  "required": [
+    "attestation_id",
+    "state_class",
+    "state_transition",
+    "bound_evidence_refs",
+    "verifier",
+    "claim",
+    "fake_green_test_ref",
+    "attestation_signature",
+    "signed_at",
+    "signer_kid"
+  ],
+  "properties": {
+    "attestation_id": {
+      "type": "string",
+      "pattern": "^urn:acef:att:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+      "description": "URN identifier for this attestation."
+    },
+    "state_class": {
+      "type": "string",
+      "description": "Hard-coded taxonomy of seven state classes per brief §24.5 / design decision D3. Values outside this enum emit ACEF-076 at validation time.",
+      "enum": [
+        "step",
+        "finding",
+        "coverage_cell",
+        "regression",
+        "delivery",
+        "badge",
+        "attestation"
+      ]
+    },
+    "state_transition": {
+      "type": "object",
+      "description": "The state transition this attestation witnesses.",
+      "required": ["from_state", "to_state", "transitioned_at"],
+      "properties": {
+        "from_state": {"type": "string"},
+        "to_state": {"type": "string"},
+        "transitioned_at": {"type": "string", "format": "date-time"}
+      },
+      "additionalProperties": true
+    },
+    "bound_evidence_refs": {
+      "type": "array",
+      "description": "Array of URNs of the records that justified the transition. Empty array emits ACEF-070 at validation. The SDK-level builder Package.attest() also rejects empty arrays before serialization (VAL-SDK-005).",
+      "items": {"type": "string"}
+    },
+    "verifier": {
+      "type": "object",
+      "description": "Identity and class of the verifier that signed off on this state transition. The verifier_class enum deliberately EXCLUDES 'persona' and 'llm' per brief §3.6 / VAL-LOAD-001/002 — those classes lack the determinism required to attest state transitions and bundles with those values are rejected at load time.",
+      "required": ["verifier_id", "verifier_class", "verifier_version"],
+      "properties": {
+        "verifier_id": {"type": "string"},
+        "verifier_class": {
+          "type": "string",
+          "enum": [
+            "contract_gate",
+            "read_back_verifier",
+            "cryptographic_verifier",
+            "harness_internal"
+          ]
+        },
+        "verifier_version": {"type": "string"}
+      },
+      "additionalProperties": true
+    },
+    "claim": {
+      "type": "string",
+      "description": "Structured claim string per brief §10.6 — '<state_class>.<from_state>.<to_state>:<short_reason>'."
+    },
+    "fake_green_test_ref": {
+      "type": "string",
+      "description": "URN of the fake-green test that proves this state class cannot be reached without the bound evidence. Per brief §24.5. Missing field emits ACEF-076."
+    },
+    "attestation_signature": {
+      "type": "object",
+      "description": "JWS detached signature over the attestation body. Algorithm MUST be RS256 or ES256; other algorithms emit ACEF-013. The signed_fields scope is normative per VAL-SIGNATURE-001.",
+      "required": ["alg", "value"],
+      "properties": {
+        "alg": {
+          "type": "string",
+          "enum": ["RS256", "ES256"]
+        },
+        "value": {
+          "type": "string",
+          "description": "JWS compact serialization."
+        },
+        "signed_fields": {
+          "type": "array",
+          "description": "Ordered list of fields covered by the signature. Per VAL-SIGNATURE-001, MUST equal exactly: ['attestation_id','state_class','state_transition','bound_evidence_refs','verifier','claim','fake_green_test_ref','signed_at','signer_kid'].",
+          "items": {"type": "string"}
+        }
+      },
+      "additionalProperties": true
+    },
+    "signed_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When the attestation was signed (ISO 8601)."
+    },
+    "signer_kid": {
+      "type": "string",
+      "description": "Key identifier from the bundle's JWKS."
+    }
+  },
+  "additionalProperties": true
+}

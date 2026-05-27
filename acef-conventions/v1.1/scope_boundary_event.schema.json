@@ -1,0 +1,113 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://acef.ai/schemas/v1.1/scope_boundary_event.schema.json",
+  "title": "ACEF Scope Boundary Event",
+  "description": "Payload schema for scope_boundary_event records. Records that a test attempted (or executed) an action outside the boundary declared in the bound authorized_test_scope. Cross-vendor control-plane integrity event distinct from incident_report (operational/post-market) and event_log (routine). Per brief freddy-on-acef-requirements-v0.1.md §3.2. When hard_stop_triggered=true, hard_stop_attestation_ref becomes required (allOf conditional below).",
+  "type": "object",
+  "required": [
+    "event_id",
+    "scope_ref",
+    "attempted_action",
+    "authorized_scope_snapshot",
+    "classification",
+    "hard_stop_triggered",
+    "detected_at",
+    "detector"
+  ],
+  "properties": {
+    "event_id": {
+      "type": "string",
+      "pattern": "^urn:acef:sbe:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+      "description": "URN identifier for this scope boundary event."
+    },
+    "scope_ref": {
+      "type": "string",
+      "description": "URN reference to the authorized_test_scope at the time the event occurred."
+    },
+    "attempted_action": {
+      "type": "object",
+      "description": "The action the harness attempted to perform.",
+      "required": ["action_class", "action_target", "action_payload_digest"],
+      "properties": {
+        "action_class": {"type": "string"},
+        "action_target": {"type": "string"},
+        "action_payload_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "description": "SHA-256 digest of the redacted payload that would have been sent. Raw payload MUST NOT be embedded."
+        }
+      },
+      "additionalProperties": true
+    },
+    "authorized_scope_snapshot": {
+      "type": "object",
+      "description": "Snapshot of the relevant scope fields at the moment of detection, to defend against later scope edits hiding the violation.",
+      "required": ["scope_id", "scope_version"],
+      "properties": {
+        "scope_id": {"type": "string"},
+        "scope_version": {"type": "string"}
+      },
+      "additionalProperties": true
+    },
+    "classification": {
+      "type": "string",
+      "description": "Why this event occurred. Drawn from a fixed taxonomy per brief §3.2.",
+      "enum": [
+        "intentional_bypass_attempt",
+        "harness_drift",
+        "persona_misbehavior",
+        "scope_definition_ambiguity",
+        "third_party_integration_overreach"
+      ]
+    },
+    "hard_stop_triggered": {
+      "type": "boolean",
+      "description": "True when the harness halted execution as a result of this event. When true, hard_stop_attestation_ref becomes required (see allOf below)."
+    },
+    "hard_stop_attestation_ref": {
+      "type": ["string", "null"],
+      "description": "URN reference to the harness_attestation recording the stop. REQUIRED if hard_stop_triggered is true."
+    },
+    "detected_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When the boundary breach was detected (ISO 8601)."
+    },
+    "detector": {
+      "type": "object",
+      "description": "The mechanism that detected the boundary breach.",
+      "required": ["detector_class", "detector_id"],
+      "properties": {
+        "detector_class": {
+          "type": "string",
+          "enum": [
+            "preflight_probe",
+            "ownership_ledger_check",
+            "side_effect_policy_check",
+            "post_action_audit",
+            "external_alert"
+          ]
+        },
+        "detector_id": {"type": "string"}
+      },
+      "additionalProperties": true
+    }
+  },
+  "allOf": [
+    {
+      "description": "When hard_stop_triggered is true, hard_stop_attestation_ref MUST be a non-null URN string per brief §3.2 / VAL-SCHEMA-002.",
+      "if": {
+        "type": "object",
+        "properties": {"hard_stop_triggered": {"const": true}},
+        "required": ["hard_stop_triggered"]
+      },
+      "then": {
+        "required": ["hard_stop_attestation_ref"],
+        "properties": {
+          "hard_stop_attestation_ref": {"type": "string"}
+        }
+      }
+    }
+  ],
+  "additionalProperties": true
+}

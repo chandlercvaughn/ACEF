@@ -1,0 +1,166 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://acef.ai/schemas/v1.1/delivery_verdict.schema.json",
+  "title": "ACEF Delivery Verdict",
+  "description": "Payload schema for delivery_verdict records. Records the state of delivering a finding to a customer/system-owner destination. Provider acknowledgment (HTTP 2xx) is not delivery — verified delivery requires a read-back of the destination object whose digest byte-equals the write digest, plus a signed harness_attestation. Cross-vendor concept per brief freddy-on-acef-requirements-v0.1.md §3.4. When delivery_state='verified_delivered', the triple requirement read_back + read_back.digest_match=true + harness_attestation_ref is enforced via allOf below.",
+  "type": "object",
+  "required": [
+    "verdict_id",
+    "finding_ref",
+    "destination",
+    "write_attempt",
+    "delivery_state"
+  ],
+  "properties": {
+    "verdict_id": {
+      "type": "string",
+      "pattern": "^urn:acef:delivery:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+      "description": "URN identifier for this delivery verdict."
+    },
+    "finding_ref": {
+      "type": "string",
+      "description": "URN of the finding_record being delivered."
+    },
+    "destination": {
+      "type": "object",
+      "description": "Where the finding was (or was attempted to be) delivered.",
+      "required": ["provider_class", "provider_instance_id", "provider_object_id"],
+      "properties": {
+        "provider_class": {
+          "type": "string",
+          "enum": [
+            "plane",
+            "github_issues",
+            "linear",
+            "jira",
+            "slack",
+            "email",
+            "markdown_export",
+            "custom"
+          ]
+        },
+        "provider_instance_id": {"type": "string"},
+        "provider_object_id": {
+          "type": "string",
+          "description": "Provider-side object identifier (e.g., ticket URL or ID)."
+        }
+      },
+      "additionalProperties": true
+    },
+    "write_attempt": {
+      "type": "object",
+      "description": "Record of the outbound write to the destination.",
+      "required": ["attempted_at", "request_digest", "response_status", "response_digest"],
+      "properties": {
+        "attempted_at": {"type": "string", "format": "date-time"},
+        "request_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "description": "SHA-256 digest of the canonicalized request payload."
+        },
+        "response_status": {"type": "integer"},
+        "response_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "description": "SHA-256 digest of the canonicalized response payload."
+        }
+      },
+      "additionalProperties": true
+    },
+    "read_back": {
+      "type": "object",
+      "description": "Read-back of the destination object after the write. REQUIRED when delivery_state='verified_delivered' (see allOf).",
+      "required": ["read_back_at", "read_back_digest", "digest_match"],
+      "properties": {
+        "read_back_at": {"type": "string", "format": "date-time"},
+        "read_back_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "description": "SHA-256 digest of the canonicalized read-back payload. MUST byte-equal write_attempt.request_digest when digest_match=true."
+        },
+        "digest_match": {
+          "type": "boolean",
+          "description": "Whether the read-back digest byte-equals the write request digest."
+        }
+      },
+      "additionalProperties": true
+    },
+    "delivery_state": {
+      "type": "string",
+      "description": "Current delivery state.",
+      "enum": [
+        "drafted",
+        "dispatched",
+        "acknowledged",
+        "verified_delivered",
+        "failed",
+        "drifted"
+      ]
+    },
+    "drift_classification": {
+      "type": "string",
+      "description": "Required when delivery_state='drifted'. Classifies the kind of drift detected.",
+      "enum": [
+        "external_close_without_resolution",
+        "external_priority_lowered",
+        "external_reassignment",
+        "ticket_deleted"
+      ]
+    },
+    "retry_history": {
+      "type": "array",
+      "description": "Ordered array of prior write attempts.",
+      "items": {
+        "type": "object",
+        "required": ["attempted_at", "response_status", "response_digest"],
+        "properties": {
+          "attempted_at": {"type": "string", "format": "date-time"},
+          "response_status": {"type": "integer"},
+          "response_digest": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "harness_attestation_ref": {
+      "type": "string",
+      "description": "URN of the harness_attestation that signed off on the verified_delivered transition. REQUIRED when delivery_state='verified_delivered' (see allOf)."
+    }
+  },
+  "allOf": [
+    {
+      "description": "Brief §3.4 triple-requirement: delivery_state='verified_delivered' REQUIRES read_back + read_back.digest_match=true + harness_attestation_ref. Missing any of these emits ACEF-071 at validation time. Per VAL-SCHEMA-004.",
+      "if": {
+        "type": "object",
+        "properties": {"delivery_state": {"const": "verified_delivered"}},
+        "required": ["delivery_state"]
+      },
+      "then": {
+        "required": ["read_back", "harness_attestation_ref"],
+        "properties": {
+          "read_back": {
+            "type": "object",
+            "required": ["digest_match"],
+            "properties": {
+              "digest_match": {"const": true}
+            }
+          }
+        }
+      }
+    },
+    {
+      "description": "drift_classification is required when delivery_state='drifted'.",
+      "if": {
+        "type": "object",
+        "properties": {"delivery_state": {"const": "drifted"}},
+        "required": ["delivery_state"]
+      },
+      "then": {
+        "required": ["drift_classification"]
+      }
+    }
+  ],
+  "additionalProperties": true
+}

@@ -1,0 +1,136 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://acef.ai/schemas/v1.1/finding_record.schema.json",
+  "title": "ACEF Finding Record",
+  "description": "Payload schema for finding_record records. A reproducible defect observed during testing of a target AI system, with full evidence binding. Distinct from incident_report (operator-facing, single occurrence, post-deployment) by being customer-facing, reproducible, dedupe-tracked, and produced during testing. Cross-vendor concept per brief freddy-on-acef-requirements-v0.1.md §3.3.",
+  "type": "object",
+  "required": [
+    "finding_id",
+    "finding_class",
+    "subject_ref",
+    "severity",
+    "dedupe_key",
+    "reproduction",
+    "attribution",
+    "discovered_at",
+    "discovered_in_run_ref"
+  ],
+  "properties": {
+    "finding_id": {
+      "type": "string",
+      "pattern": "^urn:acef:finding:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+      "description": "URN identifier for this finding."
+    },
+    "finding_class": {
+      "type": "string",
+      "description": "The class of defect this finding describes.",
+      "enum": [
+        "safety_failure",
+        "policy_violation",
+        "accuracy_degradation",
+        "robustness_failure",
+        "security_vulnerability",
+        "transparency_failure",
+        "oversight_failure",
+        "data_integrity_failure"
+      ]
+    },
+    "subject_ref": {
+      "type": "string",
+      "description": "URN of the ai_system or ai_model the finding is about."
+    },
+    "severity": {
+      "type": "object",
+      "description": "Severity classification with rationale.",
+      "required": ["severity_level", "severity_rationale"],
+      "properties": {
+        "severity_level": {
+          "type": "string",
+          "enum": ["critical", "high", "medium", "low", "informational"]
+        },
+        "severity_rationale": {
+          "type": "string",
+          "description": "Why this severity was assigned."
+        }
+      },
+      "additionalProperties": true
+    },
+    "dedupe_key": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "description": "Stable deduplication hash. NORMATIVE RECIPE (brief §3.3 + design decision D5): dedupe_key = 'sha256:' + hex(SHA-256(JCS-canonicalize({class: finding_class, subject_ref: subject_ref, expected_behavior: reproduction.expected_behavior, reproduction_steps_ref_content_hash: SHA-256-of-content-at-reproduction.reproduction_steps_ref}))). Canonicalization MUST follow RFC 8785 (JCS). Identical recipes across runs MUST collapse to one dedupe_key byte-equal. No hash agility in v0.4 — sha256 only."
+    },
+    "variant_group_id": {
+      "type": "string",
+      "description": "Optional URN linking related findings that share a class but differ in surface."
+    },
+    "reproduction": {
+      "type": "object",
+      "description": "Reproduction recipe and supporting evidence. All four sub-fields are required and must reference existing artifacts.",
+      "required": [
+        "expected_behavior",
+        "observed_behavior",
+        "reproduction_steps_ref",
+        "evidence_commit_ref"
+      ],
+      "properties": {
+        "expected_behavior": {
+          "type": "string",
+          "description": "Normalized natural-language statement of the expected behavior. Feeds dedupe_key recipe."
+        },
+        "observed_behavior": {
+          "type": "string",
+          "description": "What was actually observed."
+        },
+        "reproduction_steps_ref": {
+          "type": "string",
+          "description": "URN or content hash of the reproduction steps artifact. Content of this artifact feeds dedupe_key recipe via SHA-256."
+        },
+        "evidence_commit_ref": {
+          "type": "string",
+          "description": "URN of the evidence bundle commit that demonstrates the finding. MUST be present in content-hashes.json or be a fully-qualified external URN referenced by the manifest."
+        }
+      },
+      "additionalProperties": true
+    },
+    "attribution": {
+      "type": "object",
+      "description": "Attribution chain for the finding. Advisory per brief §2.23 but MUST be recorded.",
+      "required": ["persona_ref", "scenario_ref", "scope_ref"],
+      "properties": {
+        "persona_ref": {"type": "string"},
+        "scenario_ref": {"type": "string"},
+        "scope_ref": {"type": "string"}
+      },
+      "additionalProperties": true
+    },
+    "regulation_impact": {
+      "type": "array",
+      "description": "Array of regulation provision IDs (dotted notation as in ACEF Core) this finding may bear on.",
+      "items": {"type": "string"}
+    },
+    "discovered_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When the finding was first discovered (ISO 8601)."
+    },
+    "discovered_in_run_ref": {
+      "type": "string",
+      "description": "URN of the run that produced the finding."
+    },
+    "disposition_history": {
+      "type": "array",
+      "description": "Array of URNs pointing to disposition_record variants. The latest disposition does NOT transition the finding's internal state — it is advisory per brief §2.7.",
+      "items": {"type": "string"}
+    },
+    "accepted_risk_ref": {
+      "type": "string",
+      "description": "Optional URN of an accepted_risk record if the finding is in accepted-risk state."
+    },
+    "regression_ref": {
+      "type": "string",
+      "description": "Optional URN of a regression_definition if a regression has been promoted from this finding."
+    }
+  },
+  "additionalProperties": true
+}
