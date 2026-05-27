@@ -565,6 +565,110 @@ def enforce_disposition_authority(
 
 
 # ---------------------------------------------------------------------------
+# VAL-LOAD-001 / 002 / 005: harness_attestation verifier_class
+# ---------------------------------------------------------------------------
+
+# Mirror of acef.load_rejections._BANNED_VERIFIER_CLASSES. Kept duplicated
+# (not imported) to avoid a circular dependency loader→validation. If this
+# set drifts in one module, the agreement contract VAL-LOAD-005 breaks; the
+# integration test test_load_validate_agree.py asserts they stay aligned.
+_BANNED_VERIFIER_CLASSES: tuple[str, ...] = ("persona", "llm")
+
+
+def enforce_harness_verifier_class(
+    records: list[dict[str, Any]],
+) -> list[ValidationDiagnostic]:
+    """Emit ACEF-070 for harness_attestation records with banned verifier_class.
+
+    VAL-LOAD-005 mirror of the loader's VAL-LOAD-001/002 rejection: when
+    :func:`acef.validation.engine.validate_bundle` is run on the same
+    bundle that the loader would reject, this function emits a diagnostic
+    carrying the same ACEF-070 code so callers see consistent semantics
+    regardless of which entry point they used.
+
+    Per brief §3.6: persona and LLM verifiers lack the determinism required
+    to attest state transitions. The :class:`HarnessVerifier` Pydantic
+    enum already excludes them at parse time, but validate_bundle inspects
+    the raw record dicts (it does NOT depend on payload Pydantic models)
+    so we surface a diagnostic explicitly.
+    """
+    diags: list[ValidationDiagnostic] = []
+    for _idx, rec in _records_iter(records):
+        if _record_type_of(rec) != "harness_attestation":
+            continue
+        payload = rec.get("payload")
+        if not isinstance(payload, dict):
+            continue
+        verifier = payload.get("verifier")
+        if not isinstance(verifier, dict):
+            continue
+        vc = verifier.get("verifier_class")
+        if not isinstance(vc, str) or vc not in _BANNED_VERIFIER_CLASSES:
+            continue
+        rec_id = _record_id_of(rec)
+        diags.append(
+            ValidationDiagnostic(
+                "ACEF-070",
+                (
+                    f"harness_attestation {rec_id!r} uses banned "
+                    f"verifier_class={vc!r}: persona and LLM verifiers lack "
+                    "the determinism required to attest state transitions "
+                    "per brief §3.6."
+                ),
+            )
+        )
+    return diags
+
+
+# ---------------------------------------------------------------------------
+# VAL-LOAD-003 / 005: disposition_record internal_state_unchanged
+# ---------------------------------------------------------------------------
+
+
+def enforce_disposition_internal_state(
+    records: list[dict[str, Any]],
+) -> list[ValidationDiagnostic]:
+    """Emit ACEF-076 for disposition records with internal_state_unchanged=false.
+
+    VAL-LOAD-005 mirror of the loader's VAL-LOAD-003 rejection. Per brief
+    §V3: external dispositions are advisory and MUST NOT mutate internal
+    evidence state; :samp:`internal_state_unchanged: false` is the
+    forbidden condition.
+
+    ACEF-076's registry text reads "state_class record lacks fake-green
+    test reference" but the same code is reused here per ops plan WS3.4:
+    both conditions are "discipline failures around state mutation" and
+    sharing a code keeps the error taxonomy compact. The diagnostic
+    message disambiguates by naming the specific violation.
+    """
+    diags: list[ValidationDiagnostic] = []
+    for _idx, rec in _records_iter(records):
+        if not _is_disposition_record(rec):
+            continue
+        payload = rec.get("payload", {})
+        if not isinstance(payload, dict):
+            continue
+        # Only the explicit boolean False fires; absent / true / non-boolean
+        # are not violations at this layer (schema validation handles
+        # type-shape requirements separately).
+        if payload.get("internal_state_unchanged") is not False:
+            continue
+        rec_id = _record_id_of(rec)
+        diags.append(
+            ValidationDiagnostic(
+                "ACEF-076",
+                (
+                    f"disposition_record {rec_id!r} sets "
+                    "internal_state_unchanged=false: external dispositions "
+                    "are advisory per brief §V3 and MUST NOT mutate "
+                    "internal evidence state."
+                ),
+            )
+        )
+    return diags
+
+
+# ---------------------------------------------------------------------------
 # Top-level entry point
 # ---------------------------------------------------------------------------
 
@@ -624,7 +728,19 @@ def run_cross_record_validation(
     # 6. Mode-gated required record types
     diags.extend(enforce_mode_gates(manifest, records))
 
-    # 7. Disposition authority matrix
+    # 7. Disposition authority matrix (also handles VAL-LOAD-005 mirror of
+    #    VAL-LOAD-004 — same ACEF-080 code path emits a diagnostic for the
+    #    same input the loader rejects with LoadRejection).
     diags.extend(enforce_disposition_authority(manifest, records))
+
+    # 8. VAL-LOAD-005 mirror of VAL-LOAD-001/002: harness verifier_class
+    #    persona/llm. Emits ACEF-070 — same code the loader uses for
+    #    LoadRejection.
+    diags.extend(enforce_harness_verifier_class(records))
+
+    # 9. VAL-LOAD-005 mirror of VAL-LOAD-003: disposition_record with
+    #    internal_state_unchanged=false. Emits ACEF-076 — same code the
+    #    loader uses for LoadRejection.
+    diags.extend(enforce_disposition_internal_state(records))
 
     return diags

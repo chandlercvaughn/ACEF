@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from acef.errors import ACEFFormatError
+from acef.load_rejections import check_load_rejections
 from acef.models.entities import Actor, Component, Dataset, EntitiesBlock, Relationship
 from acef.models.manifest import AuditTrailEntry, ProfileEntry
 from acef.models.metadata import PackageMetadata, ProducerInfo, RetentionPolicy, Versioning
@@ -462,8 +463,22 @@ def _load_directory(bundle_dir: Path) -> Package:
     for at_data in manifest_data.get("audit_trail", []):
         audit_trail.append(AuditTrailEntry(**at_data))
 
-    # Load records from JSONL files
-    records: list[RecordEnvelope] = []
+    # Load records from JSONL files.
+    #
+    # Two-pass strategy:
+    #   Pass 1: read every JSONL record into a raw dict list.
+    #   Pass 2: run load-time rejection checks (VAL-LOAD-001..004) on the
+    #           raw dicts BEFORE Pydantic envelope construction — the
+    #           checks need to inspect payload contents that the strict
+    #           Pydantic models would not accept (e.g., persona/llm
+    #           verifier_class fails the HarnessVerifier Literal enum).
+    #   Pass 3: convert each raw dict into a validated RecordEnvelope.
+    #
+    # Rejection raises :class:`acef.errors.LoadRejection` carrying the
+    # ACEF-NNN code that named the rule; the same conditions are also
+    # caught by :func:`acef.validation.engine.validate_bundle` as
+    # ValidationDiagnostics (VAL-LOAD-005 agreement).
+    raw_record_dicts: list[dict[str, Any]] = []
     for rf_entry in manifest_data.get("record_files", []):
         rf_path_str = rf_entry.get("path")
         if not rf_path_str:
@@ -479,9 +494,19 @@ def _load_directory(bundle_dir: Path) -> Package:
                 f"Record file listed in manifest but not found on disk: {rf_entry['path']}",
                 code="ACEF-022",
             )
-        records_data = _parse_jsonl(rf_path)
-        for rec_data in records_data:
-            records.append(dict_to_record_envelope(rec_data))
+        raw_record_dicts.extend(_parse_jsonl(rf_path))
+
+    # Run VAL-LOAD-001..004 checks BEFORE Pydantic envelope construction.
+    # Order matters: persona/llm verifier_class would crash
+    # HarnessAttestationPayload's Literal enum if we deferred this check
+    # below dict_to_record_envelope. (Envelope construction stores payload
+    # as a raw dict so the persona/llm cases survive envelope build, but
+    # downstream code paths that parse payload via the typed model would
+    # blow up with a generic ValidationError — by raising LoadRejection
+    # here we give callers a structured ACEF-NNN handle.)
+    check_load_rejections(manifest_data, raw_record_dicts)
+
+    records: list[RecordEnvelope] = [dict_to_record_envelope(rec_data) for rec_data in raw_record_dicts]
 
     # Load attachments with size guards (M-SCOUT-5, m8 Scout R2)
     attachments: dict[str, bytes] = {}

@@ -238,6 +238,27 @@ class ACEFSigningError(ACEFError):
     code = "ACEF-012"
 
 
+class LoadRejection(ACEFError):
+    """Bundle rejected at load time per VAL-LOAD-001..004.
+
+    Carries the ACEF-NNN code that names the rule violated. The caller MUST
+    pass ``code`` via ``__init__`` — there is no class-level default, because
+    LoadRejection covers multiple distinct codes (currently ACEF-070,
+    ACEF-076, ACEF-080) and silently defaulting would mask the rule
+    actually tripped.
+
+    Per VAL-LOAD-005, every condition that raises ``LoadRejection`` MUST
+    also be detectable by :func:`acef.validation.engine.validate_bundle`
+    producing a ``ValidationDiagnostic`` with the same code.
+    """
+
+    # No class-level default code — every site that constructs LoadRejection
+    # provides one explicitly. Fall back to base ACEF-000 if a caller
+    # accidentally omits it (this keeps the exception class valid; the
+    # missing-code is caught by the test suite, not silently masked).
+    code = "ACEF-000"
+
+
 class ValidationDiagnostic:
     """A single validation finding — used by the validation engine to collect
     all errors within a phase before stopping."""
