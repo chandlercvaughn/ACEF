@@ -254,6 +254,38 @@ def _collect_results(
         )
         assessment.provision_summary.append(summary)
 
+        # ACEF-042: emit info diagnostic when a provision rolls up to
+        # GAP_ACKNOWLEDGED so consumers can see at-a-glance which
+        # provisions are passing only because an evidence_gap record
+        # acknowledges the missing evidence (spec §3.7 step 4).
+        from acef.models.enums import ProvisionOutcome as _PO
+        if summary.provision_outcome == _PO.GAP_ACKNOWLEDGED:
+            assessment.structural_errors.append(
+                ValidationDiagnostic(
+                    "ACEF-042",
+                    f"evidence_gap acknowledged for provision {prov_id} "
+                    f"in profile {profile_id}",
+                ).to_dict()
+            )
+
+        # ACEF-041: emit warning diagnostic when an evidence_freshness
+        # rule (severity=warning) failed for this provision. Spec §3.6
+        # ACEF-041 is the canonical code for stale evidence.
+        from acef.models.enums import RuleOutcome as _RO, RuleSeverity as _RS
+        for r in prov_results:
+            if (
+                r.outcome == _RO.FAILED
+                and r.rule_severity == _RS.WARNING
+                and "freshness" in (r.rule_id or "").lower()
+            ):
+                assessment.structural_errors.append(
+                    ValidationDiagnostic(
+                        "ACEF-041",
+                        f"Evidence freshness exceeded for rule {r.rule_id}: "
+                        f"{r.message or ''}",
+                    ).to_dict()
+                )
+
 
 def _parse_iso_instant(value: str) -> datetime | None:
     """Parse an ISO 8601 timestamp or date into a UTC datetime.
