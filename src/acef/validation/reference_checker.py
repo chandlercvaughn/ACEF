@@ -32,40 +32,61 @@ def check_references(
     """
     diagnostics: list[ValidationDiagnostic] = []
 
+    # Defensive type coercion: schema validation runs in Phase 1 but may
+    # not block Phase 3 from running on a malformed manifest. If a section
+    # arrives as a non-mapping/non-list, treat it as empty so we still
+    # produce a clean diagnostic instead of crashing.
+    def _dict_or_empty(value: Any) -> dict[str, Any]:
+        return value if isinstance(value, dict) else {}
+
+    def _list_or_empty(value: Any) -> list[Any]:
+        return value if isinstance(value, list) else []
+
     # Collect all defined URNs
     defined_urns: set[str] = set()
     urn_sources: dict[str, str] = {}  # urn -> first source path
 
     # Package ID
-    pkg_id = manifest_data.get("metadata", {}).get("package_id", "")
+    metadata_section = _dict_or_empty(manifest_data.get("metadata"))
+    pkg_id = metadata_section.get("package_id", "")
     if pkg_id:
         _add_urn(defined_urns, urn_sources, pkg_id, "/metadata/package_id", diagnostics)
 
     # Subject URNs
-    for i, sub in enumerate(manifest_data.get("subjects", [])):
+    for i, sub in enumerate(_list_or_empty(manifest_data.get("subjects"))):
+        if not isinstance(sub, dict):
+            continue
         sub_id = sub.get("subject_id", "")
         if sub_id:
             _add_urn(defined_urns, urn_sources, sub_id, f"/subjects/{i}/subject_id", diagnostics)
 
     # Entity URNs
-    entities = manifest_data.get("entities", {})
-    for i, comp in enumerate(entities.get("components", [])):
+    entities = _dict_or_empty(manifest_data.get("entities"))
+    for i, comp in enumerate(_list_or_empty(entities.get("components"))):
+        if not isinstance(comp, dict):
+            continue
         comp_id = comp.get("component_id", "")
         if comp_id:
             _add_urn(defined_urns, urn_sources, comp_id, f"/entities/components/{i}", diagnostics)
 
-    for i, ds in enumerate(entities.get("datasets", [])):
+    for i, ds in enumerate(_list_or_empty(entities.get("datasets"))):
+        if not isinstance(ds, dict):
+            continue
         ds_id = ds.get("dataset_id", "")
         if ds_id:
             _add_urn(defined_urns, urn_sources, ds_id, f"/entities/datasets/{i}", diagnostics)
 
-    for i, actor in enumerate(entities.get("actors", [])):
+    for i, actor in enumerate(_list_or_empty(entities.get("actors"))):
+        if not isinstance(actor, dict):
+            continue
         act_id = actor.get("actor_id", "")
         if act_id:
             _add_urn(defined_urns, urn_sources, act_id, f"/entities/actors/{i}", diagnostics)
 
     # Check relationship refs
-    for i, rel in enumerate(entities.get("relationships", [])):
+    for i, rel in enumerate(_list_or_empty(entities.get("relationships"))):
+        if not isinstance(rel, dict):
+            continue
         for ref_field in ("source_ref", "target_ref"):
             ref = rel.get(ref_field, "")
             if ref and ref not in defined_urns:

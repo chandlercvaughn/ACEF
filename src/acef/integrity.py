@@ -280,35 +280,37 @@ def compute_content_hashes(bundle_dir: Path) -> dict[str, str]:
         rel = file_path.relative_to(bundle_dir).as_posix()
         hashes[rel] = sha256_file(file_path)
 
+    # Check is_symlink BEFORE exists() — a broken symlink reports
+    # exists() == False on its target but is still a forbidden symlink.
     manifest_path = bundle_dir / "acef-manifest.json"
+    if manifest_path.is_symlink():
+        raise ACEFCanonicalizationError(
+            "acef-manifest.json is a symlink (forbidden by spec §3.1.1)",
+            path=manifest_path,
+        )
     if manifest_path.exists():
-        if manifest_path.is_symlink():
-            raise ACEFCanonicalizationError(
-                "acef-manifest.json is a symlink (forbidden by spec §3.1.1)",
-                path=manifest_path,
-            )
         hashes["acef-manifest.json"] = sha256_file(manifest_path)
 
     records_dir = bundle_dir / "records"
+    if records_dir.is_symlink():
+        # A broken symlink at records/ has is_symlink True but
+        # exists() False. Reject it explicitly so a malicious bundle
+        # cannot put a symlink to anywhere and skirt detection.
+        raise ACEFCanonicalizationError(
+            "records/ is a symlink (forbidden by spec §3.1.1)",
+            path=records_dir,
+        )
     if records_dir.exists():
-        # Reject top-level records/ symlink — a malicious bundle could
-        # point records/ at a directory outside bundle_dir, in which case
-        # rglob would silently follow it.
-        if records_dir.is_symlink():
-            raise ACEFCanonicalizationError(
-                "records/ is a symlink (forbidden by spec §3.1.1)",
-                path=records_dir,
-            )
         for file_path in sorted(records_dir.rglob("*")):
             _add_if_real_file(file_path)
 
     artifacts_dir = bundle_dir / "artifacts"
+    if artifacts_dir.is_symlink():
+        raise ACEFCanonicalizationError(
+            "artifacts/ is a symlink (forbidden by spec §3.1.1)",
+            path=artifacts_dir,
+        )
     if artifacts_dir.exists():
-        if artifacts_dir.is_symlink():
-            raise ACEFCanonicalizationError(
-                "artifacts/ is a symlink (forbidden by spec §3.1.1)",
-                path=artifacts_dir,
-            )
         for file_path in sorted(artifacts_dir.rglob("*")):
             _add_if_real_file(file_path)
 

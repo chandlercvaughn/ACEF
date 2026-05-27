@@ -41,14 +41,27 @@ def check_integrity(bundle_dir: Path) -> list[ValidationDiagnostic]:
         )
         return diagnostics
 
-    # Load expected hashes
+    # Load expected hashes. Be defensive: malformed JSON, unreadable
+    # files, non-UTF-8 bytes, and non-object top-level values all surface
+    # as ACEF-014 rather than crashing the validator.
     try:
-        expected_hashes = json.loads(content_hashes_path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as e:
+        expected_hashes = json.loads(
+            content_hashes_path.read_text(encoding="utf-8")
+        )
+    except (json.JSONDecodeError, UnicodeDecodeError, OSError) as e:
         diagnostics.append(
             ValidationDiagnostic(
                 "ACEF-014",
                 f"Invalid JSON in content-hashes.json: {e}",
+                path="/hashes/content-hashes.json",
+            )
+        )
+        return diagnostics
+    if not isinstance(expected_hashes, dict):
+        diagnostics.append(
+            ValidationDiagnostic(
+                "ACEF-014",
+                "content-hashes.json must be a JSON object",
                 path="/hashes/content-hashes.json",
             )
         )
@@ -85,16 +98,7 @@ def check_integrity(bundle_dir: Path) -> list[ValidationDiagnostic]:
     if merkle_path.exists():
         try:
             merkle_data = json.loads(merkle_path.read_text(encoding="utf-8"))
-            expected_root = merkle_data.get("root", "")
-            if not verify_merkle_root(expected_hashes, expected_root):
-                diagnostics.append(
-                    ValidationDiagnostic(
-                        "ACEF-011",
-                        "Merkle root mismatch",
-                        path="/hashes/merkle-tree.json",
-                    )
-                )
-        except json.JSONDecodeError as e:
+        except (json.JSONDecodeError, UnicodeDecodeError, OSError) as e:
             diagnostics.append(
                 ValidationDiagnostic(
                     "ACEF-011",
@@ -102,6 +106,25 @@ def check_integrity(bundle_dir: Path) -> list[ValidationDiagnostic]:
                     path="/hashes/merkle-tree.json",
                 )
             )
+        else:
+            if not isinstance(merkle_data, dict):
+                diagnostics.append(
+                    ValidationDiagnostic(
+                        "ACEF-011",
+                        "merkle-tree.json must be a JSON object",
+                        path="/hashes/merkle-tree.json",
+                    )
+                )
+            else:
+                expected_root = merkle_data.get("root", "")
+                if not verify_merkle_root(expected_hashes, expected_root):
+                    diagnostics.append(
+                        ValidationDiagnostic(
+                            "ACEF-011",
+                            "Merkle root mismatch",
+                            path="/hashes/merkle-tree.json",
+                        )
+                    )
 
     # Check signatures
     sig_diagnostics = _check_signatures(bundle_dir, content_hashes_path.read_bytes())
@@ -165,7 +188,12 @@ def _check_signatures(bundle_dir: Path, content_hashes_bytes: bytes) -> list[Val
         return diagnostics
 
     for sig_file in sorted(sig_dir.glob("*.jws")):
-        jws_str = sig_file.read_text(encoding="utf-8").strip()
+        try:
+            jws_str = sig_file.read_text(encoding="utf-8").strip()
+        except (UnicodeDecodeError, OSError):
+            # A signature file with invalid UTF-8 / unreadable bytes
+            # cannot be verified. Skip it rather than crashing.
+            continue
         if not jws_str:
             continue
 
@@ -292,7 +320,12 @@ def get_signature_info(bundle_dir: Path) -> tuple[int, list[str]]:
     algorithms: list[str] = []
 
     for sig_file in sorted(sig_dir.glob("*.jws")):
-        jws_str = sig_file.read_text(encoding="utf-8").strip()
+        try:
+            jws_str = sig_file.read_text(encoding="utf-8").strip()
+        except (UnicodeDecodeError, OSError):
+            # A signature file with invalid UTF-8 / unreadable bytes
+            # cannot be verified. Skip it rather than crashing.
+            continue
         if not jws_str:
             continue
 
