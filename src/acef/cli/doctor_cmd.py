@@ -144,9 +144,16 @@ def _check_integrity(bundle_path: Path, issues: list[tuple[str, str, str]]) -> N
             console.print(f"  [green]content-hashes.json: {len(hashes)} entries[/green]")
 
             # Spot-check a few hashes
-            from acef.integrity import verify_content_hashes
+            from acef.integrity import ACEFCanonicalizationError, verify_content_hashes
 
-            errors = verify_content_hashes(bundle_path, hashes)
+            try:
+                errors = verify_content_hashes(bundle_path, hashes)
+            except ACEFCanonicalizationError as exc:
+                # Strict canonicalization now raises on BOM, non-NFC, illegal
+                # JSONL whitespace, missing trailing newline. Surface as an
+                # ACEF-051 issue rather than crashing doctor.
+                issues.append(("error", "integrity", f"ACEF-051: {exc}"))
+                errors = []
             if errors:
                 for err in errors[:5]:
                     issues.append(("error", "integrity", err))

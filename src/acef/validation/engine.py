@@ -41,16 +41,18 @@ def _validate_record_file_path(path_str: str) -> bool:
     Returns:
         True if the path is safe to use, False otherwise.
     """
-    if not path_str:
+    # Delegate to loader._validate_path so this validator catches the
+    # same surface as the loader: empty paths, NUL bytes, backslash,
+    # absolute, non-NFC, '.'/'..' segments, and empty segments. Returning
+    # False (instead of raising) keeps the engine's "skip malformed
+    # entries" contract.
+    from acef.errors import ACEFFormatError
+    from acef.loader import _validate_path as _loader_validate_path
+
+    try:
+        _loader_validate_path(path_str)
+    except ACEFFormatError:
         return False
-    if "\\" in path_str:
-        return False
-    if path_str.startswith("/"):
-        return False
-    segments = path_str.split("/")
-    for segment in segments:
-        if segment in (".", ".."):
-            return False
     return True
 
 
@@ -78,12 +80,17 @@ def validate_bundle(
     """
     bundle_path = Path(bundle_dir)
 
-    if evaluation_instant is None:
-        evaluation_instant = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-    # Load manifest
+    # Load manifest first so we can derive a deterministic evaluation_instant
+    # from metadata.timestamp when the caller did not supply one. Spec §3.7
+    # forbids using wall-clock time during evaluation — a default of
+    # ``datetime.now()`` makes assessment non-reproducible.
     manifest_path = bundle_path / "acef-manifest.json"
     if not manifest_path.exists():
+        # No manifest means we cannot derive an instant; fall back to
+        # wall-clock for the structural-error stub only. The assessment
+        # short-circuits below.
+        if evaluation_instant is None:
+            evaluation_instant = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         assessment = AssessmentBundle(evaluation_instant=evaluation_instant)
         assessment.structural_errors.append(
             ValidationDiagnostic("ACEF-002", "acef-manifest.json not found").to_dict()
@@ -91,6 +98,15 @@ def validate_bundle(
         return assessment
 
     manifest_data = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    if evaluation_instant is None:
+        manifest_ts = manifest_data.get("metadata", {}).get("timestamp")
+        if manifest_ts:
+            evaluation_instant = manifest_ts
+        else:
+            # Last resort — should be unreachable for spec-valid bundles
+            # because metadata.timestamp is required at the schema level.
+            evaluation_instant = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     # ACEF-001: Check module version compatibility
     versioning = manifest_data.get("versioning", {})
