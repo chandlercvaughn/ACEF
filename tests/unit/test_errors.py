@@ -54,13 +54,50 @@ class TestErrorRegistry:
 
     def test_registry_has_all_codes(self):
         expected_codes = {
-            "ACEF-001", "ACEF-002", "ACEF-003", "ACEF-004",
-            "ACEF-010", "ACEF-011", "ACEF-012", "ACEF-013", "ACEF-014",
-            "ACEF-020", "ACEF-021", "ACEF-022", "ACEF-023", "ACEF-025", "ACEF-026", "ACEF-027",
-            "ACEF-030", "ACEF-031", "ACEF-032", "ACEF-033",
-            "ACEF-040", "ACEF-041", "ACEF-042", "ACEF-043", "ACEF-044", "ACEF-045",
-            "ACEF-050", "ACEF-051", "ACEF-052", "ACEF-053",
+            # v1.0 codes (sparse ACEF-001..060 range; frozen per R0 snapshot).
+            "ACEF-001",
+            "ACEF-002",
+            "ACEF-003",
+            "ACEF-004",
+            "ACEF-010",
+            "ACEF-011",
+            "ACEF-012",
+            "ACEF-013",
+            "ACEF-014",
+            "ACEF-020",
+            "ACEF-021",
+            "ACEF-022",
+            "ACEF-023",
+            "ACEF-025",
+            "ACEF-026",
+            "ACEF-027",
+            "ACEF-030",
+            "ACEF-031",
+            "ACEF-032",
+            "ACEF-033",
+            "ACEF-040",
+            "ACEF-041",
+            "ACEF-042",
+            "ACEF-043",
+            "ACEF-044",
+            "ACEF-045",
+            "ACEF-050",
+            "ACEF-051",
+            "ACEF-052",
+            "ACEF-053",
             "ACEF-060",
+            # v1.1 agent-reliability additions (ACEF-070..080).
+            "ACEF-070",
+            "ACEF-071",
+            "ACEF-072",
+            "ACEF-073",
+            "ACEF-074",
+            "ACEF-075",
+            "ACEF-076",
+            "ACEF-077",
+            "ACEF-078",
+            "ACEF-079",
+            "ACEF-080",
         }
         assert set(ERROR_REGISTRY.keys()) == expected_codes
 
@@ -73,8 +110,18 @@ class TestErrorRegistry:
             assert len(description) > 0, f"{code} has empty description"
 
     def test_fatal_codes_correct(self):
-        fatal_codes = {"ACEF-001", "ACEF-002", "ACEF-004", "ACEF-010", "ACEF-011",
-                       "ACEF-012", "ACEF-013", "ACEF-014", "ACEF-050", "ACEF-051"}
+        fatal_codes = {
+            "ACEF-001",
+            "ACEF-002",
+            "ACEF-004",
+            "ACEF-010",
+            "ACEF-011",
+            "ACEF-012",
+            "ACEF-013",
+            "ACEF-014",
+            "ACEF-050",
+            "ACEF-051",
+        }
         for code in fatal_codes:
             severity, _, _ = ERROR_REGISTRY[code]
             assert severity == Severity.FATAL, f"{code} should be FATAL"
@@ -193,7 +240,8 @@ class TestValidationDiagnostic:
 
     def test_to_dict_full(self):
         diag = ValidationDiagnostic(
-            "ACEF-010", "Hash mismatch",
+            "ACEF-010",
+            "Hash mismatch",
             path="/records/0",
             details={"expected": "abc", "actual": "def"},
         )
