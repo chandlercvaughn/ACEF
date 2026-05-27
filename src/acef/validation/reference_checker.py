@@ -102,12 +102,27 @@ def check_references(
     # rather than re-reading from disk on every record iteration.
     content_hashes: dict[str, str] = {}
     if bundle_dir:
+        # Defensively load content-hashes.json: if the file is missing,
+        # malformed, or not a JSON object, we still need a dict so the
+        # later membership checks (`att_path in content_hashes`) can
+        # short-circuit cleanly. Phase 2 already emits structured
+        # diagnostics for malformed integrity files; this is just a
+        # crash guard for the reference-check path.
         ch_path = bundle_dir / "hashes" / "content-hashes.json"
         if ch_path.exists():
             try:
-                content_hashes = json.loads(ch_path.read_text(encoding="utf-8"))
+                _loaded = json.loads(ch_path.read_text(encoding="utf-8"))
             except Exception:
-                pass
+                _loaded = None
+            # Guard against list/string/null at top level — only a dict is
+            # subscriptable by path string at the later ACEF-027 check.
+            if isinstance(_loaded, dict):
+                # Filter out non-string values (e.g., {"a.txt": ["bad"]})
+                # so verify_merkle_root / hash compare paths don't crash on
+                # .encode() against a non-string value.
+                content_hashes = {
+                    k: v for k, v in _loaded.items() if isinstance(v, str)
+                }
 
     # Check record entity refs
     record_ids: set[str] = set()

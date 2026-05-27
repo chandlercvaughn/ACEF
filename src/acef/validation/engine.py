@@ -127,7 +127,12 @@ def validate_bundle(
         return assessment
 
     if evaluation_instant is None:
-        manifest_ts = manifest_data.get("metadata", {}).get("timestamp")
+        # Defensively look up metadata: a manifest that survives the
+        # top-level dict check above may still have non-dict
+        # metadata/versioning sections (those are checked by schema
+        # validation in Phase 1 but Phase 0 must not crash on them).
+        _metadata = manifest_data.get("metadata")
+        manifest_ts = _metadata.get("timestamp") if isinstance(_metadata, dict) else None
         if manifest_ts:
             evaluation_instant = manifest_ts
         else:
@@ -135,8 +140,12 @@ def validate_bundle(
             # because metadata.timestamp is required at the schema level.
             evaluation_instant = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    # ACEF-001: Check module version compatibility
-    versioning = manifest_data.get("versioning", {})
+    # ACEF-001: Check module version compatibility. Use defensive type
+    # coercion so a schema-invalid manifest (e.g. "versioning":[]) does
+    # not crash before Phase 1 schema validation can emit diagnostics.
+    versioning = manifest_data.get("versioning")
+    if not isinstance(versioning, dict):
+        versioning = {}
     core_version = versioning.get("core_version", "1.0.0")
     try:
         core_major = int(core_version.split(".")[0])

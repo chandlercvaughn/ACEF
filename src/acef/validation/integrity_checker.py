@@ -66,6 +66,20 @@ def check_integrity(bundle_dir: Path) -> list[ValidationDiagnostic]:
             )
         )
         return diagnostics
+    # Every value MUST be a hex SHA-256 string. Reject non-string values
+    # early so downstream code (Merkle tree builder) doesn't crash on
+    # something like {"a.txt": ["bad"]} with AttributeError on .encode().
+    bad_value_keys = [k for k, v in expected_hashes.items() if not isinstance(v, str)]
+    if bad_value_keys:
+        diagnostics.append(
+            ValidationDiagnostic(
+                "ACEF-014",
+                f"content-hashes.json values must be hex strings; "
+                f"non-string values for keys: {bad_value_keys!r}",
+                path="/hashes/content-hashes.json",
+            )
+        )
+        return diagnostics
 
     # Verify content hashes. The hashing routines (sha256_file,
     # sha256_jsonl_file) raise ACEFCanonicalizationError on files that
@@ -190,11 +204,26 @@ def _check_signatures(bundle_dir: Path, content_hashes_bytes: bytes) -> list[Val
     for sig_file in sorted(sig_dir.glob("*.jws")):
         try:
             jws_str = sig_file.read_text(encoding="utf-8").strip()
-        except (UnicodeDecodeError, OSError):
-            # A signature file with invalid UTF-8 / unreadable bytes
-            # cannot be verified. Skip it rather than crashing.
+        except (UnicodeDecodeError, OSError) as exc:
+            # A signature file that exists but is unreadable / invalid
+            # UTF-8 is a present-but-broken signature, not absence.
+            # Emit ACEF-012 so the bundle does not appear "unsigned".
+            diagnostics.append(
+                ValidationDiagnostic(
+                    "ACEF-012",
+                    f"Signature file {sig_file.name} is unreadable: {exc}",
+                    path=f"/signatures/{sig_file.name}",
+                )
+            )
             continue
         if not jws_str:
+            diagnostics.append(
+                ValidationDiagnostic(
+                    "ACEF-012",
+                    f"Signature file {sig_file.name} is empty",
+                    path=f"/signatures/{sig_file.name}",
+                )
+            )
             continue
 
         # Parse JWS header to check algorithm before full verification so
