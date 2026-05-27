@@ -56,18 +56,24 @@ def doctor_cmd(path: str) -> None:
     console.print()
     if not issues:
         console.print("[green bold]No issues found! Bundle looks healthy.[/green bold]")
-    else:
-        for severity, category, message in issues:
-            if severity == "error":
-                console.print(f"  [red][{category}][/red] {message}")
-            elif severity == "warning":
-                console.print(f"  [yellow][{category}][/yellow] {message}")
-            else:
-                console.print(f"  [dim][{category}][/dim] {message}")
+        return  # Exit 0 (clean)
 
-        errors = sum(1 for s, _, _ in issues if s == "error")
-        warnings = sum(1 for s, _, _ in issues if s == "warning")
-        console.print(f"\n[bold]Summary: {errors} errors, {warnings} warnings[/bold]")
+    for severity, category, message in issues:
+        if severity == "error":
+            console.print(f"  [red][{category}][/red] {message}")
+        elif severity == "warning":
+            console.print(f"  [yellow][{category}][/yellow] {message}")
+        else:
+            console.print(f"  [dim][{category}][/dim] {message}")
+
+    errors = sum(1 for s, _, _ in issues if s == "error")
+    warnings = sum(1 for s, _, _ in issues if s == "warning")
+    console.print(f"\n[bold]Summary: {errors} errors, {warnings} warnings[/bold]")
+
+    # Errors fail the command; warnings remain advisory (exit 0). CI
+    # consumers can now actually detect a broken bundle via exit code.
+    if errors > 0:
+        raise SystemExit(1)
 
 
 def _check_structure(bundle_path: Path, issues: list[tuple[str, str, str]]) -> None:

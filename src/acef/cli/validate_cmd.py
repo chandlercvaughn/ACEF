@@ -9,7 +9,7 @@ import click
 
 from acef.assessment_builder import validate
 from acef.cli.formatters import print_assessment
-from acef.models.enums import ProvisionOutcome
+from acef.models.enums import ProvisionOutcome, RuleOutcome
 
 
 @click.command("validate")
@@ -38,7 +38,10 @@ def validate_cmd(path: str, profile: tuple[str, ...], output: str | None, fmt: s
         from acef.assessment_builder import export_assessment
 
         export_assessment(assessment, output)
-        click.echo(f"\nAssessment written to: {output}")
+        # Send the "Assessment written to:" status line to STDERR. This
+        # keeps stdout exclusively machine-readable in --format json mode
+        # so `acef validate ... -f json -o out | jq` succeeds.
+        click.echo(f"Assessment written to: {output}", err=True)
 
     # Exit code based on results
     has_fatal = any(
@@ -49,10 +52,15 @@ def validate_cmd(path: str, profile: tuple[str, ...], output: str | None, fmt: s
         ps.provision_outcome == ProvisionOutcome.NOT_SATISFIED
         for ps in assessment.provision_summary
     )
+    # Rule ERROR outcomes indicate the evaluator could not finish — surface
+    # them via non-zero exit so CI does not report green on broken engines.
+    has_rule_error = any(
+        r.outcome == RuleOutcome.ERROR for r in assessment.results
+    )
 
     if has_fatal:
         sys.exit(2)
-    elif has_not_satisfied:
+    elif has_not_satisfied or has_rule_error:
         sys.exit(1)
     else:
         sys.exit(0)
