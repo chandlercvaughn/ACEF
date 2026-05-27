@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import Field
 
+from acef.models.base import ACEFBaseModel
 from acef.models.enums import (
     ActorRole,
     ComponentType,
@@ -16,7 +17,7 @@ from acef.models.enums import (
 from acef.models.urns import URNType, generate_urn
 
 
-class Component(BaseModel):
+class Component(ACEFBaseModel):
     """A subsystem, model version, or deployment component."""
 
     component_id: str = Field(default_factory=lambda: generate_urn(URNType.COMPONENT))
@@ -31,14 +32,14 @@ class Component(BaseModel):
         return self.component_id
 
 
-class DatasetSize(BaseModel):
+class DatasetSize(ACEFBaseModel):
     """Dataset size information."""
 
     records: int = 0
     size_gb: float = 0.0
 
 
-class Dataset(BaseModel):
+class Dataset(ACEFBaseModel):
     """A training, validation, or test dataset."""
 
     dataset_id: str = Field(default_factory=lambda: generate_urn(URNType.DATASET))
@@ -54,7 +55,7 @@ class Dataset(BaseModel):
         return self.dataset_id
 
 
-class Actor(BaseModel):
+class Actor(ACEFBaseModel):
     """A person or organization involved in the AI system lifecycle."""
 
     actor_id: str = Field(default_factory=lambda: generate_urn(URNType.ACTOR))
@@ -67,7 +68,7 @@ class Actor(BaseModel):
         return self.actor_id
 
 
-class Relationship(BaseModel):
+class Relationship(ACEFBaseModel):
     """An entity graph edge (W3C PROV-compatible)."""
 
     source_ref: str
@@ -76,7 +77,7 @@ class Relationship(BaseModel):
     description: str = ""
 
 
-class EntitiesBlock(BaseModel):
+class EntitiesBlock(ACEFBaseModel):
     """The complete entity graph for a package."""
 
     components: list[Component] = Field(default_factory=list)

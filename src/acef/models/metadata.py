@@ -4,33 +4,34 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from pydantic import BaseModel, Field
+from pydantic import Field
 
+from acef.models.base import ACEFBaseModel
 from acef.models.urns import URNType, generate_urn
 
 
-class ProducerInfo(BaseModel):
+class ProducerInfo(ACEFBaseModel):
     """Organization/tool that created this package."""
 
     name: str
     version: str
 
 
-class RetentionPolicy(BaseModel):
+class RetentionPolicy(ACEFBaseModel):
     """Package-level retention requirements."""
 
     min_retention_days: int = Field(ge=0)
     personal_data_interplay: str | None = None
 
 
-class Versioning(BaseModel):
+class Versioning(ACEFBaseModel):
     """Module version declarations."""
 
     core_version: str = "1.0.0"
     profiles_version: str = "1.0.0"
 
 
-class PackageMetadata(BaseModel):
+class PackageMetadata(ACEFBaseModel):
     """Package-level metadata for an ACEF Evidence Bundle."""
 
     package_id: str = Field(default_factory=lambda: generate_urn(URNType.PACKAGE))

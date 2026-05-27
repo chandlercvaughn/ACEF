@@ -1,0 +1,69 @@
+# .ops/manifest.yaml — acef-v0.4-freddy-adoption
+#
+# Single source of truth for build / test / lint / dev commands and runtime
+# services. Workers MUST use these commands verbatim. If a needed command is
+# missing, surface the gap in the handoff — do NOT improvise.
+#
+# Project layout: Python SDK in `src/acef/`. TypeScript SDK (added in M2) in
+# `packages/sdk-typescript/`. Schemas in `acef-conventions/v1/` (frozen) and
+# `acef-conventions/v1.1/` (this operation's deliverable). All commands assume
+# they run from the repo root.
+
+schemaVersion: "1.0.0"
+operation: acef-v0.4-freddy-adoption
+repoRoot: /Users/chandlervaughn/Development/ACEF
+
+commands:
+  # Environment setup (idempotent)
+  setup: "bash .ops/setup.sh"
+
+  # Linting & types (Python)
+  lint: "ruff check src/ tests/"
+  format: "ruff format src/ tests/"
+  typecheck: "mypy --strict src/acef"
+
+  # Test tiers (see .ops/library/testing.md)
+  # Pre-v0.4: only `test_all` works. After F-M1-TIER-INFRA lands, the tier marks
+  # below become functional.
+  test_all: "pytest tests/ -v --tb=short"
+  test_unit: "pytest tests/unit -v"
+  test_integration: "pytest tests/integration -v"
+  test_conformance: "pytest tests/conformance -v"
+  test_plumbing: "pytest -m plumbing --timeout=60"
+  test_with_cov: "pytest tests/ --cov=src/acef --cov-report=term-missing"
+
+  # Specific Freddy-vector test drivers (created by F-M1-CONFORMANCE-VECTORS)
+  test_freddy_pass: "pytest tests/conformance/test_freddy_pass_vectors.py -v"
+  test_freddy_fail: "pytest tests/conformance/test_freddy_fail_vectors.py -v"
+  test_freddy_fakegreen: "pytest tests/conformance/test_freddy_fake_green_vectors.py -v"
+  test_cli_compat: "pytest tests/conformance/test_cli_compat.py -v"
+  test_gzip_determinism: "pytest tests/conformance/test_gzip_determinism.py -v"
+  test_cross_language: "pytest tests/conformance/test_freddy_cross_language_parity.py -v"
+  test_golden_bundles: "pytest tests/conformance/test_golden_bundles.py -v"
+
+  # Build / package
+  build: "python -m build"
+  install: "pip install -e ."
+
+  # Standalone CLI verifier (entry point in pyproject.toml)
+  acef_verify: "acef verify"
+
+  # Schema validation
+  validate_schemas: "python scripts/validate_schemas.py"
+
+  # M2 — TypeScript SDK (commands stub; packages/sdk-typescript/ created by F-M2-TS-SDK)
+  ts_install: "cd packages/sdk-typescript && npm install"
+  ts_build: "cd packages/sdk-typescript && npm run build"
+  ts_test: "cd packages/sdk-typescript && npm test"
+
+services:
+  # ACEF is a library, not a service. No long-running processes.
+  # Reserved for future transport-protocol work (see spec §7 Q7).
+
+# Test invocation contract (see .ops/library/testing.md):
+# - Activate venv first: `source venv/bin/activate`
+# - Never pipe validators through `tail` / `head` / `awk` — exit code lost.
+# - Never pass `--no-verify`, `--no-gpg-sign`, or skip pre-commit hooks.
+# - Report the actual exit code in handoff `assertionEvidence[*].exitCode`.
+# - Plumbing-tier budget: ≤60s wall-clock (enforced by VAL-TIER-003 once landed).
+# - Use `tests/baseline-counts.json` to detect test-count regression (VAL-TIER-004).

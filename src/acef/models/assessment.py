@@ -5,13 +5,14 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import Field
 
+from acef.models.base import ACEFBaseModel
 from acef.models.enums import ProvisionOutcome, RuleOutcome, RuleSeverity
 from acef.models.urns import URNType, generate_urn
 
 
-class Assessor(BaseModel):
+class Assessor(ACEFBaseModel):
     """The tool/organization that performed the assessment."""
 
     name: str = "acef-validator"
@@ -19,14 +20,14 @@ class Assessor(BaseModel):
     organization: str = "AI Commons"
 
 
-class EvidenceBundleRef(BaseModel):
+class EvidenceBundleRef(ACEFBaseModel):
     """Reference to the Evidence Bundle being assessed."""
 
     content_hash: str = ""
     package_id: str = ""
 
 
-class RuleResult(BaseModel):
+class RuleResult(ACEFBaseModel):
     """Result of evaluating a single DSL rule."""
 
     rule_id: str
@@ -39,7 +40,7 @@ class RuleResult(BaseModel):
     subject_scope: list[str] = Field(default_factory=list)
 
 
-class ProvisionSummary(BaseModel):
+class ProvisionSummary(ACEFBaseModel):
     """Roll-up summary for a single provision."""
 
     provision_id: str
@@ -52,7 +53,7 @@ class ProvisionSummary(BaseModel):
     evidence_refs: list[str] = Field(default_factory=list)
 
 
-class AssessmentVersioning(BaseModel):
+class AssessmentVersioning(ACEFBaseModel):
     """Assessment Bundle versioning — uses assessment_version, NOT profiles_version.
 
     Per spec Section 3.7: Assessment Bundles declare core_version and
@@ -63,13 +64,13 @@ class AssessmentVersioning(BaseModel):
     assessment_version: str = "1.0.0"
 
 
-class AssessmentIntegrity(BaseModel):
+class AssessmentIntegrity(ACEFBaseModel):
     """Assessment Bundle integrity (signature) block."""
 
     signature: dict[str, str] | None = None
 
 
-class AssessmentBundle(BaseModel):
+class AssessmentBundle(ACEFBaseModel):
     """ACEF Assessment Bundle — validation results for an Evidence Bundle."""
 
     versioning: AssessmentVersioning = Field(default_factory=AssessmentVersioning)

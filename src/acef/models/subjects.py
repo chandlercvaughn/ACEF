@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import Field
 
+from acef.models.base import ACEFBaseModel
 from acef.models.enums import LifecyclePhase, RiskClassification, SubjectType
 from acef.models.urns import URNType, generate_urn
 
 
-class LifecycleEntry(BaseModel):
+class LifecycleEntry(ACEFBaseModel):
     """A lifecycle phase transition entry."""
 
     phase: LifecyclePhase
@@ -16,7 +17,7 @@ class LifecycleEntry(BaseModel):
     end_date: str | None = None
 
 
-class Subject(BaseModel):
+class Subject(ACEFBaseModel):
     """An AI system or model being documented."""
 
     subject_id: str = Field(default_factory=lambda: generate_urn(URNType.SUBJECT))

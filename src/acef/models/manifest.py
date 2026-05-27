@@ -4,15 +4,16 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import Field
 
+from acef.models.base import ACEFBaseModel
 from acef.models.entities import EntitiesBlock
 from acef.models.enums import AuditEventType
 from acef.models.metadata import PackageMetadata, Versioning
 from acef.models.subjects import Subject
 
 
-class RecordFileEntry(BaseModel):
+class RecordFileEntry(ACEFBaseModel):
     """A reference to a record file in records/."""
 
     path: str
@@ -20,7 +21,7 @@ class RecordFileEntry(BaseModel):
     count: int = 0
 
 
-class ProfileEntry(BaseModel):
+class ProfileEntry(ACEFBaseModel):
     """A regulation profile declaration."""
 
     profile_id: str
@@ -28,7 +29,7 @@ class ProfileEntry(BaseModel):
     applicable_provisions: list[str] = Field(default_factory=list)
 
 
-class AuditTrailEntry(BaseModel):
+class AuditTrailEntry(ACEFBaseModel):
     """A package-level audit trail event."""
 
     event_type: AuditEventType
@@ -37,7 +38,7 @@ class AuditTrailEntry(BaseModel):
     description: str = ""
 
 
-class Manifest(BaseModel):
+class Manifest(ACEFBaseModel):
     """The complete acef-manifest.json structure."""
 
     metadata: PackageMetadata

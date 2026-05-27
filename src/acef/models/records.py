@@ -5,13 +5,14 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import Field, ValidationError
 
+from acef.models.base import ACEFBaseModel
 from acef.models.enums import Confidentiality, LifecyclePhase, ObligationRole, TrustLevel
 from acef.models.urns import URNType, generate_urn
 
 
-class EntityRefs(BaseModel):
+class EntityRefs(ACEFBaseModel):
     """Links to entities this record concerns."""
 
     subject_refs: list[str] = Field(default_factory=list)
@@ -20,7 +21,7 @@ class EntityRefs(BaseModel):
     actor_refs: list[str] = Field(default_factory=list)
 
 
-class AttachmentRef(BaseModel):
+class AttachmentRef(ACEFBaseModel):
     """Reference to a file in the artifacts/ directory."""
 
     path: str
@@ -30,7 +31,7 @@ class AttachmentRef(BaseModel):
     description: str = ""
 
 
-class Attestation(BaseModel):
+class Attestation(ACEFBaseModel):
     """Cryptographic attestation of evidence authenticity."""
 
     method: str = "jws"
@@ -39,7 +40,7 @@ class Attestation(BaseModel):
     signature: str = ""
 
 
-class RecordRetention(BaseModel):
+class RecordRetention(ACEFBaseModel):
     """Per-record retention requirements."""
 
     min_retention_days: int = Field(ge=0)
@@ -47,14 +48,14 @@ class RecordRetention(BaseModel):
     legal_basis: str = ""
 
 
-class CollectorInfo(BaseModel):
+class CollectorInfo(ACEFBaseModel):
     """Tool/person that collected this evidence."""
 
     name: str
     version: str = ""
 
 
-class RecordEnvelope(BaseModel):
+class RecordEnvelope(ACEFBaseModel):
     """The common record envelope — identical structure for all record types.
 
     Contains all envelope fields plus the type-specific payload.
