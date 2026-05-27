@@ -671,3 +671,80 @@ def sign_assessment(
     }
 
     return assessment_data
+
+
+def verify_assessment(
+    assessment_data: dict[str, Any],
+    public_key: PublicKeyTypes | None = None,
+    *,
+    key_data: bytes | None = None,
+    manifest_timestamp: str | None = None,
+    trust_anchors: list[Certificate] | None = None,
+) -> bool:
+    """Verify an Assessment Bundle's detached JWS signature.
+
+    Reverses :func:`sign_assessment`: sets the ``integrity`` block to
+    ``None``, re-canonicalizes via RFC 8785, and verifies the JWS over
+    the resulting bytes. The supplied ``assessment_data`` is NOT mutated.
+
+    Args:
+        assessment_data: The Assessment Bundle dict, including a
+            populated ``integrity.signature.value``.
+        public_key: Optional public key (skips x5c/jwk extraction).
+        key_data: Optional PEM-encoded public key or certificate (used
+            when neither x5c nor jwk is embedded and ``public_key`` is
+            None).
+        manifest_timestamp: Forwarded to :func:`verify_detached_jws` for
+            x5c expiry checks.
+        trust_anchors: Forwarded to :func:`verify_detached_jws` for chain
+            anchoring.
+
+    Returns:
+        True on successful verification.
+
+    Raises:
+        ACEFSigningError: If the assessment lacks a signature, the JWS is
+            malformed, or verification fails.
+    """
+    from acef.integrity import canonicalize
+
+    if not isinstance(assessment_data, dict):
+        raise ACEFSigningError(
+            "Assessment data must be a dict",
+            code="ACEF-012",
+        )
+
+    integrity = assessment_data.get("integrity")
+    if not integrity or not isinstance(integrity, dict):
+        raise ACEFSigningError(
+            "Assessment Bundle has no integrity block — nothing to verify",
+            code="ACEF-012",
+        )
+    signature_block = integrity.get("signature")
+    if not signature_block or not isinstance(signature_block, dict):
+        raise ACEFSigningError(
+            "Assessment Bundle integrity block has no signature",
+            code="ACEF-012",
+        )
+    jws = signature_block.get("value")
+    if not isinstance(jws, str) or not jws:
+        raise ACEFSigningError(
+            "Assessment Bundle signature value is missing or non-string",
+            code="ACEF-012",
+        )
+
+    # Shallow-copy so the caller's dict is not mutated when we null out
+    # integrity for canonicalization.
+    pre_sign = dict(assessment_data)
+    pre_sign["integrity"] = None
+    canonical = canonicalize(pre_sign)
+
+    verify_detached_jws(
+        jws,
+        canonical,
+        public_key,
+        key_data=key_data,
+        manifest_timestamp=manifest_timestamp,
+        trust_anchors=trust_anchors,
+    )
+    return True
