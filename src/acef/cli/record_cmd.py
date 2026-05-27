@@ -22,16 +22,43 @@ def record_cmd(
     payload: str,
     role: str,
 ) -> None:
-    """Add an evidence record to the bundle at BUNDLE_PATH."""
-    # Load existing bundle
-    pkg = load(bundle_path)
+    """Add an evidence record to the bundle at BUNDLE_PATH.
 
-    # Parse payload
-    if payload.startswith("@"):
-        with open(payload[1:], "r") as f:
-            payload_data = json.load(f)
-    else:
-        payload_data = json.loads(payload)
+    Re-exports the bundle in place after adding the record. The export is
+    NOT atomic — if the process is interrupted between the rmtree and
+    rewrite, the bundle may be left without a records/ directory. Always
+    work on a copy if interruption matters.
+    """
+    # Load existing bundle. Surface common load failures as structured
+    # ACEF-NNN errors to stderr rather than raw tracebacks.
+    try:
+        pkg = load(bundle_path)
+    except FileNotFoundError as exc:
+        click.echo(f"Error: Bundle path not found: {bundle_path}", err=True)
+        raise SystemExit(1) from exc
+    except Exception as exc:
+        click.echo(f"Error: Failed to load bundle {bundle_path}: {exc}", err=True)
+        raise SystemExit(1) from exc
+
+    # Parse payload. File reads always force UTF-8 — spec §3.1.1 requires
+    # UTF-8 NFC throughout, so platform-default encoding is not safe.
+    try:
+        if payload.startswith("@"):
+            payload_path = payload[1:]
+            try:
+                with open(payload_path, "r", encoding="utf-8") as f:
+                    payload_data = json.load(f)
+            except FileNotFoundError as exc:
+                click.echo(f"Error: Payload file not found: {payload_path}", err=True)
+                raise SystemExit(1) from exc
+            except OSError as exc:
+                click.echo(f"Error: Cannot read payload file {payload_path}: {exc}", err=True)
+                raise SystemExit(1) from exc
+        else:
+            payload_data = json.loads(payload)
+    except json.JSONDecodeError as exc:
+        click.echo(f"Error: Invalid JSON payload [ACEF-050]: {exc}", err=True)
+        raise SystemExit(1) from exc
 
     # Add record
     record = pkg.record(
@@ -41,6 +68,18 @@ def record_cmd(
         obligation_role=role,
     )
 
-    # Re-export
-    pkg.export(bundle_path)
-    click.echo(f"Added {record_type} record: {record.record_id}")
+    # Re-export. This will rmtree subdirectories of bundle_path that
+    # Package.export manages (records/, artifacts/, hashes/, signatures/).
+    # Caller is responsible for backing up first if they care.
+    try:
+        pkg.export(bundle_path)
+    except Exception as exc:
+        click.echo(
+            f"Error: Failed to re-export bundle to {bundle_path}: {exc}\n"
+            "Bundle may be in an inconsistent state — restore from backup if needed.",
+            err=True,
+        )
+        raise SystemExit(1) from exc
+
+    click.echo(f"Added {record_type} record: {record.record_id}", err=True)
+    click.echo(record.record_id)  # machine-readable id on stdout

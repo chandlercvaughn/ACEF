@@ -13,7 +13,13 @@ from typing import NamedTuple
 
 from acef.errors import ACEFError
 
-_URN_PATTERN = re.compile(r"^urn:acef:(pkg|sub|cmp|dat|act|rec|asx):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$")
+# RFC 4122 explicitly permits uppercase hex in UUID textual form, and many
+# inbound producers (Java/.NET defaults) emit uppercase. Accept either case
+# on input; SDK-generated URNs continue to be lowercase via str(uuid.uuid4()).
+_URN_PATTERN = re.compile(
+    r"^urn:acef:(pkg|sub|cmp|dat|act|rec|asx):"
+    r"([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
+)
 
 
 class URNType(str, Enum):

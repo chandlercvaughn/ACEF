@@ -66,6 +66,23 @@ class DatasetModality(str, Enum):
     MULTIMODAL = "multimodal"
 
 
+class SubjectModality(str, Enum):
+    """Subject (AI system/model) modality types.
+
+    Distinct from :class:`DatasetModality` because Subjects describe the AI
+    system's input/output modalities, not the data modality. The
+    ``manifest.schema.json`` enum at ``subjects[*].modalities`` excludes
+    ``tabular`` (datasets can be tabular but a Subject is not — a tabular
+    classifier still has text or numeric I/O at the system boundary).
+    """
+
+    TEXT = "text"
+    IMAGE = "image"
+    AUDIO = "audio"
+    VIDEO = "video"
+    MULTIMODAL = "multimodal"
+
+
 class ActorRole(str, Enum):
     """Actor roles per EU AI Act."""
 

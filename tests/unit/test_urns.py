@@ -71,8 +71,11 @@ class TestValidateURN:
     def test_invalid_uuid_too_short(self):
         assert not validate_urn("urn:acef:sub:550e8400-e29b-41d4-a716")
 
-    def test_invalid_uuid_uppercase(self):
-        assert not validate_urn("urn:acef:sub:550E8400-E29B-41D4-A716-446655440000")
+    def test_uppercase_uuid_accepted(self):
+        """RFC 4122 permits uppercase hex in UUID textual form; many inbound
+        producers (Java/.NET defaults) emit uppercase. The ACEF SDK accepts
+        either case on input and emits lowercase on output."""
+        assert validate_urn("urn:acef:sub:550E8400-E29B-41D4-A716-446655440000")
 
     def test_invalid_empty_string(self):
         assert not validate_urn("")
