@@ -329,6 +329,7 @@ def validate_bundle(
     # count from get_signature_info for the causation_chain check.
     if schema_version == "v1.1":
         from acef.validation.cross_record import run_cross_record_validation
+        from acef.validation.v1_1_rules import run_v1_1_rules
 
         _xr_sig_count, _ = get_signature_info(bundle_path)
         cross_record_diagnostics = run_cross_record_validation(
@@ -337,6 +338,34 @@ def validate_bundle(
             signature_count=_xr_sig_count,
         )
         all_diagnostics.extend(cross_record_diagnostics)
+
+        # Phase 3c: v1.1 rule families (banned claim-language lint,
+        # state-class taxonomy enforcement, mode-gated forbidden record
+        # types). Per VAL-VALIDATION-008/009/010. The banned-language
+        # lint operates on an Assessment Bundle if one is provided
+        # sibling-to-bundle (golden-bundle convention:
+        # ``<bundle_dir>.acef-assessment.json``) or in-bundle
+        # (``<bundle_dir>/acef-assessment.json``); record-scoped rules
+        # always run.
+        _assessment_data: dict[str, Any] | None = None
+        for _ab_candidate in (
+            bundle_path.parent / f"{bundle_path.name}.acef-assessment.json",
+            bundle_path / "acef-assessment.json",
+        ):
+            if _ab_candidate.is_file():
+                try:
+                    _parsed = json.loads(_ab_candidate.read_text(encoding="utf-8"))
+                except (json.JSONDecodeError, UnicodeDecodeError, OSError):
+                    _parsed = None
+                if isinstance(_parsed, dict):
+                    _assessment_data = _parsed
+                    break
+        v1_1_rule_diagnostics = run_v1_1_rules(
+            manifest_data,
+            all_records_data,
+            assessment_bundle=_assessment_data,
+        )
+        all_diagnostics.extend(v1_1_rule_diagnostics)
 
     # Record all structural errors
     for diag in all_diagnostics:
