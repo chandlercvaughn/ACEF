@@ -144,12 +144,19 @@ def dict_to_record_envelope(data: dict[str, Any]) -> RecordEnvelope:
     if data.get("retention"):
         retention = RecordRetention(**data["retention"])
 
-    # Handle collector
+    # Handle collector. record-envelope.schema.json:47-69 declares the
+    # collector as oneOf [object, string]. The object form maps to
+    # CollectorInfo; the string form is treated as a free-form name
+    # (e.g., "alice@example.com") and wrapped in a CollectorInfo with
+    # empty version so the typed model can carry it round-trip rather
+    # than silently dropping the field.
     collector = None
     if data.get("collector"):
         collector_data = data["collector"]
         if isinstance(collector_data, dict):
             collector = CollectorInfo(**collector_data)
+        elif isinstance(collector_data, str):
+            collector = CollectorInfo(name=collector_data, version="")
 
     # Build kwargs from the data dict, letting Pydantic validate
     # required fields rather than using empty-string defaults

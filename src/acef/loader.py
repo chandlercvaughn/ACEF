@@ -366,8 +366,23 @@ def _load_directory(bundle_dir: Path) -> Package:
     versioning_raw = manifest_data.get("versioning", {})
     versioning = Versioning(**versioning_raw)
 
+    def _extras(raw: dict[str, Any], known: set[str]) -> dict[str, Any]:
+        """Return a dict of keys in ``raw`` that are not in ``known``.
+
+        With models inheriting :class:`ACEFBaseModel` (``extra='allow'``),
+        these extra keys are preserved on the constructed model and emit
+        unchanged on round-trip, satisfying spec §6.4 rule 5
+        ("ACEF Evidence Bundle export MUST be lossless to the open core").
+        """
+        return {k: v for k, v in raw.items() if k not in known}
+
     # Parse subjects
     subjects: list[Subject] = []
+    _SUBJECT_KNOWN = {
+        "subject_id", "subject_type", "name", "version", "provider",
+        "risk_classification", "modalities", "lifecycle_phase",
+        "lifecycle_timeline",
+    }
     for sub_data in manifest_data.get("subjects", []):
         timeline = [LifecycleEntry(**e) for e in sub_data.get("lifecycle_timeline", [])]
         subject = Subject(
@@ -380,6 +395,7 @@ def _load_directory(bundle_dir: Path) -> Package:
             modalities=sub_data.get("modalities", []),
             lifecycle_phase=sub_data.get("lifecycle_phase", "development"),
             lifecycle_timeline=timeline,
+            **_extras(sub_data, _SUBJECT_KNOWN),
         )
         subjects.append(subject)
 
@@ -387,6 +403,7 @@ def _load_directory(bundle_dir: Path) -> Package:
     entities_raw = manifest_data.get("entities", {})
     entities = EntitiesBlock()
 
+    _COMPONENT_KNOWN = {"component_id", "name", "type", "version", "subject_refs", "provider"}
     for comp_data in entities_raw.get("components", []):
         comp = Component(
             component_id=comp_data.get("component_id", ""),
@@ -395,9 +412,11 @@ def _load_directory(bundle_dir: Path) -> Package:
             version=comp_data.get("version", "1.0.0"),
             subject_refs=comp_data.get("subject_refs", []),
             provider=comp_data.get("provider", ""),
+            **_extras(comp_data, _COMPONENT_KNOWN),
         )
         entities.components.append(comp)
 
+    _DATASET_KNOWN = {"dataset_id", "name", "version", "source_type", "modality", "size", "subject_refs"}
     for ds_data in entities_raw.get("datasets", []):
         ds = Dataset(
             dataset_id=ds_data.get("dataset_id", ""),
@@ -407,24 +426,29 @@ def _load_directory(bundle_dir: Path) -> Package:
             modality=ds_data.get("modality", "text"),
             size=ds_data.get("size", {"records": 0, "size_gb": 0.0}),
             subject_refs=ds_data.get("subject_refs", []),
+            **_extras(ds_data, _DATASET_KNOWN),
         )
         entities.datasets.append(ds)
 
+    _ACTOR_KNOWN = {"actor_id", "role", "name", "organization"}
     for act_data in entities_raw.get("actors", []):
         actor = Actor(
             actor_id=act_data.get("actor_id", ""),
             role=act_data.get("role", "provider"),
             name=act_data.get("name", ""),
             organization=act_data.get("organization", ""),
+            **_extras(act_data, _ACTOR_KNOWN),
         )
         entities.actors.append(actor)
 
+    _REL_KNOWN = {"source_ref", "target_ref", "relationship_type", "description"}
     for rel_data in entities_raw.get("relationships", []):
         rel = Relationship(
             source_ref=rel_data.get("source_ref", ""),
             target_ref=rel_data.get("target_ref", ""),
             relationship_type=rel_data.get("relationship_type", "calls"),
             description=rel_data.get("description", ""),
+            **_extras(rel_data, _REL_KNOWN),
         )
         entities.relationships.append(rel)
 
