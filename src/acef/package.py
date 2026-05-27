@@ -5,12 +5,25 @@ The primary API for creating ACEF Evidence Bundles.
 
 from __future__ import annotations
 
+import hashlib
 from datetime import datetime
 from typing import Any
+from uuid import uuid4
+
+from pydantic import ValidationError
 
 from acef.errors import ACEFError, ACEFSchemaError
+from acef.integrity import canonicalize
+from acef.models.agent_reliability import (
+    AuthorizedTestScopePayload,
+    DeliveryVerdictPayload,
+    FindingRecordPayload,
+    HarnessAttestationPayload,
+    ScopeBoundaryEventPayload,
+)
 from acef.models.entities import Actor, Component, Dataset, EntitiesBlock, Relationship
 from acef.models.enums import (
+    RECORD_TYPES,
     ActorRole,
     AuditEventType,
     ComponentType,
@@ -19,7 +32,6 @@ from acef.models.enums import (
     DatasetSourceType,
     LifecyclePhase,
     ObligationRole,
-    RECORD_TYPES,
     RelationshipType,
     RiskClassification,
     SubjectType,
@@ -36,6 +48,29 @@ from acef.models.records import (
     RecordRetention,
 )
 from acef.models.subjects import LifecycleEntry, Subject
+
+# Brief §3.6 / VAL-LOAD-001/002 — persona and LLM verifiers lack the
+# determinism required to attest state transitions; they are rejected at
+# SDK build time AND at load time AND mirrored by validate_bundle.
+_BANNED_VERIFIER_CLASSES: frozenset[str] = frozenset({"persona", "llm"})
+
+# Brief Q3 / VAL-SCHEMA-009 — the seven hard-coded state classes.
+_STATE_CLASS_TAXONOMY: frozenset[str] = frozenset(
+    {
+        "step",
+        "finding",
+        "coverage_cell",
+        "regression",
+        "delivery",
+        "badge",
+        "attestation",
+    }
+)
+
+# Brief §3.1 — ownership proof methods that prove genuine *ownership* of
+# the underlying system (as opposed to mere *control of an account*).
+# Production-capable authorization requires one of these methods.
+_OWNERSHIP_PROVING_METHODS: frozenset[str] = frozenset({"dns_txt", "well_known_file", "sso_assertion"})
 
 
 class Package:
@@ -374,16 +409,8 @@ class Package:
 
         if collector is None:
             # Default collector to the package's producer info if available.
-            producer_name = (
-                self.metadata.producer.name
-                if self.metadata and self.metadata.producer
-                else "unknown"
-            )
-            producer_version = (
-                self.metadata.producer.version
-                if self.metadata and self.metadata.producer
-                else ""
-            )
+            producer_name = self.metadata.producer.name if self.metadata and self.metadata.producer else "unknown"
+            producer_version = self.metadata.producer.version if self.metadata and self.metadata.producer else ""
             collector = CollectorInfo(name=producer_name, version=producer_version)
         elif isinstance(collector, dict):
             collector = CollectorInfo(**collector)
@@ -429,6 +456,487 @@ class Package:
 
         self._records.append(envelope)
         return envelope
+
+    # ------------------------------------------------------------------
+    # v1.1 typed builders (F-M1-SDK-BUILDERS)
+    #
+    # These five methods wrap :meth:`record` with Pydantic-validated
+    # payloads and SDK-side pre-flight checks for the brief §3 cross-
+    # field rules. Each method:
+    #   1. Runs the brief-specified cross-field rule check (which Pydantic
+    #      cannot express) — raises ValueError BEFORE any state mutation.
+    #   2. Runs the relevant Pydantic payload model — raises ValueError
+    #      (via :class:`pydantic.ValidationError`, which subclasses
+    #      :class:`ValueError`) for shape/enum violations.
+    #   3. Delegates to :meth:`record` with ``record_type`` set, the
+    #      validated payload, and any envelope-level kwargs forwarded.
+    # ------------------------------------------------------------------
+
+    def authorize_test_scope(
+        self,
+        *,
+        scope_id: str,
+        scope_version: str,
+        subject_ref: str,
+        authorized_surfaces: list[dict[str, Any]],
+        authorized_identities: list[dict[str, Any]],
+        side_effect_policy: dict[str, Any],
+        sandbox_boundary: dict[str, Any],
+        ownership_proof: dict[str, Any],
+        effective_from: str,
+        authorizing_actor_ref: str,
+        effective_until: str | None = None,
+        kill_switch_ref: str | None = None,
+        provisions: list[str] | None = None,
+        entity_refs: dict[str, list[str]] | EntityRefs | None = None,
+        confidentiality: str | Confidentiality = Confidentiality.PUBLIC,
+        obligation_role: str | ObligationRole | None = None,
+        timestamp: str | None = None,
+    ) -> RecordEnvelope:
+        """Add an ``authorized_test_scope`` record (brief §3.1).
+
+        Enforces the brief §3.1 cross-field rules BEFORE the record is
+        appended to the bundle:
+
+        - If any ``authorized_surfaces[*].authorization_level`` is
+          ``production_capable_owner_authorized``, then
+          ``ownership_proof.proof_method`` MUST be one of
+          ``dns_txt``, ``well_known_file``, or ``sso_assertion`` (the
+          three methods that prove genuine ownership; ``github_oauth``
+          and ``http_header`` prove account control but not system
+          ownership) — TC-FRD-001-N1.
+        - If any surface is production-capable, ``kill_switch_ref``
+          MUST be a non-empty string — TC-FRD-001-N2.
+
+        Raises:
+            ValueError: If either cross-field rule fails, or if the
+                payload fails Pydantic validation. The record is NOT
+                appended to ``self._records`` in either case.
+        """
+        # ---- Cross-field rules (brief §3.1) — run BEFORE Pydantic ----
+        has_production_capable = any(
+            isinstance(s, dict) and s.get("authorization_level") == "production_capable_owner_authorized"
+            for s in authorized_surfaces
+        )
+        if has_production_capable:
+            method = ownership_proof.get("proof_method") if isinstance(ownership_proof, dict) else None
+            if method not in _OWNERSHIP_PROVING_METHODS:
+                raise ValueError(
+                    "authorized_test_scope rejected: "
+                    "authorization_level='production_capable_owner_authorized' "
+                    f"requires ownership_proof.proof_method in {sorted(_OWNERSHIP_PROVING_METHODS)!r}; "
+                    f"got {method!r} (brief §3.1 TC-FRD-001-N1)."
+                )
+            if not (isinstance(kill_switch_ref, str) and kill_switch_ref):
+                raise ValueError(
+                    "authorized_test_scope rejected: "
+                    "authorization_level='production_capable_owner_authorized' "
+                    "requires kill_switch_ref (non-empty URN) "
+                    "(brief §3.1 TC-FRD-001-N2)."
+                )
+
+        # ---- Pydantic validation ----
+        payload_dict: dict[str, Any] = {
+            "scope_id": scope_id,
+            "scope_version": scope_version,
+            "subject_ref": subject_ref,
+            "authorized_surfaces": authorized_surfaces,
+            "authorized_identities": authorized_identities,
+            "side_effect_policy": side_effect_policy,
+            "sandbox_boundary": sandbox_boundary,
+            "ownership_proof": ownership_proof,
+            "effective_from": effective_from,
+            "authorizing_actor_ref": authorizing_actor_ref,
+        }
+        if effective_until is not None:
+            payload_dict["effective_until"] = effective_until
+        if kill_switch_ref is not None:
+            payload_dict["kill_switch_ref"] = kill_switch_ref
+
+        try:
+            validated = AuthorizedTestScopePayload.model_validate(payload_dict)
+        except ValidationError as e:
+            raise ValueError(f"authorized_test_scope payload failed validation: {e}") from e
+
+        return self.record(
+            record_type="authorized_test_scope",
+            payload=validated.model_dump(mode="json", exclude_none=True),
+            provisions=provisions,
+            entity_refs=entity_refs,
+            confidentiality=confidentiality,
+            obligation_role=obligation_role,
+            timestamp=timestamp,
+        )
+
+    def record_scope_boundary_event(
+        self,
+        *,
+        scope_ref: str,
+        attempted_action: dict[str, Any],
+        authorized_scope_snapshot: dict[str, Any],
+        classification: str,
+        hard_stop_triggered: bool,
+        detected_at: str,
+        detector: dict[str, Any],
+        event_id: str | None = None,
+        hard_stop_attestation_ref: str | None = None,
+        provisions: list[str] | None = None,
+        entity_refs: dict[str, list[str]] | EntityRefs | None = None,
+        confidentiality: str | Confidentiality = Confidentiality.PUBLIC,
+        obligation_role: str | ObligationRole | None = None,
+        timestamp: str | None = None,
+    ) -> RecordEnvelope:
+        """Add a ``scope_boundary_event`` record (brief §3.2).
+
+        Enforces the brief §3.2 conditional rule BEFORE the record is
+        appended: when ``hard_stop_triggered=True``,
+        ``hard_stop_attestation_ref`` MUST be a non-empty URN.
+
+        Raises:
+            ValueError: If the conditional rule fails, or if the payload
+                fails Pydantic validation. The record is NOT appended.
+        """
+        # ---- Cross-field rule (brief §3.2) ----
+        if hard_stop_triggered and not (isinstance(hard_stop_attestation_ref, str) and hard_stop_attestation_ref):
+            raise ValueError(
+                "scope_boundary_event rejected: hard_stop_triggered=True "
+                "requires a non-empty hard_stop_attestation_ref URN "
+                "(brief §3.2)."
+            )
+
+        if event_id is None:
+            event_id = f"urn:acef:rec:{uuid4()}"
+
+        payload_dict: dict[str, Any] = {
+            "event_id": event_id,
+            "scope_ref": scope_ref,
+            "attempted_action": attempted_action,
+            "authorized_scope_snapshot": authorized_scope_snapshot,
+            "classification": classification,
+            "hard_stop_triggered": hard_stop_triggered,
+            "detected_at": detected_at,
+            "detector": detector,
+        }
+        if hard_stop_attestation_ref is not None:
+            payload_dict["hard_stop_attestation_ref"] = hard_stop_attestation_ref
+
+        try:
+            validated = ScopeBoundaryEventPayload.model_validate(payload_dict)
+        except ValidationError as e:
+            raise ValueError(f"scope_boundary_event payload failed validation: {e}") from e
+
+        return self.record(
+            record_type="scope_boundary_event",
+            payload=validated.model_dump(mode="json", exclude_none=True),
+            provisions=provisions,
+            entity_refs=entity_refs,
+            confidentiality=confidentiality,
+            obligation_role=obligation_role,
+            timestamp=timestamp,
+        )
+
+    def record_finding(
+        self,
+        *,
+        class_: str,
+        subject_ref: str,
+        expected_behavior: str,
+        reproduction_steps_ref_content_hash: str,
+        severity: dict[str, Any],
+        reproduction: dict[str, Any],
+        attribution: dict[str, Any],
+        discovered_at: str,
+        discovered_in_run_ref: str,
+        finding_id: str | None = None,
+        variant_group_id: str | None = None,
+        regulation_impact: list[str] | None = None,
+        disposition_history: list[str] | None = None,
+        accepted_risk_ref: str | None = None,
+        regression_ref: str | None = None,
+        provisions: list[str] | None = None,
+        entity_refs: dict[str, list[str]] | EntityRefs | None = None,
+        confidentiality: str | Confidentiality = Confidentiality.PUBLIC,
+        obligation_role: str | ObligationRole | None = None,
+        timestamp: str | None = None,
+    ) -> RecordEnvelope:
+        """Add a ``finding_record`` (brief §3.3) with auto-computed
+        ``dedupe_key``.
+
+        The dedupe_key recipe is normative per brief Q5 / design
+        decision D5::
+
+            dedupe_key = "sha256:" + hex(SHA-256(JCS-canonicalize({
+                "class": class_,
+                "subject_ref": subject_ref,
+                "expected_behavior": expected_behavior,
+                "reproduction_steps_ref_content_hash":
+                    reproduction_steps_ref_content_hash,
+            })))
+
+        The computation uses :func:`acef.integrity.canonicalize` (RFC
+        8785 JCS) and has no entropy source — two identical-input calls
+        produce byte-equal ``dedupe_key``.
+
+        Note: ``class_`` is the Python parameter name (``class`` is
+        reserved). The Pydantic model field is ``finding_class``; the
+        dedupe_key recipe per brief uses the JSON key ``class``.
+        """
+        # Compute dedupe_key BEFORE Pydantic validation — the payload
+        # model requires the field to be present and matching the
+        # ^sha256:[0-9a-f]{64}$ pattern.
+        recipe = {
+            "class": class_,
+            "subject_ref": subject_ref,
+            "expected_behavior": expected_behavior,
+            "reproduction_steps_ref_content_hash": reproduction_steps_ref_content_hash,
+        }
+        canonical = canonicalize(recipe)
+        dedupe_key = "sha256:" + hashlib.sha256(canonical).hexdigest()
+
+        if finding_id is None:
+            finding_id = f"urn:acef:rec:{uuid4()}"
+
+        payload_dict: dict[str, Any] = {
+            "finding_id": finding_id,
+            "finding_class": class_,
+            "subject_ref": subject_ref,
+            "severity": severity,
+            "dedupe_key": dedupe_key,
+            "reproduction": reproduction,
+            "attribution": attribution,
+            "discovered_at": discovered_at,
+            "discovered_in_run_ref": discovered_in_run_ref,
+        }
+        if variant_group_id is not None:
+            payload_dict["variant_group_id"] = variant_group_id
+        if regulation_impact is not None:
+            payload_dict["regulation_impact"] = regulation_impact
+        if disposition_history is not None:
+            payload_dict["disposition_history"] = disposition_history
+        if accepted_risk_ref is not None:
+            payload_dict["accepted_risk_ref"] = accepted_risk_ref
+        if regression_ref is not None:
+            payload_dict["regression_ref"] = regression_ref
+
+        try:
+            validated = FindingRecordPayload.model_validate(payload_dict)
+        except ValidationError as e:
+            raise ValueError(f"finding_record payload failed validation: {e}") from e
+
+        return self.record(
+            record_type="finding_record",
+            payload=validated.model_dump(mode="json", exclude_none=True),
+            provisions=provisions,
+            entity_refs=entity_refs,
+            confidentiality=confidentiality,
+            obligation_role=obligation_role,
+            timestamp=timestamp,
+        )
+
+    def record_delivery_verdict(
+        self,
+        *,
+        finding_ref: str,
+        destination: dict[str, Any],
+        write_attempt: dict[str, Any],
+        delivery_state: str,
+        verdict_id: str | None = None,
+        read_back: dict[str, Any] | None = None,
+        harness_attestation_ref: str | None = None,
+        drift_classification: str | None = None,
+        retry_history: list[dict[str, Any]] | None = None,
+        provisions: list[str] | None = None,
+        entity_refs: dict[str, list[str]] | EntityRefs | None = None,
+        confidentiality: str | Confidentiality = Confidentiality.PUBLIC,
+        obligation_role: str | ObligationRole | None = None,
+        timestamp: str | None = None,
+    ) -> RecordEnvelope:
+        """Add a ``delivery_verdict`` record (brief §3.4).
+
+        Enforces two cross-field rules BEFORE the record is appended:
+
+        1. If ``read_back`` is provided, ``read_back.read_back_digest``
+           MUST equal ``write_attempt.request_digest``. A mismatch
+           raises immediately so the bundle never contains a
+           self-inconsistent verdict.
+        2. If ``delivery_state == "verified_delivered"``, ALL of the
+           following MUST hold per brief §3.4:
+           - ``read_back`` is provided (not None)
+           - ``read_back.digest_match`` is exactly True
+           - ``harness_attestation_ref`` is a non-empty URN
+
+        Raises:
+            ValueError: For either rule above, or for Pydantic shape
+                violations. The record is NOT appended in any failure
+                case.
+        """
+        # Rule 1: read-back digest equality — applies whenever a
+        # read_back block is present, regardless of delivery_state.
+        if isinstance(read_back, dict):
+            req_digest = write_attempt.get("request_digest") if isinstance(write_attempt, dict) else None
+            rb_digest = read_back.get("read_back_digest")
+            if req_digest is not None and rb_digest is not None and req_digest != rb_digest:
+                raise ValueError(
+                    "delivery_verdict rejected: read-back digest mismatch — "
+                    f"write_attempt.request_digest={req_digest!r} but "
+                    f"read_back.read_back_digest={rb_digest!r}. A delivery "
+                    "verdict with self-inconsistent digests MUST NOT enter "
+                    "the bundle (brief §3.4)."
+                )
+
+        # Rule 2: verified_delivered triple-requirement (brief §3.4).
+        if delivery_state == "verified_delivered":
+            problems: list[str] = []
+            if not isinstance(read_back, dict):
+                problems.append("read_back is missing")
+            elif read_back.get("digest_match") is not True:
+                problems.append(f"read_back.digest_match must be exactly True (got {read_back.get('digest_match')!r})")
+            if not (isinstance(harness_attestation_ref, str) and harness_attestation_ref):
+                problems.append("harness_attestation_ref is missing or empty")
+            if problems:
+                raise ValueError(
+                    "delivery_verdict rejected: delivery_state='verified_delivered' "
+                    "requires read_back + read_back.digest_match=True + "
+                    f"harness_attestation_ref; problems: {problems!r} "
+                    "(brief §3.4)."
+                )
+
+        if verdict_id is None:
+            verdict_id = f"urn:acef:rec:{uuid4()}"
+
+        payload_dict: dict[str, Any] = {
+            "verdict_id": verdict_id,
+            "finding_ref": finding_ref,
+            "destination": destination,
+            "write_attempt": write_attempt,
+            "delivery_state": delivery_state,
+        }
+        if read_back is not None:
+            payload_dict["read_back"] = read_back
+        if drift_classification is not None:
+            payload_dict["drift_classification"] = drift_classification
+        if retry_history is not None:
+            payload_dict["retry_history"] = retry_history
+        if harness_attestation_ref is not None:
+            payload_dict["harness_attestation_ref"] = harness_attestation_ref
+
+        try:
+            validated = DeliveryVerdictPayload.model_validate(payload_dict)
+        except ValidationError as e:
+            raise ValueError(f"delivery_verdict payload failed validation: {e}") from e
+
+        return self.record(
+            record_type="delivery_verdict",
+            payload=validated.model_dump(mode="json", exclude_none=True),
+            provisions=provisions,
+            entity_refs=entity_refs,
+            confidentiality=confidentiality,
+            obligation_role=obligation_role,
+            timestamp=timestamp,
+        )
+
+    def attest(
+        self,
+        *,
+        state_class: str,
+        state_transition: dict[str, Any],
+        bound_evidence_refs: list[str],
+        verifier: dict[str, Any],
+        claim: str,
+        fake_green_test_ref: str | None,
+        attestation_signature: dict[str, Any],
+        signed_at: str,
+        signer_kid: str,
+        attestation_id: str | None = None,
+        provisions: list[str] | None = None,
+        entity_refs: dict[str, list[str]] | EntityRefs | None = None,
+        confidentiality: str | Confidentiality = Confidentiality.PUBLIC,
+        obligation_role: str | ObligationRole | None = None,
+        timestamp: str | None = None,
+    ) -> RecordEnvelope:
+        """Add a ``harness_attestation`` record (brief §3.6).
+
+        Enforces the following SDK-side pre-flight checks BEFORE the
+        record is appended:
+
+        - ``state_class`` MUST be one of the seven values in the brief
+          Q3 taxonomy (VAL-SCHEMA-009). Mirrors validator ACEF-076.
+        - ``verifier.verifier_class`` MUST NOT be ``persona`` or ``llm``
+          (brief §3.6, VAL-LOAD-001/002). Mirrors loader's ACEF-070
+          LoadRejection at SDK build time.
+        - ``bound_evidence_refs`` MUST be a non-empty list (VAL-SDK-005,
+          brief TC8 — state-class records require >=1 binding).
+        - ``fake_green_test_ref`` MUST be a non-empty string for any
+          state_class (VAL-SDK-006).
+
+        Raises:
+            ValueError: For any of the above, or for Pydantic shape
+                violations. The record is NOT appended.
+        """
+        # Pre-flight checks ordered so the most informative error
+        # surfaces first.
+        if state_class not in _STATE_CLASS_TAXONOMY:
+            raise ValueError(
+                f"harness_attestation rejected: state_class={state_class!r} "
+                f"is not in the brief Q3 taxonomy {sorted(_STATE_CLASS_TAXONOMY)!r} "
+                "(VAL-SCHEMA-009)."
+            )
+
+        verifier_class = verifier.get("verifier_class") if isinstance(verifier, dict) else None
+        if verifier_class in _BANNED_VERIFIER_CLASSES:
+            raise ValueError(
+                f"harness_attestation rejected: verifier_class={verifier_class!r} "
+                "is banned — persona and LLM verifiers lack the determinism "
+                "required to attest state transitions (brief §3.6, "
+                "VAL-LOAD-001/002)."
+            )
+
+        # VAL-SDK-005 — state-class records require >=1 ref.
+        if not bound_evidence_refs:
+            raise ValueError(
+                f"harness_attestation rejected: state_class={state_class!r} "
+                "record requires bound_evidence_refs with at least one entry "
+                "(VAL-SDK-005, brief TC8)."
+            )
+
+        # VAL-SDK-006 — fake_green_test_ref required for any state_class.
+        if not (isinstance(fake_green_test_ref, str) and fake_green_test_ref):
+            raise ValueError(
+                f"harness_attestation rejected: state_class={state_class!r} "
+                "record requires a non-empty fake_green_test_ref "
+                "(VAL-SDK-006)."
+            )
+
+        if attestation_id is None:
+            attestation_id = f"urn:acef:rec:{uuid4()}"
+
+        payload_dict: dict[str, Any] = {
+            "attestation_id": attestation_id,
+            "state_class": state_class,
+            "state_transition": state_transition,
+            "bound_evidence_refs": bound_evidence_refs,
+            "verifier": verifier,
+            "claim": claim,
+            "fake_green_test_ref": fake_green_test_ref,
+            "attestation_signature": attestation_signature,
+            "signed_at": signed_at,
+            "signer_kid": signer_kid,
+        }
+
+        try:
+            validated = HarnessAttestationPayload.model_validate(payload_dict)
+        except ValidationError as e:
+            raise ValueError(f"harness_attestation payload failed validation: {e}") from e
+
+        return self.record(
+            record_type="harness_attestation",
+            payload=validated.model_dump(mode="json", exclude_none=True),
+            provisions=provisions,
+            entity_refs=entity_refs,
+            confidentiality=confidentiality,
+            obligation_role=obligation_role,
+            timestamp=timestamp,
+        )
 
     def add_attachment(self, path: str, content: bytes) -> None:
         """Add an attachment file to be included in artifacts/.
@@ -489,16 +997,12 @@ class Package:
 
             if len(shards) == 1:
                 path = f"records/{record_type}.jsonl"
-                record_files.append(
-                    RecordFileEntry(path=path, record_type=record_type, count=len(shards[0]))
-                )
+                record_files.append(RecordFileEntry(path=path, record_type=record_type, count=len(shards[0])))
             else:
                 for i, shard in enumerate(shards):
                     shard_num = str(i + 1).zfill(4)
                     path = f"records/{record_type}/{record_type}.{shard_num}.jsonl"
-                    record_files.append(
-                        RecordFileEntry(path=path, record_type=record_type, count=len(shard))
-                    )
+                    record_files.append(RecordFileEntry(path=path, record_type=record_type, count=len(shard)))
 
         return Manifest(
             metadata=self._metadata,
@@ -519,7 +1023,7 @@ class Package:
         Args:
             path: Output path (directory or .acef.tar.gz).
         """
-        from acef.export import export_directory, export_archive
+        from acef.export import export_archive, export_directory
 
         if path.endswith(".tar.gz"):
             export_archive(self, path)
@@ -538,7 +1042,7 @@ class Package:
         records: list[RecordEnvelope],
         audit_trail: list[AuditTrailEntry],
         attachments: dict[str, bytes] | None = None,
-    ) -> "Package":
+    ) -> Package:
         """Create a Package from pre-parsed parts (deserialization path).
 
         This is the approved way for loader.py, merge.py, and redaction.py
