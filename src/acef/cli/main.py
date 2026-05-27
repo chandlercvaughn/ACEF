@@ -2,9 +2,36 @@
 
 from __future__ import annotations
 
+import io
+import sys
+
 import click
 
 from acef._version import __version__
+
+
+def _force_utf8_streams() -> None:
+    """Reconfigure stdout/stderr to UTF-8 so non-ASCII bundle contents print.
+
+    Spec §3.1.1 requires UTF-8 NFC throughout. On systems with LANG=C or
+    LANG=POSIX, Python's default stdout encoding may fall back to ASCII
+    and raise UnicodeEncodeError when Rich/click prints non-ASCII subject
+    names. Reconfiguring once at CLI entry ensures output is consistent
+    across locales.
+    """
+    for stream_name in ("stdout", "stderr"):
+        stream = getattr(sys, stream_name)
+        # Newer Python (3.7+) exposes reconfigure() on text streams.
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            try:
+                reconfigure(encoding="utf-8", errors="strict")
+            except (io.UnsupportedOperation, ValueError):
+                # Some streams (e.g., pytest captures) don't support reconfigure.
+                pass
+
+
+_force_utf8_streams()
 
 
 @click.group()

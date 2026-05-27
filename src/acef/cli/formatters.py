@@ -73,7 +73,12 @@ def print_assessment(assessment: AssessmentBundle) -> None:
     if failed:
         console.print(f"\n[red bold]Failed Rules ({len(failed)}):[/red bold]")
         for r in failed:
-            severity = r.rule_severity.value.upper()
+            # rule_severity is normally a RuleSeverity enum, but assessments
+            # that have been round-tripped through JSON may carry a plain
+            # string here. Coerce defensively so the pretty printer never
+            # raises AttributeError on a string severity.
+            sev_obj = r.rule_severity
+            severity = (sev_obj.value if hasattr(sev_obj, "value") else str(sev_obj)).upper()
             console.print(f"  [{severity:7s}] {r.rule_id}: {r.message or ''}")
 
     # Structural errors
