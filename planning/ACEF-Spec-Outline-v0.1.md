@@ -602,6 +602,8 @@ Every evidence record in `records/` consists of two parts, each validated by a s
 
 2. **Payload schema** — specific to the `record_type`. Validated by `acef-conventions/v{major}/{record_type}.schema.json`. Only the `payload` object is validated against this schema.
 
+**Minor-version additivity rule (normative, introduced in v1.1):** v1.0 record types are frozen for v1.0 conformance. **v1.x minor releases MAY add new record types** provided that: (a) all v1.0 record-type schemas remain unchanged; (b) new record types are listed under "v1.x optional" in the registry below (not under v1 mandatory or v1 optional); (c) v1.0 Evidence Bundles continue to validate clean against v1.x validators; and (d) any new envelope or manifest fields that are required-in-spec are **conditional-required** and gated by `manifest.versioning.core_version` (validators select the v1.0 or v1.x schema set based on the bundle's declared `core_version`, so existing v1.0 bundles do not pick up new required fields). This rule preserves the v1.0 freeze for existing conformance claims while permitting additive minor evolution; see §6.2 for the compatibility matrix and ACEF RFC-0001 for the version-gating design rationale.
+
 **v1 record types (frozen for v1 conformance):**
 
 | Record Type | Status | Description |
@@ -1268,6 +1270,17 @@ ACEF defines a normative error taxonomy so that all validators and SDK implement
 | `ACEF-052` | Format | `error` | Path contains `..` segments or non-UTF-8-NFC characters |
 | `ACEF-053` | Format | `error` | Vendor extension field (`x-*`) affects conformance outcome (forbidden) |
 | `ACEF-060` | Merge | `warning` | Conflicting records from multiple packages for same entity |
+| `ACEF-070` | Integrity | `fatal` | `harness_attestation` cites missing or unverifiable required evidence (empty `bound_evidence_refs` or URN does not resolve in bundle or declared external references) |
+| `ACEF-071` | Integrity | `fatal` | `delivery_verdict` claims `verified_delivered` without a read-back digest (`read_back` missing, `harness_attestation_ref` missing, or `read_back.digest_match: true` without the matching digest) |
+| `ACEF-072` | Integrity | `fatal` | `delivery_verdict` read-back digest does not match write-back digest (`read_back.read_back_digest != write_attempt.request_digest` byte-equal) |
+| `ACEF-073` | Reference | `fatal` | `causation_chain` cites an unknown or unsigned URN (URN does not resolve in-bundle or via declared external bundle references, or owning bundle is unsigned per §3.1.3) |
+| `ACEF-074` | Schema | `error` | Record missing `redaction_policy_version` when `confidentiality != "public"` (conditional-required field absent on a v1.1 bundle) |
+| `ACEF-075` | Reference | `fatal` | `tenant_label` mismatch across records in a single bundle (two distinct values within one bundle) |
+| `ACEF-076` | Schema | `error` | `state_class` record lacks fake-green test reference (missing `fake_green_test_ref`, or `state_class` value not in `state-class-taxonomy.json`) |
+| `ACEF-077` | Integrity | `fatal` | `voice_rubric_emission` contains claim-lexicon token without a paired `harness_attestation` (emitted via the namespace-scoped lint registered for `x-freddy/voice-rubric-emission`; see ACEF RFC-0001) |
+| `ACEF-078` | Reference | `error` | `redaction_attestation_ref` points to unresolvable URN (distinct from ACEF-022; the attestation reference is on the record envelope, not in `record_files`) |
+| `ACEF-079` | Schema | `error` | `coverage_cell.claim_language` contains a banned claim-lexicon token (`compliant`, `certified`, `AI Act-approved`, `guaranteed`); distinct from ACEF-053 (which covers vendor-extension outcome effects) |
+| `ACEF-080` | Reference | `error` | Bundle declares `analysis_mode` but lacks required envelope/manifest fields for that mode, or contains forbidden record types for that mode (mode-gated rule violation) |
 
 ### 3.7 Validation Result Schema (Assessment Bundle)
 
@@ -1397,8 +1410,16 @@ This matrix shows how evidence artifacts map across frameworks, enabling "collec
 | `governance_policy` (variant: `ai_use_case_inventory_entry`) | — | GOVERN-1.7 | — | — | — | — |
 | `conformity_declaration` | Art. 47–48 | — | — | — | — | — |
 | `evidence_gap` | All articles | All functions | All guidance areas | All requirements | All recommendations | All clauses |
+| `authorized_test_scope` (v1.1) | Art. 9, Art. 17 (QMS) | GOVERN-1, MAP-1 | — | — | — | 6.1, A.6.2 |
+| `scope_boundary_event` (v1.1) | Art. 9, Art. 12, Art. 14 | MEASURE-2, MANAGE-4 | — | — | — | 9.1, 10.2 |
+| `finding_record` (v1.1) | Art. 9, Art. 15, GPAI Art. 55 (systemic-risk threshold) | MEASURE-2.x, MANAGE-4.x | — | — | — | 9.1, 10.2 |
+| `delivery_verdict` (v1.1) | Art. 12, Art. 13, Art. 14 | MEASURE-2.x | — | — | — | 9.1 |
+| `coverage_cell` (v1.1; Assessment-side) | Art. 15, Art. 17 | MEASURE-2.x, MANAGE-3 | — | — | — | 9.1, 10.1 |
+| `harness_attestation` (v1.1) | Art. 9, Art. 12, Art. 13, Art. 15, Art. 17 | GOVERN-1.3, MEASURE-2.x, MANAGE-1 | — | — | — | 9.1, A.6.2 |
 
 **Note:** OMB M-24-10 (US federal) maps primarily to `governance_policy` variants (`ai_use_case_inventory_entry`, CAIO governance records) and is tracked via the `us-omb-m-24-10` template. Not shown as a separate column to keep the matrix readable.
+
+**Note (v1.1 additions):** The six rows tagged `(v1.1)` were added by ACEF RFC-0001 ("Agent Reliability Primitives") and ship in v0.4. Per the §3.1.4 minor-version additivity rule, these record types are conditional and gated on `manifest.versioning.core_version: 1.1.0`; v1.0 bundles do not encounter them. The per-regulation mapping templates (`acef-conventions/v1/templates/eu-ai-act-high-risk-v1.json`, `acef-conventions/v1/templates/nist-rmf-v1.json`) are extended in the same v0.4 release to consume these record types as binding evidence for the cited provisions.
 
 ---
 
@@ -1632,9 +1653,12 @@ assessment.export("acme-rag-assessment-2026-q1.acef-assessment.json")
 
 | Core Version | Compatible Profiles Versions | Compatible Assessment Versions |
 |---|---|---|
-| 1.x | 1.x | 1.x |
+| 1.0.x | 1.x | 1.x |
+| 1.1.x | 1.x | 1.x |
 
 Breaking changes to any module require a major version bump in that module. A Core 2.x package cannot be validated by a Profiles 1.x template. The manifest's `versioning` block is the single source of truth for version negotiation — there is no single `acef_version` field.
+
+**Minor-version negotiation (normative, introduced in v1.1):** Validators MUST read `manifest.versioning.core_version` and select the schema set for the matching minor (`acef-conventions/v1/` for `1.0.x`, `acef-conventions/v1.1/` for `1.1.x`). Per §3.1.4's minor-version additivity rule, v1.0 Evidence Bundles MUST validate clean against v1.1 validators because the v1.1 schema set extends v1.0 only with optional fields and adds new record types under "v1.x optional" — no v1.0 field is removed or made stricter. New conditional-required envelope/manifest fields apply only to bundles declaring `core_version: 1.1.0` or higher. See ACEF RFC-0001 for the version-gating design rationale.
 
 ### 6.3 Licensing
 
