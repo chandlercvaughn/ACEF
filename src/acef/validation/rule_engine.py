@@ -111,10 +111,13 @@ def evaluate_rules_for_subject(
             if subject_risk_classification and subject_risk_classification not in provision.applicable_to:
                 continue
 
-        # Check provision effective date
+        # Check provision effective date. Use the engine's _is_before helper
+        # so mixed-format ISO strings ("2026-01-01T00:00:00Z" vs
+        # "2026-01-01") compare correctly rather than lexicographically.
         provision_effective = True
         if provision.effective_date and evaluation_instant:
-            provision_effective = evaluation_instant >= provision.effective_date
+            from acef.validation.engine import _is_before
+            provision_effective = not _is_before(evaluation_instant, provision.effective_date)
 
         # Expand required_evidence_types to has_record_type rules if no evaluation rules exist
         rules = list(provision.evaluation)

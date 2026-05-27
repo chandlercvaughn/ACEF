@@ -513,6 +513,14 @@ def verify_detached_jws(
             code="ACEF-013",
         )
 
+    # Spec §3.1.3 #5: every JWS header MUST include kid. Reject signatures
+    # that lack one — key-rotation and identification depend on this.
+    if not header.get("kid"):
+        raise ACEFSigningError(
+            "JWS header missing required 'kid' field (spec §3.1.3)",
+            code="ACEF-013",
+        )
+
     # Get public key
     if public_key is None:
         if key_data is not None:

@@ -241,14 +241,52 @@ def _check_signatures(bundle_dir: Path, content_hashes_bytes: bytes) -> list[Val
 
 
 def get_signature_info(bundle_dir: Path) -> tuple[int, list[str]]:
-    """Get signature count and algorithms from a bundle.
+    """Get count and algorithms of CRYPTOGRAPHICALLY VERIFIED signatures.
+
+    Counts only signatures that pass full JWS verification against the
+    bundle's content-hashes.json (re-canonicalized per spec §3.1.3 #5),
+    using x5c or jwk from the JWS header itself. Signatures whose format
+    is valid but whose signature does not verify (tampered, expired x5c
+    chain, key mismatch) are NOT counted.
+
+    This is what ``op_bundle_signed`` relies on to decide whether a
+    bundle is "signed"; counting unverified signatures would let a
+    tampered bundle satisfy ``bundle_signed`` rules.
 
     Returns:
-        Tuple of (signature_count, list_of_algorithms).
+        Tuple of (verified_signature_count, list_of_algorithms).
+        Algorithms list is parallel to the count — each verified
+        signature contributes its alg.
     """
     sig_dir = bundle_dir / "signatures"
     if not sig_dir.exists():
         return 0, []
+
+    # Read content-hashes.json once for verification input.
+    content_hashes_path = bundle_dir / "hashes" / "content-hashes.json"
+    if not content_hashes_path.exists():
+        return 0, []
+
+    from acef.errors import ACEFSigningError
+    from acef.integrity import canonicalize_json_str
+    from acef.signing import verify_detached_jws
+
+    try:
+        canonical_input = canonicalize_json_str(
+            content_hashes_path.read_text(encoding="utf-8")
+        )
+    except (ValueError, UnicodeDecodeError):
+        return 0, []
+
+    # Read manifest timestamp for cert expiry checks.
+    manifest_timestamp: str | None = None
+    manifest_path = bundle_dir / "acef-manifest.json"
+    if manifest_path.exists():
+        try:
+            mdata = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest_timestamp = mdata.get("metadata", {}).get("timestamp")
+        except json.JSONDecodeError:
+            manifest_timestamp = None
 
     count = 0
     algorithms: list[str] = []
@@ -265,9 +303,20 @@ def get_signature_info(bundle_dir: Path) -> tuple[int, list[str]]:
         try:
             header_bytes = base64.urlsafe_b64decode(parts[0] + "==")
             header = json.loads(header_bytes)
-            algorithms.append(header.get("alg", ""))
-            count += 1
         except Exception:
             continue
+
+        alg = header.get("alg", "")
+        try:
+            verify_detached_jws(
+                jws_str,
+                canonical_input,
+                manifest_timestamp=manifest_timestamp,
+            )
+        except ACEFSigningError:
+            continue
+
+        algorithms.append(alg)
+        count += 1
 
     return count, algorithms

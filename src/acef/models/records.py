@@ -120,13 +120,17 @@ def dict_to_record_envelope(data: dict[str, Any]) -> RecordEnvelope:
     # Import here to avoid circular import (errors.py -> models -> errors)
     from acef.errors import ACEFFormatError
 
-    # Handle entity_refs
-    entity_refs_data = data.get("entity_refs", {})
+    # Handle entity_refs. Pass through any unknown nested keys so
+    # vendor-prefixed extension refs (e.g., a custom relationship type)
+    # round-trip losslessly.
+    entity_refs_data = data.get("entity_refs", {}) or {}
+    _entity_refs_known = {"subject_refs", "component_refs", "dataset_refs", "actor_refs"}
     entity_refs = EntityRefs(
         subject_refs=entity_refs_data.get("subject_refs", []),
         component_refs=entity_refs_data.get("component_refs", []),
         dataset_refs=entity_refs_data.get("dataset_refs", []),
         actor_refs=entity_refs_data.get("actor_refs", []),
+        **{k: v for k, v in entity_refs_data.items() if k not in _entity_refs_known},
     )
 
     # Handle attachments
@@ -190,6 +194,22 @@ def dict_to_record_envelope(data: dict[str, Any]) -> RecordEnvelope:
         kwargs["attestation"] = attestation
     if retention is not None:
         kwargs["retention"] = retention
+
+    # Pass through any unknown top-level keys (vendor extensions, future
+    # spec fields) as extras so they survive load→export round-trip.
+    # Spec §6.4 rule 5: "ACEF Evidence Bundle export MUST be lossless to
+    # the open core". record-envelope.schema.json sets
+    # additionalProperties: true at 7 locations, so unknown fields are
+    # spec-permitted.
+    _envelope_known = {
+        "record_id", "record_type", "provisions_addressed", "timestamp",
+        "lifecycle_phase", "collector", "obligation_role", "confidentiality",
+        "redaction_method", "access_policy", "trust_level", "entity_refs",
+        "payload", "attachments", "attestation", "retention",
+    }
+    for k, v in data.items():
+        if k not in _envelope_known:
+            kwargs[k] = v
 
     try:
         return RecordEnvelope(**kwargs)
