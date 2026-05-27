@@ -9,6 +9,7 @@ from pydantic import Field
 from acef.models.base import ACEFBaseModel
 from acef.models.enums import (
     ActorRole,
+    AuthorityClass,
     ComponentType,
     DatasetModality,
     DatasetSourceType,
@@ -62,6 +63,15 @@ class Actor(ACEFBaseModel):
     role: ActorRole = ActorRole.PROVIDER
     name: str = ""
     organization: str = ""
+    authority_class: AuthorityClass | None = Field(
+        default=None,
+        description=(
+            "Optional authority grant per brief §14.5 disposition matrix. "
+            "Pairs with disposition_record.authority_check.authority_granted "
+            "to gate which actor types may exercise which authority classes; "
+            "violations rejected at load time (ACEF-NNN per VAL-LOAD-004)."
+        ),
+    )
 
     @property
     def id(self) -> str:

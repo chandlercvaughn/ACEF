@@ -78,6 +78,43 @@ class RecordEnvelope(ACEFBaseModel):
     attestation: Attestation | None = None
     retention: RecordRetention | None = None
 
+    # v1.1 envelope extensions (X1-X4) — all OPTIONAL at the model/schema
+    # level; conditional-required semantics keyed on confidentiality /
+    # record_type / manifest.analysis_mode are enforced at the validator
+    # level so v1.0 bundles continue to validate clean (spec §8.1).
+    redaction_policy_version: str | None = Field(
+        default=None,
+        description=(
+            "X1: redaction policy semver; required at validation time when "
+            "confidentiality != public. Missing on a non-public record emits "
+            "ACEF-074."
+        ),
+    )
+    redaction_attestation_ref: str | None = Field(
+        default=None,
+        description=(
+            "X2: URN of the attestation record proving the redaction policy "
+            "executed against source content. Required at validation time when "
+            "confidentiality != public. Unresolvable URN emits ACEF-078."
+        ),
+    )
+    tenant_label: str | None = Field(
+        default=None,
+        description=(
+            "X3: stable tenant identifier (urn:acef:tenant:<slug>). "
+            "Bundle-wide uniformity enforced at validator level when "
+            "manifest.analysis_mode is set; emits ACEF-075 on divergence."
+        ),
+    )
+    causation_chain: list[str] | None = Field(
+        default=None,
+        description=(
+            "X4: ordered upstream-record URNs (most-recent-first) that caused "
+            "this record. Required on harness_attestation with at least one "
+            "element; unresolvable URN emits ACEF-073."
+        ),
+    )
+
     @property
     def id(self) -> str:
         return self.record_id
@@ -204,6 +241,13 @@ def dict_to_record_envelope(data: dict[str, Any]) -> RecordEnvelope:
         "redaction_method",
         "access_policy",
         "trust_level",
+        # v1.1 envelope extensions (X1-X4). Passed through explicitly so
+        # Pydantic validates the declared types instead of landing them as
+        # untyped extras.
+        "redaction_policy_version",
+        "redaction_attestation_ref",
+        "tenant_label",
+        "causation_chain",
     ):
         if field_name in data:
             kwargs[field_name] = data[field_name]
@@ -222,10 +266,27 @@ def dict_to_record_envelope(data: dict[str, Any]) -> RecordEnvelope:
     # additionalProperties: true at 7 locations, so unknown fields are
     # spec-permitted.
     _envelope_known = {
-        "record_id", "record_type", "provisions_addressed", "timestamp",
-        "lifecycle_phase", "collector", "obligation_role", "confidentiality",
-        "redaction_method", "access_policy", "trust_level", "entity_refs",
-        "payload", "attachments", "attestation", "retention",
+        "record_id",
+        "record_type",
+        "provisions_addressed",
+        "timestamp",
+        "lifecycle_phase",
+        "collector",
+        "obligation_role",
+        "confidentiality",
+        "redaction_method",
+        "access_policy",
+        "trust_level",
+        "entity_refs",
+        "payload",
+        "attachments",
+        "attestation",
+        "retention",
+        # v1.1 envelope extensions (X1-X4) — declared on RecordEnvelope.
+        "redaction_policy_version",
+        "redaction_attestation_ref",
+        "tenant_label",
+        "causation_chain",
     }
     for k, v in data.items():
         if k not in _envelope_known:

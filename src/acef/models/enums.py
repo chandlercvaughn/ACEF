@@ -95,6 +95,22 @@ class ActorRole(str, Enum):
     DATA_SUBJECT = "data_subject"
 
 
+class AuthorityClass(str, Enum):
+    """Disposition authority class per brief §14.5 disposition matrix.
+
+    Each class describes the kind of authority an actor may exercise over a
+    disposition_record. The §14.5 matrix governs which (authority_class ×
+    actor_type) combinations may be granted; violations are rejected at load
+    time per VAL-LOAD-004.
+    """
+
+    PRIORITY = "priority"
+    SEVERITY_ADVISORY = "severity_advisory"
+    ACCEPTED_RISK_REQUEST = "accepted_risk_request"
+    FALSE_POSITIVE_ASSERTION = "false_positive_assertion"
+    EVIDENCE_DISPUTE = "evidence_dispute"
+
+
 class RelationshipType(str, Enum):
     """Entity relationship types (W3C PROV-compatible)."""
 
@@ -190,30 +206,47 @@ class ProvisionOutcome(str, Enum):
     NOT_ASSESSED = "not-assessed"
 
 
-# Record types — the 16 v1 record types
-RECORD_TYPES = frozenset({
-    "risk_register",
-    "risk_treatment",
-    "dataset_card",
-    "data_provenance",
-    "evaluation_report",
-    "event_log",
-    "human_oversight_action",
-    "transparency_disclosure",
-    "transparency_marking",
-    "disclosure_labeling",
-    "copyright_rights_reservation",
-    "license_record",
-    "incident_report",
-    "governance_policy",
-    "conformity_declaration",
-    "evidence_gap",
-})
+# Record types — 16 v1.0 record types + 6 v1.1 agent-reliability primitives
+# (authorized_test_scope, scope_boundary_event, finding_record,
+#  delivery_verdict, coverage_cell, harness_attestation) per brief §3.1-§3.6.
+# coverage_cell lives in Assessment Bundles, not records/, but is registered
+# here so cross-cutting type-name checks (e.g., VAL-CONFORMANCE-004 inventory)
+# treat it uniformly with the other v1.1 additions.
+RECORD_TYPES = frozenset(
+    {
+        # v1.0 — the original 16
+        "risk_register",
+        "risk_treatment",
+        "dataset_card",
+        "data_provenance",
+        "evaluation_report",
+        "event_log",
+        "human_oversight_action",
+        "transparency_disclosure",
+        "transparency_marking",
+        "disclosure_labeling",
+        "copyright_rights_reservation",
+        "license_record",
+        "incident_report",
+        "governance_policy",
+        "conformity_declaration",
+        "evidence_gap",
+        # v1.1 — agent-reliability primitives
+        "authorized_test_scope",
+        "scope_boundary_event",
+        "finding_record",
+        "delivery_verdict",
+        "coverage_cell",
+        "harness_attestation",
+    }
+)
 
-MANDATORY_RECORD_TYPES = frozenset({
-    "risk_register",
-    "risk_treatment",
-    "dataset_card",
-    "data_provenance",
-    "evaluation_report",
-})
+MANDATORY_RECORD_TYPES = frozenset(
+    {
+        "risk_register",
+        "risk_treatment",
+        "dataset_card",
+        "data_provenance",
+        "evaluation_report",
+    }
+)

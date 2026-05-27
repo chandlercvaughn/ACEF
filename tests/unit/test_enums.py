@@ -71,24 +71,29 @@ class TestDatasetModality:
 
 class TestActorRole:
     def test_all_values(self):
-        expected = {"provider", "deployer", "importer", "distributor",
-                    "auditor", "regulator", "data_subject"}
+        expected = {"provider", "deployer", "importer", "distributor", "auditor", "regulator", "data_subject"}
         actual = {ar.value for ar in ActorRole}
         assert actual == expected
 
 
 class TestRelationshipType:
     def test_all_values(self):
-        expected = {"wraps", "calls", "fine_tunes", "deploys",
-                    "trains_on", "evaluates_with", "oversees"}
+        expected = {"wraps", "calls", "fine_tunes", "deploys", "trains_on", "evaluates_with", "oversees"}
         actual = {rt.value for rt in RelationshipType}
         assert actual == expected
 
 
 class TestObligationRole:
     def test_all_values(self):
-        expected = {"provider", "deployer", "importer", "distributor",
-                    "authorised_representative", "notified_body", "platform"}
+        expected = {
+            "provider",
+            "deployer",
+            "importer",
+            "distributor",
+            "authorised_representative",
+            "notified_body",
+            "platform",
+        }
         actual = {o.value for o in ObligationRole}
         assert actual == expected
 
@@ -109,36 +114,74 @@ class TestRuleOutcome:
 
 class TestProvisionOutcome:
     def test_all_values(self):
-        expected = {"satisfied", "not-satisfied", "partially-satisfied",
-                    "gap-acknowledged", "skipped", "not-assessed"}
+        expected = {"satisfied", "not-satisfied", "partially-satisfied", "gap-acknowledged", "skipped", "not-assessed"}
         actual = {po.value for po in ProvisionOutcome}
         assert actual == expected
 
 
 class TestRecordTypes:
+    # The 16 v1.0 record types — frozen subset preserved per VAL-MODEL-001.
+    V1_0_RECORD_TYPES = frozenset(
+        {
+            "risk_register",
+            "risk_treatment",
+            "dataset_card",
+            "data_provenance",
+            "evaluation_report",
+            "event_log",
+            "human_oversight_action",
+            "transparency_disclosure",
+            "transparency_marking",
+            "disclosure_labeling",
+            "copyright_rights_reservation",
+            "license_record",
+            "incident_report",
+            "governance_policy",
+            "conformity_declaration",
+            "evidence_gap",
+        }
+    )
+    # The 6 v1.1 agent-reliability primitives added in ACEF v0.4 per brief
+    # §3.1-§3.6 (VAL-MODEL-001).
+    V1_1_RECORD_TYPES = frozenset(
+        {
+            "authorized_test_scope",
+            "scope_boundary_event",
+            "finding_record",
+            "delivery_verdict",
+            "coverage_cell",
+            "harness_attestation",
+        }
+    )
+
     def test_is_frozenset(self):
         assert isinstance(RECORD_TYPES, frozenset)
 
-    def test_contains_16_types(self):
-        assert len(RECORD_TYPES) == 16
+    def test_contains_22_types(self):
+        # 16 v1.0 + 6 v1.1 = 22. Per VAL-MODEL-001.
+        assert len(RECORD_TYPES) == 22
+
+    def test_v1_0_types_preserved(self):
+        """The 16 v1.0 types must remain a subset (no removals, no renames)."""
+        assert self.V1_0_RECORD_TYPES.issubset(RECORD_TYPES)
+
+    def test_v1_1_types_added(self):
+        """The 6 v1.1 agent-reliability primitives must be present."""
+        assert self.V1_1_RECORD_TYPES.issubset(RECORD_TYPES)
 
     def test_all_expected_types_present(self):
-        expected = {
-            "risk_register", "risk_treatment", "dataset_card",
-            "data_provenance", "evaluation_report", "event_log",
-            "human_oversight_action", "transparency_disclosure",
-            "transparency_marking", "disclosure_labeling",
-            "copyright_rights_reservation", "license_record",
-            "incident_report", "governance_policy",
-            "conformity_declaration", "evidence_gap",
-        }
+        expected = self.V1_0_RECORD_TYPES | self.V1_1_RECORD_TYPES
         assert RECORD_TYPES == expected
 
     def test_mandatory_subset(self):
+        # Mandatory set is v1.0 invariant — NOT extended by v1.1.
         assert MANDATORY_RECORD_TYPES.issubset(RECORD_TYPES)
         expected_mandatory = {
-            "risk_register", "risk_treatment", "dataset_card",
-            "data_provenance", "evaluation_report",
+            "risk_register",
+            "risk_treatment",
+            "dataset_card",
+            "data_provenance",
+            "evaluation_report",
         }
         assert MANDATORY_RECORD_TYPES == expected_mandatory
 
@@ -160,13 +203,21 @@ class TestEnumStringBehavior:
         assert actual == expected
 
     def test_event_type_values(self):
-        expected = {"inference", "training", "evaluation", "deployment",
-                    "override", "error", "marking", "disclosure", "logging_spec"}
+        expected = {
+            "inference",
+            "training",
+            "evaluation",
+            "deployment",
+            "override",
+            "error",
+            "marking",
+            "disclosure",
+            "logging_spec",
+        }
         actual = {et.value for et in EventType}
         assert actual == expected
 
     def test_trust_level_values(self):
-        expected = {"self-attested", "peer-reviewed",
-                    "independently-verified", "notified-body-certified"}
+        expected = {"self-attested", "peer-reviewed", "independently-verified", "notified-body-certified"}
         actual = {tl.value for tl in TrustLevel}
         assert actual == expected

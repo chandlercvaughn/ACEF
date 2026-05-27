@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import Field
 
@@ -48,6 +48,28 @@ class Manifest(ACEFBaseModel):
     profiles: list[ProfileEntry] = Field(default_factory=list)
     record_files: list[RecordFileEntry] = Field(default_factory=list)
     audit_trail: list[AuditTrailEntry] = Field(default_factory=list)
+
+    # v1.1 manifest extensions (X5, X6) — both OPTIONAL at the model/schema
+    # level; conditional-required semantics (mode-gated required/forbidden
+    # record types; tenant uniformity) are enforced at the validator level
+    # so v1.0 bundles continue to validate clean (spec §8.1).
+    analysis_mode: Literal["subscriber", "public_artifact", "canary", "unattributed_artifact"] | None = Field(
+        default=None,
+        description=(
+            "X5: gates which v1.1 conditional-required envelope fields and "
+            "mode-gated record-type rules apply. Violations emit ACEF-080."
+        ),
+    )
+    namespaces: dict[str, dict[str, Any]] | None = Field(
+        default=None,
+        description=(
+            "X6: vendor-extension namespaces; top-level keys MUST be "
+            "x-vendor-prefixed (pattern '^x-[a-z0-9-]+/?$'). Registered "
+            "namespaces may receive validator lint hooks via "
+            "namespace_lints.py registry; unregistered namespaces validate "
+            "without lint coverage (graceful degradation)."
+        ),
+    )
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to dict for JSON output."""

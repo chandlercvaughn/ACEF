@@ -271,12 +271,19 @@ class TestRecord:
         rec = pkg.record("x-custom-record", payload={"custom": True})
         assert rec.record_type == "x-custom-record"
 
-    def test_record_all_16_types(self):
+    def test_record_all_known_types(self):
+        """Package.record() accepts every entry in RECORD_TYPES.
+
+        Per VAL-MODEL-001, RECORD_TYPES expanded from 16 (v1.0) to 22
+        (v1.0 + 6 v1.1 agent-reliability primitives). The test name no
+        longer encodes the count; the assertion uses ``len(RECORD_TYPES)``
+        so future additions remain covered without churn.
+        """
         pkg = Package()
         for rt in RECORD_TYPES:
             rec = pkg.record(rt, payload={"test": True})
             assert rec.record_type == rt
-        assert len(pkg.records) == 16
+        assert len(pkg.records) == len(RECORD_TYPES)
 
     def test_records_list_is_copy(self):
         pkg = Package()
