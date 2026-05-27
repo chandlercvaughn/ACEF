@@ -97,7 +97,34 @@ def validate_bundle(
         )
         return assessment
 
-    manifest_data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    try:
+        manifest_data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError, OSError) as exc:
+        # A malformed manifest must produce a structured diagnostic, not
+        # crash the validator before any other phase runs.
+        if evaluation_instant is None:
+            evaluation_instant = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        assessment = AssessmentBundle(evaluation_instant=evaluation_instant)
+        assessment.structural_errors.append(
+            ValidationDiagnostic(
+                "ACEF-050",
+                f"acef-manifest.json is not valid JSON: {exc}",
+                path="/acef-manifest.json",
+            ).to_dict()
+        )
+        return assessment
+    if not isinstance(manifest_data, dict):
+        if evaluation_instant is None:
+            evaluation_instant = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        assessment = AssessmentBundle(evaluation_instant=evaluation_instant)
+        assessment.structural_errors.append(
+            ValidationDiagnostic(
+                "ACEF-002",
+                "acef-manifest.json must be a JSON object",
+                path="/acef-manifest.json",
+            ).to_dict()
+        )
+        return assessment
 
     if evaluation_instant is None:
         manifest_ts = manifest_data.get("metadata", {}).get("timestamp")
@@ -173,6 +200,18 @@ def validate_bundle(
                         )
                     )
                     continue
+                # JSONL lines must be JSON objects — null, arrays, strings,
+                # and numbers are well-formed JSON but cannot be records.
+                if not isinstance(rec_data, dict):
+                    early_load_diagnostics.append(
+                        ValidationDiagnostic(
+                            "ACEF-050",
+                            f"JSONL line at {rf_path_str}:{line_number} is not a JSON object "
+                            f"(got {type(rec_data).__name__})",
+                            path=f"/{rf_path_str}",
+                        )
+                    )
+                    continue
                 # Cross-check: every record's record_type must match
                 # the manifest's declared record_type for the file
                 # it appears in. A malicious bundle could otherwise
@@ -194,6 +233,19 @@ def validate_bundle(
                 try:
                     all_records.append(dict_to_record_envelope(rec_data))
                 except _ACEFFormatErr as exc:
+                    early_load_diagnostics.append(
+                        ValidationDiagnostic(
+                            "ACEF-004",
+                            f"Cannot construct RecordEnvelope from {rf_path_str}:{line_number}: {exc}",
+                            path=f"/{rf_path_str}",
+                        )
+                    )
+                except Exception as exc:
+                    # Catch raw Pydantic ValidationError or any other
+                    # construction failure that escapes the
+                    # ACEFFormatError wrapper. The validator must continue
+                    # collecting diagnostics, not crash on a single bad
+                    # line.
                     early_load_diagnostics.append(
                         ValidationDiagnostic(
                             "ACEF-004",
@@ -256,8 +308,20 @@ def validate_bundle(
     if content_hashes_path.exists():
         from acef.integrity import compute_bundle_digest
 
-        content_hashes = json.loads(content_hashes_path.read_text(encoding="utf-8"))
-        assessment.evidence_bundle_ref.content_hash = compute_bundle_digest(content_hashes)
+        try:
+            content_hashes = json.loads(
+                content_hashes_path.read_text(encoding="utf-8")
+            )
+            if isinstance(content_hashes, dict):
+                assessment.evidence_bundle_ref.content_hash = (
+                    compute_bundle_digest(content_hashes)
+                )
+        except (json.JSONDecodeError, UnicodeDecodeError, OSError):
+            # The Phase 2 integrity check already emitted a diagnostic for
+            # an invalid content-hashes.json; don't re-emit, just leave the
+            # content_hash field empty so callers know it could not be
+            # computed.
+            pass
 
     return assessment
 

@@ -246,43 +246,71 @@ def compute_content_hashes(bundle_dir: Path) -> dict[str, str]:
     """
     hashes: dict[str, str] = {}
 
-    def _add_if_real_file(file_path: Path, root: Path) -> None:
-        """Add ``file_path`` to the hash domain if it is a regular file
-        contained within ``root``. Rejects symlinks (which could escape
-        the bundle root via dangling targets) and any path whose
-        resolved location escapes ``root``.
+    bundle_root_resolved = bundle_dir.resolve()
 
-        Spec §3.1.1: paths in the manifest are relative to the bundle
-        root, with no ``.``/``..`` segments — symlinks bypass that
-        invariant by encoding traversal in filesystem state instead of
-        path text, so they are rejected outright here.
+    def _add_if_real_file(file_path: Path) -> None:
+        """Add ``file_path`` to the hash domain if it is a regular file
+        whose resolved location stays inside ``bundle_root_resolved``.
+
+        Symlinks anywhere in the hash domain are forbidden: spec §3.1.1
+        requires paths to be relative to the bundle root with no ``.``
+        or ``..`` segments, and symlinks encode traversal in filesystem
+        state. We raise :class:`ACEFCanonicalizationError` (mapped to
+        ACEF-051) so the calling validator surfaces the issue as a
+        structured diagnostic rather than silently skipping the file
+        (which would leave the bundle's content-hashes.json incomplete
+        and confuse downstream verifiers).
         """
-        # is_symlink check first so we don't follow the link before testing.
         if file_path.is_symlink():
-            return
+            raise ACEFCanonicalizationError(
+                f"Symlink in bundle hash domain (forbidden by spec §3.1.1): "
+                f"{file_path}",
+                path=file_path,
+            )
         if not file_path.is_file():
             return
         try:
             resolved = file_path.resolve()
-            resolved.relative_to(root.resolve())
-        except (ValueError, OSError):
-            return
+            resolved.relative_to(bundle_root_resolved)
+        except (ValueError, OSError) as exc:
+            raise ACEFCanonicalizationError(
+                f"File in hash domain escapes bundle root: {file_path}: {exc}",
+                path=file_path,
+            ) from exc
         rel = file_path.relative_to(bundle_dir).as_posix()
         hashes[rel] = sha256_file(file_path)
 
     manifest_path = bundle_dir / "acef-manifest.json"
-    if manifest_path.exists() and not manifest_path.is_symlink():
+    if manifest_path.exists():
+        if manifest_path.is_symlink():
+            raise ACEFCanonicalizationError(
+                "acef-manifest.json is a symlink (forbidden by spec §3.1.1)",
+                path=manifest_path,
+            )
         hashes["acef-manifest.json"] = sha256_file(manifest_path)
 
     records_dir = bundle_dir / "records"
     if records_dir.exists():
+        # Reject top-level records/ symlink — a malicious bundle could
+        # point records/ at a directory outside bundle_dir, in which case
+        # rglob would silently follow it.
+        if records_dir.is_symlink():
+            raise ACEFCanonicalizationError(
+                "records/ is a symlink (forbidden by spec §3.1.1)",
+                path=records_dir,
+            )
         for file_path in sorted(records_dir.rglob("*")):
-            _add_if_real_file(file_path, records_dir)
+            _add_if_real_file(file_path)
 
     artifacts_dir = bundle_dir / "artifacts"
     if artifacts_dir.exists():
+        if artifacts_dir.is_symlink():
+            raise ACEFCanonicalizationError(
+                "artifacts/ is a symlink (forbidden by spec §3.1.1)",
+                path=artifacts_dir,
+            )
         for file_path in sorted(artifacts_dir.rglob("*")):
-            _add_if_real_file(file_path, artifacts_dir)
+            _add_if_real_file(file_path)
 
     return dict(sorted(hashes.items()))
 
