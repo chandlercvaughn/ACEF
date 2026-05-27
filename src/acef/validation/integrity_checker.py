@@ -97,19 +97,67 @@ def check_integrity(bundle_dir: Path) -> list[ValidationDiagnostic]:
 
 
 def _check_signatures(bundle_dir: Path, content_hashes_bytes: bytes) -> list[ValidationDiagnostic]:
-    """Verify all JWS signatures in signatures/."""
+    """Verify all JWS signatures in ``signatures/``.
+
+    For every ``.jws`` file:
+
+    1. Parse the header. Emit ACEF-012 on malformed JWS.
+    2. Reject algorithms outside the {RS256, ES256} whitelist
+       (ACEF-013, spec §3.1.3 #5).
+    3. Attempt cryptographic verification using the public key carried
+       by the JWS itself — either an embedded ``jwk`` or the first
+       certificate in ``x5c``. If neither is present, emit ACEF-012:
+       a bundle that claims a signature but provides no key cannot be
+       verified by an offline reader.
+    4. Re-canonicalize ``content-hashes.json`` via RFC 8785 and use that
+       as the signing input (spec §3.1.3 #5 — the signature is over the
+       canonicalized bytes, NOT the raw on-disk bytes, so a producer
+       that writes pretty-printed JSON still produces a verifiable
+       signature).
+    5. On invalid signature, emit ACEF-012.
+    """
+    from acef.errors import ACEFSigningError
+    from acef.integrity import canonicalize_json_str
+    from acef.signing import verify_detached_jws
+
     diagnostics: list[ValidationDiagnostic] = []
     sig_dir = bundle_dir / "signatures"
 
     if not sig_dir.exists():
         return diagnostics  # Unsigned bundles are valid
 
+    # Read manifest timestamp to anchor cert validity against (spec §3.1.3).
+    manifest_timestamp: str | None = None
+    manifest_path = bundle_dir / "acef-manifest.json"
+    if manifest_path.exists():
+        try:
+            mdata = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest_timestamp = mdata.get("metadata", {}).get("timestamp")
+        except json.JSONDecodeError:
+            manifest_timestamp = None
+
+    try:
+        canonical_input = canonicalize_json_str(
+            content_hashes_bytes.decode("utf-8")
+        )
+    except (ValueError, UnicodeDecodeError) as exc:
+        diagnostics.append(
+            ValidationDiagnostic(
+                "ACEF-012",
+                f"Cannot re-canonicalize content-hashes.json for sig verify: {exc}",
+                path="/hashes/content-hashes.json",
+            )
+        )
+        return diagnostics
+
     for sig_file in sorted(sig_dir.glob("*.jws")):
         jws_str = sig_file.read_text(encoding="utf-8").strip()
         if not jws_str:
             continue
 
-        # Parse JWS header to check algorithm
+        # Parse JWS header to check algorithm before full verification so
+        # we emit the precise spec-mandated code (ACEF-013) for an
+        # unsupported algorithm.
         parts = jws_str.split(".")
         if len(parts) != 3:
             diagnostics.append(
@@ -143,10 +191,37 @@ def _check_signatures(bundle_dir: Path, content_hashes_bytes: bytes) -> list[Val
                     path=f"/signatures/{sig_file.name}",
                 )
             )
+            continue
 
-        # Note: actual signature verification requires the public key,
-        # which is provided by x5c or external trust store.
-        # We validate format here; full verification is done with keys.
+        # Per spec §3.1.3 #5 the header MUST carry x5c or jwk so an
+        # offline verifier can do the work. Reject bundles that ship a
+        # signature without an in-band key.
+        if "x5c" not in header and "jwk" not in header:
+            diagnostics.append(
+                ValidationDiagnostic(
+                    "ACEF-012",
+                    f"Signature {sig_file.name} has no x5c or jwk header "
+                    "— offline verifier cannot resolve a public key",
+                    path=f"/signatures/{sig_file.name}",
+                )
+            )
+            continue
+
+        try:
+            verify_detached_jws(
+                jws_str,
+                canonical_input,
+                manifest_timestamp=manifest_timestamp,
+            )
+        except ACEFSigningError as exc:
+            code = exc.code if exc.code in ("ACEF-012", "ACEF-013") else "ACEF-012"
+            diagnostics.append(
+                ValidationDiagnostic(
+                    code,
+                    f"Signature verification failed for {sig_file.name}: {exc}",
+                    path=f"/signatures/{sig_file.name}",
+                )
+            )
 
     return diagnostics
 
