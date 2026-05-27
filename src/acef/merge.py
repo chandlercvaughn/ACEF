@@ -121,6 +121,8 @@ def merge_packages(
     seen_entities: dict[str, str] = {}  # entity_id -> pkg_id
     # For records: track record_id -> (pkg_id, record) so we can compare timestamps
     seen_records: dict[str, tuple[str, RecordEnvelope]] = {}
+    # Dedup relationships by (source_ref, target_ref, type) — see below.
+    seen_relationships: set[tuple[str, str, str]] = set()
 
     for pkg in packages:
         pkg_id = pkg.metadata.package_id
@@ -175,7 +177,18 @@ def merge_packages(
                 merged_entities.actors.append(actor.model_copy(deep=True))
 
         for rel in pkg.entities.relationships:
-            merged_entities.relationships.append(rel.model_copy(deep=True))
+            # Dedup by (source_ref, target_ref, relationship_type). Multiple
+            # source packages declaring the same edge collapse to a single
+            # entry in the merged graph (P2 from structural review).
+            rel_type = (
+                rel.relationship_type.value
+                if hasattr(rel.relationship_type, "value")
+                else str(rel.relationship_type)
+            )
+            rel_key = (rel.source_ref, rel.target_ref, rel_type)
+            if rel_key not in seen_relationships:
+                seen_relationships.add(rel_key)
+                merged_entities.relationships.append(rel.model_copy(deep=True))
 
         # Merge profiles (using public .profiles property, deduplicate by profile_id)
         existing_profile_ids = {p.profile_id for p in merged_profiles}

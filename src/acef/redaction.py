@@ -10,10 +10,17 @@ from __future__ import annotations
 
 from typing import Any
 
+from acef.errors import ACEFFormatError
 from acef.integrity import canonicalize, sha256_hex
 from acef.models.enums import Confidentiality
 from acef.models.records import RecordEnvelope
 from acef.package import Package
+
+# The v1 SDK only documents and supports one redaction method. New methods
+# (e.g., zero-knowledge proofs per spec §7 Q6) require an explicit
+# whitelist update so untested methods cannot silently produce records
+# that downstream tooling will not understand.
+_SUPPORTED_REDACTION_METHODS = frozenset({"sha256-hash-commitment"})
 
 
 def redact_record(
@@ -25,16 +32,35 @@ def redact_record(
     """Create a redacted copy of a record.
 
     The payload is replaced with a hash commitment. The original payload
-    hash is stored in redaction_method for verification.
+    hash is stored in ``redaction_method`` so verifiers can recompute it
+    against the original payload via :func:`verify_redaction`.
 
     Args:
         record: The record to redact.
-        method: Redaction method (default: sha256-hash-commitment).
-        access_policy: Who can see the full payload.
+        method: Redaction method (default: ``sha256-hash-commitment``).
+            Must be a documented method in
+            :data:`_SUPPORTED_REDACTION_METHODS`; arbitrary strings are
+            rejected so misspellings cannot produce records labeled with
+            a method downstream tools cannot interpret.
+        access_policy: Who can see the full payload. If ``None``, the
+            record's existing ``access_policy`` is preserved rather than
+            overwritten — passing ``None`` should not strip an existing
+            policy.
 
     Returns:
-        A new RecordEnvelope with redacted payload.
+        A new :class:`RecordEnvelope` with redacted payload.
+
+    Raises:
+        ACEFFormatError: If ``method`` is not a documented redaction
+            method.
     """
+    if method not in _SUPPORTED_REDACTION_METHODS:
+        raise ACEFFormatError(
+            f"Unsupported redaction method: {method!r}. "
+            f"Supported methods: {sorted(_SUPPORTED_REDACTION_METHODS)}",
+            code="ACEF-004",
+        )
+
     # Compute hash of canonical payload
     payload_canonical = canonicalize(record.payload)
     payload_hash = sha256_hex(payload_canonical)
@@ -43,7 +69,12 @@ def redact_record(
     redacted = record.model_copy(deep=True)
     redacted.confidentiality = Confidentiality.HASH_COMMITTED
     redacted.redaction_method = f"{method}:{payload_hash}"
-    redacted.access_policy = access_policy
+    # Only overwrite access_policy when the caller actually provides one.
+    # Passing access_policy=None previously erased any pre-existing policy
+    # — a bug that silently removed access controls (P2 from structural
+    # review).
+    if access_policy is not None:
+        redacted.access_policy = access_policy
     redacted.payload = {"_redacted": True, "_commitment": f"sha256:{payload_hash}"}
 
     return redacted
