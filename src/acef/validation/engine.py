@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from acef.errors import ACEFError, ValidationDiagnostic
+from acef.errors import ACEFError, ACEFSchemaError, ValidationDiagnostic
 from acef.models.assessment import (
     AssessmentBundle,
     Assessor,
@@ -21,6 +21,7 @@ from acef.models.assessment import (
     RuleResult,
 )
 from acef.models.records import RecordEnvelope, dict_to_record_envelope
+from acef.schemas.registry import schema_version_for_core_version
 from acef.templates.registry import compute_template_digest, load_template
 from acef.validation.integrity_checker import check_integrity, get_signature_info
 from acef.validation.reference_checker import check_references
@@ -92,9 +93,7 @@ def validate_bundle(
         if evaluation_instant is None:
             evaluation_instant = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         assessment = AssessmentBundle(evaluation_instant=evaluation_instant)
-        assessment.structural_errors.append(
-            ValidationDiagnostic("ACEF-002", "acef-manifest.json not found").to_dict()
-        )
+        assessment.structural_errors.append(ValidationDiagnostic("ACEF-002", "acef-manifest.json not found").to_dict())
         return assessment
 
     try:
@@ -151,6 +150,23 @@ def validate_bundle(
         # Schema validation in Phase 1 will diagnose the type error; we
         # just need to keep Phase 0 from crashing.
         core_version = "1.0.0"
+
+    # Resolve schema-version token from core_version. This routes Phase 1
+    # schema validation to v1/ for 1.0.x bundles and v1.1/ for 1.1.x
+    # bundles (with v1.1 → v1 fallback for record types unchanged in
+    # the v1.1 minor release). See VAL-VALIDATION-001/002.
+    try:
+        schema_version = schema_version_for_core_version(core_version)
+    except ACEFSchemaError as exc:
+        assessment = AssessmentBundle(evaluation_instant=evaluation_instant)
+        assessment.structural_errors.append(
+            ValidationDiagnostic(
+                exc.code,
+                exc.message,
+            ).to_dict()
+        )
+        return assessment
+
     try:
         core_major = int(core_version.split(".")[0])
         if core_major != 1:
@@ -170,6 +186,7 @@ def validate_bundle(
     # rather than crashing the validator before Phase 1 diagnostics are
     # collected.
     from acef.errors import ACEFFormatError as _ACEFFormatErr
+
     all_records_data: list[dict[str, Any]] = []
     all_records: list[RecordEnvelope] = []
     record_file_type_mismatches: list[ValidationDiagnostic] = []
@@ -284,9 +301,13 @@ def validate_bundle(
 
     all_diagnostics: list[ValidationDiagnostic] = []
 
-    # Phase 1: Schema validation
-    schema_diagnostics = validate_manifest_schema(manifest_data)
-    schema_diagnostics.extend(validate_record_schemas(all_records_data))
+    # Phase 1: Schema validation — route to v1/ or v1.1/ schemas based on
+    # the bundle's declared core_version (resolved above into
+    # ``schema_version``). v1.1 falls back to v1 for record types unchanged
+    # in the minor release; v1 has no fallback so v1.1-only record types
+    # in a v1.0-declared bundle correctly emit ACEF-003.
+    schema_diagnostics = validate_manifest_schema(manifest_data, schema_version)
+    schema_diagnostics.extend(validate_record_schemas(all_records_data, schema_version))
     all_diagnostics.extend(schema_diagnostics)
 
     # Surface record-file type-mismatch and early-load diagnostics gathered
@@ -327,13 +348,9 @@ def validate_bundle(
         from acef.integrity import compute_bundle_digest
 
         try:
-            content_hashes = json.loads(
-                content_hashes_path.read_text(encoding="utf-8")
-            )
+            content_hashes = json.loads(content_hashes_path.read_text(encoding="utf-8"))
             if isinstance(content_hashes, dict):
-                assessment.evidence_bundle_ref.content_hash = (
-                    compute_bundle_digest(content_hashes)
-                )
+                assessment.evidence_bundle_ref.content_hash = compute_bundle_digest(content_hashes)
         except (json.JSONDecodeError, UnicodeDecodeError, OSError):
             # The Phase 2 integrity check already emitted a diagnostic for
             # an invalid content-hashes.json; don't re-emit, just leave the
@@ -368,7 +385,10 @@ def _collect_results(
     for prov_id in sorted(seen_provisions):
         prov_results = [r for r in results if r.provision_id == prov_id]
         summary = compute_provision_outcome(
-            prov_id, profile_id, prov_results, records,
+            prov_id,
+            profile_id,
+            prov_results,
+            records,
             subject_scope=subject_scope or [],
         )
         assessment.provision_summary.append(summary)
@@ -396,12 +416,12 @@ def _collect_results(
         # provisions are passing only because an evidence_gap record
         # acknowledges the missing evidence (spec §3.7 step 4).
         from acef.models.enums import ProvisionOutcome as _PO
+
         if summary.provision_outcome == _PO.GAP_ACKNOWLEDGED:
             assessment.structural_errors.append(
                 ValidationDiagnostic(
                     "ACEF-042",
-                    f"evidence_gap acknowledged for provision {prov_id} "
-                    f"in profile {profile_id}",
+                    f"evidence_gap acknowledged for provision {prov_id} in profile {profile_id}",
                 ).to_dict()
             )
 
@@ -409,17 +429,13 @@ def _collect_results(
         # rule (severity=warning) failed for this provision. Spec §3.6
         # ACEF-041 is the canonical code for stale evidence.
         from acef.models.enums import RuleOutcome as _RO, RuleSeverity as _RS
+
         for r in prov_results:
-            if (
-                r.outcome == _RO.FAILED
-                and r.rule_severity == _RS.WARNING
-                and "freshness" in (r.rule_id or "").lower()
-            ):
+            if r.outcome == _RO.FAILED and r.rule_severity == _RS.WARNING and "freshness" in (r.rule_id or "").lower():
                 assessment.structural_errors.append(
                     ValidationDiagnostic(
                         "ACEF-041",
-                        f"Evidence freshness exceeded for rule {r.rule_id}: "
-                        f"{r.message or ''}",
+                        f"Evidence freshness exceeded for rule {r.rule_id}: {r.message or ''}",
                     ).to_dict()
                 )
 
@@ -501,9 +517,7 @@ def _evaluate_profiles(
                 manifest_profile_decl = _decl
                 break
 
-        declared_template_version = (
-            manifest_profile_decl.get("template_version") if manifest_profile_decl else None
-        )
+        declared_template_version = manifest_profile_decl.get("template_version") if manifest_profile_decl else None
         if declared_template_version and declared_template_version != template.version:
             assessment.structural_errors.append(
                 ValidationDiagnostic(
@@ -566,11 +580,11 @@ def _evaluate_profiles(
         provisions_to_evaluate = template.provisions
         if applicable_provisions:
             provisions_to_evaluate = [
-                p for p in template.provisions
+                p
+                for p in template.provisions
                 if p.provision_id in applicable_provisions
                 or any(
-                    ap.startswith(p.provision_id + ".")
-                    or ap.startswith(p.provision_id + "-")
+                    ap.startswith(p.provision_id + ".") or ap.startswith(p.provision_id + "-")
                     for ap in applicable_provisions
                 )
             ]
@@ -624,10 +638,7 @@ def _evaluate_profiles(
                     _collect_results(assessment, skipped_results, profile_id, records)
 
         # Exclude not-yet-effective provisions from further evaluation.
-        provisions_to_evaluate = [
-            p for p in provisions_to_evaluate
-            if p.provision_id not in not_yet_effective
-        ]
+        provisions_to_evaluate = [p for p in provisions_to_evaluate if p.provision_id not in not_yet_effective]
 
         # Split provisions into package-scoped and per-subject (default)
         package_scoped = [p for p in provisions_to_evaluate if p.evaluation_scope == "package"]
@@ -666,7 +677,10 @@ def _evaluate_profiles(
                     signature_algorithms=sig_algs,
                 )
                 _collect_results(
-                    assessment, results, profile_id, records,
+                    assessment,
+                    results,
+                    profile_id,
+                    records,
                     subject_scope=[subject_id],
                 )
         elif per_subject:

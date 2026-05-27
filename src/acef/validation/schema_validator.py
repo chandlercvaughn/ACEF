@@ -12,15 +12,24 @@ from acef.errors import ValidationDiagnostic
 from acef.schemas.registry import validate_against_schema
 
 
-def validate_manifest_schema(manifest_data: dict[str, Any]) -> list[ValidationDiagnostic]:
+def validate_manifest_schema(
+    manifest_data: dict[str, Any],
+    version: str = "v1",
+) -> list[ValidationDiagnostic]:
     """Validate manifest against the manifest JSON Schema.
+
+    Args:
+        manifest_data: The parsed acef-manifest.json.
+        version: Schema-dir token ("v1" or "v1.1") selected upstream from
+            ``manifest.versioning.core_version``. See
+            :func:`acef.schemas.registry.schema_version_for_core_version`.
 
     Returns:
         List of diagnostics. Empty means valid.
     """
     diagnostics: list[ValidationDiagnostic] = []
 
-    errors = validate_against_schema(manifest_data, "manifest")
+    errors = validate_against_schema(manifest_data, "manifest", version)
     for error in errors:
         diagnostics.append(
             ValidationDiagnostic(
@@ -35,8 +44,15 @@ def validate_manifest_schema(manifest_data: dict[str, Any]) -> list[ValidationDi
 
 def validate_record_schemas(
     records: list[dict[str, Any]],
+    version: str = "v1",
 ) -> list[ValidationDiagnostic]:
     """Validate all records against envelope and payload schemas.
+
+    Args:
+        records: Parsed record dicts (envelope + payload).
+        version: Schema-dir token ("v1" or "v1.1") selected upstream from
+            ``manifest.versioning.core_version``. Controls both the
+            envelope schema and per-record-type payload schema selection.
 
     For each record:
     1. Validate against record-envelope.schema.json
@@ -49,7 +65,7 @@ def validate_record_schemas(
 
     for i, record in enumerate(records):
         # Validate envelope
-        envelope_errors = validate_against_schema(record, "record-envelope")
+        envelope_errors = validate_against_schema(record, "record-envelope", version)
         for error in envelope_errors:
             diagnostics.append(
                 ValidationDiagnostic(
@@ -68,7 +84,7 @@ def validate_record_schemas(
         record_type = record.get("record_type", "")
         payload = record.get("payload", {}) if isinstance(record.get("payload"), dict) else {}
         if record_type:
-            payload_errors = validate_against_schema(payload, record_type)
+            payload_errors = validate_against_schema(payload, record_type, version)
             for error in payload_errors:
                 # Don't report as error if schema not found (ACEF-003 instead)
                 if "not found" in str(error.message):
