@@ -2,37 +2,37 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://acef.ai/schemas/v1.1/variant-registry.json",
   "title": "ACEF v1.1 Payload Variant Registry (additions)",
-  "description": "Additive variant entries for ACEF Core v1.1. Resolved as a UNION with v1.0's variant-registry.json by acef.schemas.registry.load_variant_registry('v1.1') — v1.1 adds artifact names without removing v1.0 entries (per VAL-VARIANT-002 and the v1.x-minor freeze rule in Spec §3.1.4). The five entries here correspond to the agent-reliability primitives that F-M1-VARIANTS introduces. Of these, `verification_badge` and `evidence_freshness_window` are accompanied by oneOf payload-shape enforcement on their parent record-type schemas (transparency_disclosure, evidence_gap) in this same v1.1 directory, satisfying VAL-VARIANT-004's 'at least 2' threshold. Full oneOf enforcement for the remaining three (`human_oversight_kill_switch`, `regression_definition`, `external_disposition`) is deferred to a follow-up feature. `external_disposition` is registered against `event_log` (with /payload/event_type discriminator) because no standalone `disposition_record` schema exists in v1.1 at the time of registration; this preserves referential integrity while a dedicated record type is designed.",
+  "description": "Additive variant entries for ACEF Core v1.1, corresponding 1:1 with brief §4.1-§4.5. Resolved as a UNION with v1.0's variant-registry.json by acef.schemas.registry.load_variant_registry('v1.1') — v1.1 adds artifact names without removing v1.0 entries (per VAL-VARIANT-002 and the v1.x-minor freeze rule in Spec §3.1.4). The five entries are: V1 human_oversight_kill_switch (parent: human_oversight_action, discriminator /payload/oversight_subtype = 'kill_switch'); V2 regression_definition (parent: risk_treatment, discriminator /payload/treatment_subtype = 'regression_definition'); V3 disposition_record (parent: risk_treatment, discriminator /payload/treatment_subtype = 'external_disposition'); V4 badge_state (parent: transparency_disclosure, discriminator /payload/variant = 'verification_badge'); V5 evidence_freshness_window (parent: evidence_gap, discriminator /payload/gap_subtype = 'freshness_window'). Of these, V4 (badge_state) and V5 (evidence_freshness_window) are accompanied by oneOf payload-shape enforcement on their parent record-type schemas (transparency_disclosure.schema.json, evidence_gap.schema.json) in this same v1.1 directory, satisfying VAL-VARIANT-003's 'at least 2 of 5' threshold for branch enforcement. oneOf enforcement for V1, V2, V3 (which would require new v1.1 overlay schemas for human_oversight_action and risk_treatment) is deferred to a follow-up feature; the variant-registry entries are sufficient to satisfy VAL-VARIANT-001 and VAL-VARIANT-002.",
   "variants": [
     {
       "artifact_name": "human_oversight_kill_switch",
       "record_type": "human_oversight_action",
-      "discriminator_field": "/payload/action_type",
+      "discriminator_field": "/payload/oversight_subtype",
       "discriminator_value": "kill_switch"
     },
     {
       "artifact_name": "regression_definition",
-      "record_type": "evidence_gap",
-      "discriminator_field": "/payload/gap_class",
+      "record_type": "risk_treatment",
+      "discriminator_field": "/payload/treatment_subtype",
       "discriminator_value": "regression_definition"
     },
     {
-      "artifact_name": "external_disposition",
-      "record_type": "event_log",
-      "discriminator_field": "/payload/event_type",
+      "artifact_name": "disposition_record",
+      "record_type": "risk_treatment",
+      "discriminator_field": "/payload/treatment_subtype",
       "discriminator_value": "external_disposition"
     },
     {
-      "artifact_name": "verification_badge",
+      "artifact_name": "badge_state",
       "record_type": "transparency_disclosure",
-      "discriminator_field": "/payload/disclosure_subtype",
+      "discriminator_field": "/payload/variant",
       "discriminator_value": "verification_badge"
     },
     {
       "artifact_name": "evidence_freshness_window",
       "record_type": "evidence_gap",
-      "discriminator_field": "/payload/gap_class",
-      "discriminator_value": "evidence_freshness_window"
+      "discriminator_field": "/payload/gap_subtype",
+      "discriminator_value": "freshness_window"
     }
   ]
 }

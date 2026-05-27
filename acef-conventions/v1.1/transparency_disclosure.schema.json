@@ -2,17 +2,13 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://acef.ai/schemas/v1.1/transparency_disclosure.schema.json",
   "title": "ACEF v1.1 Transparency Disclosure Payload (overlay)",
-  "description": "ACEF Core v1.1 overlay of transparency_disclosure. Inlines the v1.0 property set (kept backward-compatible) and adds conditional discriminator-keyed oneOf enforcement for the verification_badge variant (per VAL-VARIANT-004 and the v1.1 variant-registry entry for /payload/disclosure_subtype = 'verification_badge'). Records that do NOT set /payload/disclosure_subtype validate exactly as under v1.0. Records that set it to 'verification_badge' MUST satisfy the badge_id / claim / expires_at / signing_kid required-field set.",
+  "description": "ACEF Core v1.1 overlay of transparency_disclosure. Inlines the v1.0 property set (kept backward-compatible) and adds conditional discriminator-keyed enforcement for the V4 'badge_state' variant per brief §4.4. The discriminator is /payload/variant = 'verification_badge' (this re-uses the v1.0 'variant' field, which under v1.0 carried values like 'publication_evidence'; the v1.1 addition is the new enum value 'verification_badge' plus its branch-required fields). Records that do NOT set /payload/variant or set it to a v1.0 value validate exactly as under v1.0. Records that set it to 'verification_badge' MUST satisfy the brief §4.4 payload field set: badge_id, subject_ref, page_state, integrity_state, evidence_chain_root_ref, freshness_state_ref — plus provisional_reason when page_state='provisional' and public_artifact_link when page_state is 'green' or 'provisional'.",
   "type": "object",
   "required": ["disclosure_type"],
   "properties": {
     "variant": {
       "type": "string",
-      "description": "Discriminator for payload variants from v1.0 (e.g., 'publication_evidence')."
-    },
-    "disclosure_subtype": {
-      "type": "string",
-      "description": "v1.1 discriminator field for transparency_disclosure variants. Values defined in v1.1 variant-registry.json. Currently includes: 'verification_badge'."
+      "description": "Discriminator for payload variants. v1.0 values include 'publication_evidence'; v1.1 adds 'verification_badge' (the V4 badge_state variant per brief §4.4)."
     },
     "disclosure_type": {
       "type": "string",
@@ -127,36 +123,92 @@
     },
     "badge_id": {
       "type": "string",
-      "description": "URN-shaped identifier for the verification badge (verification_badge variant)."
+      "description": "Identifier for the verification badge (verification_badge variant, V4 per brief §4.4)."
     },
-    "claim": {
+    "subject_ref": {
       "type": "string",
-      "description": "Human-readable claim displayed by the verification badge (verification_badge variant)."
+      "description": "URN reference to the ai_system or ai_model the badge is verifying (verification_badge variant, V4 per brief §4.4)."
     },
-    "expires_at": {
+    "page_state": {
       "type": "string",
-      "format": "date-time",
-      "description": "ISO 8601 timestamp at which this badge claim expires (verification_badge variant)."
+      "description": "Public page state shown for the badge (verification_badge variant, V4 per brief §4.4 + §16.7). Independent of integrity_state.",
+      "enum": ["green", "provisional", "red", "unsupported", "unknown"]
     },
-    "signing_kid": {
+    "integrity_state": {
       "type": "string",
-      "description": "Key ID of the JWS key whose signature backs this badge (verification_badge variant)."
+      "description": "Bundle integrity state underlying the badge (verification_badge variant, V4 per brief §4.4 + §16.7). Independent of page_state.",
+      "enum": ["verified", "failed_integrity", "degraded", "unverified"]
+    },
+    "evidence_chain_root_ref": {
+      "type": "string",
+      "description": "URN of the top-level evidence record the badge depends on (verification_badge variant, V4 per brief §4.4)."
+    },
+    "freshness_state_ref": {
+      "type": "string",
+      "description": "URN of the most-recent coverage_cell freshness state the badge depends on (verification_badge variant, V4 per brief §4.4)."
+    },
+    "provisional_reason": {
+      "type": "string",
+      "description": "Reason the badge is in 'provisional' state. REQUIRED when page_state='provisional' (verification_badge variant, V4 per brief §4.4).",
+      "enum": ["partial_coverage", "pending_freshness_reconciliation", "accepted_risk_in_effect"]
+    },
+    "public_artifact_link": {
+      "type": "string",
+      "format": "uri",
+      "description": "Public URL to the artifact backing the badge. REQUIRED when page_state is 'green' or 'provisional' (verification_badge variant, V4 per brief §4.4)."
     }
   },
   "additionalProperties": true,
   "allOf": [
     {
-      "$comment": "VAL-VARIANT-004 conditional oneOf enforcement for verification_badge. When /payload/disclosure_subtype is 'verification_badge', the badge-specific required-field set applies. When unset (or any other value), no additional constraint is imposed — preserving the v1.0 envelope's openness and existing variant flow (publication_evidence keyed on /payload/variant).",
+      "$comment": "VAL-VARIANT-003 conditional enforcement for the V4 badge_state variant. When /payload/variant is 'verification_badge', the brief §4.4 required-field set applies: badge_id, subject_ref, page_state, integrity_state, evidence_chain_root_ref, freshness_state_ref. When unset (or any other v1.0 variant value), no additional constraint is imposed.",
       "if": {
         "type": "object",
         "properties": {
-          "disclosure_subtype": {"const": "verification_badge"}
+          "variant": {"const": "verification_badge"}
         },
-        "required": ["disclosure_subtype"]
+        "required": ["variant"]
       },
       "then": {
         "type": "object",
-        "required": ["badge_id", "claim", "expires_at", "signing_kid"]
+        "required": [
+          "badge_id",
+          "subject_ref",
+          "page_state",
+          "integrity_state",
+          "evidence_chain_root_ref",
+          "freshness_state_ref"
+        ]
+      }
+    },
+    {
+      "$comment": "VAL-VARIANT-003 conditional enforcement for the V4 provisional_reason rule (brief §4.4: provisional_reason REQUIRED when page_state='provisional').",
+      "if": {
+        "type": "object",
+        "properties": {
+          "variant": {"const": "verification_badge"},
+          "page_state": {"const": "provisional"}
+        },
+        "required": ["variant", "page_state"]
+      },
+      "then": {
+        "type": "object",
+        "required": ["provisional_reason"]
+      }
+    },
+    {
+      "$comment": "VAL-VARIANT-003 conditional enforcement for the V4 public_artifact_link rule (brief §4.4: public_artifact_link REQUIRED when page_state in {green, provisional}).",
+      "if": {
+        "type": "object",
+        "properties": {
+          "variant": {"const": "verification_badge"},
+          "page_state": {"enum": ["green", "provisional"]}
+        },
+        "required": ["variant", "page_state"]
+      },
+      "then": {
+        "type": "object",
+        "required": ["public_artifact_link"]
       }
     }
   ]

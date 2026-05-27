@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://acef.ai/schemas/v1.1/evidence_gap.schema.json",
   "title": "ACEF v1.1 Evidence Gap Payload (overlay)",
-  "description": "ACEF Core v1.1 overlay of evidence_gap. Inlines the v1.0 property set (kept backward-compatible) and adds conditional discriminator-keyed oneOf enforcement for the evidence_freshness_window and regression_definition variants (per VAL-VARIANT-004 and the v1.1 variant-registry entries for /payload/gap_class). Records that do NOT set /payload/gap_class validate exactly as under v1.0.",
+  "description": "ACEF Core v1.1 overlay of evidence_gap. Inlines the v1.0 property set (kept backward-compatible) and adds conditional discriminator-keyed enforcement for the V5 'evidence_freshness_window' variant per brief §4.5. The discriminator is /payload/gap_subtype = 'freshness_window'. Records that do NOT set /payload/gap_subtype validate exactly as under v1.0. Records that set it to 'freshness_window' MUST satisfy the time-window field set: window_start, window_end, refresh_due_at, current_freshness_state. NOTE: The V2 'regression_definition' variant parents to risk_treatment (NOT evidence_gap) per brief §4.2; its branch enforcement is therefore not declared here — it belongs in a future v1.1/risk_treatment.schema.json overlay.",
   "type": "object",
   "required": ["missing_record_type", "reason"],
   "properties": {
@@ -81,71 +81,45 @@
       "type": "string",
       "description": "Justification for why the evidence is not applicable."
     },
-    "gap_class": {
+    "gap_subtype": {
       "type": "string",
-      "description": "v1.1 discriminator for evidence_gap variants. Values registered in v1.1 variant-registry.json: 'evidence_freshness_window' (time-bounded freshness gap) and 'regression_definition' (regression-test-pending gap)."
+      "description": "v1.1 discriminator for evidence_gap variants per brief §4.5. Registered values: 'freshness_window' (V5 evidence_freshness_window — time-bound expression of when a piece of evidence stops being current)."
     },
     "window_start": {
       "type": "string",
       "format": "date-time",
-      "description": "ISO 8601 timestamp marking the start of the freshness window (evidence_freshness_window variant)."
+      "description": "ISO 8601 timestamp marking the start of the freshness window (V5 evidence_freshness_window variant)."
     },
     "window_end": {
       "type": "string",
       "format": "date-time",
-      "description": "ISO 8601 timestamp marking the end of the freshness window (evidence_freshness_window variant)."
+      "description": "ISO 8601 timestamp marking the end of the freshness window (V5 evidence_freshness_window variant)."
     },
     "refresh_due_at": {
       "type": "string",
       "format": "date-time",
-      "description": "ISO 8601 timestamp by which evidence MUST be refreshed (evidence_freshness_window variant)."
+      "description": "ISO 8601 timestamp by which evidence MUST be refreshed (V5 evidence_freshness_window variant)."
     },
     "current_freshness_state": {
       "type": "string",
-      "description": "Current freshness state for the evidence in this window (evidence_freshness_window variant).",
+      "description": "Current freshness state for the evidence in this window (V5 evidence_freshness_window variant).",
       "enum": ["fresh", "stale_within_grace", "stale_outside_grace"]
-    },
-    "regression_id": {
-      "type": "string",
-      "description": "URN-shaped identifier for the regression definition (regression_definition variant)."
-    },
-    "surface_class": {
-      "type": "string",
-      "description": "Surface or capability class that the regression applies to (regression_definition variant)."
-    },
-    "baseline_evidence_ref": {
-      "type": "string",
-      "description": "URN of the baseline evidence record this regression definition is anchored against (regression_definition variant)."
     }
   },
   "additionalProperties": true,
   "allOf": [
     {
-      "$comment": "VAL-VARIANT-004 conditional oneOf for evidence_freshness_window. When /payload/gap_class is 'evidence_freshness_window', the four window-specific fields are required.",
+      "$comment": "VAL-VARIANT-003 conditional enforcement for the V5 evidence_freshness_window variant. When /payload/gap_subtype is 'freshness_window', the four window-specific fields are required. When unset, no additional constraint is imposed.",
       "if": {
         "type": "object",
         "properties": {
-          "gap_class": {"const": "evidence_freshness_window"}
+          "gap_subtype": {"const": "freshness_window"}
         },
-        "required": ["gap_class"]
+        "required": ["gap_subtype"]
       },
       "then": {
         "type": "object",
         "required": ["window_start", "window_end", "refresh_due_at", "current_freshness_state"]
-      }
-    },
-    {
-      "$comment": "VAL-VARIANT-004 conditional oneOf for regression_definition. When /payload/gap_class is 'regression_definition', the three regression-specific fields are required.",
-      "if": {
-        "type": "object",
-        "properties": {
-          "gap_class": {"const": "regression_definition"}
-        },
-        "required": ["gap_class"]
-      },
-      "then": {
-        "type": "object",
-        "required": ["regression_id", "surface_class", "baseline_evidence_ref"]
       }
     }
   ]
