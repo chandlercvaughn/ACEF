@@ -14,14 +14,15 @@ from __future__ import annotations
 import base64
 import json
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from cryptography.exceptions import UnsupportedAlgorithm
+from cryptography.exceptions import InvalidSignature, UnsupportedAlgorithm
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, padding, rsa, utils
 from cryptography.hazmat.primitives.asymmetric.types import PrivateKeyTypes, PublicKeyTypes
-from cryptography.x509 import load_pem_x509_certificate
+from cryptography.x509 import Certificate, load_der_x509_certificate, load_pem_x509_certificate
 
 from acef.errors import ACEFSigningError
 
@@ -65,6 +66,202 @@ def _detect_algorithm(private_key: PrivateKeyTypes) -> str:
             f"Unsupported key type: {type(private_key).__name__}",
             code="ACEF-013",
         )
+
+
+def _parse_x5c_chain(x5c: list[str]) -> list[Certificate]:
+    """Decode an x5c JWS header value into a list of X.509 certificates.
+
+    JWS x5c entries are base64-encoded DER (not base64url). Each entry has a
+    size cap (65536 bytes) to bound parse work.
+    """
+    certs: list[Certificate] = []
+    for idx, entry in enumerate(x5c):
+        if not isinstance(entry, str):
+            raise ACEFSigningError(
+                f"x5c entry {idx} is not a string",
+                code="ACEF-012",
+            )
+        if len(entry) > 65536:
+            raise ACEFSigningError(
+                f"x5c entry {idx} too large: {len(entry)} bytes (max 65536)",
+                code="ACEF-012",
+            )
+        try:
+            cert_der = base64.b64decode(entry, validate=True)
+        except (ValueError, binascii_error_alias) as exc:  # noqa: F821 — defined below
+            raise ACEFSigningError(
+                f"x5c entry {idx} is not valid base64: {exc}",
+                code="ACEF-012",
+            ) from exc
+        try:
+            certs.append(load_der_x509_certificate(cert_der))
+        except Exception as exc:
+            raise ACEFSigningError(
+                f"x5c entry {idx} is not a valid DER X.509 certificate: {exc}",
+                code="ACEF-012",
+            ) from exc
+    return certs
+
+
+# Resolve the actual binascii.Error name for the broad-except above. Doing
+# this without an `import binascii` at the top would forward-reference.
+import binascii as _binascii  # noqa: E402
+
+binascii_error_alias = _binascii.Error
+
+
+def _cert_validity_covers(cert: Certificate, instant: datetime) -> tuple[bool, str | None]:
+    """Return (True, None) if ``instant`` is within ``cert`` validity, else (False, reason).
+
+    Uses ``not_valid_before_utc`` / ``not_valid_after_utc`` from the
+    cryptography library (timezone-aware) so comparisons against the
+    timezone-aware ``instant`` are well-defined.
+    """
+    try:
+        not_before = cert.not_valid_before_utc
+        not_after = cert.not_valid_after_utc
+    except AttributeError:
+        # Older cryptography versions exposed naive UTC datetimes.
+        not_before = cert.not_valid_before.replace(tzinfo=timezone.utc)
+        not_after = cert.not_valid_after.replace(tzinfo=timezone.utc)
+    if instant < not_before:
+        return False, f"certificate not yet valid (not_before={not_before.isoformat()})"
+    if instant > not_after:
+        return False, f"certificate expired (not_after={not_after.isoformat()})"
+    return True, None
+
+
+def _verify_cert_signed_by(child: Certificate, parent: Certificate) -> bool:
+    """Verify ``child`` was signed by ``parent``'s public key."""
+    parent_public_key = parent.public_key()
+    try:
+        # cryptography exposes algorithm-specific verify on each public key.
+        if isinstance(parent_public_key, rsa.RSAPublicKey):
+            parent_public_key.verify(
+                child.signature,
+                child.tbs_certificate_bytes,
+                padding.PKCS1v15(),
+                child.signature_hash_algorithm,
+            )
+        elif isinstance(parent_public_key, ec.EllipticCurvePublicKey):
+            parent_public_key.verify(
+                child.signature,
+                child.tbs_certificate_bytes,
+                ec.ECDSA(child.signature_hash_algorithm),
+            )
+        else:
+            return False
+    except (InvalidSignature, ValueError, TypeError):
+        return False
+    return True
+
+
+def verify_x5c_chain(
+    x5c: list[str],
+    *,
+    manifest_timestamp: str | None = None,
+    trust_anchors: list[Certificate] | None = None,
+) -> PublicKeyTypes:
+    """Verify an x5c certificate chain and return the leaf's public key.
+
+    Per spec §3.1.3 "Signature trust model":
+
+    - The leaf certificate is at ``x5c[0]``; each subsequent entry is its
+      issuer (so ``x5c[1]`` signs ``x5c[0]``, ``x5c[2]`` signs ``x5c[1]``,
+      etc.). The final entry is either self-signed (when chaining to a
+      trust anchor present in ``trust_anchors``) or signed by a cert in
+      ``trust_anchors``.
+    - Certificate expiry MUST be checked against the bundle's
+      ``manifest.timestamp`` (NOT wall-clock). This gives reproducible
+      verification: a bundle signed before its cert expired still
+      verifies after the cert has rolled over.
+    - Revocation (CRL/OCSP) is RECOMMENDED but not REQUIRED for v1, so
+      this function does not perform it.
+
+    Args:
+        x5c: The list of base64-encoded DER X.509 certs from a JWS header.
+        manifest_timestamp: ISO 8601 timestamp from the bundle manifest.
+            If provided, every certificate's validity window MUST cover
+            this instant.
+        trust_anchors: Locally configured trust anchor certificates. If
+            provided, the chain MUST terminate at one of these (either
+            the chain's final cert is in this set, OR the chain's final
+            cert is signed by one of these). If None, the chain links
+            are still verified but no external root anchoring is
+            enforced — appropriate for "self-attested" trust per spec.
+
+    Returns:
+        The leaf certificate's public key, suitable for verifying the JWS
+        signing input.
+
+    Raises:
+        ACEFSigningError: If the chain is empty, any link fails to verify,
+            any cert's validity does not cover ``manifest_timestamp``, or
+            ``trust_anchors`` is provided and the chain does not terminate
+            at one of them.
+    """
+    if not x5c:
+        raise ACEFSigningError("x5c chain is empty", code="ACEF-012")
+
+    chain = _parse_x5c_chain(x5c)
+
+    # Validate expiry against manifest_timestamp (or skip if not provided —
+    # callers SHOULD always provide one).
+    if manifest_timestamp is not None:
+        ts_norm = manifest_timestamp
+        if ts_norm.endswith("Z"):
+            ts_norm = ts_norm[:-1] + "+00:00"
+        try:
+            instant = datetime.fromisoformat(ts_norm)
+        except ValueError as exc:
+            raise ACEFSigningError(
+                f"Invalid manifest_timestamp for cert validity check: "
+                f"{manifest_timestamp!r}: {exc}",
+                code="ACEF-012",
+            ) from exc
+        if instant.tzinfo is None:
+            instant = instant.replace(tzinfo=timezone.utc)
+        for idx, cert in enumerate(chain):
+            ok, reason = _cert_validity_covers(cert, instant)
+            if not ok:
+                raise ACEFSigningError(
+                    f"x5c[{idx}] {reason} at manifest_timestamp {manifest_timestamp}",
+                    code="ACEF-012",
+                )
+
+    # Walk chain links: each cert (except the last) must be signed by the
+    # next one in the list.
+    for idx in range(len(chain) - 1):
+        if not _verify_cert_signed_by(chain[idx], chain[idx + 1]):
+            raise ACEFSigningError(
+                f"x5c[{idx}] is not signed by x5c[{idx + 1}] (broken chain)",
+                code="ACEF-012",
+            )
+
+    # Anchor termination. If trust_anchors supplied, the chain MUST end at
+    # one of them (by DER equality) OR be signed by one of them.
+    if trust_anchors is not None:
+        if not trust_anchors:
+            raise ACEFSigningError(
+                "trust_anchors list is empty — cannot anchor chain",
+                code="ACEF-012",
+            )
+        tail = chain[-1]
+        tail_der = tail.public_bytes(serialization.Encoding.DER)
+        anchor_ders = {anchor.public_bytes(serialization.Encoding.DER) for anchor in trust_anchors}
+        if tail_der in anchor_ders:
+            anchored = True
+        else:
+            anchored = any(
+                _verify_cert_signed_by(tail, anchor) for anchor in trust_anchors
+            )
+        if not anchored:
+            raise ACEFSigningError(
+                "x5c chain does not terminate at any configured trust anchor",
+                code="ACEF-012",
+            )
+
+    return chain[0].public_key()
 
 
 def _load_private_key(key_path: str) -> PrivateKeyTypes:
@@ -279,6 +476,8 @@ def verify_detached_jws(
     public_key: PublicKeyTypes | None = None,
     *,
     key_data: bytes | None = None,
+    manifest_timestamp: str | None = None,
+    trust_anchors: list[Certificate] | None = None,
 ) -> dict[str, Any]:
     """Verify a detached JWS signature.
 
@@ -319,19 +518,20 @@ def verify_detached_jws(
         if key_data is not None:
             public_key = _load_public_key_from_pem(key_data)
         elif "x5c" in header and header["x5c"]:
-            x5c_entry = header["x5c"][0]
-            if len(x5c_entry) > 65536:
-                raise ACEFSigningError(
-                    f"x5c certificate too large: {len(x5c_entry)} bytes (max 65536)",
-                    code="ACEF-012",
-                )
-            cert_der = base64.b64decode(x5c_entry)
-            from cryptography.x509 import load_der_x509_certificate
-
-            cert = load_der_x509_certificate(cert_der)
-            public_key = cert.public_key()
+            # Spec §3.1.3 mandates full-chain validation, NOT just leaf-key
+            # extraction. verify_x5c_chain walks links, checks expiry
+            # against manifest_timestamp (when provided), and anchors to
+            # trust_anchors (when provided).
+            public_key = verify_x5c_chain(
+                header["x5c"],
+                manifest_timestamp=manifest_timestamp,
+                trust_anchors=trust_anchors,
+            )
         elif "jwk" in header:
-            # M-R2-5 / m7 (Scout): JWK-based key resolution
+            # JWK-based key resolution (spec §3.1.3 trust model:
+            # signatures via embedded JWK prove data integrity but not
+            # organizational identity — callers SHOULD treat as
+            # self-attested).
             public_key = _load_public_key_from_jwk(header["jwk"])
         else:
             raise ACEFSigningError(

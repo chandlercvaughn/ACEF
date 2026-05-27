@@ -39,14 +39,32 @@ def _validate_path(path: str) -> None:
     """Validate a path per spec Section 3.1.1 path normalization rules.
 
     Rejects:
+    - Empty paths
     - Paths containing '..' segments (traversal)
     - Paths containing '.' segments (current-dir, spec-forbidden)
     - Absolute paths (starting with '/')
     - Backslash separators (must use forward slash)
+    - Embedded NUL bytes
+    - Paths not normalized to UTF-8 NFC (spec §3.1.1)
 
     Raises:
         ACEFFormatError: If path violates normalization rules.
     """
+    import unicodedata
+
+    if not isinstance(path, str) or path == "":
+        raise ACEFFormatError(
+            f"Empty or non-string path: {path!r}",
+            code="ACEF-052",
+        )
+
+    # Reject NUL bytes — these can confuse path APIs on some platforms.
+    if "\x00" in path:
+        raise ACEFFormatError(
+            f"Path contains NUL byte: {path!r}",
+            code="ACEF-052",
+        )
+
     # Check for backslash separators
     if "\\" in path:
         raise ACEFFormatError(
@@ -58,6 +76,15 @@ def _validate_path(path: str) -> None:
     if path.startswith("/"):
         raise ACEFFormatError(
             f"Absolute path not allowed (must be relative to bundle root): {path!r}",
+            code="ACEF-052",
+        )
+
+    # Spec §3.1.1: paths MUST use UTF-8 NFC normalization. Reject non-NFC
+    # so the determinism contract holds across producers on different
+    # filesystems (HFS+ NFD vs ext4 NFC).
+    if unicodedata.normalize("NFC", path) != path:
+        raise ACEFFormatError(
+            f"Path is not UTF-8 NFC normalized: {path!r}",
             code="ACEF-052",
         )
 
@@ -74,17 +101,34 @@ def _validate_path(path: str) -> None:
                 f"Current-directory segment (.) not allowed in paths: {path!r}",
                 code="ACEF-052",
             )
+        if segment == "":
+            # Empty segment from consecutive slashes or trailing slash.
+            raise ACEFFormatError(
+                f"Empty path segment (consecutive or trailing slash): {path!r}",
+                code="ACEF-052",
+            )
 
 
 def _validate_tar_safety(tar: tarfile.TarFile) -> None:
-    """Validate tar archive for bomb protection.
+    """Validate tar archive for bomb protection and traversal safety.
+
+    Rejects any member that is not a regular file or a directory. This
+    closes the gap noted by the structural review: tarfile's
+    ``filter="data"`` is only available on Python 3.12+, and the prior
+    implementation accepted device, FIFO, character/block-device, and
+    other special members without complaint. On a pre-3.12 runtime that
+    would create the special node on disk during extraction.
 
     Checks:
-    - No symlinks or hard links
-    - Total extracted size < 10 GB
-    - File count < 100,000
-    - No single file > 1 GB
-    - No path traversal
+    - Only regular files and directories permitted (no symlinks, hard
+      links, devices, FIFOs, char/block devices, or any other special
+      type)
+    - Empty member name rejected
+    - No NUL byte, no backslash separator, no leading slash, no '..' or
+      '.' segment, no empty segment (defense-in-depth alongside
+      :func:`_validate_path`)
+    - Total extracted size <= 10 GB; file count <= 100,000; no single
+      file > 1 GB
 
     Raises:
         ACEFFormatError: If any safety check fails.
@@ -93,18 +137,60 @@ def _validate_tar_safety(tar: tarfile.TarFile) -> None:
     file_count = 0
 
     for member in tar.getmembers():
-        # Reject symlinks and hard links
+        # Reject symlinks, hard links, and ALL special types (device,
+        # FIFO, char/block device, anything not a regular file or dir).
         if member.issym() or member.islnk():
             raise ACEFFormatError(
                 f"Symlinks/hardlinks not allowed in ACEF archives: {member.name}",
                 code="ACEF-052",
             )
-
-        # Path traversal check — strip the leading bundle name for archive members
-        # Archive paths are like "bundle.acef/records/..." so validate the full path
-        if member.name.startswith("/") or ".." in member.name.split("/"):
+        if not (member.isfile() or member.isdir()):
             raise ACEFFormatError(
-                f"Absolute or traversal path in archive: {member.name}",
+                f"Special tar member type not allowed (only files/dirs): {member.name!r} type={member.type!r}",
+                code="ACEF-052",
+            )
+
+        if not member.name:
+            raise ACEFFormatError(
+                "Tar member has empty name",
+                code="ACEF-052",
+            )
+        if "\x00" in member.name:
+            raise ACEFFormatError(
+                f"Tar member name contains NUL byte: {member.name!r}",
+                code="ACEF-052",
+            )
+        if "\\" in member.name:
+            raise ACEFFormatError(
+                f"Tar member uses backslash separator (must use forward slash): {member.name!r}",
+                code="ACEF-052",
+            )
+
+        # Path traversal + absolute-path check.
+        if member.name.startswith("/"):
+            raise ACEFFormatError(
+                f"Absolute path in archive: {member.name}",
+                code="ACEF-052",
+            )
+        segments = member.name.split("/")
+        for seg in segments:
+            if seg == "..":
+                raise ACEFFormatError(
+                    f"Traversal segment (..) in archive: {member.name}",
+                    code="ACEF-052",
+                )
+            if seg == ".":
+                raise ACEFFormatError(
+                    f"Current-directory segment (.) in archive: {member.name}",
+                    code="ACEF-052",
+                )
+            # The last segment may legitimately be empty when a directory
+            # member is written with a trailing slash (some tar tools do
+            # this). All earlier empty segments indicate consecutive
+            # slashes and are rejected.
+        if "//" in member.name:
+            raise ACEFFormatError(
+                f"Consecutive slashes in archive path: {member.name}",
                 code="ACEF-052",
             )
 
@@ -129,6 +215,35 @@ def _validate_tar_safety(tar: tarfile.TarFile) -> None:
             f"Archive total size exceeds 10 GB limit: {total_size} bytes",
             code="ACEF-050",
         )
+
+
+def _safe_tar_extract(tar: tarfile.TarFile, dest: Path) -> None:
+    """Extract ``tar`` into ``dest`` with a containment guard for every member.
+
+    On Python 3.12+ we use the stdlib ``filter='data'`` extraction filter,
+    which performs the spec's intended safety checks. On older runtimes
+    we extract one member at a time, asserting that the resolved
+    destination path stays inside ``dest`` (defense in depth alongside
+    :func:`_validate_tar_safety`).
+    """
+    dest = dest.resolve()
+    if sys.version_info >= (3, 12):
+        tar.extractall(dest, filter="data")
+        return
+
+    for member in tar.getmembers():
+        # _validate_tar_safety has already vetted special types and traversal
+        # segments, but re-check the resolved destination as a final guard
+        # against platform-specific surprises (e.g., Windows path handling).
+        member_path = (dest / member.name).resolve()
+        try:
+            member_path.relative_to(dest)
+        except ValueError as exc:
+            raise ACEFFormatError(
+                f"Tar member escapes extraction root: {member.name}",
+                code="ACEF-052",
+            ) from exc
+        tar.extract(member, dest)
 
 
 def _parse_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -196,11 +311,7 @@ def _load_archive(archive_path: Path) -> Package:
         with tempfile.TemporaryDirectory() as tmpdir:
             with tarfile.open(str(archive_path), "r:gz") as tar:
                 _validate_tar_safety(tar)
-                # C-SCOUT-1: filter="data" only available in Python 3.12+
-                if sys.version_info >= (3, 12):
-                    tar.extractall(tmpdir, filter="data")
-                else:
-                    tar.extractall(tmpdir)
+                _safe_tar_extract(tar, Path(tmpdir))
 
             # Find the bundle root (first directory)
             extracted = list(Path(tmpdir).iterdir())
