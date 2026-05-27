@@ -253,15 +253,36 @@ def export_archive(package: Package, output_path: str) -> Path:
                     with open(str(full_path), "rb") as file_obj:
                         tar.addfile(file_info, file_obj)
 
-            # Stream-gzip the tar file to output with deterministic settings
-            _stream_gzip(tar_tmp_path, output, mtime=0, level=6)
+            # Stream-gzip the tar file to a sibling temp file, then atomically
+            # rename to the final output. This protects against a SIGKILL
+            # between the gzip write and the OS-byte patch leaving a
+            # half-written archive at the user-visible path.
+            staging = output.with_name(output.name + ".tmp")
+            try:
+                _stream_gzip(tar_tmp_path, staging, mtime=0, level=6)
 
-            # Patch the OS byte in the gzip header to 0xFF (unknown) per spec.
-            # Gzip header format: bytes[0:2]=magic, [2]=method, [3]=flags,
-            # [4:8]=mtime, [8]=xfl, [9]=OS. Python sets OS to platform default.
-            with open(str(output), "r+b") as f:
-                f.seek(9)
-                f.write(b"\xff")
+                # Patch the OS byte in the gzip header to 0xFF (unknown) per
+                # spec §3.1.3. Gzip header layout:
+                #   bytes[0:2]=magic, [2]=method, [3]=flags,
+                #   [4:8]=mtime, [8]=xfl, [9]=OS
+                # Python sets OS to platform default; deterministic archives
+                # MUST use 0xFF.
+                with open(str(staging), "r+b") as f:
+                    f.seek(9)
+                    f.write(b"\xff")
+
+                # os.replace is atomic on POSIX and Windows when source and
+                # destination are on the same filesystem (which they are
+                # here — both in output.parent).
+                os.replace(str(staging), str(output))
+            except BaseException:
+                # On any failure, remove the staging file so we don't leave
+                # debris next to the user's intended output path.
+                try:
+                    staging.unlink()
+                except FileNotFoundError:
+                    pass
+                raise
 
             return output
 
