@@ -139,9 +139,9 @@ def check_references(
                 )
             record_ids.add(rec_id)
 
-        entity_refs = rec.get("entity_refs", {})
+        entity_refs = _dict_or_empty(rec.get("entity_refs"))
         for ref_type in ("subject_refs", "component_refs", "dataset_refs", "actor_refs"):
-            for ref in entity_refs.get(ref_type, []):
+            for ref in _list_or_empty(entity_refs.get(ref_type)):
                 if ref and ref not in defined_urns:
                     diagnostics.append(
                         ValidationDiagnostic(
@@ -156,7 +156,12 @@ def check_references(
             from acef.errors import ACEFFormatError
             from acef.loader import _validate_path as _loader_validate_path
 
-            for j, att in enumerate(rec.get("attachments", [])):
+            for j, att in enumerate(_list_or_empty(rec.get("attachments"))):
+                if not isinstance(att, dict):
+                    # A non-object attachment entry can't carry a path or
+                    # hash; skip rather than crash on .get(). Schema
+                    # validation (Phase 1) will diagnose this.
+                    continue
                 att_path = att.get("path", "")
                 if att_path:
                     # Reject paths that fail loader path validation (NUL bytes,

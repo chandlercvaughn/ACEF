@@ -253,6 +253,19 @@ def _check_signatures(bundle_dir: Path, content_hashes_bytes: bytes) -> list[Val
             )
             continue
 
+        # The JWS header MUST decode to a JSON object (per RFC 7515).
+        # A header like `[]` parses successfully but cannot carry alg/kid/
+        # x5c/jwk; reject as ACEF-012.
+        if not isinstance(header, dict):
+            diagnostics.append(
+                ValidationDiagnostic(
+                    "ACEF-012",
+                    f"JWS header in {sig_file.name} is not a JSON object",
+                    path=f"/signatures/{sig_file.name}",
+                )
+            )
+            continue
+
         alg = header.get("alg", "")
         if alg not in ("RS256", "ES256"):
             diagnostics.append(

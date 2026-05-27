@@ -147,6 +147,10 @@ def validate_bundle(
     if not isinstance(versioning, dict):
         versioning = {}
     core_version = versioning.get("core_version", "1.0.0")
+    if not isinstance(core_version, str):
+        # Schema validation in Phase 1 will diagnose the type error; we
+        # just need to keep Phase 0 from crashing.
+        core_version = "1.0.0"
     try:
         core_major = int(core_version.split(".")[0])
         if core_major != 1:
@@ -170,7 +174,12 @@ def validate_bundle(
     all_records: list[RecordEnvelope] = []
     record_file_type_mismatches: list[ValidationDiagnostic] = []
     early_load_diagnostics: list[ValidationDiagnostic] = []
-    for rf in manifest_data.get("record_files", []):
+    _record_files = manifest_data.get("record_files", [])
+    if not isinstance(_record_files, list):
+        _record_files = []
+    for rf in _record_files:
+        if not isinstance(rf, dict):
+            continue
         rf_path_str = rf.get("path", "")
         if not rf_path_str:
             continue
