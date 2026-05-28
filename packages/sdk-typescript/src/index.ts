@@ -32,6 +32,9 @@ export {
     type KeyInput,
 } from "./signing.js";
 
+// Deterministic gzip helper (mtime=0, OS=0xFF, level=6 default)
+export { deterministicGzip } from "./exporter.js";
+
 // Enum mirrors
 export {
     SubjectType,
