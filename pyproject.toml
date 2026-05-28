@@ -36,6 +36,7 @@ dependencies = [
 dev = [
     "pytest>=8.0",
     "pytest-cov>=5.0",
+    "pytest-timeout>=2.3",
     "hypothesis>=6.100",
     "mypy>=1.8",
     "ruff>=0.3",
@@ -47,12 +48,29 @@ acef = "acef.cli.main:cli"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-v --tb=short"
-# Minimal marker registration placeholder added by F-M1-REGRESSION-SUITE to
-# suppress PytestUnknownMarkWarning. F-M1-TIER-INFRA owns the authoritative
-# marker registry (plumbing / integration / conformance sub-tiers).
+# Authoritative tier marker registry owned by F-M1-TIER-INFRA (VAL-TIER-002).
+#
+# Tier model (per brief §plumbing-tier and ACEF v0.4 plan.md):
+#   plumbing       = top-level fast tier; full plumbing tier MUST complete <=60s
+#                    wall-clock. Composed of three sub-tiers below.
+#   conformance    = sub-tier of plumbing; bundle-validation tests under
+#                    tests/conformance/. Wall-clock budget <=40s.
+#   regression     = sub-tier of plumbing; VAL-REGRESSION-* gate tests guarding
+#                    v1.0-bundle byte-stability. Wall-clock budget <=20s.
+#   integration    = top-level tier (NOT under plumbing); multi-component
+#                    end-to-end tests under tests/integration/. Slower but
+#                    bounded; not part of the <=60s plumbing budget.
+#   legacy_budget  = VAL-REGRESSION-LEGACY-BUDGET-001 runtime-budget check.
+#
+# Tier markers are auto-applied to tests by location via the
+# pytest_collection_modifyitems hook in tests/conftest.py. Tests MAY also be
+# decorated explicitly; explicit decorators always take precedence.
 markers = [
-    "regression: VAL-REGRESSION-* tier; conformance sub-tier <=20s wall-clock",
-    "legacy_budget: VAL-REGRESSION-LEGACY-BUDGET-001 runtime-budget check",
+    "plumbing: Plumbing tier — top-level fast tier; full plumbing tier MUST complete <=60s wall-clock (VAL-TIER-003).",
+    "integration: Integration tier — multi-component end-to-end tests under tests/integration/; not part of plumbing budget.",
+    "conformance: Conformance sub-tier of plumbing — bundle-validation tests under tests/conformance/; wall-clock budget <=40s (VAL-TIER-003).",
+    "regression: Regression sub-tier of plumbing — VAL-REGRESSION-* v1.0 byte-stability gates; wall-clock budget <=20s (VAL-TIER-003).",
+    "legacy_budget: VAL-REGRESSION-LEGACY-BUDGET-001 runtime-budget check.",
 ]
 
 [tool.ruff]

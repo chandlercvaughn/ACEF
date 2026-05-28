@@ -1,19 +1,32 @@
 {
-  "$schema_note": "Pre-v0.4 baseline test counts captured at the start of WS8 (F-M1-REGRESSION-SUITE). F-M1-TIER-INFRA owns the authoritative version of this file and may extend the schema. A CI gate enforces test_count_regression: total may grow but never shrink without an approved RFC.",
-  "captured_at": "2026-05-27T00:00:00Z",
-  "captured_by_feature": "F-M1-REGRESSION-SUITE",
-  "captured_at_commit": "0e2e55634fd46cccbc70c1f5f429557cbdfdddb4",
+  "$schema_note": "Authoritative test-count baseline for ACEF. CI fails on regression unless captured_at_commit is bumped via an approved RFC. Test growth (observed > total) is always allowed; shrinkage (observed < total) is denied. F-M1-TIER-INFRA owns this file's schema and the CI gate at scripts/check_baseline_counts.py.",
+  "captured_at": "2026-05-27T22:00:00Z",
+  "captured_at_commit": "pending-tier-infra-commit",
   "ops_operation": "acef-v0.4-freddy-adoption",
+  "ownership": "F-M1-TIER-INFRA",
+  "primary_fulfills": ["VAL-TIER-001"],
   "counts": {
-    "total": 1265,
-    "tests_conformance_total": 483,
-    "tests_conformance_freddy": 77,
-    "tests_conformance_excluding_freddy": 406,
-    "tests_unit": 762,
-    "tests_integration": 20
+    "total": 1275,
+    "by_directory": {
+      "tests/unit/": 770,
+      "tests/conformance/": 485,
+      "tests/integration/": 20
+    },
+    "by_marker": {
+      "plumbing": 1255,
+      "conformance": 485,
+      "regression": 112,
+      "integration": 20,
+      "legacy_budget": 2
+    }
   },
   "notes": [
-    "Pre-v0.4 logical baseline (no freddy tests existed) is the 'tests_conformance_excluding_freddy' figure 406 captured here AFTER the F-M1-REGRESSION-SUITE test_regression_r1_r4.py module was added (57 tests). To recover the strict pre-v0.4 number, subtract those 57: 349.",
-    "F-M1-TIER-INFRA will replace these placeholder numbers with the authoritative pre-WS8 baseline (likely 349 for excluding_freddy) and add tier/marker-bucket counts."
+    "captured_at_commit is set to a sentinel because the actual commit SHA is not knowable at write time. The post-commit step in F-M1-TIER-INFRA is to amend this file with the real SHA, but to stay reproducible for downstream CI the gate only consumes counts.total. The captured_at_commit field is informational provenance.",
+    "by_directory totals: 770 unit + 485 conformance + 20 integration = 1275 total (matches counts.total).",
+    "by_marker.plumbing = unit (770) + conformance (485) = 1255 because tests/conformance/ and tests/unit/ are auto-tagged 'plumbing' by tests/conftest.py::pytest_collection_modifyitems. tests/integration/ tests are NOT in plumbing tier (they are the separate 'integration' tier; not counted against plumbing's <=60s budget).",
+    "by_marker.regression = 112 covers VAL-REGRESSION-* tests (in conformance + a handful of unit tests). regression is a sub-tier of plumbing with a <=20s wall-clock budget.",
+    "by_marker.legacy_budget = 2 covers VAL-REGRESSION-LEGACY-BUDGET-001 (the timing self-benchmark and its precondition test).",
+    "Growth-allowed: CI gate PASSES when live pytest collection >= total. A test addition that pushes total above 1267 is welcomed and should be reflected in this file when convenient (no RFC required for growth).",
+    "Shrinkage-denied: live collection < total => CI gate FAILS. An intentional test removal requires an approved RFC plus a deliberate edit to this file. See VAL-TIER-004."
   ]
 }

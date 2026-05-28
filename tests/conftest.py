@@ -1,4 +1,13 @@
-"""ACEF test fixtures and shared configuration."""
+"""ACEF test fixtures and shared configuration.
+
+Also owns the authoritative tier-marker auto-application hook (F-M1-TIER-INFRA,
+VAL-TIER-002). Tests located under known top-level directories are tagged with
+their tier marker by ``pytest_collection_modifyitems`` so that callers can use
+``pytest -m plumbing``, ``pytest -m conformance``, ``pytest -m regression``,
+and ``pytest -m integration`` selectors without touching every test file. The
+auto-applied markers compose with any explicit ``@pytest.mark.<tier>``
+decorators on individual tests (pytest deduplicates by marker name).
+"""
 
 from __future__ import annotations
 
@@ -176,3 +185,38 @@ def sample_record() -> RecordEnvelope:
         obligation_role=ObligationRole.PROVIDER,
         entity_refs=EntityRefs(subject_refs=["urn:acef:sub:00000000-0000-0000-0000-000000000001"]),
     )
+
+
+# ---------------------------------------------------------------------------
+# Tier-marker auto-application (F-M1-TIER-INFRA, VAL-TIER-002 / VAL-TIER-003)
+# ---------------------------------------------------------------------------
+#
+# pytest invokes ``pytest_collection_modifyitems`` once after collection. We
+# walk each collected item's filesystem path and tag it with the tier markers
+# its location implies:
+#
+#   tests/conformance/   -> plumbing + conformance
+#   tests/unit/          -> plumbing
+#   tests/integration/   -> integration
+#
+# ``item.add_marker`` is additive; explicit ``@pytest.mark.<tier>`` decorators
+# on individual tests remain in place and are deduplicated by pytest. Tests
+# located outside the three known directories receive no auto-applied tier
+# marker (a future ``tests/perf/`` directory would not break this hook).
+def pytest_collection_modifyitems(  # noqa: D401  (pytest hook signature)
+    config: pytest.Config, items: list[pytest.Item]
+) -> None:
+    """Auto-apply tier markers based on test file location.
+
+    See module docstring and ``pyproject.toml`` ``[tool.pytest.ini_options]``
+    for the tier model owned by F-M1-TIER-INFRA.
+    """
+    for item in items:
+        parts = Path(str(item.fspath)).parts
+        if "conformance" in parts and "tests" in parts:
+            item.add_marker(pytest.mark.plumbing)
+            item.add_marker(pytest.mark.conformance)
+        elif "unit" in parts and "tests" in parts:
+            item.add_marker(pytest.mark.plumbing)
+        elif "integration" in parts and "tests" in parts:
+            item.add_marker(pytest.mark.integration)
