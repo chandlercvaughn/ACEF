@@ -47,6 +47,7 @@ def cli() -> None:
 # Import and register subcommands
 from acef.cli.init_cmd import init_cmd
 from acef.cli.validate_cmd import validate_cmd
+from acef.cli.verify_cmd import verify_cmd
 from acef.cli.export_cmd import export_cmd
 from acef.cli.inspect_cmd import inspect_cmd
 from acef.cli.record_cmd import record_cmd
@@ -55,6 +56,7 @@ from acef.cli.doctor_cmd import doctor_cmd
 
 cli.add_command(init_cmd, "init")
 cli.add_command(validate_cmd, "validate")
+cli.add_command(verify_cmd, "verify")
 cli.add_command(export_cmd, "export")
 cli.add_command(inspect_cmd, "inspect")
 cli.add_command(record_cmd, "record")

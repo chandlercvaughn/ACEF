@@ -234,16 +234,6 @@ def _find_acef_cli() -> list[str]:
 
 
 @pytest.mark.regression
-@pytest.mark.xfail(
-    strict=False,
-    reason=(
-        "F-M1-CLI-COMPAT (dependsOn F-M1-REGRESSION-SUITE) owns the "
-        "implementation of the `acef verify` subcommand and the CLI exit-0 "
-        "behavior on the six v1.0 golden bundles. This test is the "
-        "contract-grep target for VAL-REGRESSION-004; it will flip to xpass "
-        "once F-M1-CLI-COMPAT lands."
-    ),
-)
 @pytest.mark.parametrize("bundle_name", GOLDEN_BUNDLE_NAMES)
 def test_val_regression_004_acef_verify_cli(bundle_name: str) -> None:
     """VAL-REGRESSION-004: ``acef verify <bundle>`` exits 0 for each of the
@@ -251,15 +241,14 @@ def test_val_regression_004_acef_verify_cli(bundle_name: str) -> None:
 
     This assertion subsumes VAL-CLI-001 (same harness, same bundles).
 
-    The contract names the subcommand ``verify``. The current CLI (post-
-    F-M1-REGRESSION-SUITE, pre-F-M1-CLI-COMPAT) does not yet expose
-    ``verify`` -- only ``validate`` -- and ``validate`` returns exit 2 on
-    these bundles due to a pre-existing structural diagnostic (empty
-    ``audit_trail/0/actor_ref`` against the FROZEN v1 manifest schema, which
-    fires ACEF-002). F-M1-CLI-COMPAT will either (a) add a ``verify``
-    subcommand that downgrades pre-existing baseline diagnostics or
-    (b) reconcile the golden manifests + schema. Either way, this test is
-    the regression-tier landing zone for that contract.
+    Implemented by F-M1-CLI-COMPAT: the ``acef verify`` subcommand calls
+    the existing validator pipeline but classifies a narrow, well-known
+    baseline diagnostic (empty ``audit_trail[N]/actor_ref`` triggering
+    ACEF-002 under the FROZEN v1 manifest schema) as non-fatal for CI.
+    Every other ACEF-002 (and every other diagnostic) continues to fail.
+
+    See ``src/acef/cli/verify_cmd.py:_BASELINE_DIAGNOSTICS`` for the exact
+    downgrade rule.
     """
     bundle_dir = GOLDEN_BUNDLES_DIR / bundle_name
     assert bundle_dir.exists()
