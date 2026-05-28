@@ -1,7 +1,7 @@
 {
   "$schema_note": "Authoritative test-count baseline for ACEF. CI fails on regression unless captured_at_commit is bumped via an approved RFC. Test growth (observed > total) is always allowed; shrinkage (observed < total) is denied. F-M1-TIER-INFRA owns this file's schema and the CI gate at scripts/check_baseline_counts.py.",
   "captured_at": "2026-05-27T22:00:00Z",
-  "captured_at_commit": "pending-tier-infra-commit",
+  "captured_at_commit": "d47b851dd39933952b0f6db90508143f90d1fd32",
   "ops_operation": "acef-v0.4-freddy-adoption",
   "ownership": "F-M1-TIER-INFRA",
   "primary_fulfills": ["VAL-TIER-001"],
