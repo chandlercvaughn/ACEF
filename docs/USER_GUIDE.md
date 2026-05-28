@@ -958,3 +958,365 @@ ACEF defines a structured error taxonomy with unique codes, severities, and cate
 | `error` | Evidence fails binding regulatory requirements |
 | `warning` | Evidence fails voluntary or advisory requirements |
 | `info` | Informational observation (not a failure) |
+
+---
+
+## 7. v1.1 Agent-Reliability Record Types
+
+ACEF v0.4 introduces six new record types and a typed builder for each on
+`acef.Package`. This section provides one fully-worked example per record
+type. Each example is self-contained: copy it into a Python file, run with
+the ACEF SDK installed, and the bundle constructs cleanly. The version-
+gating semantics are described in
+[`MIGRATION-v0.3-to-v0.4.md`](MIGRATION-v0.3-to-v0.4.md#version-gating-semantics);
+in summary, you must set `core_version: 1.1.0` on the package's `Versioning`
+to opt into v1.1 conditional-required enforcement.
+
+The shared preamble below is referenced by every example below; it sets up
+a v1.1-opted-in package with a single AI system subject and an authorizing
+actor.
+
+```python
+from acef.package import Package
+from acef.models.metadata import Versioning
+
+pkg = Package(producer={"name": "acef-user-guide", "version": "1.0.0"})
+# Opt into v1.1 conditional-required enforcement.
+pkg._versioning = Versioning(core_version="1.1.0", profiles_version="1.0.0")
+
+system = pkg.add_subject(
+    "ai_system",
+    name="Demo Assistant",
+    risk_classification="high-risk",
+    modalities=["text"],
+    lifecycle_phase="deployment",
+)
+authorizer = pkg.add_actor(name="Acme Customer Admin", role="provider",
+                           organization="Acme Corp")
+```
+
+### authorized_test_scope
+
+Declares what testing is authorized against an AI system. Required when an
+agent-reliability product exercises a third-party AI system; provides
+authorized surfaces, identities, side-effect policy, sandbox boundary,
+ownership proof, and an optional kill-switch reference.
+
+```python
+# (uses preamble above)
+scope = pkg.authorize_test_scope(
+    scope_id="urn:acef:scope:11111111-1111-1111-1111-111111111111",
+    scope_version="1.0.0",
+    subject_ref=system.subject_id,
+    authorized_surfaces=[
+        {
+            "surface_type": "chat_endpoint",
+            "surface_identifier": "https://api.demo.example.com/v1/chat",
+            "authorization_level": "read_only",
+        },
+    ],
+    authorized_identities=[
+        {
+            "identity_type": "test_account",
+            "identity_ref": authorizer.actor_id,
+            "scope_constraint": "sandbox-only",
+        },
+    ],
+    side_effect_policy={
+        "default_disposition": "default_deny",
+        "explicit_allowlist": [],
+        "explicit_denylist": ["external_writes", "billing_calls"],
+    },
+    sandbox_boundary={
+        "ownership_ledger_ref": "urn:acef:rec:22222222-2222-2222-2222-222222222222",
+        "preflight_method": "preflight_probe",
+    },
+    ownership_proof={
+        "proof_method": "dns_txt",
+        "proof_artifact_ref": "urn:acef:rec:33333333-3333-3333-3333-333333333333",
+        "verified_at": "2026-05-27T00:00:00Z",
+    },
+    effective_from="2026-05-27T00:00:00Z",
+    authorizing_actor_ref=authorizer.actor_id,
+)
+print(scope.payload["scope_id"])  # → urn:acef:scope:11111111-...
+```
+
+**Notes:**
+- When any surface's `authorization_level` is
+  `production_capable_owner_authorized`, `ownership_proof.proof_method` MUST
+  be one of `dns_txt`, `well_known_file`, or `sso_assertion` (the three
+  methods that prove genuine ownership; `github_oauth` and `http_header`
+  prove account control but not system ownership).
+- `kill_switch_ref` is REQUIRED whenever any surface is
+  `production_capable_owner_authorized`.
+- The builder enforces both rules BEFORE the record is appended; an invalid
+  call raises `ValueError` and the bundle is unmodified.
+
+### scope_boundary_event
+
+A control-plane integrity event: a test attempted an action outside its
+authorized scope. Distinct from `event_log` (routine) and `incident_report`
+(post-market operational). When `hard_stop_triggered: true`, the event MUST
+reference the `harness_attestation` that recorded the stop.
+
+```python
+# (uses preamble above)
+event = pkg.record_scope_boundary_event(
+    scope_ref="urn:acef:scope:11111111-1111-1111-1111-111111111111",
+    attempted_action={
+        "action_class": "external_write",
+        "action_target": "https://prod.example.com/api/v1/users",
+        "action_payload_digest": "sha256:" + "a" * 64,
+    },
+    authorized_scope_snapshot={
+        "scope_id": "urn:acef:scope:11111111-1111-1111-1111-111111111111",
+        "scope_version": "1.0.0",
+    },
+    classification="intentional_bypass_attempt",
+    hard_stop_triggered=False,  # no stop required for this example
+    detected_at="2026-05-27T01:00:00Z",
+    detector={
+        "detector_class": "side_effect_policy_check",
+        "detector_id": "urn:acef:actor:44444444-4444-4444-4444-444444444444",
+    },
+)
+print(event.payload["classification"])  # → intentional_bypass_attempt
+```
+
+**Notes:**
+- When `hard_stop_triggered=True`, supply `hard_stop_attestation_ref`
+  pointing to the `harness_attestation` record that signed off on the stop.
+  The builder raises `ValueError` if the pairing is missing.
+- `attempted_action.action_payload_digest` MUST match the regex
+  `^sha256:[0-9a-f]{64}$`. The raw payload is NEVER embedded — only its
+  digest, post-redaction.
+
+### finding_record
+
+A reproducible defect with evidence. Carries a normative `dedupe_key`
+computed via the brief Q5 recipe so two findings with byte-equal reproduction
+recipes collapse to the same key.
+
+```python
+import hashlib
+
+# (uses preamble above)
+content_hash = "sha256:" + hashlib.sha256(b"reproduction-steps-content").hexdigest()
+
+finding = pkg.record_finding(
+    class_="accuracy_degradation",
+    subject_ref=system.subject_id,
+    expected_behavior="Model returns factually correct historical dates.",
+    reproduction_steps_ref_content_hash=content_hash,
+    severity={
+        "severity_level": "medium",
+        "severity_rationale": "User-facing accuracy regression in known domain.",
+    },
+    reproduction={
+        "expected_behavior": "Model returns factually correct historical dates.",
+        "observed_behavior": "Model returned an incorrect year for a known event.",
+        "reproduction_steps_ref": "artifacts/repro-2026-05-27.md",
+        "evidence_commit_ref": content_hash,
+    },
+    attribution={
+        "persona_ref": "urn:acef:actor:55555555-5555-5555-5555-555555555555",
+        "scenario_ref": "urn:acef:rec:66666666-6666-6666-6666-666666666666",
+        "scope_ref": "urn:acef:scope:11111111-1111-1111-1111-111111111111",
+    },
+    discovered_at="2026-05-27T02:00:00Z",
+    discovered_in_run_ref="urn:acef:rec:77777777-7777-7777-7777-777777777777",
+)
+print(finding.payload["dedupe_key"])  # stable across SDK runs
+```
+
+**Notes:**
+- `class_` is the Python parameter name because `class` is a reserved
+  keyword. The JSON-side field name is `finding_class`; the recipe-side
+  field name used to compute `dedupe_key` is `class`.
+- The builder canonicalizes the recipe `{class, subject_ref,
+  expected_behavior, reproduction_steps_ref_content_hash}` via RFC 8785
+  (JCS) and computes SHA-256 over the canonical bytes. Two calls with
+  identical input parameters produce byte-equal `dedupe_key` (verified by
+  VAL-SDK-DETERMINISM-HASH-001).
+
+### delivery_verdict
+
+Records that evidence was shipped to a downstream system AND verified to
+have arrived. The `verified_delivered` state requires a `read_back` block,
+`read_back.digest_match: true`, byte-equal `read_back.read_back_digest ==
+write_attempt.request_digest`, and a paired `harness_attestation_ref`.
+Provider acknowledgment alone (HTTP 2xx) is NOT verified delivery.
+
+```python
+# (uses preamble above, and finding from the previous example)
+request_digest = "sha256:" + "b" * 64
+verdict = pkg.record_delivery_verdict(
+    finding_ref=finding.payload["finding_id"],
+    destination={
+        "provider_class": "jira",
+        "provider_instance_id": "jira.acme.example.com",
+        "provider_object_id": "ACME-1234",
+    },
+    write_attempt={
+        "attempted_at": "2026-05-27T03:00:00Z",
+        "request_digest": request_digest,
+        "response_status": 201,
+        "response_digest": "sha256:" + "c" * 64,
+    },
+    read_back={
+        "read_back_at": "2026-05-27T03:00:30Z",
+        "read_back_digest": request_digest,   # MUST byte-equal request_digest
+        "digest_match": True,
+    },
+    delivery_state="verified_delivered",
+    harness_attestation_ref="urn:acef:rec:88888888-8888-8888-8888-888888888888",
+)
+print(verdict.payload["delivery_state"])  # → verified_delivered
+```
+
+**Notes:**
+- The builder enforces TWO cross-field rules before append. Rule 1: when a
+  `read_back` block is present, `read_back.read_back_digest` MUST byte-equal
+  `write_attempt.request_digest` (otherwise emits ACEF-072 at validation;
+  the builder raises immediately so the bundle never holds a
+  self-inconsistent verdict). Rule 2: `delivery_state="verified_delivered"`
+  requires all of `read_back` present, `digest_match: true`, and a non-empty
+  `harness_attestation_ref` (otherwise emits ACEF-071 at validation; the
+  builder raises immediately).
+- For non-verified states (`drafted`, `dispatched`, `acknowledged`,
+  `failed`, `drifted`), omit `read_back` and `harness_attestation_ref`.
+
+### coverage_cell
+
+An Assessment Bundle field, NOT a standalone record type. Lives inside
+`acef-conventions/v1.1/assessment-bundle.schema.json` under the
+`coverage_cells` optional array. ACEF v0.4 does not expose a `Package`
+builder for it (because it does not belong in an Evidence Bundle); instead
+callers construct it directly via the Pydantic model in
+`acef.models.agent_reliability`, then attach it to an Assessment Bundle
+via the assessment-builder API.
+
+```python
+from acef.models.agent_reliability import CoverageCellPayload, CoverageDimensions
+
+cell = CoverageCellPayload(
+    cell_id="urn:acef:cell:99999999-9999-9999-9999-999999999999",
+    subject_ref=system.subject_id,
+    dimensions=CoverageDimensions(
+        scenario_class="factuality",
+        surface_class="chat_endpoint",
+        time_window_start="2026-05-20T00:00:00Z",
+        time_window_end="2026-05-27T00:00:00Z",
+    ),
+    bound_evidence_refs=[finding.record_id],
+    freshness_state="fresh",
+    freshness_policy_ref="urn:acef:rec:aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+    # claim_language MUST NOT contain banned tokens (compliant, certified,
+    # AI Act-approved, guaranteed) — banned tokens emit ACEF-079.
+    claim_language="Coverage measured for factuality scenarios over the past 7 days.",
+    coverage_outcome="covered",
+)
+print(cell.model_dump(mode="json", exclude_none=True)["coverage_outcome"])  # → covered
+```
+
+**Notes:**
+- `freshness_state="fresh"` requires every URN in `bound_evidence_refs` to
+  have a `timestamp` newer than `time_window_start - freshness_policy.max_age`.
+  This is a validator-level rule consulting the bundle's record set, not a
+  model-level invariant.
+- The banned-token check is enforced by the validator (ACEF-079), not by
+  the Pydantic model. A `claim_language` containing `"AI Act-compliant"`
+  constructs cleanly but fails validation.
+- The assessment-bundle builder API for attaching coverage_cell entries is
+  outside the scope of this section; see
+  `src/acef/assessment.py` for the assessment-side API.
+
+### harness_attestation
+
+A per-state-transition signed attestation. The most important new primitive:
+it is the durable proof that a state transition was earned by evidence,
+generalizing the bundle-level JWS already in `src/acef/signing.py` to
+per-record granularity.
+
+The `Package.attest(...)` builder constructs the attestation; the JWS
+signature over the 9 normative fields is produced by
+`acef.signing.sign_harness_attestation(...)`. In a production pipeline you
+would compute the signature first and pass it into the builder; the example
+below shows both the builder call (with a synthetic signature value) and
+the real signature computation against a generated RSA key.
+
+```python
+from cryptography.hazmat.primitives.asymmetric import rsa
+from acef.signing import sign_harness_attestation, HARNESS_ATTESTATION_SIGNED_FIELDS
+
+# (uses preamble above and finding from the finding_record example)
+
+# 1) Build the payload (without the signature) so we can sign over the
+#    9 normative fields enumerated by HARNESS_ATTESTATION_SIGNED_FIELDS.
+attestation_payload = {
+    "attestation_id": "urn:acef:rec:bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+    "state_class": "finding",
+    "state_transition": {
+        "from_state": "open",
+        "to_state": "reproduced",
+        "transitioned_at": "2026-05-27T04:00:00Z",
+    },
+    "bound_evidence_refs": [finding.record_id],
+    "verifier": {
+        "verifier_id": "urn:acef:actor:cccccccc-cccc-cccc-cccc-cccccccccccc",
+        "verifier_class": "contract_gate",
+        "verifier_version": "1.0",
+    },
+    "claim": "finding.open.reproduced:reproduction-steps-verified",
+    "fake_green_test_ref": "urn:acef:rec:dddddddd-dddd-dddd-dddd-dddddddddddd",
+    "signed_at": "2026-05-27T04:00:00Z",
+    "signer_kid": "kid-demo-001",
+}
+
+# 2) Compute the JWS detached signature over the 9 signed fields.
+priv = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+jws = sign_harness_attestation(attestation_payload, private_key=priv,
+                               signer_kid="kid-demo-001")
+
+# 3) Append the harness_attestation via the builder.
+attestation_record = pkg.attest(
+    state_class="finding",
+    state_transition=attestation_payload["state_transition"],
+    bound_evidence_refs=attestation_payload["bound_evidence_refs"],
+    verifier=attestation_payload["verifier"],
+    claim=attestation_payload["claim"],
+    fake_green_test_ref=attestation_payload["fake_green_test_ref"],
+    attestation_signature={
+        "alg": "RS256",
+        "value": jws,
+        "signed_fields": list(HARNESS_ATTESTATION_SIGNED_FIELDS),
+    },
+    signed_at=attestation_payload["signed_at"],
+    signer_kid=attestation_payload["signer_kid"],
+    attestation_id=attestation_payload["attestation_id"],
+)
+print(attestation_record.payload["state_class"])  # → finding
+```
+
+**Notes:**
+- The builder enforces FOUR SDK-side pre-flight checks before append:
+  (1) `state_class` MUST be one of the seven hard-coded values
+  (`step`, `finding`, `coverage_cell`, `regression`, `delivery`, `badge`,
+  `attestation`) — otherwise raises (mirrors validator ACEF-076).
+  (2) `verifier.verifier_class` MUST NOT be `persona` or `llm` — those
+  classes lack determinism and are rejected at load (VAL-LOAD-001/002).
+  (3) `bound_evidence_refs` MUST be non-empty (VAL-SDK-005, mirrors
+  validator ACEF-070).
+  (4) `fake_green_test_ref` MUST be a non-empty string (VAL-SDK-006,
+  mirrors validator ACEF-076).
+- The JWS signs exactly the 9 fields enumerated by
+  `acef.signing.HARNESS_ATTESTATION_SIGNED_FIELDS`:
+  `attestation_id`, `state_class`, `state_transition`,
+  `bound_evidence_refs`, `verifier`, `claim`, `fake_green_test_ref`,
+  `signed_at`, `signer_kid`. Any other fields (added by future versions
+  or vendors) are explicitly outside the signature envelope and MUST NOT
+  be trusted by verifiers.
+- The signature algorithm MUST be `RS256` (RSA-PKCS1-v1_5 over SHA-256)
+  or `ES256` (ECDSA over P-256 + SHA-256). Other algorithms emit ACEF-013
+  at validation.

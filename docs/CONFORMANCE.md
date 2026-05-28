@@ -409,3 +409,212 @@ Use this checklist to verify your implementation:
 - [ ] All 19 test vectors produce expected assessment outcomes
 - [ ] Unknown record types (x- prefix) are preserved during round-trip
 - [ ] Symlinks and path traversal in archives are rejected
+
+---
+
+## Freddy Profile Conformance
+
+This section documents the conformance requirements introduced in ACEF v0.4
+for agent-reliability and continuous-verification consumers. It complements
+the v1.0 conformance machinery above. The normative source is the brief at
+[`planning/freddy-on-acef-requirements-v0.1.md`](../planning/freddy-on-acef-requirements-v0.1.md);
+the version-gating design is described in
+[`MIGRATION-v0.3-to-v0.4.md`](MIGRATION-v0.3-to-v0.4.md#version-gating-semantics).
+
+A bundle is in scope of "Freddy Profile Conformance" when its
+`manifest.versioning.core_version` is `1.1.0` or later AND its
+`manifest.analysis_mode` is set. Bundles declaring only `core_version: 1.0.x`
+remain in scope of the v1.0 conformance rules above.
+
+### Analysis Modes
+
+`manifest.analysis_mode` is a v1.1 manifest field with four enumerated
+values. Each mode defines what record types and envelope fields are
+required, forbidden, and conditionally permitted. The validator's mode-gate
+fires `ACEF-080` when a bundle declares a mode but lacks the mode's
+required envelope fields, or contains a forbidden record type for that
+mode.
+
+| Mode | Required records | Forbidden records | Notes |
+|---|---|---|---|
+| `subscriber` | At least one `authorized_test_scope` AND at least one `harness_attestation`. | (none) | Full guarantees. All record types valid. `tenant_label` uniformity enforced bundle-wide (ACEF-075). X1/X2 conditional-required on non-public records (ACEF-074, ACEF-078). |
+| `public_artifact` | (none) | `delivery_verdict`, `disposition_record`, `accepted_risk_ref`. | Customer-facing publicly accessible artifact. Attribution confidence on persona observations must be `low` or `medium`. |
+| `canary` | (none) | Customer-facing records. `badge_state.page_state` MUST be `unsupported`. | Internal pre-production testing only. Not for customer or auditor consumption. |
+| `unattributed_artifact` | (none) | Same as `public_artifact`, plus no `attribution` blocks on any record. | Prospect-side teaser surface. Stricter than `public_artifact`; no actor attribution. |
+
+The mode-gate rule table is exhaustive: any record type not listed as
+"forbidden" for a given mode is permitted (subject to the mode's required
+envelope fields). The validator implementation lives in
+`src/acef/validation/mode_gate.py`; the rule registry follows the WS3.9 table
+of the operation plan.
+
+### State-Class Taxonomy
+
+The seven state classes from brief §24.5 are published as a frozen JSON
+document at `acef-conventions/v1.1/state-class-taxonomy.json`. Every
+`harness_attestation.state_class` value MUST be one of these seven; values
+outside the enum emit `ACEF-076`. Promotion to an open registry is deferred
+to ACEF v1.2+ per design decision D3.
+
+Each entry declares whether a fake-green test is required for that class
+(currently `true` for all seven) and which `record_type` values are
+acceptable in `bound_evidence_refs` for transitions to that state.
+
+| state_class_id | Description | fake_green_test_required | required_bound_evidence_types |
+|---|---|---|---|
+| `step` | A single harness step (probe, scan, evaluation) transitioning between in-progress states. | true | `event_log`, `scope_boundary_event` |
+| `finding` | A `finding_record` reaching a reproduced or verified state. | true | `finding_record`, `event_log` |
+| `coverage_cell` | A `coverage_cell` reaching `fresh` state with bound evidence. | true | `coverage_cell`, `finding_record`, `event_log` |
+| `regression` | A `regression_definition` reaching `active` state with a fix-verification reference. | true | `risk_treatment` (`regression_definition` variant), `finding_record` |
+| `delivery` | A `delivery_verdict` reaching `verified_delivered` with a passing read-back. | true | `delivery_verdict`, `harness_attestation` (read-back verifier) |
+| `badge` | A `badge_state` reaching `green` or `provisional` state with fresh coverage. | true | `transparency_disclosure` (`badge_state` variant), `coverage_cell` |
+| `attestation` | A higher-order `harness_attestation` (attestation-of-attestation). | true | `harness_attestation` |
+
+The 7-entry table is hard-coded; v1.1 does NOT allow community extension.
+A validator encountering a `state_class` value not in this table emits
+`ACEF-076` and refuses the record.
+
+### Test Vector Battery
+
+ACEF v0.4 ships 27 test bundles under `test-vectors/freddy/`, mirroring the
+existing per-regulation layout. The test driver is
+`pytest tests/conformance/test_freddy_*.py`.
+
+#### Pass vectors (9 bundles)
+
+Location: `test-vectors/freddy/pass/`.
+
+Every pass bundle validates clean (zero errors emitted). The driver is
+`tests/conformance/test_freddy_pass_vectors.py`.
+
+| Bundle | Purpose |
+|---|---|
+| `subscriber-mode-full-loop.acef/` | Canonical reference bundle. Contains at least one record of each of the 6 new types and each of the 5 new variants. Required by VAL-CONFORMANCE-004 and design decision D7. |
+| `public-artifact-mode.acef/` | Demonstrates the `public_artifact` mode without forbidden record types. |
+| `canary-mode.acef/` | Demonstrates `canary` mode with `badge_state.page_state: unsupported`. |
+| `verified-delivery.acef/` | A `delivery_verdict` reaching `verified_delivered` with passing read-back digest equality. |
+| `regression-active-with-fix-verification.acef/` | A `regression_definition` promoted to `active` with a paired `promotion_attestation_ref`. |
+| `badge-green-with-fresh-coverage.acef/` | A `badge_state` at `green` with `integrity_state: verified` and a `fresh` coverage cell. |
+| `badge-provisional-with-reason.acef/` | A `badge_state` at `provisional` with a populated `provisional_reason`. |
+| `accepted-risk-disposition.acef/` | A `disposition_record` with `internal_state_unchanged: true` and `authority_class: accepted_risk_request`. |
+| `multi-finding-with-dedupe-collapse.acef/` | Two `finding_record` entries with identical reproduction recipes collapsing to the same `dedupe_key`. |
+
+#### Fail vectors (11 bundles)
+
+Location: `test-vectors/freddy/fail/`.
+
+Every fail bundle emits exactly the ACEF-NNN code declared in its
+`README.md` and no other. The driver is
+`tests/conformance/test_freddy_fail_vectors.py`.
+
+| Bundle | Expected code |
+|---|---|
+| `verified-delivery-without-readback/` | ACEF-071 |
+| `verified-delivery-digest-mismatch/` | ACEF-072 |
+| `harness-attestation-empty-evidence/` | ACEF-070 |
+| `harness-attestation-persona-as-verifier/` | LoadRejection ACEF-070 (record rejected at load, not just validation) |
+| `badge-green-with-failed-integrity/` | mode-gate / page-state coherence rejection |
+| `cross-tenant-references-in-one-bundle/` | ACEF-075 |
+| `voice-rubric-with-claim-token/` | ACEF-077 (via the namespace lint for `x-freddy/voice-rubric-emission`) |
+| `scope-boundary-event-without-stop-attest/` | schema `allOf` rejection (`hard_stop_triggered: true` without `hard_stop_attestation_ref`) |
+| `external-disposition-overrides-internal/` | LoadRejection (`disposition_record.internal_state_unchanged: false`) |
+| `public-artifact-with-delivery-verdict/` | ACEF-080 (mode-gate forbidden record) |
+| `non-public-record-without-redaction-pol/` | ACEF-074 |
+
+#### Fake-green vectors (7 bundles)
+
+Location: `test-vectors/freddy/fake-green/`.
+
+Every fake-green bundle FAILS validation. The point of the fake-green
+battery is to prove no state class can be reached without its precursor
+evidence; a passing fake-green bundle would invalidate the Prove-It
+Doctrine. The driver is
+`tests/conformance/test_freddy_fake_green_vectors.py`, which asserts the
+bundle fails (the test passes when validation fails).
+
+| Bundle | State class probed |
+|---|---|
+| `cannot-reach-step-without-evidence/` | `step` |
+| `cannot-reach-finding-without-evidence/` | `finding` |
+| `cannot-reach-coverage-cell-without-evidence/` | `coverage_cell` |
+| `cannot-reach-active-regression-without-fix-verification/` | `regression` |
+| `cannot-reach-verified-delivery-without-readback/` | `delivery` |
+| `cannot-reach-green-badge-without-fresh-coverage/` | `badge` |
+| `cannot-reach-attestation-without-precursor-attestation/` | `attestation` |
+
+Bundles under `fake-green/` are JSON-Schema valid (per
+VAL-CONFORMANCE-FAKE-GREEN-REF-002) — they fail at a higher level
+(integrity, reference, or rule layer), not at the schema layer. This
+ensures the Prove-It Doctrine is enforced by ACEF semantics, not by
+schema bugs.
+
+#### Running the battery
+
+```bash
+source venv/bin/activate
+pytest tests/conformance/test_freddy_pass_vectors.py \
+       tests/conformance/test_freddy_fail_vectors.py \
+       tests/conformance/test_freddy_fake_green_vectors.py \
+       -v
+```
+
+The combined wall-clock budget for the Freddy battery is ≤40 seconds at
+the conformance sub-tier (VAL-CONFORMANCE-005), with the v1.0 regression
+sub-tier ≤20 seconds (VAL-REGRESSION-LEGACY-BUDGET-001), staying within
+the plumbing-tier ≤60 second budget (VAL-TIER-003).
+
+### Cross-Bundle Determinism
+
+ACEF v1.1 producers can guarantee byte-equal `.acef.tar.gz` output across
+independent runs by injecting deterministic clock and URN factories into
+the `Package` constructor:
+
+```python
+from datetime import datetime, UTC
+from itertools import count
+from acef.package import Package
+from acef.models.urns import URNType
+
+# Frozen clock — every timestamp minted by this package is identical.
+_FROZEN = datetime(2026, 5, 27, 0, 0, 0, tzinfo=UTC)
+
+def fixed_clock():
+    return _FROZEN
+
+# Sequential URN generator — every URN of a given type increments
+# deterministically. The counters are stable across runs because the
+# factory is constructed from a closure with no entropy source.
+def make_urn_generator():
+    counters = {URNType.PACKAGE: count(1), URNType.RECORD: count(1),
+                URNType.SUBJECT: count(1), URNType.COMPONENT: count(1),
+                URNType.DATASET: count(1), URNType.ACTOR: count(1),
+                URNType.SCOPE: count(1), URNType.CELL: count(1)}
+    prefix = {URNType.PACKAGE: "pkg", URNType.RECORD: "rec",
+              URNType.SUBJECT: "sub", URNType.COMPONENT: "cmp",
+              URNType.DATASET: "ds",  URNType.ACTOR: "actor",
+              URNType.SCOPE: "scope", URNType.CELL: "cell"}
+    def gen(urn_type: URNType) -> str:
+        n = next(counters[urn_type])
+        return f"urn:acef:{prefix[urn_type]}:{n:08d}-0000-0000-0000-000000000000"
+    return gen
+
+pkg = Package(
+    producer={"name": "deterministic-producer", "version": "1.0.0"},
+    clock=fixed_clock,
+    urn_generator=make_urn_generator(),
+)
+```
+
+The contract VAL-SDK-007 verifies that two independent runs of identical
+builder calls (same inputs, same factory state) produce SHA-256-equal
+`.acef.tar.gz` archives. The archive's gzip stream is held to
+`level=6, mtime=0, OS=0xFF` (deterministic gzip), and the tar stream uses
+`owner 0/0, permissions 0644/0755, mtime=0` (deterministic tar). Together
+with JCS canonicalization on every JSON in the hash domain and the
+deterministic record sort order (`timestamp` ascending,
+`record_id` lexicographic sub-sort), the entire bundle is byte-equal
+across runs.
+
+Cross-language Python ↔ TypeScript byte-equality (VAL-PARITY-001..003)
+lands in ACEF v0.4.1 alongside the TypeScript SDK; v0.4.0 ships the
+Python-side determinism only.
