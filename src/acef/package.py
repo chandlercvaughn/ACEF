@@ -6,9 +6,9 @@ The primary API for creating ACEF Evidence Bundles.
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime
+from collections.abc import Callable
+from datetime import UTC, datetime
 from typing import Any
-from uuid import uuid4
 
 from pydantic import ValidationError
 
@@ -48,6 +48,30 @@ from acef.models.records import (
     RecordRetention,
 )
 from acef.models.subjects import LifecycleEntry, Subject
+from acef.models.urns import URNType, generate_urn
+
+# Spec §3.1 timestamp format — ISO 8601 with explicit ``Z`` suffix and no
+# sub-second precision. Both the model default factories and the injected-
+# clock path MUST format identically so v0.3 behavior is preserved.
+_TIMESTAMP_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
+
+
+def _default_clock() -> datetime:
+    """Wall-clock default; replaced by the injected ``clock`` callable."""
+    return datetime.now(UTC)
+
+
+def _format_timestamp(dt: datetime) -> str:
+    """Format a datetime per spec §3.1 — ISO 8601 with ``Z`` suffix.
+
+    Naive datetimes are treated as UTC. Sub-second precision is dropped.
+    """
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    else:
+        dt = dt.astimezone(UTC)
+    return dt.strftime(_TIMESTAMP_FORMAT)
+
 
 # Brief §3.6 / VAL-LOAD-001/002 — persona and LLM verifiers lack the
 # determinism required to attest state transitions; they are rejected at
@@ -89,7 +113,35 @@ class Package:
         *,
         retention_policy: dict[str, Any] | RetentionPolicy | None = None,
         prior_package_ref: str | None = None,
+        clock: Callable[[], datetime] | None = None,
+        urn_generator: Callable[[URNType], str] | None = None,
     ) -> None:
+        """Build an empty Package.
+
+        Args:
+            producer: Tool/organization metadata.
+            retention_policy: Package-level retention requirements.
+            prior_package_ref: URN of a prior version of this package.
+            clock: Optional callable returning the current
+                :class:`datetime` (timezone-aware). When provided, replaces
+                the default ``datetime.now(timezone.utc)`` for all
+                timestamps minted by this builder (record envelopes,
+                audit-trail entries, package metadata). Enables byte-
+                deterministic export per VAL-SDK-007.
+            urn_generator: Optional callable taking a
+                :class:`acef.models.urns.URNType` and returning a URN
+                string. When provided, replaces the default
+                :func:`acef.models.urns.generate_urn` for all URN minting
+                by this builder (``package_id``, ``record_id``, and the
+                payload identifiers minted by the v1.1 typed builders).
+                Enables byte-deterministic export per VAL-SDK-007.
+        """
+        # Stash injection callables BEFORE building metadata so the
+        # metadata's timestamp / package_id come from the injected
+        # implementations rather than the model's default factories.
+        self._clock: Callable[[], datetime] = clock or _default_clock
+        self._urn_generator: Callable[[URNType], str] = urn_generator or generate_urn
+
         if producer is None:
             producer = ProducerInfo(name="acef-sdk", version="0.1.0")
         elif isinstance(producer, dict):
@@ -103,6 +155,8 @@ class Package:
                 retention = retention_policy
 
         self._metadata = PackageMetadata(
+            package_id=self._urn_generator(URNType.PACKAGE),
+            timestamp=_format_timestamp(self._clock()),
             producer=producer,
             prior_package_ref=prior_package_ref,
             retention_policy=retention,
@@ -126,6 +180,18 @@ class Package:
                 description="Initial package creation",
             )
         )
+
+    # ------------------------------------------------------------------
+    # Injection helpers (private)
+    # ------------------------------------------------------------------
+
+    def _now_iso(self) -> str:
+        """Return ``self._clock()`` formatted per spec §3.1."""
+        return _format_timestamp(self._clock())
+
+    def _mint_record_urn(self) -> str:
+        """Mint a record URN via the injected URN generator."""
+        return self._urn_generator(URNType.RECORD)
 
     @property
     def metadata(self) -> PackageMetadata:
@@ -201,6 +267,7 @@ class Package:
             timeline = [LifecycleEntry(**entry) for entry in lifecycle_timeline]
 
         subject = Subject(
+            subject_id=self._urn_generator(URNType.SUBJECT),
             subject_type=subject_type,
             name=name,
             version=version,
@@ -231,6 +298,7 @@ class Package:
             type = ComponentType(type)
 
         component = Component(
+            component_id=self._urn_generator(URNType.COMPONENT),
             name=name,
             type=type,
             version=version,
@@ -261,6 +329,7 @@ class Package:
             modality = DatasetModality(modality)
 
         dataset = Dataset(
+            dataset_id=self._urn_generator(URNType.DATASET),
             name=name,
             version=version,
             source_type=source_type,
@@ -286,7 +355,12 @@ class Package:
         if isinstance(role, str):
             role = ActorRole(role)
 
-        actor = Actor(name=name, role=role, organization=organization)
+        actor = Actor(
+            actor_id=self._urn_generator(URNType.ACTOR),
+            name=name,
+            role=role,
+            organization=organization,
+        )
         self._entities.actors.append(actor)
         return actor
 
@@ -353,6 +427,7 @@ class Package:
         attestation: dict[str, Any] | Attestation | None = None,
         retention: dict[str, Any] | RecordRetention | None = None,
         timestamp: str | None = None,
+        record_id: str | None = None,
     ) -> RecordEnvelope:
         """Record an evidence record.
 
@@ -369,7 +444,13 @@ class Package:
             attachments: File references in artifacts/.
             attestation: Cryptographic attestation.
             retention: Per-record retention requirements.
-            timestamp: Override timestamp (ISO 8601).
+            timestamp: Override timestamp (ISO 8601). When ``None``, the
+                envelope timestamp is minted by the package's injected
+                ``clock`` (or the default wall clock if no injection).
+            record_id: Override record_id URN. When ``None``, the
+                envelope record_id is minted by the package's injected
+                ``urn_generator`` (or the default ``generate_urn`` if no
+                injection). Caller-supplied IDs win.
 
         Returns:
             The created RecordEnvelope.
@@ -428,7 +509,26 @@ class Package:
         if isinstance(retention, dict):
             retention = RecordRetention(**retention)
 
+        # Resolve record_id + timestamp BEFORE RecordEnvelope construction
+        # so the injected clock/URN generator are honored instead of the
+        # model's default factories (which would otherwise mint random
+        # uuid4-based URNs + wall-clock timestamps).
+        if timestamp is not None:
+            try:
+                datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+            except (ValueError, AttributeError) as e:
+                raise ACEFError(
+                    f"Invalid ISO 8601 timestamp: {timestamp!r}",
+                    code="ACEF-050",
+                ) from e
+            resolved_timestamp = timestamp
+        else:
+            resolved_timestamp = self._now_iso()
+
+        resolved_record_id = record_id if record_id is not None else self._mint_record_urn()
+
         envelope = RecordEnvelope(
+            record_id=resolved_record_id,
             record_type=record_type,
             provisions_addressed=provisions or [],
             payload=payload or {},
@@ -443,16 +543,8 @@ class Package:
             attachments=parsed_attachments,
             attestation=attestation,
             retention=retention,
+            timestamp=resolved_timestamp,
         )
-        if timestamp:
-            try:
-                datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
-            except (ValueError, AttributeError) as e:
-                raise ACEFError(
-                    f"Invalid ISO 8601 timestamp: {timestamp!r}",
-                    code="ACEF-050",
-                ) from e
-            envelope.timestamp = timestamp
 
         self._records.append(envelope)
         return envelope
@@ -605,7 +697,7 @@ class Package:
             )
 
         if event_id is None:
-            event_id = f"urn:acef:rec:{uuid4()}"
+            event_id = self._mint_record_urn()
 
         payload_dict: dict[str, Any] = {
             "event_id": event_id,
@@ -694,7 +786,7 @@ class Package:
         dedupe_key = "sha256:" + hashlib.sha256(canonical).hexdigest()
 
         if finding_id is None:
-            finding_id = f"urn:acef:rec:{uuid4()}"
+            finding_id = self._mint_record_urn()
 
         payload_dict: dict[str, Any] = {
             "finding_id": finding_id,
@@ -802,7 +894,7 @@ class Package:
                 )
 
         if verdict_id is None:
-            verdict_id = f"urn:acef:rec:{uuid4()}"
+            verdict_id = self._mint_record_urn()
 
         payload_dict: dict[str, Any] = {
             "verdict_id": verdict_id,
@@ -908,7 +1000,7 @@ class Package:
             )
 
         if attestation_id is None:
-            attestation_id = f"urn:acef:rec:{uuid4()}"
+            attestation_id = self._mint_record_urn()
 
         payload_dict: dict[str, Any] = {
             "attestation_id": attestation_id,
@@ -1062,6 +1154,14 @@ class Package:
             A fully constructed Package.
         """
         pkg = cls.__new__(cls)
+        # Seed injection callables with their defaults so post-load
+        # callers can still invoke record() / typed builders without
+        # AttributeError. Loaded packages are not expected to be
+        # extended in deterministic-output workflows; callers wanting
+        # deterministic post-load edits should construct a fresh
+        # Package(clock=, urn_generator=) and re-add records.
+        pkg._clock = _default_clock
+        pkg._urn_generator = generate_urn
         pkg._metadata = metadata
         pkg._versioning = versioning
         pkg._subjects = list(subjects)
