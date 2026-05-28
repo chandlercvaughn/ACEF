@@ -1,0 +1,93 @@
+{
+  "analysis_mode": "subscriber",
+  "audit_trail": [],
+  "entities": {
+    "actors": [
+      {
+        "actor_id": "urn:acef:act:00000000-0000-0000-0000-000000000033",
+        "authority_class": "accepted_risk_request",
+        "name": "Customer Test Authorizer",
+        "organization": "Acme Corp",
+        "role": "deployer"
+      },
+      {
+        "actor_id": "urn:acef:act:00000000-0000-0000-0000-000000000034",
+        "name": "Freddy Ops",
+        "organization": "Freddy",
+        "role": "auditor"
+      },
+      {
+        "actor_id": "urn:acef:act:00000000-0000-0000-0000-000000000046",
+        "name": "Harness Contract Gate v1",
+        "organization": "Freddy",
+        "role": "auditor"
+      },
+      {
+        "actor_id": "urn:acef:act:00000000-0000-0000-0000-000000000032",
+        "name": "Freddy Test Account",
+        "organization": "Freddy",
+        "role": "auditor"
+      },
+      {
+        "actor_id": "urn:acef:act:00000000-0000-0000-0000-00000000003c",
+        "name": "Probe Persona alpha",
+        "organization": "Freddy",
+        "role": "auditor"
+      }
+    ],
+    "components": [],
+    "datasets": [],
+    "relationships": []
+  },
+  "metadata": {
+    "created_at": "2026-05-01T00:00:00Z",
+    "package_id": "urn:acef:pkg:00000000-0000-0000-0000-00000000006a",
+    "producer": {
+      "name": "freddy-test-builder",
+      "version": "0.4.0"
+    },
+    "timestamp": "2026-05-01T00:00:00Z"
+  },
+  "profiles": [],
+  "record_files": [
+    {
+      "count": 1,
+      "path": "records/authorized_test_scope.jsonl",
+      "record_type": "authorized_test_scope"
+    },
+    {
+      "count": 1,
+      "path": "records/finding_record.jsonl",
+      "record_type": "finding_record"
+    },
+    {
+      "count": 1,
+      "path": "records/harness_attestation.jsonl",
+      "record_type": "harness_attestation"
+    },
+    {
+      "count": 1,
+      "path": "records/transparency_disclosure.jsonl",
+      "record_type": "transparency_disclosure"
+    }
+  ],
+  "subjects": [
+    {
+      "lifecycle_phase": "deployment",
+      "lifecycle_timeline": [],
+      "modalities": [
+        "text"
+      ],
+      "name": "Acme Customer Chatbot",
+      "provider": "Acme Corp",
+      "risk_classification": "high-risk",
+      "subject_id": "urn:acef:sub:00000000-0000-0000-0000-000000000001",
+      "subject_type": "ai_system",
+      "version": "2.3.0"
+    }
+  ],
+  "versioning": {
+    "core_version": "1.1.0",
+    "profiles_version": "1.0.0"
+  }
+}

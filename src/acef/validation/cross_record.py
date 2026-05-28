@@ -669,6 +669,174 @@ def enforce_disposition_internal_state(
 
 
 # ---------------------------------------------------------------------------
+# ACEF-070: harness_attestation evidence binding (empty refs / unresolvable URN)
+#
+# Brief §3.6: empty bound_evidence_refs OR a ref that cannot be resolved to
+# an in-bundle record (or an externally-declared bundle reference) emits
+# ACEF-070 at validation time. The SDK builder Package.attest() rejects
+# empty refs at build time (VAL-SDK-005); this validator covers the
+# post-hoc / hand-authored / loaded-and-mutated cases that bypass the SDK.
+# ---------------------------------------------------------------------------
+
+
+def enforce_harness_evidence_binding(
+    records: list[dict[str, Any]],
+    in_bundle_record_urns: set[str],
+    manifest: dict[str, Any],
+) -> list[ValidationDiagnostic]:
+    """Emit ACEF-070 for harness_attestation records with broken evidence binding.
+
+    Two failure modes both emit ACEF-070 per brief §3.6:
+
+    1. ``payload.bound_evidence_refs`` is missing OR an empty list — a
+       state-class attestation that does not cite any evidence has no
+       binding, so any claim is structurally unverifiable.
+    2. A ref URN in ``bound_evidence_refs`` resolves to neither an
+       in-bundle record nor an externally-declared bundle reference (via
+       ``manifest.namespaces['x-external'].bundleReferences``).
+
+    Records of any type OTHER than ``harness_attestation`` are skipped —
+    ACEF-070 is reserved for harness attestation per VAL-SDK-EDGE-001.
+    """
+    declared_external = _declared_external_urns(manifest)
+    diags: list[ValidationDiagnostic] = []
+    for _idx, rec in _records_iter(records):
+        if _record_type_of(rec) != "harness_attestation":
+            continue
+        payload = rec.get("payload")
+        if not isinstance(payload, dict):
+            continue
+        rec_id = _record_id_of(rec)
+        refs = payload.get("bound_evidence_refs")
+        # Empty / missing list — fire once per record.
+        if not isinstance(refs, list) or len(refs) == 0:
+            diags.append(
+                ValidationDiagnostic(
+                    "ACEF-070",
+                    (
+                        f"harness_attestation {rec_id!r} has empty or missing "
+                        "bound_evidence_refs: state-class attestations require "
+                        "at least one URN binding the transition to evidence "
+                        "(brief §3.6)."
+                    ),
+                )
+            )
+            continue
+        # Resolve each ref.
+        for urn in refs:
+            if not isinstance(urn, str) or not urn:
+                continue  # schema layer flagged malformed entries
+            if urn in in_bundle_record_urns:
+                continue
+            if urn in declared_external:
+                continue
+            diags.append(
+                ValidationDiagnostic(
+                    "ACEF-070",
+                    (
+                        f"harness_attestation {rec_id!r} cites "
+                        f"bound_evidence_ref {urn!r} that resolves to "
+                        "neither an in-bundle record nor an externally-"
+                        "declared bundle reference (brief §3.6)."
+                    ),
+                )
+            )
+    return diags
+
+
+# ---------------------------------------------------------------------------
+# ACEF-071 / ACEF-072: delivery_verdict verified-delivery integrity
+#
+# Brief §3.4: when delivery_state='verified_delivered', the triple
+# requirement read_back + read_back.digest_match=true +
+# harness_attestation_ref MUST hold. Missing the read-back emits ACEF-071;
+# a read_back present whose read_back_digest does NOT byte-equal the
+# write_attempt.request_digest emits ACEF-072 (independent of
+# delivery_state: a self-inconsistent read-back is always a finding).
+# ---------------------------------------------------------------------------
+
+
+def enforce_delivery_verdict_integrity(
+    records: list[dict[str, Any]],
+) -> list[ValidationDiagnostic]:
+    """Emit ACEF-071 / ACEF-072 for delivery_verdict integrity failures.
+
+    Per brief §3.4 and VAL-ERROR-001 / VAL-CONFORMANCE-002:
+
+    - ACEF-071 fires when ``delivery_state == 'verified_delivered'`` and
+      any of ``read_back`` / ``read_back.digest_match == true`` /
+      ``harness_attestation_ref`` is missing. The bundle is claiming
+      verified delivery without the cryptographic read-back that proves
+      the destination object byte-equals the write payload.
+
+    - ACEF-072 fires whenever a ``read_back`` block is present and its
+      ``read_back_digest`` is NOT byte-equal to
+      ``write_attempt.request_digest``. The schema layer's allOf
+      requires ``digest_match=true`` for verified_delivered but does
+      not assert digest equality; this validator closes that gap.
+    """
+    diags: list[ValidationDiagnostic] = []
+    for _idx, rec in _records_iter(records):
+        if _record_type_of(rec) != "delivery_verdict":
+            continue
+        payload = rec.get("payload")
+        if not isinstance(payload, dict):
+            continue
+        rec_id = _record_id_of(rec)
+        state = payload.get("delivery_state")
+        read_back = payload.get("read_back")
+        write_attempt = payload.get("write_attempt")
+        harness_ref = payload.get("harness_attestation_ref")
+
+        # ACEF-072: read-back digest mismatch (independent of state).
+        if isinstance(read_back, dict) and isinstance(write_attempt, dict):
+            req_digest = write_attempt.get("request_digest")
+            rb_digest = read_back.get("read_back_digest")
+            if (
+                isinstance(req_digest, str)
+                and isinstance(rb_digest, str)
+                and req_digest
+                and rb_digest
+                and req_digest != rb_digest
+            ):
+                diags.append(
+                    ValidationDiagnostic(
+                        "ACEF-072",
+                        (
+                            f"delivery_verdict {rec_id!r} read_back.read_back_digest "
+                            f"{rb_digest!r} does not byte-equal "
+                            f"write_attempt.request_digest {req_digest!r} "
+                            "(brief §3.4): a self-inconsistent read-back "
+                            "cannot witness verified delivery."
+                        ),
+                    )
+                )
+
+        # ACEF-071: verified_delivered without the required triple.
+        if state == "verified_delivered":
+            problems: list[str] = []
+            if not isinstance(read_back, dict):
+                problems.append("read_back is missing")
+            elif read_back.get("digest_match") is not True:
+                problems.append(f"read_back.digest_match must be exactly true (got {read_back.get('digest_match')!r})")
+            if not (isinstance(harness_ref, str) and harness_ref):
+                problems.append("harness_attestation_ref is missing or empty")
+            if problems:
+                diags.append(
+                    ValidationDiagnostic(
+                        "ACEF-071",
+                        (
+                            f"delivery_verdict {rec_id!r} declares "
+                            "delivery_state='verified_delivered' but is missing "
+                            f"the required read-back triple: {problems!r} "
+                            "(brief §3.4)."
+                        ),
+                    )
+                )
+    return diags
+
+
+# ---------------------------------------------------------------------------
 # Top-level entry point
 # ---------------------------------------------------------------------------
 
@@ -742,5 +910,14 @@ def run_cross_record_validation(
     #    internal_state_unchanged=false. Emits ACEF-076 — same code the
     #    loader uses for LoadRejection.
     diags.extend(enforce_disposition_internal_state(records))
+
+    # 10. Brief §3.6 harness_attestation evidence binding — emits ACEF-070
+    #     for empty bound_evidence_refs OR unresolvable ref URN.
+    diags.extend(enforce_harness_evidence_binding(records, in_bundle_urns, manifest))
+
+    # 11. Brief §3.4 delivery_verdict integrity — emits ACEF-071 for
+    #     verified_delivered without the read-back triple, and ACEF-072
+    #     for a read_back whose digest does not match the write digest.
+    diags.extend(enforce_delivery_verdict_integrity(records))
 
     return diags
