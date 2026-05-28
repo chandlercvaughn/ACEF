@@ -30,6 +30,35 @@ from acef.errors import ACEFSigningError
 _ALLOWED_ALGORITHMS = frozenset({"RS256", "ES256"})
 
 
+# ---------------------------------------------------------------------------
+# Harness-attestation signed-fields scope (VAL-SIGNATURE-001..004).
+#
+# Per contract.md §SIGNATURE, the JWS detached signature on a
+# `harness_attestation` record covers EXACTLY these nine fields, in this
+# order, JCS-canonicalized as a JSON object. Any field outside this list
+# (including future-spec or vendor extensions appearing in the payload)
+# is explicitly OUTSIDE the signature envelope and verifiers MUST NOT
+# trust it. Any field inside the list, if tampered with after signing,
+# MUST cause verification to fail.
+#
+# RFC 8785 (JCS) handles object-key ordering deterministically (sorted
+# code-point ascending), so the *tuple order* here is the source of
+# truth for documentation, registry, and audit purposes — not for
+# canonicalization byte-order.
+# ---------------------------------------------------------------------------
+HARNESS_ATTESTATION_SIGNED_FIELDS: tuple[str, ...] = (
+    "attestation_id",
+    "state_class",
+    "state_transition",
+    "bound_evidence_refs",
+    "verifier",
+    "claim",
+    "fake_green_test_ref",
+    "signed_at",
+    "signer_kid",
+)
+
+
 def _base64url_encode(data: bytes) -> str:
     """Base64url encode without padding."""
     return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
@@ -56,8 +85,7 @@ def _detect_algorithm(private_key: PrivateKeyTypes) -> str:
         curve = private_key.curve
         if not isinstance(curve, ec.SECP256R1):
             raise ACEFSigningError(
-                f"Unsupported EC curve: {curve.name!r}. "
-                f"ACEF requires P-256 (secp256r1) for ES256.",
+                f"Unsupported EC curve: {curve.name!r}. ACEF requires P-256 (secp256r1) for ES256.",
                 code="ACEF-013",
             )
         return "ES256"
@@ -215,8 +243,7 @@ def verify_x5c_chain(
             instant = datetime.fromisoformat(ts_norm)
         except ValueError as exc:
             raise ACEFSigningError(
-                f"Invalid manifest_timestamp for cert validity check: "
-                f"{manifest_timestamp!r}: {exc}",
+                f"Invalid manifest_timestamp for cert validity check: {manifest_timestamp!r}: {exc}",
                 code="ACEF-012",
             ) from exc
         if instant.tzinfo is None:
@@ -252,9 +279,7 @@ def verify_x5c_chain(
         if tail_der in anchor_ders:
             anchored = True
         else:
-            anchored = any(
-                _verify_cert_signed_by(tail, anchor) for anchor in trust_anchors
-            )
+            anchored = any(_verify_cert_signed_by(tail, anchor) for anchor in trust_anchors)
         if not anchored:
             raise ACEFSigningError(
                 "x5c chain does not terminate at any configured trust anchor",
@@ -303,12 +328,8 @@ def _derive_jwk(private_key: PrivateKeyTypes) -> dict[str, str]:
     if isinstance(public_key, rsa.RSAPublicKey):
         public_numbers = public_key.public_numbers()
         # Encode n and e as base64url unsigned big-endian integers
-        n_bytes = public_numbers.n.to_bytes(
-            (public_numbers.n.bit_length() + 7) // 8, byteorder="big"
-        )
-        e_bytes = public_numbers.e.to_bytes(
-            (public_numbers.e.bit_length() + 7) // 8, byteorder="big"
-        )
+        n_bytes = public_numbers.n.to_bytes((public_numbers.n.bit_length() + 7) // 8, byteorder="big")
+        e_bytes = public_numbers.e.to_bytes((public_numbers.e.bit_length() + 7) // 8, byteorder="big")
         return {
             "kty": "RSA",
             "n": _base64url_encode(n_bytes),
@@ -435,9 +456,7 @@ def create_detached_jws(
     # Encode header. sort_keys=True ensures any two callers building the same
     # logical header (same alg/kid/x5c-or-jwk) produce byte-identical JWS
     # output, preserving the determinism contract from spec §3.1.3 / §6.5.
-    header_b64 = _base64url_encode(
-        json.dumps(header, separators=(",", ":"), sort_keys=True).encode("utf-8")
-    )
+    header_b64 = _base64url_encode(json.dumps(header, separators=(",", ":"), sort_keys=True).encode("utf-8"))
     payload_b64 = _base64url_encode(payload)
 
     # Sign
@@ -593,6 +612,168 @@ def verify_detached_jws(
         raise ACEFSigningError(f"Signature verification failed: {e}", code="ACEF-012") from e
 
     return header
+
+
+def _project_harness_attestation_subset(payload: dict[str, Any]) -> dict[str, Any]:
+    """Project a harness_attestation payload down to its signed-fields scope.
+
+    Per :data:`HARNESS_ATTESTATION_SIGNED_FIELDS`, the signature covers
+    exactly the 9 normative fields. Fields *absent* from the input are
+    *absent* from the projection — i.e., signing a payload that lacks
+    ``signer_kid`` produces a subset without that key, and any later
+    re-injection of the field by an attacker will perturb the JCS bytes
+    and fail verification. This "present-only" projection (as opposed
+    to filling absent fields with ``None``) is the design choice that
+    makes drop-or-inject tampering detectable.
+
+    Fields *outside* the 9-field list are excluded entirely, so vendor
+    extensions and future-spec fields carried alongside the payload
+    have no effect on the signature.
+    """
+    if not isinstance(payload, dict):
+        raise ACEFSigningError(
+            f"harness_attestation payload must be a dict, got {type(payload).__name__}",
+            code="ACEF-012",
+        )
+    subset: dict[str, Any] = {}
+    for field in HARNESS_ATTESTATION_SIGNED_FIELDS:
+        if field in payload:
+            subset[field] = payload[field]
+    return subset
+
+
+def sign_harness_attestation(
+    payload: dict[str, Any],
+    *,
+    private_key: PrivateKeyTypes,
+    signer_kid: str,
+) -> str:
+    """Produce a JWS detached signature over the harness_attestation
+    signed-fields scope (VAL-SIGNATURE-001..004).
+
+    Builds a sub-dict of ``payload`` limited to the 9 normative fields
+    listed in :data:`HARNESS_ATTESTATION_SIGNED_FIELDS`, RFC 8785
+    canonicalizes that sub-dict, and produces a detached JWS over the
+    canonical bytes. The JWS header includes ``alg`` (RS256 or ES256
+    auto-detected from the key type per :func:`_detect_algorithm`),
+    ``kid`` (the supplied ``signer_kid``), and an auto-embedded JWK so
+    that verifiers without out-of-band key material can still verify.
+
+    Args:
+        payload: The full harness_attestation payload (may contain
+            additional fields beyond the 9-field signed scope; they
+            are excluded from signing).
+        private_key: RSA-2048+ or EC P-256 private key. Other key
+            types raise ``ACEFSigningError(code="ACEF-013")`` via
+            :func:`_detect_algorithm`.
+        signer_kid: The key identifier to embed in the JWS header.
+            Required per spec §3.1.3 #5. Empty kid raises.
+
+    Returns:
+        JWS compact serialization in detached form
+        ``"<header_b64>..<signature_b64>"``.
+
+    Raises:
+        ACEFSigningError: For unsupported algorithms, malformed input,
+            or cryptographic failures.
+    """
+    # Import locally to avoid a top-of-module cycle (integrity imports
+    # nothing from signing, but the lazy form keeps the dependency
+    # direction explicit).
+    from acef.integrity import canonicalize
+
+    subset = _project_harness_attestation_subset(payload)
+    canonical = canonicalize(subset)
+    return create_detached_jws(canonical, private_key, kid=signer_kid)
+
+
+def verify_harness_attestation(
+    payload: dict[str, Any],
+    signature: str,
+    *,
+    public_key: PublicKeyTypes | None = None,
+    key_data: bytes | None = None,
+) -> bool:
+    """Verify a harness_attestation JWS detached signature.
+
+    Reconstructs the 9-field subset from ``payload`` per
+    :data:`HARNESS_ATTESTATION_SIGNED_FIELDS`, JCS-canonicalizes it,
+    and verifies ``signature`` against those bytes.
+
+    Algorithm whitelist enforcement:
+
+    - Headers whose ``alg`` is not in :data:`_ALLOWED_ALGORITHMS`
+      raise ``ACEFSigningError(code="ACEF-013")``. This includes
+      ``"HS256"``, ``"EdDSA"``, ``"none"``, etc.
+    - This raise propagates *out* of this function — it is not
+      swallowed into a ``False`` return — because callers MUST be
+      able to distinguish a tampered-payload (cryptographic
+      verification failure → ``False``) from a malformed-or-forbidden
+      signature (structural failure → exception with diagnostic).
+
+    Cryptographic verification failure returns ``False`` without
+    raising, so callers can branch cleanly on tamper detection.
+
+    Args:
+        payload: The full harness_attestation payload. Only the 9
+            normative fields participate in verification; outside
+            fields are ignored.
+        signature: JWS compact serialization
+            ``"<header_b64>..<signature_b64>"``.
+        public_key: Verification key. If omitted, the JWS header's
+            embedded ``jwk`` or ``x5c`` is used by
+            :func:`verify_detached_jws`.
+        key_data: Optional PEM-encoded public key (alternative to
+            ``public_key``).
+
+    Returns:
+        ``True`` on successful verification; ``False`` on
+        cryptographic failure (signature does not match payload subset).
+
+    Raises:
+        ACEFSigningError: With code ``ACEF-013`` for non-whitelisted
+            ``alg`` headers. With code ``ACEF-012`` for malformed JWS
+            structure (wrong segment count, undecodable header, etc.).
+    """
+    from acef.integrity import canonicalize
+
+    subset = _project_harness_attestation_subset(payload)
+    canonical = canonicalize(subset)
+
+    try:
+        verify_detached_jws(
+            signature,
+            canonical,
+            public_key,
+            key_data=key_data,
+        )
+    except ACEFSigningError as exc:
+        # ACEF-013 (unsupported alg, missing kid, key-type mismatch) and
+        # ACEF-012 structural failures (malformed JWS, missing header
+        # fields) propagate. Only the post-structural cryptographic
+        # verification failure (also ACEF-012 — re-raised by
+        # verify_detached_jws's except-clause around the
+        # cryptography-lib verify call) is converted to a False return
+        # so callers can branch cleanly on tamper detection.
+        if exc.code == "ACEF-013":
+            raise
+        # Distinguish the "signature did not match" path from other
+        # structural ACEF-012 cases. verify_detached_jws raises a
+        # message starting with "Signature verification failed:" only
+        # for the cryptographic verify-call failure (see signing.py
+        # near `raise ACEFSigningError(f"Signature verification
+        # failed: {e}", code="ACEF-012")`). All other ACEF-012 sites
+        # carry distinct prefixes (e.g., "Invalid JWS format", "Invalid
+        # JWS header", "Public key is not RSA for RS256
+        # verification"). Matching by prefix keeps the tamper-vs-
+        # malformed-JWS distinction crisp.
+        if str(exc).startswith("[ACEF-012] Signature verification failed"):
+            return False
+        # Any other ACEF-012 (structurally malformed JWS, wrong key
+        # type for declared alg, etc.) propagates as a real error so
+        # callers see the diagnostic.
+        raise
+    return True
 
 
 def sign_bundle(bundle_dir: Path, key_path: str, *, kid: str = "provider-key") -> str:
