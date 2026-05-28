@@ -45,3 +45,9 @@ fabric/
 hydra.toml
 .hydra-backup/
 projects/
+
+# TypeScript SDK build artifacts
+packages/sdk-typescript/node_modules/
+packages/sdk-typescript/dist-test/
+# `dist/` is already covered by the Python rule above; matches both Python
+# `dist/` and `packages/sdk-typescript/dist/`.
