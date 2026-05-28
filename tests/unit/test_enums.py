@@ -213,6 +213,10 @@ class TestEnumStringBehavior:
             "marking",
             "disclosure",
             "logging_spec",
+            # v1.1 addition: emitted by acef.redaction.apply_redaction()
+            # for redaction attestation event_log records. Permitted by
+            # the v1.1 event_log overlay schema only — v1.0 still rejects.
+            "redaction",
         }
         actual = {et.value for et in EventType}
         assert actual == expected

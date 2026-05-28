@@ -166,6 +166,7 @@ class EventType(str, Enum):
     MARKING = "marking"
     DISCLOSURE = "disclosure"
     LOGGING_SPEC = "logging_spec"
+    REDACTION = "redaction"
 
 
 class AuditEventType(str, Enum):
