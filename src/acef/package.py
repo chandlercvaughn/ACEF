@@ -115,6 +115,7 @@ class Package:
         prior_package_ref: str | None = None,
         clock: Callable[[], datetime] | None = None,
         urn_generator: Callable[[URNType], str] | None = None,
+        redaction_policy: Any = None,
     ) -> None:
         """Build an empty Package.
 
@@ -135,6 +136,17 @@ class Package:
                 by this builder (``package_id``, ``record_id``, and the
                 payload identifiers minted by the v1.1 typed builders).
                 Enables byte-deterministic export per VAL-SDK-007.
+            redaction_policy: Optional
+                :class:`acef.redaction.RedactionPolicy` attached to this
+                package. When attached, :meth:`record` auto-populates the
+                X1 envelope field (``redaction_policy_version``) and the
+                X2 field (``redaction_attestation_ref``) for any record
+                whose ``confidentiality`` is not ``public``, also
+                appending a Core ``event_log`` attestation record (per
+                VAL-REDACTION-003 / 004 — no vendor namespace introduced).
+                Typed as ``Any`` here to avoid an import cycle with
+                ``acef.redaction``; the runtime check at use-time
+                enforces the actual class.
         """
         # Stash injection callables BEFORE building metadata so the
         # metadata's timestamp / package_id come from the injected
@@ -171,6 +183,10 @@ class Package:
         self._signed = False
         self._signature_key: str | None = None
         self._signature_method: str | None = None
+        # Stash any attached RedactionPolicy so Package.record() can
+        # auto-populate the X1/X2 envelope fields (VAL-REDACTION-003).
+        # Typed as ``Any`` to avoid an import cycle with acef.redaction.
+        self._redaction_policy: Any = redaction_policy
 
         # Add creation audit entry
         self._audit_trail.append(
@@ -428,6 +444,8 @@ class Package:
         retention: dict[str, Any] | RecordRetention | None = None,
         timestamp: str | None = None,
         record_id: str | None = None,
+        redaction_policy_version: str | None = None,
+        redaction_attestation_ref: str | None = None,
     ) -> RecordEnvelope:
         """Record an evidence record.
 
@@ -527,6 +545,100 @@ class Package:
 
         resolved_record_id = record_id if record_id is not None else self._mint_record_urn()
 
+        # ------------------------------------------------------------------
+        # VAL-REDACTION-003 — auto-populate X1/X2 on non-public records.
+        #
+        # When the caller flags this record as non-public (anything other
+        # than Confidentiality.PUBLIC), the v1.1 validator's
+        # cross_record.enforce_redaction_policy_version /
+        # enforce_redaction_attestation_ref will demand the X1
+        # (redaction_policy_version) and X2 (redaction_attestation_ref)
+        # envelope fields. We auto-populate them here so SDK callers do
+        # not have to remember the wiring:
+        #
+        #   1. X1 resolves from an explicit kwarg OR the package's
+        #      attached RedactionPolicy.version. If neither is available
+        #      we raise ValueError immediately — the SDK refuses to mint
+        #      a record the validator will then reject.
+        #
+        #   2. X2 resolves from an explicit kwarg OR from a freshly-
+        #      generated event_log attestation record (via
+        #      acef.redaction.apply_redaction). The attestation record
+        #      reuses the Core event_log record_type — no vendor
+        #      namespace is introduced (VAL-REDACTION-004).
+        # ------------------------------------------------------------------
+        resolved_policy_version: str | None = redaction_policy_version
+        resolved_attestation_ref: str | None = redaction_attestation_ref
+
+        is_non_public = confidentiality != Confidentiality.PUBLIC
+
+        # Version-gating: X1/X2 are v1.1 additions (spec §8.1
+        # conditional-required keyed on manifest.versioning.core_version).
+        # v1.0 bundles have no schema for these fields and the v1.1
+        # cross-record validator does not run against them — auto-
+        # populating would emit fields v1.0 readers must ignore. Skip the
+        # entire block unless the package declares v1.1+. Caller-supplied
+        # X1/X2 kwargs still flow through to RecordEnvelope below; the
+        # gate only suppresses *auto*-population.
+        try:
+            core_v = self._versioning.core_version
+            v1_1_or_later = isinstance(core_v, str) and core_v >= "1.1"
+        except AttributeError:
+            v1_1_or_later = False
+
+        if is_non_public and v1_1_or_later:
+            policy = self._redaction_policy
+            # ---- X1: redaction_policy_version ----
+            if resolved_policy_version is None:
+                if policy is None:
+                    raise ValueError(
+                        "Package.record(confidentiality="
+                        f"{confidentiality.value!r}) requires "
+                        "redaction_policy_version. Either pass it "
+                        "explicitly as a kwarg, or attach a "
+                        "RedactionPolicy to the Package via "
+                        "Package(redaction_policy=...) — non-public "
+                        "records without X1 fail validator ACEF-074."
+                    )
+                policy_version_attr = getattr(policy, "version", None)
+                if not isinstance(policy_version_attr, str) or not policy_version_attr:
+                    raise ValueError(
+                        "Package.record: attached redaction_policy does "
+                        "not expose a non-empty .version string; cannot "
+                        "auto-populate redaction_policy_version."
+                    )
+                resolved_policy_version = policy_version_attr
+
+            # ---- X2: redaction_attestation_ref ----
+            if resolved_attestation_ref is None:
+                if policy is None:
+                    # We already raised above when policy is None and
+                    # resolved_policy_version was None. But if the caller
+                    # supplied X1 explicitly we still need a way to
+                    # produce X2 — without a policy we cannot mint the
+                    # event_log attestation. Caller must supply X2 too.
+                    raise ValueError(
+                        "Package.record(confidentiality="
+                        f"{confidentiality.value!r}) requires "
+                        "redaction_attestation_ref. Either pass it "
+                        "explicitly as a kwarg, or attach a "
+                        "RedactionPolicy to the Package via "
+                        "Package(redaction_policy=...) so the SDK can "
+                        "mint a Core event_log attestation record."
+                    )
+                # Lazy import — acef.redaction imports Package, so we
+                # must not import at module load time.
+                from acef.redaction import apply_redaction
+
+                _redacted_payload, attestation_record = apply_redaction(
+                    payload or {},
+                    policy,
+                    clock=self._clock,
+                    urn_generator=self._urn_generator,
+                )
+                self._records.append(attestation_record)
+                resolved_attestation_ref = attestation_record.record_id
+
         envelope = RecordEnvelope(
             record_id=resolved_record_id,
             record_type=record_type,
@@ -544,6 +656,8 @@ class Package:
             attestation=attestation,
             retention=retention,
             timestamp=resolved_timestamp,
+            redaction_policy_version=resolved_policy_version,
+            redaction_attestation_ref=resolved_attestation_ref,
         )
 
         self._records.append(envelope)
@@ -1173,6 +1287,10 @@ class Package:
         pkg._signed = False
         pkg._signature_key = None
         pkg._signature_method = None
+        # _init_from_parts is the deserialization path — loaded packages
+        # do not carry the source-side RedactionPolicy. Seed to None so
+        # Package.record() can read the attribute without AttributeError.
+        pkg._redaction_policy = None
         return pkg
 
 
