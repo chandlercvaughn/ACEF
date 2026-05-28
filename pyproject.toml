@@ -47,6 +47,13 @@ acef = "acef.cli.main:cli"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-v --tb=short"
+# Minimal marker registration placeholder added by F-M1-REGRESSION-SUITE to
+# suppress PytestUnknownMarkWarning. F-M1-TIER-INFRA owns the authoritative
+# marker registry (plumbing / integration / conformance sub-tiers).
+markers = [
+    "regression: VAL-REGRESSION-* tier; conformance sub-tier <=20s wall-clock",
+    "legacy_budget: VAL-REGRESSION-LEGACY-BUDGET-001 runtime-budget check",
+]
 
 [tool.ruff]
 target-version = "py311"

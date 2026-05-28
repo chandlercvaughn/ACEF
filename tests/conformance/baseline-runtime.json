@@ -1,0 +1,32 @@
+{
+  "$schema_note": "Pre-v0.4 baseline wall-clock for tests/conformance/ excluding test_freddy_*. Used by tests/conformance/test_legacy_runtime_budget.py (VAL-REGRESSION-LEGACY-BUDGET-001) to detect runtime regressions caused by v1.1 validator work. F-M1-TIER-INFRA owns the authoritative scheduling of this gate.",
+  "captured_at": "2026-05-27T00:00:00Z",
+  "captured_by_feature": "F-M1-REGRESSION-SUITE",
+  "captured_at_commit": "0e2e55634fd46cccbc70c1f5f429557cbdfdddb4",
+  "ops_operation": "acef-v0.4-freddy-adoption",
+  "selection": {
+    "include_globs": ["tests/conformance/"],
+    "ignore_globs": ["*test_freddy_*"],
+    "test_count_at_capture": 406
+  },
+  "wall_clock_seconds": {
+    "min_of_three_runs": 19.52,
+    "median_of_three_runs": 19.58,
+    "max_of_three_runs": 19.78,
+    "baseline_for_budget_check": 19.58
+  },
+  "budget": {
+    "headroom_pct": 10,
+    "max_allowed_seconds": 21.54
+  },
+  "platform": {
+    "python": "3.14.3",
+    "pytest": "9.0.2",
+    "machine": "darwin"
+  },
+  "notes": [
+    "Three back-to-back warm runs with `-p no:cacheprovider` were used to suppress pytest's .pytest_cache effects. Median is preferred as the baseline anchor.",
+    "Headroom is 10% per VAL-REGRESSION-LEGACY-BUDGET-001. Budget check: current_seconds <= baseline_for_budget_check * 1.10.",
+    "Set ACEF_SKIP_RUNTIME_BUDGET=1 to skip the gate (e.g., on busy local machines). CI is the authoritative enforcement environment."
+  ]
+}

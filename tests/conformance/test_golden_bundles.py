@@ -49,8 +49,13 @@ def _load_fixture(bundle_name: str) -> dict[str, Any]:
     return json.loads(fixture_path.read_text(encoding="utf-8"))
 
 
+@pytest.mark.regression
 class TestGoldenBundleLoading:
-    """Each golden bundle loads without errors."""
+    """Each golden bundle loads without errors.
+
+    Tagged with @pytest.mark.regression to surface under VAL-REGRESSION-001
+    (R1: v1.0 golden bundles validate clean under v1.0 schema selection).
+    """
 
     @pytest.mark.parametrize("bundle_name", GOLDEN_BUNDLE_NAMES)
     def test_golden_bundle_loads_successfully(self, bundle_name: str) -> None:
@@ -68,8 +73,12 @@ class TestGoldenBundleLoading:
         assert len(pkg.records) > 0, f"Golden bundle {bundle_name} should have at least one record"
 
 
+@pytest.mark.regression
 class TestGoldenBundleValidation:
-    """Each golden bundle produces a valid assessment with provision summaries."""
+    """Each golden bundle produces a valid assessment with provision summaries.
+
+    Tagged with @pytest.mark.regression for VAL-REGRESSION-001.
+    """
 
     @pytest.mark.parametrize("bundle_name", GOLDEN_BUNDLE_NAMES)
     def test_golden_bundle_validates(self, bundle_name: str) -> None:
@@ -95,45 +104,39 @@ class TestGoldenBundleValidation:
 
         # Provision summaries must be present (this proves the validation pipeline ran
         # through all 4 phases and produced meaningful results)
-        assert len(assessment.provision_summary) > 0, (
-            f"Golden bundle {bundle_name} should produce provision summaries"
-        )
+        assert len(assessment.provision_summary) > 0, f"Golden bundle {bundle_name} should produce provision summaries"
 
         # Profiles must be evaluated
-        assert len(assessment.profiles_evaluated) > 0, (
-            f"Golden bundle {bundle_name} should have evaluated profiles"
-        )
+        assert len(assessment.profiles_evaluated) > 0, f"Golden bundle {bundle_name} should have evaluated profiles"
 
         # Results must be produced (individual rule evaluations)
-        assert len(assessment.results) > 0, (
-            f"Golden bundle {bundle_name} should have rule evaluation results"
-        )
+        assert len(assessment.results) > 0, f"Golden bundle {bundle_name} should have rule evaluation results"
 
 
+@pytest.mark.regression
 class TestGoldenBundleAssessmentFixtures:
     """Compare runtime assessment against published assessment fixtures.
 
     Per spec Section 6.5/6.6, the runtime assessment must produce the same
     provision outcomes and rule result counts as the published fixtures.
     Uses the fixture's evaluation_instant to ensure deterministic comparison.
+
+    Tagged with @pytest.mark.regression for VAL-REGRESSION-001 (fixture
+    outcomes must remain stable under v1.1 validator work).
     """
 
     @pytest.mark.parametrize("bundle_name", GOLDEN_BUNDLE_NAMES)
     def test_assessment_fixture_exists(self, bundle_name: str) -> None:
         """Each golden bundle has a corresponding .acef-assessment.json fixture."""
         fixture_path = GOLDEN_BUNDLES_DIR / f"{bundle_name}.acef-assessment.json"
-        assert fixture_path.exists(), (
-            f"Missing assessment fixture for golden bundle {bundle_name}"
-        )
+        assert fixture_path.exists(), f"Missing assessment fixture for golden bundle {bundle_name}"
 
     @pytest.mark.parametrize("bundle_name", GOLDEN_BUNDLE_NAMES)
     def test_fixture_has_provision_summaries(self, bundle_name: str) -> None:
         """Each assessment fixture contains provision summaries."""
         fixture = _load_fixture(bundle_name)
 
-        assert "provision_summary" in fixture, (
-            f"Assessment fixture for {bundle_name} missing provision_summary"
-        )
+        assert "provision_summary" in fixture, f"Assessment fixture for {bundle_name} missing provision_summary"
         assert len(fixture["provision_summary"]) > 0, (
             f"Assessment fixture for {bundle_name} has empty provision_summary"
         )
@@ -155,8 +158,7 @@ class TestGoldenBundleAssessmentFixtures:
 
         runtime_profiles = set(assessment.profiles_evaluated)
         assert runtime_profiles == fixture_profiles, (
-            f"Profile mismatch for {bundle_name}: "
-            f"runtime={runtime_profiles} fixture={fixture_profiles}"
+            f"Profile mismatch for {bundle_name}: runtime={runtime_profiles} fixture={fixture_profiles}"
         )
 
     @pytest.mark.parametrize("bundle_name", GOLDEN_BUNDLE_NAMES)
@@ -176,8 +178,7 @@ class TestGoldenBundleAssessmentFixtures:
 
         runtime_count = len(assessment.provision_summary)
         assert runtime_count == fixture_count, (
-            f"Provision summary count mismatch for {bundle_name}: "
-            f"runtime={runtime_count} fixture={fixture_count}"
+            f"Provision summary count mismatch for {bundle_name}: runtime={runtime_count} fixture={fixture_count}"
         )
 
     @pytest.mark.parametrize("bundle_name", GOLDEN_BUNDLE_NAMES)
@@ -213,20 +214,15 @@ class TestGoldenBundleAssessmentFixtures:
 
         # Every fixture provision must exist in runtime with the same outcome
         for key, expected_outcome in fixture_outcomes.items():
-            assert key in runtime_outcomes, (
-                f"[{bundle_name}] Fixture provision {key} not found in runtime assessment"
-            )
+            assert key in runtime_outcomes, f"[{bundle_name}] Fixture provision {key} not found in runtime assessment"
             actual_outcome = runtime_outcomes[key]
             assert actual_outcome == expected_outcome, (
-                f"[{bundle_name}] Provision {key}: "
-                f"expected outcome={expected_outcome!r}, got={actual_outcome!r}"
+                f"[{bundle_name}] Provision {key}: expected outcome={expected_outcome!r}, got={actual_outcome!r}"
             )
 
         # Every runtime provision must exist in fixture (no spurious provisions)
         for key in runtime_outcomes:
-            assert key in fixture_outcomes, (
-                f"[{bundle_name}] Runtime provision {key} not found in fixture"
-            )
+            assert key in fixture_outcomes, f"[{bundle_name}] Runtime provision {key} not found in fixture"
 
     @pytest.mark.parametrize("bundle_name", GOLDEN_BUNDLE_NAMES)
     def test_rule_result_counts_match_fixture(self, bundle_name: str) -> None:
@@ -271,6 +267,5 @@ class TestGoldenBundleAssessmentFixtures:
             fixture_n = fixture_counts.get(outcome, 0)
             runtime_n = runtime_counts.get(outcome, 0)
             assert runtime_n == fixture_n, (
-                f"[{bundle_name}] Rule result count for outcome={outcome!r}: "
-                f"runtime={runtime_n} fixture={fixture_n}"
+                f"[{bundle_name}] Rule result count for outcome={outcome!r}: runtime={runtime_n} fixture={fixture_n}"
             )

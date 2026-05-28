@@ -103,8 +103,15 @@ def _load_snapshot() -> dict[str, dict[str, str]]:
     return data
 
 
+@pytest.mark.regression
 class TestR0SnapshotIntegrity:
-    """Pre-existing v1.0 codes must remain byte-equal to the R0 snapshot."""
+    """Pre-existing v1.0 codes must remain byte-equal to the R0 snapshot.
+
+    Tagged with @pytest.mark.regression for VAL-REGRESSION-003 (R3 v1.0
+    error codes byte-equal to snapshot). The same assertion is also tracked
+    as a parametrized per-code test in
+    ``tests/conformance/test_regression_r1_r4.py``.
+    """
 
     def test_snapshot_file_exists(self):
         assert SNAPSHOT_PATH.exists(), f"R0 snapshot missing at {SNAPSHOT_PATH}"

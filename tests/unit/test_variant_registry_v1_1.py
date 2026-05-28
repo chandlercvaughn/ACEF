@@ -177,10 +177,15 @@ def test_r0_snapshot_fixture_exists_and_has_twelve_entries() -> None:
     assert len(snapshot) == 12, f"R0 snapshot should have 12 entries; got {len(snapshot)}"
 
 
+@pytest.mark.regression
 def test_r0_snapshot_each_entry_resolves_identically_under_v1() -> None:
-    """VAL-VARIANT-004: every R0 fixture entry resolves via
-    ``resolve_variant(name, 'v1')`` to a byte-identical triple
+    """VAL-VARIANT-004 / VAL-REGRESSION-002: every R0 fixture entry resolves
+    via ``resolve_variant(name, 'v1')`` to a byte-identical triple
     (record_type, discriminator_field, discriminator_value).
+
+    The same assertion is also tracked under VAL-REGRESSION-002 in
+    ``tests/conformance/test_regression_r1_r4.py`` as a parametrized
+    per-entry test (one case per R0 entry). Both are intentionally kept.
     """
     with open(_R0_SNAPSHOT_PATH, encoding="utf-8") as f:
         snapshot = json.load(f)

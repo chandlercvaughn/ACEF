@@ -1,0 +1,19 @@
+{
+  "$schema_note": "Pre-v0.4 baseline test counts captured at the start of WS8 (F-M1-REGRESSION-SUITE). F-M1-TIER-INFRA owns the authoritative version of this file and may extend the schema. A CI gate enforces test_count_regression: total may grow but never shrink without an approved RFC.",
+  "captured_at": "2026-05-27T00:00:00Z",
+  "captured_by_feature": "F-M1-REGRESSION-SUITE",
+  "captured_at_commit": "0e2e55634fd46cccbc70c1f5f429557cbdfdddb4",
+  "ops_operation": "acef-v0.4-freddy-adoption",
+  "counts": {
+    "total": 1265,
+    "tests_conformance_total": 483,
+    "tests_conformance_freddy": 77,
+    "tests_conformance_excluding_freddy": 406,
+    "tests_unit": 762,
+    "tests_integration": 20
+  },
+  "notes": [
+    "Pre-v0.4 logical baseline (no freddy tests existed) is the 'tests_conformance_excluding_freddy' figure 406 captured here AFTER the F-M1-REGRESSION-SUITE test_regression_r1_r4.py module was added (57 tests). To recover the strict pre-v0.4 number, subtract those 57: 349.",
+    "F-M1-TIER-INFRA will replace these placeholder numbers with the authoritative pre-WS8 baseline (likely 349 for excluding_freddy) and add tier/marker-bucket counts."
+  ]
+}
