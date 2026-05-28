@@ -35,6 +35,18 @@ export {
 // Deterministic gzip helper (mtime=0, OS=0xFF, level=6 default)
 export { deterministicGzip } from "./exporter.js";
 
+// Directory-bundle loader (read path for re-export parity)
+export { loadBundle, type LoadedBundle, type RawRecord } from "./loader.js";
+
+// Directory + USTAR-tar exporter (byte-equal to Python export_archive)
+export {
+    rebuildManifestForExport,
+    buildVirtualBundle,
+    buildArchive,
+    exportArchiveFromDirectory,
+    type VirtualBundle,
+} from "./bundle_export.js";
+
 // Enum mirrors
 export {
     SubjectType,
