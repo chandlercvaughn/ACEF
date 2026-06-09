@@ -78,6 +78,14 @@ REQUIRED_SCHEMA_IDS = (
 # a stray/unexpected heading (e.g. "## References") cannot slip past the scan.
 ANY_TOP_HEADING_RE = re.compile(r"^## (.+?)\s*$")
 
+# CommonMark fenced-code-block opener/closer. A fence line is, after at most
+# three leading spaces of indentation, a run of >=3 IDENTICAL fence characters
+# (backtick "`" OR tilde "~"). Group 1 is the leading indentation; group 2 is
+# the fence-character run itself (its first char is the fence char, its length is
+# the fence length). Per CommonMark a closing fence carries no info string, but
+# matching char + length is sufficient for this sweep's purposes.
+FENCE_LINE_RE = re.compile(r"^( {0,3})((`{3,})|(~{3,}))[ \t]*(.*)$")
+
 # The canonical key of an EXPECTED top-level heading: "## 1. ...", "## 11. ...",
 # or "## Appendix A. ...". Used to normalise an expected heading line to its key
 # ("1".."11", "Appendix A".."Appendix E").
@@ -141,15 +149,79 @@ def check_json_blocks(text: str) -> bool:
     )
 
 
+def _fence_open_info(line: str) -> tuple[str, int] | None:
+    """If ``line`` is a CommonMark code-fence OPENER, return ``(char, length)``.
+
+    An opener is, after <=3 spaces of indentation, a run of >=3 identical fence
+    characters (`` ` `` or ``~``). The info string (the run's trailing text) is
+    irrelevant to opening. Returns ``None`` for non-fence lines.
+    """
+    m = FENCE_LINE_RE.match(line)
+    if m is None:
+        return None
+    run = m.group(2)
+    return run[0], len(run)
+
+
+def _is_fence_close(line: str, open_char: str, open_len: int) -> bool:
+    """True if ``line`` CLOSES a fence opened with ``open_char`` x ``open_len``.
+
+    Per CommonMark a closing fence uses the SAME character as the opener, is at
+    least as long as the opener, and carries NO info string (only trailing
+    whitespace is permitted after the run).
+    """
+    m = FENCE_LINE_RE.match(line)
+    if m is None:
+        return False
+    run = m.group(2)
+    info = m.group(5)
+    return run[0] == open_char and len(run) >= open_len and info.strip() == ""
+
+
+def _has_dangling_fence(text: str) -> tuple[bool, int]:
+    """Walk ``text`` under CommonMark fence rules; report any unclosed fence.
+
+    Returns ``(dangling, n_blocks)`` where ``dangling`` is True iff a fence was
+    opened and never closed before EOF, and ``n_blocks`` is the number of fenced
+    code blocks that opened (closed or not). A nested fence run that is shorter
+    than (or a different char from) the open fence is block CONTENT and does not
+    open or close anything.
+    """
+    open_char: str | None = None
+    open_len = 0
+    n_blocks = 0
+    for line in text.splitlines():
+        if open_char is None:
+            info = _fence_open_info(line)
+            if info is not None:
+                open_char, open_len = info
+                n_blocks += 1
+            continue
+        # Inside a fence: only a matching-or-longer same-char run with no info
+        # string closes it; everything else (including shorter/other-char fence
+        # runs) is content.
+        if _is_fence_close(line, open_char, open_len):
+            open_char = None
+            open_len = 0
+    return open_char is not None, n_blocks
+
+
 def check_fences_balanced(text: str) -> bool:
-    """C2: the count of ``` fence markers is even (every open is closed)."""
-    count = text.count("```")
-    ok = count % 2 == 0
-    return _emit(
-        ok,
-        "C2 fences-balanced",
-        f"fence-marker count = {count} ({'even' if ok else 'ODD/unbalanced'})",
-    )
+    """C2: under CommonMark fence rules, no code fence is left unclosed at EOF.
+
+    This supersedes the old "even count of ``` markers" heuristic, which could
+    not see ``~~~`` tilde fences and mis-counted longer (>=4 backtick) fences
+    that contain nested shorter runs. A fence opens on a run of >=3 identical
+    fence chars and closes only on a later >=-as-long run of the SAME char with
+    no info string; nested shorter/other-char runs are content.
+    """
+    dangling, n_blocks = _has_dangling_fence(text)
+    ok = not dangling
+    if ok:
+        detail = f"all {n_blocks} fenced block(s) closed (no dangling fence at EOF)"
+    else:
+        detail = f"DANGLING unclosed fence at EOF ({n_blocks} block(s) opened)"
+    return _emit(ok, "C2 fences-balanced", detail)
 
 
 def check_heading_order(text: str) -> bool:
@@ -162,23 +234,31 @@ def check_heading_order(text: str) -> bool:
     full ordered list must equal the expected sequence — any stray, missing,
     duplicated, or reordered heading fails the check.
 
-    The scan is fence-aware: a ``## `` line INSIDE a fenced code block (e.g. a
-    shell comment ``## References`` in a ````bash```` example) is body content,
-    NOT a Markdown heading, and is ignored. Fence state toggles on every line
-    that opens or closes a ``` fence.
+    The scan is fence-aware under CommonMark rules: a ``## `` line INSIDE a
+    fenced code block (e.g. a shell comment ``## References`` in a ``bash``
+    example, a nested ``` block inside a ```` block, or a ``~~~`` tilde block) is
+    body content, NOT a Markdown heading, and is ignored. A fence opens on a run
+    of >=3 identical fence chars and closes only on a later >=-as-long run of the
+    SAME char with no info string; nested shorter/other-char runs are content.
     """
     expected = [str(n) for n in range(1, 12)] + [f"Appendix {letter}" for letter in "ABCDE"]
     found: list[str] = []
-    in_fence = False
+    open_char: str | None = None
+    open_len = 0
     for line in text.splitlines():
-        if line.lstrip().startswith("```"):
-            # A fence marker line opens or closes a fenced code block. The marker
-            # line itself is never a heading; flip state and move on.
-            in_fence = not in_fence
-            continue
-        if in_fence:
-            # Inside a fenced code block: any ``## `` line is code/comment body,
-            # not a Markdown heading. Skip it.
+        if open_char is None:
+            info = _fence_open_info(line)
+            if info is not None:
+                # A fence opener line opens a fenced code block. The opener line
+                # itself is never a heading; enter the block and move on.
+                open_char, open_len = info
+                continue
+        else:
+            # Inside a fenced code block: a matching close ends it; every other
+            # line (including ``## `` comments and nested shorter runs) is body.
+            if _is_fence_close(line, open_char, open_len):
+                open_char = None
+                open_len = 0
             continue
         raw = ANY_TOP_HEADING_RE.match(line)
         if raw is None:

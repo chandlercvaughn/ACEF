@@ -168,6 +168,67 @@ def test_c3_ignores_hash_heading_inside_text_fence() -> None:
     assert sweep.check_heading_order(text) is True
 
 
+def test_c3_ignores_hash_heading_inside_four_backtick_fence() -> None:
+    # CommonMark: a fence opened with four backticks (````) spans until a CLOSING
+    # fence of >=4 backticks of the SAME char. A nested THREE-backtick run inside
+    # MUST NOT close it. The inner ``` and the `## References` line both live
+    # inside the four-backtick block and are document body, not headings. With the
+    # old toggle-on-any-triple-backtick logic the inner ``` flips fence state OFF
+    # and the `## References` line leaks out as a stray heading -> C3 wrongly
+    # FAILS (genuinely RED on the old code: an odd number of inner ``` runs).
+    skeleton = _ordered_top_headings()
+    fenced = '````markdown\nHere is a nested fenced example with one inner run:\n```\n{"a": 1}\n## References\n````\n'
+    text = skeleton + fenced
+    assert sweep.check_heading_order(text) is True
+
+
+def test_c3_ignores_hash_heading_inside_tilde_fence() -> None:
+    # CommonMark: `~~~` is a valid fence char. A `## 99.` line inside a tilde
+    # fence is body, not a heading. The old logic only recognised ``` and so it
+    # collected the fenced `## 99.` as a stray heading -> C3 wrongly FAILS.
+    head = "".join(f"## {n}. Section {n}\nbody\n" for n in range(1, 6))
+    fenced = "~~~\n## 99. tilde-fenced pseudo-heading\n~~~\n"
+    tail = "".join(f"## {n}. Section {n}\nbody\n" for n in range(6, 12))
+    tail += "".join(f"## Appendix {letter}. Title\nbody\n" for letter in "ABCDE")
+    text = head + fenced + tail
+    assert sweep.check_heading_order(text) is True
+
+
+def test_c3_inner_triple_does_not_close_outer_quad_fence() -> None:
+    # A `## 1.`-shaped heading sits AFTER the inner ``` but still INSIDE the outer
+    # ```` block. If the inner ``` prematurely closed the outer fence, that line
+    # would be (mis)collected as `## 1.` and corrupt the ordered heading list.
+    # The whole four-backtick block (and everything in it) must be ignored.
+    skeleton = _ordered_top_headings()
+    fenced = "````text\n```\ninner code\n## 1. still inside the outer four-backtick fence\n````\n"
+    text = skeleton + fenced
+    assert sweep.check_heading_order(text) is True
+
+
+def test_c2_passes_on_four_backtick_fence_with_nested_triple() -> None:
+    # C2 (no dangling open fence) must treat the inner ``` as content of the outer
+    # ```` block, not as an independent fence. A naive even-count of "```" markers
+    # would see THREE occurrences (````, ```, ```, ````) and could miscount; the
+    # CommonMark model sees exactly one balanced outer fence.
+    text = "````\n```\ninner\n```\n````\n"
+    assert sweep.check_fences_balanced(text) is True
+
+
+def test_c2_passes_on_balanced_tilde_fence() -> None:
+    assert sweep.check_fences_balanced("~~~\nx\n~~~\n") is True
+
+
+def test_c2_fails_on_unclosed_four_backtick_fence() -> None:
+    # An opening ```` with only a nested ``` ... ``` inside and no >=4 backtick
+    # closer leaves the outer fence dangling at EOF -> C2 MUST fail.
+    text = "````\n```\ninner\n```\n"
+    assert sweep.check_fences_balanced(text) is False
+
+
+def test_c2_fails_on_unclosed_tilde_fence() -> None:
+    assert sweep.check_fences_balanced("~~~\nx\n") is False
+
+
 # --- C4: no-overclaim --------------------------------------------------------
 
 
