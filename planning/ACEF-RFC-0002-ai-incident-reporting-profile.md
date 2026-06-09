@@ -1,0 +1,1435 @@
+---
+**Title:** ACEF RFC-0002: Normalized AI Incident Reporting Profile
+**Status:** Working Draft (Proposed) — Revision 10 (standards-track candidate: structural v1.1/v1.2 conformance phasing — a new §11 assigns the registry-dependent surface, the [NR-1] governance dependency, third-party-publisher governance, and the Top-25 corpus to v1.2, so v1.1 conformance MUST NOT depend on any institution; the v1.1 `public_incident_id` is reframed honestly as a **self-asserted handle** carrying an explicit `id_grade` discriminator (`self-asserted` in v1.1 → `registry-canonical` in v1.2) and a ≥128-bit suffix, with the DNS domain-control proof as an OPTIONAL online-conformance check proving control at check time — not an offline-attributable credential and not proof of authorship by the id alone; carries forward the Revision 9 `card_source.eu_ai_act_facts` confidential Art. 73 path, dual clock-source rule, and offline/online uniqueness wording)
+**Date:** 2026-06-08
+**Owner:** ACEF maintainers (AI Commons steering committee)
+**Targets:** ACEF Spec v0.4 (extending v0.3 working draft), ACEF SDK v0.2.x, `acef-conventions/v1.1/` (new minor, gated on `core_version: 1.1.0`)
+**Source discussion:** AI Commons partner thread on an AI incident reporting standardization effort (June 2026)
+---
+
+> Normative keywords (MUST, SHOULD, MAY) follow RFC 2119 and describe the **proposed** behavior of this profile. This RFC is a Working Draft for review and adopts no normative force until accepted by the steering committee.
+
+> **Revision 2 note.** Revision 1 layered an analysis (the open questions Q1–Q28, the editorial-defect list, and 28 verified resolutions) on top of an unchanged Revision 0 body, leaving the body and the appendices in contradiction. Revision 2 folds every accepted resolution into the normative body and §5–§8, fixes every editorial defect in place, and reduces the appendices to: a field crosswalk (A), a normative `incident_card` schema excerpt (B), a verification ledger (C), an editorial-defect ledger now marked reconciled (D), and the decision record for Q1–Q28 (E). Where the body and Appendix E once disagreed, the body now governs.
+
+## 1. Summary
+
+This RFC proposes a **Normalized AI Incident Reporting Profile** for ACEF. The profile keeps the existing private `incident_report` record unchanged in role and adds a **new `incident_card` record type** that is the public, normalized, redaction-safe **projection** of an incident, plus two regulation mapping templates and a small set of supporting conventions. The two records together let an organization serve both purposes without co-locating privileged internal analysis and publishable cross-database fields on one redaction unit: `incident_report` remains the full-fidelity private/regulatory evidence record, and `incident_card` is a deterministic projection that crosswalks cleanly into the major incident frameworks (OECD, EU AI Act, CSET, NIST AI 600-1, MIT AI Risk Repository, and the AI Incident Database). The two-record partition (rather than a single extended record) is the load-bearing architecture decision; its rationale — ACEF's whole-record redaction model and legal-professional-privilege exposure — is recorded in Appendix E Q1/Q17/Q23.
+
+The `incident_card` carries the following. `public_incident_id` and `harm_core` are structurally required at schema level (a card is meaningless without them); every other field is schema-optional and becomes conditional-required at validator level only when a profile is declared:
+
+- a federated, human-legible, **non-enumerable public incident identifier** (`AIIC-{assigner}-{year}-{random}`, §5.3) that in v1.1 is a **self-asserted handle** (DNS-domain assigner, minted locally, no central service, `id_grade: self-asserted`, ≥128-bit suffix), with a defined lifecycle (RESERVED → PUBLISHED | REJECTED, with DISPUTED as an overlay on PUBLISHED) whose resolving id-state authority and the `registry-canonical` grade are deferred to the v1.2 registry surface (§11);
+- a recomputable **severity vector** (`ACEF-SEV:1.0`, §5.4) that carries technical severity as evidence; the pre-existing coarse `severity` enum becomes a deterministic projection of the vector (§5.4, Appendix E Q13);
+- a single canonical **`harm_core`** object (causality, realization, harm class) plus a **taxonomy crosswalk** of optional, closed, version-pinned members that are *derived projections* of `harm_core` (OECD, EU Article 3(49), CSET, NIST AI 600-1, MIT causal+domain, AIID, STIX);
+- a **coordinated disclosure** block (one canonical shape, §5.6) with an open, scheme-tagged multi-jurisdiction clock registry (EU Art. 73/55, and extensibly US, China, Korea — §5.7);
+- a normative **publishability map** and disclosure-time redaction gate so special-category and privileged fields are never published unlawfully (§5.11, Appendix E Q8/Q23);
+- two mapping templates, `oecd-ai-incidents-2025` and `eu-ai-act-art73-2026`.
+
+No existing v1.0 evidence bundle changes behavior. v1.0 `incident_report` records continue to validate clean: every addition ships under the new `acef-conventions/v1.1/` minor gated on `manifest.versioning.core_version: 1.1.0`, and the frozen `acef-conventions/v1/` schemas are not touched (Appendix E Q12).
+
+## 2. Motivation
+
+### 2.1 The gap
+
+Four serious incident registries exist (the AI Incident Database with 1,400+ entries, AIAAIC, the OECD AI Incidents Monitor (AIM), and the MIT AI Risk Repository), and each runs its own taxonomy. CSET's published finding is the cleanest statement of the problem: these registries "have developed separate taxonomy and classification frameworks," and "conflicting definitions of AI incidents and harms make it difficult to conduct comparable research." OECD has done the strongest normalization work (a common reporting framework of 8 dimensions and 29 criteria with 7 mandatory; the criteria are transcribed in §5.7 and Appendix E Q2 from the OECD primary source), but that is a benchmark and is not yet an adopted machine-readable standard. The EU AI Act's Article 73 serious-incident reporting attaches to the high-risk obligations, whose application date is in flux: as adopted it is 2 August 2026, but the 2026 Digital Omnibus (provisional political agreement, not yet adopted) would defer the high-risk obligations to 2 December 2027 (Annex III) and 2 August 2028 (Annex I product-embedded) — see Appendix E Q7. Art. 73 is the first legally binding template, but it is EU-specific.
+
+The unowned layer is the interoperability one: a stable identifier plus a normalized, machine-readable report schema that crosswalks one incident into every framework above. ACEF is well placed to provide it because ACEF is already a regulation-agnostic envelope with pluggable, jurisdiction-specific templates, which is exactly what a crosswalk needs.
+
+### 2.2 What ACEF already has, and what it lacks
+
+ACEF v1 defines an `incident_report` record (`acef-conventions/v1/incident_report.schema.json`) scoped to an organization documenting its own incident for EU GPAI Article 55 and NIST MANAGE: `incident_type`, `severity`, `description`, detection and occurrence and resolution dates, `root_cause_analysis`, `corrective_actions[]`, `affected_systems`, `affected_users_count`, `notification_timeline[]`, `ai_office_reference`, `preventive_measures[]`, `impact_assessment`, `regulatory_compliance_impact`, and `lessons_learned`.
+
+That record answers "what happened, and did we meet our notification duties." It does not yet answer "how does this incident map to the OECD, AIID, CSET, and MIT taxonomies, what is its recomputable severity, what is its stable public identifier, and is the flaw transferable to other models." Those are the normalization fields this profile adds.
+
+### 2.3 Regulatory and ecosystem drivers
+
+- **EU AI Act Article 73** (serious-incident reporting by providers of high-risk systems to market surveillance authorities), applicable 2 August 2026 *as enacted, subject to the pending Digital Omnibus deferral encoded with status in §5.7* (Annex III → 2 Dec 2027, Annex I → 2 Aug 2028), with awareness-clocked deadlines (general 15 days; critical-infrastructure (3(49)(b)) or widespread 2 days; **death** 10 days — note 3(49)(a) also covers non-fatal serious health harm, which takes the general 15-day clock, §5.7).
+- **EU AI Act Article 55** (GPAI systemic-risk providers must track, document, and report serious incidents to the AI Office), applicable from 2 August 2025; GPAI Code of Practice Commitment 9 maps to serious-incident reporting.
+- **OECD AI Incidents Monitor (AIM)** and the OECD common reporting framework, which the profile aligns to as the canonical superset.
+- The fragmented academic and civil-society registries (AIID, AIAAIC, MIT), which a crosswalk would connect rather than replace.
+
+### 2.4 Posture
+
+The profile is designed to **interoperate with and map to** the incumbents, never to replace them. It adopts OECD definitions as the canonical anchor, carries the AIID incident id as a non-authoritative cross-reference for deduplication (the dedupe spine is ACEF's own key — §5.5, Appendix E Q6/Q28), and treats the registries as upstream sources to seed and link, not competitors. The differentiated contribution is the normalization and identifier layer that none of them owns. (Throughout this RFC the public identifier prefix is `AIIC`, "AI Incident Card"; the earlier draft's stray "AIC" usages are corrected.)
+
+## 3. Scope and fit with ACEF
+
+**In scope.** A normalized, machine-readable public **`incident_card`** record (a deterministic projection of the private `incident_report`); a public identifier scheme and its lifecycle states; a recomputable severity vector; a single canonical harm core plus a closed, version-pinned taxonomy crosswalk; a coordinated-disclosure block; a disclosure-time publishability map; and two mapping templates.
+
+**Out of scope** (consistent with spec v0.3 §1.0.1 exclusions). A transport protocol for submitting reports to a central registry (a companion spec if needed); real-time streaming; and any conformity-assessment certification procedure. The *legal constitution* of the identifier-assignment bodies remains out of normative scope, but — because a binding template hard-requires `public_incident_id` — this RFC now names the operator model, the assignment/uniqueness mechanism, and the id lifecycle that the template depends on (§5.3, Appendix E Q3/Q9/Q10/Q11); only their incorporation/governance instruments are deferred.
+
+**Evidence vs Assessment boundary (preserved, stated precisely).** Every field this profile adds is evidence: a neutral, factual record of the incident and its classification, carried in the Evidence Bundle. No field encodes a pass/fail or compliance verdict. Derived outputs that involve judgment — a probability-weighted risk rating, a provision pass/fail, or a "top failure modes" ranking — are computed by validators or analysts and belong in the Assessment Bundle or downstream analytics. Two clarifications correct a Revision 0 overstatement: (1) a *structured, recomputable severity vector* is Evidence; only a single derived **risk** number is Assessment. (2) The pre-existing required coarse `severity` enum (`critical|major|minor|informational`) is itself a derived *severity* rating that already lives in Evidence; rather than deny this, §5.4 makes `severity` a deterministic, validator-checked projection of `severity_vector` when the vector is present (Appendix E Q13). The boundary the profile holds is *severity-is-not-risk*, not *Evidence-carries-no-derived-value*.
+
+**Backward compatibility.** All additions *to existing v1.0 record types* are optional at the JSON Schema level (so v1.0 bundles validate unchanged); the **new `incident_card` record structurally requires `public_incident_id` and `harm_core`**, and all other card fields are optional unless a declared profile requires them. Requiredness becomes conditional only when a bundle declares one of the new profiles, using the version-gating mechanism RFC-0001 established (`manifest.versioning.core_version` and profile declaration drive validator-level requiredness). The new `incident_card` schema and the extended templates ship under `acef-conventions/v1.1/` gated on `core_version: 1.1.0`; the frozen `acef-conventions/v1/` schemas are not modified, so v1.0 `incident_report` bundles validate identically to pre-v0.4 behavior (Appendix E Q12).
+
+## 4. Regulatory and taxonomy mapping
+
+| Proposed concept | EU AI Act | NIST | OECD / ecosystem | Rationale |
+|---|---|---|---|---|
+| `incident_card` (public projection of `incident_report`) | Art. 73, Art. 3(49), Art. 55 | AI RMF MANAGE; AI 600-1 risk categories (enrichment) | OECD common framework; AIID; MIT; CSET | Two linked records: private evidence + public normalized report, without one redaction unit. |
+| `public_incident_id` (`AIIC-{assigner}-{year}-{random}`) | report identifier | n/a | CVE-analog (assignment + lifecycle); AIID `incident_id` soft-link | Stable, citable, collision-resistant (≥128-bit suffix), non-enumerable public handle; `id_grade: self-asserted` in v1.1 (§5.3). |
+| `severity_vector` (`ACEF-SEV:1.0`) | informs the 3(49) trigger via harm facts | n/a | CVSS v4.0-analog | Recomputable technical severity; severity is not risk. The 3(49) trigger derives from the harm facts (`harm_core`, tangibility), not from the vector. |
+| `harm_core` + `taxonomy_crosswalk` | Art. 3(49)(a-d) trigger array | AI 600-1 risk categories (enrichment) | OECD criteria; CSET; MIT causal+domain; AIID | One canonical harm core; crosswalk members are closed, version-pinned, derived projections. |
+| `realization` (event/issue/near_miss) | "incident or malfunctioning leads to" | n/a | CSET imminency | Near-miss is the most valuable and least-reported signal. |
+| `causality` (entity/intent/timing) | "directly or indirectly leads to" | malfunction/misuse/ecosystem | MIT Causal Taxonomy | Normalizes attribution across the supply chain. |
+| `coordinated_disclosure` | Art. 73/55 reporting acts | MANAGE | CRFM coordinated flaw disclosure; ISO 29147/30111 | Roles, safe harbor, and an open multi-jurisdiction clock registry for multi-party flaws. |
+| `oecd-ai-incidents-2025` template | n/a | n/a | OECD common reporting framework (voluntary) | Maps card fields to the OECD 7 mandatory + 22 optional criteria. |
+| `eu-ai-act-art73-2026` template | Art. 73, Art. 3(49) | n/a | n/a | Maps card fields and a trigger array to Art. 73 provisions and the shortest applicable clock. |
+
+## 5. Design
+
+### 5.1 Approach: a private `incident_report` plus a generated public `incident_card`
+
+This RFC introduces a **new `incident_card` record type** that is the public, normalized projection of an incident, and leaves the existing `incident_report` as the private/regulatory evidence record. It does **not** extend `incident_report` with a public normalization block. The reason is dispositive and architectural, not stylistic (full analysis in Appendix E Q1/Q17/Q23):
+
+- **ACEF redaction is whole-record.** `redact_record` (`src/acef/redaction.py`) replaces the *entire* canonicalized payload with one SHA-256 hash commitment under a single envelope `confidentiality` value; field-level/selective redaction is deferred by the spec. A single extended record therefore cannot publish `public_incident_id`/`taxonomy_crosswalk`/`severity_vector` while withholding `root_cause_analysis`/`impact_assessment`/special-category harm detail — they share one redaction unit. Co-locating them is unbuildable without new field-level-redaction machinery the spec does not have.
+- **Legal-professional-privilege / discoverability.** Fixing candid internal analysis (`root_cause_analysis`, `lessons_learned`, `corrective_actions`, `impact_assessment`) on the same record that becomes a mandatory Art. 73/55 submission risks waiving privilege/work-product protection. Partition removes that co-location hazard.
+
+**The card is a deterministic projection, not a hand-authored twin.** `incident_card` is generated from its `incident_report` by applying the normative publishability map (§5.11); the two are linked by a shared `public_incident_id` and a typed `public_projection_of` relationship (§5.8). Because the card is generated, the "two records diverge" objection to partitioning does not arise. This makes the `AIIC` = "AI Incident **Card**" prefix accurate.
+
+**Projection-source model (which fields live where, and when).** Because the card may not exist yet during coordinated disclosure (§5.3), the *source of truth* for the projection lives on the private `incident_report` as a **version-gated, optional `card_source` block** added in `acef-conventions/v1.1/` (it does not modify frozen `v1/`, and v1.0 reports validate unchanged). `card_source` holds exactly the projection inputs: the reserved `public_incident_id` and its state, the `coordinated_disclosure` block (status, embargo, regulatory_timeline), the `severity_vector`, and the source facts from which `harm_core` and the crosswalk are derived. These are *private coordination/source* fields, not a public normalization block — the privileged-analysis fields (`root_cause_analysis`, etc.) stay where they already are on `incident_report` and are **never copied to the card**. The two records and their field locations:
+
+| field group | `incident_report` (private, regulator-only) | `incident_card` (public projection) |
+|---|---|---|
+| privileged analysis (`root_cause_analysis`, `lessons_learned`, `corrective_actions`, `impact_assessment`) | yes | **never** (not a card field) |
+| `card_source` (reserved id+state, `coordinated_disclosure`, `severity_vector`, source harm facts) | yes (v1.1 optional) | — |
+| publishable projection (`public_incident_id` PUBLISHED, `harm_core`, `severity`/`severity_vector`, `taxonomy_crosswalk`, public `coordinated_disclosure` subset, `transferability`) | — | yes |
+| special-category (`harm_distribution_basis`) | yes | only per §5.11 (default regulator-only/hash-committed) |
+
+Because the card is a **separate record containing only publishable fields**, no per-field redaction of a single record is required (which ACEF does not support): a "regulator-only" or "omitted" field is simply absent from the card; a "hash-committed" field appears on the card as an explicit hash value. This resolves the whole-record-redaction trap without new field-level-redaction machinery.
+
+All `incident_card` properties are declared in `acef-conventions/v1.1/incident_card.schema.json` (closed; unknown keys MUST be `x-*`-namespaced to be safely ignorable — §5.5). The schema marks `public_incident_id` and `harm_core` structurally required (a card is meaningless without them); all *other* card fields are schema-optional and become conditional-required only under the declared profiles (§5.7).
+
+### 5.2 `incident_card` fields: one canonical harm core, everything else derived
+
+To avoid reproducing the fragmentation the profile exists to solve, the card carries **one canonical normalized harm core** that every card MUST populate, and treats every taxonomy-scheme encoding as an *optional derived projection* validated against the core (Appendix E Q14). There is exactly one storage location per concept; the Revision 0 duplications (`tangibility`/`causality`/`realization` both top-level and inside `taxonomy_crosswalk`; `harm_distribution_basis` both top-level and under `cset`; `genai_risk_category` duplicating `nist_ai_600_1.categories`) are removed. Names use the existing lowercase_with_underscores convention.
+
+**Canonical core (required on every card):**
+
+- `harm_core` (object), closed ACEF-owned enums, the single source of truth for harm classification:
+  - `realization`: `harm_event` | `harm_issue` | `near_miss` (CSET imminency / AIID harm-or-near-harm).
+  - `causality`: `{ entity: human|ai|other, intent: intentional|unintentional|other, timing: pre_deployment|post_deployment|other }` (MIT Causal Taxonomy).
+  - `harm_class`: a **closed ACEF-defined** harm taxonomy keyed to EU Art. 3(49)(a–d) plus `tangibility` (`tangible|intangible`). The code list is normative here (shipped as `acef-conventions/v1.1/harm-core-taxonomy.json`): `physical_health` (3(49)(a)), `critical_infrastructure` (3(49)(b)), `fundamental_rights` (3(49)(c)), `property_or_environment` (3(49)(d)), and the AI-specific intangible classes `discrimination`, `misinformation_integrity`, `privacy_data`, `security_compromise`, `economic`, `societal_systemic`, `other`. Each entry has a normative one-directional derivation table to the scheme members (`harm_class` → OECD/CSET/NIST/MIT), against which a present crosswalk member is checked (ACEF-085); the derivation tables are part of `harm-core-taxonomy.json`. Because this taxonomy is ACEF-owned (not transcribed from an external source), it is fully specified by this RFC and is not an Appendix C verify item.
+
+**Identity, severity, supply-chain (card-level):**
+
+- `public_incident_id` (string): the federated **self-asserted** public handle (§5.3), pattern `^AIIC-[A-Z0-9]{2,8}-[0-9]{4}-[0-9A-HJKMNP-TV-Z]{26,}$` (assigner-scoped, non-enumerable, ≥128-bit suffix). Distinct from the organization-internal `incident_id`. Accompanied by `id_grade` (§5.3).
+- `id_grade` (enum `self-asserted` | `registry-canonical`): the trust grade of `public_incident_id` (§5.3). In v1.1 it is always `self-asserted` (DNS-domain assigner, minted locally, no central service); `registry-canonical` is reserved for the v1.2 registry surface (§11) and MUST NOT be asserted in v1.1.
+- `severity_vector` (string): the recomputable severity vector (§5.4).
+- `severity` (enum `critical|major|minor|informational`): the coarse rating carried on the card; when `severity_vector` is present, `severity` MUST equal `band(severity_vector)` (§5.4), checked by ACEF-088.
+- `value_chain_role` (enum): `foundation_model` | `fine_tuned_model` | `integrated_application` | `third_party_component`. Locates the subject in the supply chain for attribution.
+- `autonomy_level` (enum): `autonomous` | `human_on_the_loop` | `human_in_the_loop` (operationalized in the AIID CSETv1 taxonomy; not the published CSET report).
+- `sector_of_deployment` (object): `{ scheme: "isic-rev4"|"other", code: string }` — structurally scheme-tagged like the crosswalk members (fixes the Revision 0 bare-string inconsistency).
+- `harm_distribution_basis` (array of a **closed ACEF vocabulary**): the protected-attribute axis for differential treatment, populated only when `harm_class` is `discrimination`. Controlled values (the CSETv1 distribution axis, ACEF-pinned): `race`, `sex`, `national_origin`, `disability`, `religion`, `sexual_orientation_or_gender_identity`, `financial_means`, `age`, `geography`, `ideology`, `familial_status`, `other`. **Single canonical location** (removed from `taxonomy_crosswalk.cset`). This is GDPR Art. 9 special-category data and is governed by the §5.11 publishability map: on a public card it is regulator-only / hash-committed by default unless a `declared_publication_basis` is asserted.
+
+**Derived/optional projections and links:**
+
+- `taxonomy_crosswalk` (object): the closed, version-pinned crosswalk (§5.5); members are derived projections of `harm_core`.
+- `coordinated_disclosure` (object): the single canonical disclosure block (§5.6).
+- `transferability` (object): `{ affects_other_models: boolean, scope_note: string, related_incident_ids: array[string] }`. Whether the underlying flaw is expected to appear in other models — a property unique to AI flaws (per CRFM). **Single canonical location**; the Revision 0 `coordinated_disclosure.transferability_known` boolean is removed (it duplicated `affects_other_models`).
+- `taxonomy_crosswalk.nist_ai_600_1.categories[]` (array of string, GenAI only): a **controlled, version-pinned** vocabulary of the NIST AI 600-1 (July 2024 *final*) category names, with `edition: "2024-07-final"`. It is a *risk-category enrichment*, not an incident class. There is **no** separate top-level `genai_risk_category` card field (the Revision 0 free-string field is removed — Appendix E Q14; reviewer note F).
+
+The normative schema excerpt for `incident_card` is in Appendix B.
+
+### 5.3 Public incident identifier: a self-asserted handle, its grade, and the optional domain-control proof
+
+**What the v1.1 `public_incident_id` is, stated honestly.** In v1.1 the identifier is a **self-asserted handle**, not a credential that resists impersonation and not a registry-canonical id. The **assigner is the registrant's own DNS domain**: a provider mints the id **locally**, with **no central service** and no per-mint brokering, by drawing a ≥128-bit random suffix and prefixing it with an assigner token derived from a domain it controls. Minting is therefore a one-step local operation; nothing is allocated, reserved, or brokered by any institution. Because anyone can write `AIIC-OPENAI.COM-2026-…` into a card, the handle on its own asserts authorship — it does not *prove* it. The trust grade of that assertion is carried explicitly in a sibling **`id_grade`** discriminator:
+
+- `id_grade: self-asserted` — the **only** value emitted in v1.1. The id is a locally-minted handle; its binding to the assigner domain is *unproven by the id alone* and is only ever established by the OPTIONAL online domain-control check below, at check time.
+- `id_grade: registry-canonical` — **reserved for v1.2** (the registry surface, §11). It denotes an id whose uniqueness and assigner-binding have been admitted by the AI Commons registry. It MUST NOT be asserted by a v1.1 producer, and a v1.1 validator treats it as out-of-surface.
+
+The id **format is identical across both grades and across phases** (below), so a v1.1 self-asserted handle is upgradeable to a v1.2 registry-canonical id without re-minting. The registry/uniqueness/lifecycle-governance machinery — the central reservation registry, cross-org global-uniqueness admission, the dispute/merge/split lifecycle authority, third-party-publisher governance, and the **[NR-1]** AIIC identifier-governance document — is **v1.2 surface (§11)** and **MUST NOT** be a dependency of v1.1 conformance. The minimum conformance *hooks* an implementer can already build against — the **assigner-registry snapshot format** (a list of `{assigner, public_key}` a bundle may embed or reference), the **id-state proof format** (`{public_incident_id, id_state, disputed, as_of}`), the **dispute overlay** (`disputed: boolean` on a PUBLISHED id), and **rejection/replacement** semantics (`REJECTED` terminal; `supersedes`/`merged_from`/`split_into` registry edges) — are fixed here so v1.1 code can prototype against them, but exercising them as a *trust* mechanism is the v1.2 registry class. Revision 0's `AIIC-YYYY-NNNN…` flat sequence is replaced; it leaked sequencing under embargo (Appendix E Q11) and could not stay collision-resistant under offline federated minting (Appendix E Q10). The ≥128-bit suffix plus a domain-derived assigner namespace resolves both without any central allocation.
+
+- **Format (resolves Q10 + Q11 together).** `AIIC-{assigner}-{year}-{random}`:
+  - `{assigner}` is an assigner token (2–8 uppercase alphanumerics) **derived from a DNS domain the registrant controls** (e.g. `OPENAI` from `openai.com`), giving each domain a disjoint namespace so two distinct assigners cannot collide — federation with a real uniqueness invariant (Q10), with **no central per-mint brokering and no registered-assigner allocation step**. In v1.1 the token is self-asserted: the id alone does not prove the registrant controls the domain; that binding is established only by the OPTIONAL online domain-control check (below), and only at check time.
+  - `{year}` is the four-digit assignment year.
+  - `{random}` is a random suffix of **≥26 characters** drawn from the **true Crockford base32 alphabet** `0-9 A-H J K M N P-T V-Z` (excludes I, L, O, U), giving **≥128 bits** of entropy, so ids are **non-enumerable**: minting an id never reveals the existence or rough timing of other (possibly embargoed) incidents (Q11). This replaces the sequential counter, which was the source of the embargo leak. (The earlier ≥10-char / ≥50-bit suffix is superseded: 50 bits is too small to keep a globally federated, self-asserted namespace collision-resistant under offline minting; ≥128 bits is the v1.1 floor.)
+  - Pattern: `^AIIC-[A-Z0-9]{2,8}-[0-9]{4}-[0-9A-HJKMNP-TV-Z]{26,}$`.
+- **Validation conformance classes (resolves the determinism objection, stated honestly).** Attribution of a self-asserted handle to its assigner domain depends on a live, check-time observation, so it MUST NOT be conflated with deterministic offline validation. There are two classes:
+  - (1) **Offline-deterministic validation** (reproducible, no network) checks **only**: the syntactic pattern, and — when the card is signed — the **JWS signature self-consistency** (the signature verifies against the key embedded in / referenced by the card, per `src/acef/signing.py`; RS256/ES256). It also accepts a signed id-state *snapshot* if the bundle embeds one. **Offline-deterministic validation NEVER attributes the id to the assigner domain.** By explicit design a **forged `AIIC-OPENAI.COM-2026-…` card signed with an attacker key whose JWS is internally consistent PASSES the offline class** — the offline class proves *the card is well-formed and internally signed*, not *that OpenAI authored it*. **ACEF-083 is an offline *syntax* check only** (pattern + assigner-snapshot presence, when a snapshot is supplied); it makes no attribution claim.
+  - (2) **OPTIONAL online domain-control conformance** (a distinct, non-deterministic check; see the domain-control proof below) proves the registrant controls the assigner domain **at check time**, returning `verified` / `unverified` / reject (ACEF-083). It is the v1.1 online-conformance class. A v1.1 bundle is fully conformant offline; running the online check is OPTIONAL and adds the at-check-time attribution the offline class deliberately omits.
+  - Two offline validators with different network access therefore never disagree, because the offline class is attribution-free by construction.
+- **The OPTIONAL online domain-control proof (an online-conformance check, not an offline-attributable credential).** The proof binds `{assigner}` to a DNS domain the registrant controls, in the style of ACME DNS-01 / `.well-known` HTTP challenges, reusing the card's JWS key (`src/acef/signing.py`). It is **OPTIONAL**, **online**, and proves control **at check time only**: a `verified` verdict means *the registrant demonstrated control of the domain at the moment of the check*, never that the id is attributable without a network check, never that the verdict persists after the check, and never that the handle alone resists impersonation. The verdict is tri-valued — **`verified`** (proof present and current), **`unverified`** (no proof, or the network/DNS lookup timed out — an explicit non-result, never a silent pass and never a forgery verdict), or **reject (ACEF-083)** (a proof was presented but is forged/absent/inconsistent under the online class). A v1.1 implementation that wants to ship this check needs the following parameters fixed; they are currently **underspecified and MUST be pinned in the implementing profile / [NR-1]** before the online class is interoperable (an implementer can build the check from this list):
+  - **IDNA / punycode normalization** of the assigner↔domain mapping (how the uppercased 2–8-char `{assigner}` token maps to a registrable domain; A-label vs U-label canonicalization);
+  - **eTLD+1 / subdomain-delegation policy** (which label boundary is authoritative; whether a subdomain may prove control for a parent, and vice versa) keyed to the Public Suffix List;
+  - **TXT-record canonicalization and multiple-record handling** (exact record name, value encoding, and the rule when several matching TXT records or several values are present);
+  - **DNSSEC stance** (whether a validated DNSSEC chain is required, preferred, or ignored, and how bogus/indeterminate states map to `unverified` vs reject);
+  - **HTTP-redirect and TLS rules for the `.well-known` challenge** (permitted redirect chains/hops, required TLS posture and certificate validation, and what a redirect off-domain means);
+  - **content-type** of the `.well-known` challenge document (the exact required media type);
+  - **cache-TTL and clock semantics** (the freshness window a `verified` verdict is valid for, how DNS/HTTP caching and the `as_of` timestamp bound "at check time", and how clock skew is tolerated);
+  - **JWK-thumbprint canonicalization** (RFC 7638 thumbprint computation binding the challenge value to the card's signing key).
+  Until these are pinned, the online domain-control class is **non-normative** in v1.1 and a conforming v1.1 validator MAY decline to run it; the offline-deterministic class above stands alone and is attribution-free.
+- **Lifecycle state machine (resolves Q9; the resolving authority is v1.2 surface).** States and transitions: `RESERVED` → `PUBLISHED` (embargo lifts) | `REJECTED` (terminal: withdrawn/not-an-incident; no further transitions); `PUBLISHED` → `DISPUTED` (subject contests) and back to `PUBLISHED` (dispute resolved) or → `REJECTED` (upheld). `DISPUTED` is a status overlay on a `PUBLISHED` id (a card may be simultaneously PUBLISHED and DISPUTED), not a separate publication state — matching CVE's treatment of dispute as a tag rather than a primary state, with ACEF adding it as an explicit overlay. Merge/split/supersession are expressed by the typed relationships `supersedes` / `merged_from` / `split_into` resolved at the registry level (§5.8). Because an ACEF bundle is immutable, the bundle freezes only a *snapshot* of the id and its state at export time. **The mutable lifecycle, and the out-of-band id-state authority that resolves it, are part of the v1.2 registry surface (§11) and MUST NOT be a dependency of v1.1 conformance**: in v1.1 the state fields (`id_state`, `disputed`) are self-asserted snapshot values like the handle itself, and no institution adjudicates them. The full state-machine table and the dispute/republish procedure are specified in the **[NR-1]** AIIC identifier-governance document, a v1.2 prerequisite (§10, §11, Appendix E Q3/Q9).
+- **Embargo safety (resolves Q11).** While `coordinated_disclosure.status` is `private`/`coordinated`, the `incident_report` MAY hold a `RESERVED` id, and **no public `incident_card` exists** until embargo lifts. A `RESERVED` id is non-enumerable and non-public, so reserving an identifier during coordination leaks nothing.
+- **Relationship to ACEF URNs.** The ACEF record id remains `urn:acef:rec:<uuid>`. `public_incident_id` is a card field, not a replacement for the record URN. A card may also carry a non-authoritative `aiid.incident_id` cross-reference (§5.5).
+- **Assignment authority (Appendix E Q3; entirely v1.2 surface).** v1.1 needs **no** assignment authority — minting is local and the handle is self-asserted. The institutional model below is **v1.2 (§11)** and is **not** a v1.1 conformance dependency: mirroring the CVE model with a *neutral nonprofit* root (FIRST-style) rather than a vendor or single government, AI Commons would operate the root/secretariat and a central reservation/uniqueness registry; a last-resort assigner would handle transferable cross-vendor incidents; an AIIC Board (CVE-Board-style) would adjudicate disputes; and the `registry-canonical` `id_grade` would be issued there. Assigner "scope" maps to the existing `obligation_role`/`collector` fields. The bodies' incorporation instruments remain out of scope, and their existence is a v1.2 prerequisite ([NR-1], §10/§11), never a v1.1 one.
+
+### 5.4 Recomputable severity vector (`ACEF-SEV:1.0`)
+
+`ACEF-SEV:1.0` is a self-contained, recomputable, slash-delimited, fixed-order vector string modeled structurally on CVSS v4.0 (full derivation and primary-source notes in Appendix E Q4). It is a conformance target, not a sketch: the grammar, metric list, order, and the projection to the coarse `severity` enum are all fixed here.
+
+- **Grammar.** Vectors begin `ACEF-SEV:1.0/` and concatenate `Name:Value` pairs with `/`. Metrics MUST appear in group order **I, T, E, S**, and in the listed order within a group; any omitted optional metric defaults to Not-Defined (`X`). Group I is mandatory. A present-but-unparseable vector raises **ACEF-082** (§7).
+- **Group I — Intrinsic Harm (mandatory):** `HT` harm type {P physical · R fundamental-rights · K critical-infrastructure · E property/environmental · S societal/systemic} keyed to EU Art. 3(49)(a–d); `HG` harm gravity {H·L·N} (ACEF-defined, *not* a CSET mapping — CSET Severity is unbuilt); `RV` reversibility {A automatic · U user-recoverable · I irrecoverable} (CVSS v4.0 Recovery semantics; `I` aligns with 3(49)(b) "irreversible"); `SC` scope {C changed · U unchanged}; `BR` affected-population breadth {I individual · G group · P population-scale} (grounded on the EU "widespread" modifier; ACEF-defined, *not* a built CSET "Spread").
+- **Group T — Threat/Realization (optional):** `RZ` realization {E·S·N}; `RP` reproduction prevalence as `RP:<rate>@<N>` (rate∈[0,1] over N trials, per the CRFM prevalence recommendation — the wire format is an ACEF construction); `XF` transferability {Y·N·X}.
+- **Group E — Environmental/Contextual (optional; risk-tailoring, not severity):** `AU` autonomy {L·O·A}; `EX` deployment exposure {H·L·N}; `KC` sector criticality {H·M·L}.
+- **Group S — Supplemental (optional, score-neutral):** `SF` safety {P·N} (CVSS v4.0 Supplemental Safety); `VL` value-chain locus {F·T·A·C}; `DB` differential-distribution flag {Y·N}.
+- Example: `ACEF-SEV:1.0/HT:R/HG:H/RV:I/SC:C/BR:P/RZ:E/RP:0.62@200/XF:Y/AU:A/EX:H/KC:H/SF:N/VL:F/DB:Y`.
+- **Severity-is-not-risk.** Group I expresses the magnitude of harm if realized, not probability-weighted risk; there is no defensible cross-harm-type exchange rate. Group E factors are carried for a downstream analyst to fold into risk **in the Assessment Bundle**.
+- **Projection to `severity` (resolves Q13).** When `severity_vector` is present, the coarse `severity` enum MUST equal the deterministic projection `band(I-group)` below. A card whose `severity` disagrees raises a consistency error (**ACEF-088**, §7). `RP` prevalence never changes the band; it informs an optional Assessment-layer *risk* score only. The severity *band* is a deterministic function of stated harm facts (Evidence); any probability-weighted *risk* number is Assessment and is never carried in the Evidence Bundle.
+
+  **`band()` table (normative).** Evaluate top-to-bottom; the first matching row wins. `HG` gravity, `BR` breadth, `RV` reversibility are the Group-I metrics from the vector.
+
+  | condition on Group-I metrics | `severity` |
+  |---|---|
+  | `HG:H` AND (`BR:P` OR `RV:I`) | `critical` |
+  | `HG:H` | `major` |
+  | `HG:L` AND (`BR:P` OR `RV:I`) | `major` |
+  | `HG:L` | `minor` |
+  | `HG:N` (negligible gravity) | `informational` |
+
+  **Why only `HG`, `BR`, `RV`.** The band is a *magnitude* projection, so it uses the three Group-I metrics that scale magnitude: gravity (`HG`), affected-population breadth (`BR`), and reversibility (`RV`). `HT` (harm *type*) is deliberately excluded because harm types are incommensurable (§5.4 severity-is-not-risk) — banding by type would smuggle in a cross-type exchange rate the design rejects; `HT` is retained as evidence and as the Art. 3(49) trigger input, not a band input. `SC` (scope-changed) is folded into `BR` (a boundary-crossing harm raises breadth) rather than scored twice. This table is reproduced normatively in `acef-conventions/v1.1/severity_vector.schema.json`; the table here governs and the schema file MUST match it.
+
+The full `ACEF-SEV:1.0` value tables and grammar are specified normatively in `acef-conventions/v1.1/severity_vector.schema.json` (not the frozen `v1/`).
+
+### 5.5 Taxonomy crosswalk object
+
+The `taxonomy_crosswalk` object maps one incident to each framework. Every member is **optional, closed (no `additionalProperties`), and version-pinned**, and is a *derived projection* of `harm_core` (§5.2): when present a member MUST be consistent with the core, validated by ACEF-owned one-directional derivation tables (core→scheme); a contradiction raises **ACEF-085** (§7). This closure (Appendix E Q15) lets the validator catch a misspelled member, a wrong-typed value, or a missing mandatory member — impossible under the Revision 0 `additionalProperties: true`. Unknown keys are not silently accepted here; vendor extensions MUST be `x-*`-namespaced to be safely ignorable, preserving the spec's conformance-neutrality contract and round-trip determinism.
+
+```
+taxonomy_crosswalk: {
+  oecd:          { edition: "oecd-crf-2025", criteria: [ { id: "oecd-crf-2025/<n>", value } ] },
+  eu_ai_act:     { edition: "reg-2024-1689",
+                   serious_incident_triggers: [ "3.49.a" | "3.49.b" | "3.49.c" | "3.49.d" ],
+                   widespread: boolean,                         // modifier, not a 5th trigger
+                   death_involved: boolean },                   // 3(49)(a) covers death OR serious health harm; the 10-day clock is death-only
+  cset:          { edition: "csetv1", harm_type, autonomy, sector },   // tangibility/distribution live in harm_core
+  nist_ai_600_1: { edition: "2024-07-final", categories: [ $ref nist-ai-600-1-2024-07.json#/$defs/category ] },  // closed enum, NOT free string
+  mit_causal:    { edition: "2024-08", entity, intent, timing },
+  mit_domain:    { taxonomy_version: "2024-08" | "2025-04", domain, subdomain },
+  aiid:          { incident_id: integer, report_ids: [ integer ] },   // non-authoritative soft cross-reference
+  stix:          { object_refs: [ "<type>--<uuidv4>" ] }              // emit-only; resolvable STIX 2.1 ids (§5.8)
+}
+```
+
+Notes that fix Revision 0 defects:
+
+- **`mapping_permission` removed from the producer-set per-card crosswalk.** CWE's mapping-permission is a *maintainer-side, per-catalog-entry* property with values Allowed / Allowed-with-Review / Discouraged / Prohibited; it is not a producer-supplied incident field, and the Revision 0 `allowed|discouraged` pair on the `oecd` member alone misrepresented it. Mapping permission, where used at all, belongs in the ACEF↔scheme mapping table / profile metadata, not on each card (Appendix E Q15; reviewer note G).
+- **EU Art. 3(49) is a trigger *array* plus a `widespread` modifier**, not a single enum (Appendix E Q14/Q16; reviewer note C). One incident can satisfy multiple triggers (e.g. death **and** critical-infrastructure), and "widespread infringement" is a cross-cutting modifier of (c), not a fifth letter. The `eu-ai-act-art73-2026` template (§5.7) computes the **shortest applicable clock** over the trigger array + modifier.
+- **OECD is the canonical anchor**; its criteria ids key to the OECD ordinal positions (`oecd-crf-2025/<n>`), transcribed in §5.7 / Appendix E Q2 from the primary source — not invented.
+- **Every member uses `edition` as its version-pin field, except `mit_domain`, which uses MIT's own `taxonomy_version` label as its edition pin** (no member uses `scheme_version`), because each scheme drifts (NIST draft↔final, CSET v1↔planned, MIT 23↔24 subdomains); pinning makes "the same code" mean the same thing across editions.
+- **The NIST registry `nist-ai-600-1-2024-07.json` is a closed enum of the FINAL July-2024 category names** (verified against `nvlpubs.nist.gov/nistpubs/ai/NIST.AI.600-1.pdf`, distinct from the April-2024 draft names): *CBRN Information or Capabilities · Confabulation · Dangerous, Violent, or Hateful Content · Data Privacy · Environmental Impacts · Harmful Bias or Homogenization · Human-AI Configuration · Information Integrity · Information Security · Intellectual Property · Obscene, Degrading, and/or Abusive Content · Value Chain and Component Integration*. These are risk-category enrichment, not incident classes. This registry is no longer an Appendix C verify item.
+- **`aiid.incident_id` is a non-authoritative soft cross-reference**, not the dedupe spine, and AIID's one-incident-to-many-reports model and CC-BY-SA 4.0 licensing are handled in Appendix E Q6/Q28.
+
+**Canonical dedupe key (normative; resolves Q6/Q20/Q28).** The cross-database dedupe spine is ACEF's own `incident_dedupe_key`, built like RFC-0001's `finding_record.dedupe_key`:
+
+```
+incident_dedupe_key = "sha256:" + hex( SHA-256( JCS( {
+  value_chain_role,                       // the card enum
+  subject_identity,                       // NFC-normalized, case-folded "provider|name|version" triple
+                                          //   (NOT the per-bundle subject UUID, which never matches across DBs)
+  harm_class,                             // the canonical harm_core.harm_class code
+  occurrence_date_utc                     // occurrence_date (else detection_date) as a UTC YYYY-MM-DD calendar date
+} ) ) )
+```
+
+- SHA-256 only, no hash agility (RFC-0001 precedent); pattern `^sha256:[0-9a-f]{64}$`. The preimage is a JSON **object** canonicalized with RFC 8785, never a delimiter-joined string.
+- **Confidentiality (resolves Q20).** The subject-bearing key MUST be emitted ONLY on a card whose `public_incident_id` is `PUBLISHED`/public; on any non-public record it MUST be omitted (three of four inputs are low-entropy and the triple is often guessable, so a published unsalted key would be offline-enumerable). For dedupe across redacted-subject records, a keyed variant `incident_dedupe_key_hmac = "hmac-sha256:" + hex(HMAC-SHA-256(pepper, JCS(K)))` is used, with the pepper held only by the central id/dedupe resolver (§5.3 authority); absent a resolver it degrades to link-only.
+- `aiid.incident_id` (and AIAAIC/OECD-AIM ids) are soft cross-references that hard-link when present but never replace the key; an upstream AIID renumber MUST NOT invalidate the key.
+- The key is a deterministic Evidence field; any clustering or §5.9 roll-up over it is Assessment-layer.
+
+### 5.6 Coordinated disclosure profile
+
+The profile carries one canonical `coordinated_disclosure` block (this is the single authoritative shape; the divergent Appendix-B variant and the duplicate `transferability_known` boolean of Revision 0 are removed — see Appendix D #1/#2), modeled on ISO/IEC 29147 and 30111, the CERT/CC and FIRST multi-party guidance, and the Stanford CRFM coordinated flaw disclosure proposal (arXiv 2503.16861).
+
+```
+coordinated_disclosure: {
+  status: "private" | "coordinated" | "public",
+  reporter_role: "internal" | "external_researcher" | "deployer" | "affected_party" | "regulator",
+  coordinator_ref: string,        // entity ref to a neutral coordinator actor
+  safe_harbor_ref: string,        // pointer to the rules-of-engagement / safe-harbor document
+  embargo_until: date-time,
+  regulatory_timeline: [ {        // ARRAY: one entry per applicable jurisdiction (§5.7 registry)
+    framework: string,            // open, scheme-tagged jurisdiction id, e.g. "eu-ai-act-art73",
+                                  //   "eu-ai-act-art55", "us-circia", "cn-cac-2025", "kr-ai-basic-act"
+    clock_model: string,          // "awareness_days" | "tiered_severity" | "pending" | "risk_management_no_clock"
+    awareness_date: date-time,
+    deadline: date-time           // may be null when clock_model is pending / risk_management_no_clock
+  } ],
+  data_residency: {               // China PIPL/DSL conflict with global export (§5.7, Appendix E Q18)
+    cross_border_restricted: boolean,
+    jurisdiction: string
+  },
+  remediation_timeline: {         // negotiated, complexity-keyed, not a fixed 90-day clock
+    negotiated_disclosure_date: date-time,
+    rationale: string
+  }
+}
+```
+
+**Requiredness.** `coordinated_disclosure.schema.json` makes `status` always required; when `eu-ai-act-art73-2026` or `eu-ai-act-art55` is declared, at least one matching `regulatory_timeline[]` entry (with `framework`, `awareness_date`, and a `deadline` consistent with the §5.7 clock) is conditional-required, and on a `status: public` card the public subset (`status`, `reporter_role`) is required while `embargo_until` MUST be absent. Roles reuse and extend the envelope `obligation_role` enum plus a neutral coordinator actor. `regulatory_timeline` is an **array** because one incident is routinely reportable under several regimes at once, each with its own clock model (§5.7); the single `transferability` object (§5.2) holds whether the flaw transfers. Remediation timelines are flexible and negotiated, because AI fixes often require retraining over weeks or months and depend on transferability across models. Safe-harbor language for good-faith reporters is referenced, not embedded; the self-reporter incentive/immunity question is Appendix E Q22.
+
+### 5.7 Mapping templates, profiles, and the jurisdiction clock registry
+
+Templates are authored as ordinary ACEF templates in `src/acef/templates/`, from **verified primary sources** (Appendix E Q2/Q7/Q18; Appendix C). Requiredness follows the union-of-declared-profiles rule with per-profile error attribution (Appendix E Q16): a member required by any declared profile is required, and a missing-member error carries the offending `profile_id` plus the RFC 6901 `path`, so two conformant validators cannot disagree on a multi-profiled card.
+
+**Identifier trust does not gate the Art. 73 path.** The binding Art. 73 template requires only that `public_incident_id` be *present and well-formed* (a `self-asserted` `id_grade` handle suffices); it does **not** require the OPTIONAL online domain-control proof (§5.3), because the regulatory filing runs through the **confidential source-backed path** (`incident_report.card_source.eu_ai_act_facts`, below) which produces no public card and needs no at-check-time attribution. A reserved-id, no-public-card report is fully validatable with a `self-asserted` handle alone — id-trust attribution is an OPTIONAL online concern, never on the regulatory-filing critical path (§11).
+
+- **`eu-ai-act-art73-2026.json`** (jurisdiction EU, legal_force binding). Carries **per-provision effective dates with status**, not a single hard-coded default: as adopted the high-risk obligations apply 2 Aug 2026, but the template marks the high-risk Annex III / Annex I dates as `2027-12-02` / `2028-08-02` with status `pending-final-adoption` pending the Digital Omnibus (Appendix E Q7). DSL rules require `public_incident_id`, `taxonomy_crosswalk.eu_ai_act.serious_incident_triggers[]` (+ `widespread`), `coordinated_disclosure.regulatory_timeline[]`, and `notification_timeline[]`, and compute the **shortest applicable clock** over the trigger array. **Important Art. 73 correction:** 3(49)(a) covers *both* death *and* serious harm to health, but the 10-day clock applies to **death only**; the clock rule therefore keys on the `death_involved` fact, not on the whole `3.49.a` trigger. Rule: `death_involved: true` → 10 days; `3.49.b` (critical-infrastructure) **or** `widespread` → 2 days; otherwise (including non-fatal `3.49.a` serious-health-harm) → 15 days; the shortest applicable clock wins for compound incidents. An inconsistent stated deadline raises **ACEF-084** (§7). **Source of the trigger facts depends on the validation context:** for a CONFIDENTIAL/embargoed Art. 73 report validated *before any public card exists*, the clock is computed from `incident_report.card_source.eu_ai_act_facts` (which carries `serious_incident_triggers[]`, `widespread`, and `death_involved`); for a public card it is computed from `incident_card.taxonomy_crosswalk.eu_ai_act` (plus `death_involved`). This lets a reserved-id, no-public-card Art. 73 report validate fully. This replaces the Revision 0 single-trigger enum that could not encode compound incidents (Appendix D #6).
+- **`oecd-ai-incidents-2025.json`** (jurisdiction international, legal_force voluntary). Maps to the OECD common reporting framework's 8 dimensions / 29 criteria, requiring the **7 mandatory** criteria — transcribed from OECD AI Papers No. 34 (Feb 2025): #1 Title, #2 Description, #3 How the AI system relates to the incident, #4 Submitter information, #7 Supporting material, #10 Severity, #11 Harm type (Appendix E Q2). Criterion ids key to the OECD ordinal (`oecd-crf-2025/<n>`), with `edition: oecd-crf-2025`. OECD is marked voluntary/non-binding, not law-like.
+- The existing **`eu-gpai-code-of-practice-2025`** template gains incident provisions mapped to Commitment 9 (Art. 55 serious-incident reporting to the AI Office, applied 2 Aug 2025).
+
+**Open multi-jurisdiction clock registry.** `coordinated_disclosure.regulatory_timeline[].framework` is an open, scheme-tagged registry so non-EU regimes are first-class, not collapsed to "other" (Appendix E Q18, primary-sourced 2026-06-08):
+
+| `framework` | clock model | trigger / note |
+|---|---|---|
+| `eu-ai-act-art73` | `awareness_days` | 15 / 2 / 10-day; shortest over trigger array |
+| `eu-ai-act-art55` | `awareness_days` | GPAI systemic-risk to the AI Office |
+| `us-circia` | `pending` | 72 h substantial / 24 h ransom-payment — final rule unpublished as of 2026-06; not AI-specific |
+| `cn-cac-2025` | `tiered_severity` | CAC Measures (eff. 1 Nov 2025): 30 min / 1 h / 2 h / 4 h by operator class × severity; **PIPL/DSL localization** can forbid global export — set `data_residency.cross_border_restricted` |
+| `kr-ai-basic-act` | `risk_management_no_clock` | AI Basic Act (eff. 22 Jan 2026): serious-incident duty, no numeric deadline |
+
+**Normative status of the registry rows.** Only the EU rows (`eu-ai-act-art73`, `eu-ai-act-art55`) are proposed as normative templates in v1.1; the EU clocks and dates are pinned to Regulation (EU) 2024/1689 and the Digital Omnibus status. The US, China, and Korea rows are **non-normative illustrative examples** of the registry's extensibility until pinned to official instruments / authoritative government sources (the US CIRCIA pending status is sourced to CISA; China and Korea entries are NOT regulator-grade — e.g. Korea's official English translations are reference-only and not legally effective, and the China clocks require the official CAC instrument). A jurisdiction's exact reporting-template field names and clocks are transcribed from the official instrument before that row is promoted from example to normative template, never invented (Appendix C). An organization declares a profile the usual way:
+
+```python
+pkg.add_profile("eu-ai-act-art73-2026", provisions=["article-73", "article-3-49"])
+```
+
+### 5.8 Incident graph via typed relationships
+
+The incident graph uses ACEF's typed package-level `relationships[]`, **not** untyped `entity_refs`. The Revision 0 claim that `entity_refs` is "the analog of STIX relationship objects" with "no new machinery" is retracted (Appendix E Q25): `entity_refs` is four untyped URN buckets, and the closed `relationship_type` enum (`wraps|calls|fine_tunes|deploys|trains_on|evaluates_with|oversees`, verified `manifest.schema.json`) has no incident edges. Two distinct kinds of edge, with explicitly chosen homes so the manifest schema actually permits them (reviewer note: adding enum values alone is insufficient):
+
+- **In-bundle graph edges** — `public_projection_of` (report→card), `caused_by`, `harms`, `mitigated_by`, `transferable_to` — are added to the `relationship_type` enum (§8) AND require **broadening `relationships[].source_ref`/`target_ref` to accept record URNs** (`urn:acef:rec:<uuid>`), not only entity URNs, since these edges connect records/incidents. That ref-pattern broadening is part of the §8 Core change.
+- **Id-lifecycle edges** — `supersedes` / `merged_from` / `split_into` — connect AIIC ids across *different* bundles over time, which an immutable in-bundle relationship cannot express; they therefore live in the **registry id-state document** (a `replaced_by` / `merged_into` / `split_into` graph keyed on `public_incident_id`), not in `relationships[]`. §5.3's lifecycle and §5.8's graph use the same registry as the single source of truth.
+
+The free-string foreign keys of Revision 0 (`transferability.related_incident_ids`, `coordinator_ref`, `safe_harbor_ref`) denote in-bundle graph edges and SHOULD be expressed as typed `relationships[]` (or `entity_refs`) accordingly.
+
+**STIX integration is emit-only for v1.1** (Appendix E Q27): `taxonomy_crosswalk.stix.object_refs[]` entries MUST be resolvable STIX 2.1 ids (`<type>--<uuidv4>`) pointing to producer-asserted STIX SDOs; ACEF ships an ACEF→STIX drop-list. Ingest/round-trip is deferred until the STIX Incident Core Extension field names are confirmed (Appendix C; they are not invented).
+
+### 5.9 Top AI Failure Modes shortlist (companion analytics, not normative)
+
+This is moved out of the normative profile into a **non-normative companion analytics note** and constrained (Appendix E Q21; reviewer note I), because a single multiplicative Danger Score (frequency × severity) across heterogeneous harm types contradicts this RFC's own severity-is-not-risk / incommensurability principle (§5.4; Appendix D #10), and an open corpus is a Sybil/poisoning target. RFC 2119 keywords in this subsection are conditional: they bind only **if** the companion analytics note is adopted. Under that condition, the shortlist must: (1) rank **within harm class** (or as per-harm-type leaderboards), never as one cross-class score; (2) draw only on cards that pass the **admission gate** — JWS-signed with a defined `public_incident_id`↔key binding and a minimum `trust_level` (Appendix E Q19/Q21); and (3) disclose the reporting-propensity bias (it measures *reported* danger, skewed to well-reported/English/EU-regulated harms). It is Assessment-layer/analytics, never an Evidence field, and never part of the v1.1 normative conformance surface.
+
+### 5.10 Version-gating, determinism, and backward compatibility
+
+- **Concrete minor (resolves Q12, Appendix D #3).** All new schemas ship under `acef-conventions/v1.1/` — `incident_card.schema.json`, `harm-core-taxonomy.json`, `severity_vector.schema.json`, and the v1.1 overlay that registers the templates — gated on `manifest.versioning.core_version: 1.1.0`, sharing RFC-0001's minor. The frozen `acef-conventions/v1/` is **not** modified and the v1.0 golden bundles are untouched; "v1.x" (a non-resolvable range) no longer appears in the current normative body or any schema `$id`, except where historical problem statements (§9.1, Appendix D/E) quote the Revision 0 text. The reference validator treats the new fields as conditional-required only when a bundle declares `eu-ai-act-art73-2026`, `oecd-ai-incidents-2025`, or the GPAI incident provisions.
+- **Array determinism (resolves Q26).** RFC 8785 (JCS) canonicalizes object keys but not array elements. Therefore **every order-insensitive array introduced by this profile** MUST be sorted ascending by the RFC-8785 canonical byte sequence of its element before hashing and serialization, mirroring ACEF's existing record ordering (`export.py` `sort_records`). This is exhaustive, not a fixed list; the arrays include (non-exhaustively) `taxonomy_crosswalk.oecd.criteria[]`, `taxonomy_crosswalk.eu_ai_act.serious_incident_triggers[]`, `taxonomy_crosswalk.nist_ai_600_1.categories[]`, `aiid.report_ids[]` (numeric ascending), `stix.object_refs[]`, `transferability.related_incident_ids[]`, `harm_distribution_basis[]`, `coordinated_disclosure.regulatory_timeline[]`, and every array inside a crosswalk subschema. **Order-significant** arrays (e.g. `notification_timeline[]`) are the only exception and MUST be explicitly tagged order-significant in their schema.
+- **Backward-compat regression.** The conformance suite (§6) runs each v1.0 golden `incident_report` bundle against the v1.1 schema set under `core_version: 1.0.0` and asserts zero new errors and that `acef-conventions/v1/` is byte-unchanged.
+
+### 5.11 Disclosure-time publishability map and GDPR Art. 9 gate (normative)
+
+Generating an `incident_card` from an `incident_report` is governed by a normative **publishability map** (resolves Q8/Q23; reviewer note D), enforced by the validator at the public-disclosure boundary (`coordinated_disclosure.status: public` or `public_incident_id` PUBLISHED). The map is a **field-projection rule over two separate records**, not per-field redaction of one record (which ACEF does not support): for each `incident_report` source field it assigns one disposition determining how/whether that field appears on the card:
+
+- `omitted` — the field is **not a card field** and never appears on the card (the default for the privileged-analysis fields `root_cause_analysis`, `lessons_learned`, `corrective_actions`, `impact_assessment`).
+- `regulator-only` — the field stays on the private `incident_report`/`card_source` and is not projected (the default for special-category `harm_distribution_basis` and free-text `description`).
+- `hash-committed` — the card carries an explicit SHA-256 commitment value (`<field>_commitment`, format `sha256:<64-hex>`) computed over the RFC-8785 canonicalization of the source value, allowing later proof-of-content without disclosure; this is an ordinary card field, not a redaction of the report. **Commitment-linkage rule (normative):** every `*_commitment` field on a card MUST correspond to exactly one source field whose disposition is `hash-committed` in `card_source.publishability_map`, and its value MUST equal `"sha256:" + hex(SHA-256(JCS(source_value)))` at that source path; an orphan or mismatched commitment raises **ACEF-086**.
+- `anonymized` — the card carries an irreversibly anonymized derivative (not pseudonymized — pseudonymous data remains personal data under GDPR Recital 26) under a declared `anonymization_method`.
+- `public` — the field is copied to the card verbatim.
+
+**Two validation contexts (resolves the projection-conformance split).** A public registry often holds only the `incident_card`, not the private `incident_report.card_source`. Validation therefore has two named modes: (1) **card-only validation** (deterministic offline, what anyone with just the card runs) checks the card's syntax, closed schema, **JWS signature self-consistency** (§5.3), the `self-asserted` `id_grade`, and `*_commitment` *format* — it does NOT check commitment preimages, publishability-map pointer resolution, **the domain-control proof, or any live registry status**, because those require the private source or a network call (the domain-control proof is the OPTIONAL online class of §5.3; live registry status is v1.2 surface, §11). Card-only validation is **attribution-free**: a `self-asserted` handle is checked for shape and self-consistent signature, never attributed to its assigner domain. (2) **source-backed projection validation** (run by the producer / a holder of both records) additionally checks that each `publishability_map` pointer resolves to exactly one source value, that every `*_commitment` equals `sha256(JCS(source_value))` at its mapped path, and that special-category/privileged dispositions were honored. **ACEF-086's preimage and pointer-resolution checks fire only in source-backed mode**; in card-only mode ACEF-086 is limited to commitment-format and declared-basis-presence checks. This prevents two validators from disagreeing on a standalone public card.
+
+A special-category or identifying field may be projected as `public` or `anonymized` only if the card carries a structured **`declared_publication_basis`** object asserting **both** a GDPR Art. 6(1) lawful basis **and** an Art. 9(2) condition (or a declared `anonymization_method`). Publishing such a field without a satisfying `declared_publication_basis` raises **ACEF-086** (§7). The validator checks the *presence and structural validity* of the declared basis and the projection dispositions; it does **not** and cannot adjudicate whether Art. 6/Art. 9 are actually satisfied in law. The standard therefore makes public output **publication-gated by a declared basis and anonymization metadata**, not "lawful by construction" — whether publication is lawful remains jurisdictional legal analysis outside schema validation. The **third-party-publisher governance** for cards filed by non-owners — a minimum `trust_level`, right-of-reply/takedown, and the controllership model (Appendix E Q19) — is **v1.2 surface (§11)**, since it depends on the registry trust framework; in v1.1 a non-owner card is a `self-asserted` handle whose authorship is established (if at all) only by the OPTIONAL online domain-control proof (§5.3). Voluntary near-miss contribution uses the aggregation/anonymity tier and self-reporter safe harbor (Appendix E Q22).
+
+## 6. Conformance impact
+
+- **Schemas (all under `acef-conventions/v1.1/`, frozen `v1/` untouched).** Add `incident_card.schema.json`, `harm-core-taxonomy.json`, `severity_vector.schema.json` (with the normative `band()` table), and the closed per-member crosswalk subschemas. Register the two templates plus the GPAI Art. 55 incident provisions.
+- **Validator.** Add: conditional-required rules under the new profiles with union/per-profile-attributed errors (§5.7); the `ACEF-SEV:1.0` format check + `severity` projection-consistency check; the **offline-deterministic** `public_incident_id` check — syntactic pattern + `id_grade: self-asserted` + **JWS signature self-consistency**, and **never** id-to-domain attribution (a self-consistent forged-assigner card passes offline by design — §5.3); the **OPTIONAL online domain-control verifier** as the v1.1 online-conformance class (`verified`/`unverified`/reject ACEF-083, proving control *at check time only*, never a no-network or persistent attribution — §5.3); the `harm_core`→crosswalk derivation-consistency check; the Art. 73 shortest-clock check; and the §5.11 publishability-gate check. Global uniqueness, current lifecycle state, and `registry-canonical` admission are checked **only** in the **v1.2 online-registry** class (§11), never offline and never in v1.1. No change to the four-phase pipeline structure.
+- **Test vectors (enumerated, grouped by conformance class).** Vectors are tagged by the class that runs them — **offline-deterministic** (syntax, schema shape, severity↔band, harm_core↔crosswalk, array determinism, publishability map / commitment linkage), **online-registry** (id uniqueness + current lifecycle state), and **public-registry-admission** (signing, minimum `trust_level`, right-of-reply) — so an offline validator never depends on a live lookup (§5.3). A pass + fail bundle for each of: Art. 73 single-trigger; Art. 73 compound multi-trigger (death + critical-infra → 2-day shortest clock, exercising ACEF-084); OECD voluntary 7-mandatory-core (ACEF-081); a multi-profile card (union requiredness + per-profile-attributed ACEF-081); `severity_vector` parse failure (ACEF-082); `public_incident_id` syntax/assigner-snapshot failure (ACEF-083); `harm_core`↔crosswalk contradiction (ACEF-085); public disclosure of special-category without `declared_publication_basis` (ACEF-086); `near_miss` info marker (ACEF-087); `severity`↔`band()` disagreement (ACEF-088); a **RESERVED-id confidential Art. 73 report with NO public card, `card_source.eu_ai_act_facts.death_involved: true` → 10-day clock** (validated source-backed, exercising the §5.7 confidential path); a **compound RESERVED-id case, `death_involved: true` + `3.49.b` → 2-day shortest clock**; a published card with a `hash-committed` field; and a v1.0 golden `incident_report` regression under `core_version: 1.0.0`. Each carries the expected `.acef-assessment.json`.
+- **Backward-compat regression.** Each v1.0 golden `incident_report` bundle validates clean under the v1.1 schema set selected by `core_version: 1.0.0`, with `acef-conventions/v1/` byte-unchanged (§5.10).
+
+## 7. Errors added
+
+New codes in a **reserved 081–090 band** (the 070–080 band is exhausted — ACEF-080 is the ceiling, verified `src/acef/errors.py`; opening 081–090 requires spec-author approval per the ops error-code rule — Appendix E Q24). Numbers are reserved-pending-approval:
+
+- **ACEF-081** (ERROR): incident profile declared but `taxonomy_crosswalk` missing a mandatory member — error carries `profile_id` + RFC 6901 `path` (§5.7, Q16).
+- **ACEF-082** (ERROR): `severity_vector` present but not parseable against `ACEF-SEV:1.0` (§5.4).
+- **ACEF-083** (ERROR): `public_incident_id` does not match the `AIIC-{assigner}-{year}-{random}` pattern, or `{assigner}` is absent from the bundle's assigner-registry snapshot (offline syntax/snapshot check only). Global uniqueness and current lifecycle state are checked by the separate *online registry conformance* class, never by deterministic offline validation (§5.3).
+- **ACEF-084** (ERROR): `eu-ai-act-art73-2026` declared and the stated `regulatory_timeline` deadline is inconsistent with the shortest applicable clock computed over the trigger array + `widespread` + **`death_involved`** (`death_involved` → 10 days; `3.49.b` or `widespread` → 2 days; else 15 days). The trigger facts are read from `incident_report.card_source.eu_ai_act_facts` in confidential/source-backed validation and from `incident_card.taxonomy_crosswalk.eu_ai_act` in public-card validation (§5.7).
+- **ACEF-085** (ERROR): a present `taxonomy_crosswalk` member contradicts the derived value from `harm_core` (§5.5).
+- **ACEF-086** (ERROR): public disclosure without satisfying the §5.11 publishability map / `declared_publication_basis` on special-category or privileged fields.
+- **ACEF-087** (INFO): `realization` is `near_miss` — informational marker, never a failure.
+- **ACEF-088** (ERROR): a record carries **both** `severity` and `severity_vector` and the coarse `severity` disagrees with the `band()` projection (§5.4, Q13). It does not fire when only one of the two is present.
+
+## 8. Spec amendments triggered
+
+This RFC drives the following amendments to `planning/ACEF-Spec-Outline-v0.1.md`:
+
+1. §Record Types: document the new `incident_card` record type, its fields, and the `incident_report`→`incident_card` projection.
+2. §Profiles: register `eu-ai-act-art73-2026` and `oecd-ai-incidents-2025`, and the open jurisdiction clock registry.
+3. §Identifiers: define the `AIIC-{assigner}-{year}-{random}` scheme (v1.1 self-asserted handle, `id_grade: self-asserted`, ≥128-bit suffix), its `id_grade` discriminator with `registry-canonical` reserved for v1.2 (§11), its lifecycle states, and its relationship to ACEF URNs.
+4. §Relationships: extend the closed `relationship_type` enum with the in-bundle incident edges (`public_projection_of`, `caused_by`, `harms`, `mitigated_by`, `transferable_to`) **and broaden `relationships[].source_ref`/`target_ref` to accept record URNs** (§5.8). The id-lifecycle edges (`supersedes`/`merged_from`/`split_into`) are registry-level, not manifest changes.
+5. §Conformance: add the new test-vector directories and the backward-compat regression.
+6. §Errors: add ACEF-081–088.
+7. §Severity: **§5.4 is the single normative source** for the `ACEF-SEV:1.0` grammar, value tables, and the `band()` projection; `acef-conventions/v1.1/severity_vector.schema.json` reproduces §5.4 and MUST match it (no separate companion note carries independent authority).
+
+## 9. Open questions
+
+> **These questions are RESOLVED; as of Revision 2 the §5–§8 normative body incorporates the resolutions, and the decision record (rationale + primary sources) is in Appendix E.** Q1–Q16 were each adversarially verified against primary/repository sources; Q17–Q28 were authored from those resolutions plus directly verified facts and primary-source research. The list is retained as the problem-statement index that the body now answers; each Appendix E entry carries its verify verdict, confidence, and any [unverified] residual still owed before normative promotion.
+
+- **Q1. Extend or new record type. → RESOLVED: partition.** A private `incident_report` plus a new, generated public `incident_card` (§5.1), on ACEF whole-record-redaction and legal-professional-privilege grounds (Appendix E Q1/Q17/Q23). The Revision 0 "extend one record" recommendation is withdrawn.
+- **Q2. OECD criteria sourcing. → RESOLVED (§5.7).** The 8 dimensions / 29 criteria / 7 mandatory are transcribed from OECD AI Papers No. 34 (Feb 2025); the OECD template uses ordinal ids `oecd-crf-2025/<n>`. Decision record: Appendix E Q2.
+- **Q3. Identifier governance. → RESOLVED in design (§5.3); incorporation deferred.** A neutral-nonprofit (FIRST-style) root + last-resort assigner + AIIC Board, with a central uniqueness registry. Only the bodies' incorporation instruments remain out of scope. Decision record: Appendix E Q3.
+- **Q4. Severity metric set. → RESOLVED (§5.4).** The `ACEF-SEV:1.0` metric list, fixed order, and the normative `band()` projection table are specified in §5.4. Decision record: Appendix E Q4.
+- **Q5. Opt-in versus default. → RESOLVED (§5.7).** Profile-scoped mandatory core + opt-in enrichment; never blanket default-on. Decision record: Appendix E Q5.
+- **Q6. Deduplication. → RESOLVED (§5.5).** ACEF-computed `incident_dedupe_key` = SHA-256(JCS(value_chain_role, subject_identity, harm_class, occurrence_date_utc)); `aiid.incident_id` is a soft cross-reference, not the spine; emitted only on public records, with an HMAC variant for redacted subjects. Decision record: Appendix E Q6/Q20/Q28.
+- **Q7. Date anchor. → RESOLVED (§5.7).** Digital Omnibus is a provisional agreement, not yet adopted; would defer high-risk obligations to 2 Dec 2027 (Annex III) / 2 Aug 2028 (Annex I). Encoded as per-provision effective dates with `pending-final-adoption` status. Decision record: Appendix E Q7.
+
+### 9.1 Additional open questions (surfaced by structured review, 2026-06-08)
+
+Q8–Q28 were surfaced by a five-lens adversarial review of this draft (ACEF-architecture fit, regulatory/legal completeness, taxonomy interoperability, identifier lifecycle, and adoption/security threat model), with the load-bearing structural claims verified against the repository. They are grouped by severity. Resolutions are recorded in Appendix E; internal inconsistencies that are editorial defects rather than open decisions are listed in Appendix D.
+
+> **Reading note (Revision 3+).** The bullets below are the **original problem statements**, retained verbatim as the audit trail of what the review found. They describe the *Revision 0* draft and therefore still use Revision 0 framing (a single extended record, the flat `AIIC-YYYY-NNNN` id, whole-record redaction, etc.). **Every one is resolved in the §5–§8 normative body** (each bullet ends with a "→ §x" pointer to where), and the body governs. They are not open issues; do not read the past-tense problem language as describing the current design.
+
+**Blocking — each forecloses a core use case or makes the canonical output unlawful.**
+
+- **Q8. Disclosure-time redaction and lawful basis.** The same record carries the public crosswalk and special-category data (`harm_distribution_basis`: race, religion, sexual orientation, etc., plus free-text `description`/`impact_assessment`). When `coordinated_disclosure.status` transitions to `public` (or `public_incident_id` is minted), nothing in the profile forces anonymization, and no GDPR Art. 6 lawful basis / Art. 9(2) condition is stated for publishing this data in a federated public registry. Choice: (a) mandate a validator-enforced disclosure-time redaction projection (reuse `redaction.py` + the `confidentiality` envelope field) that strips/anonymizes special-category and identifying fields and defaults `harm_distribution_basis` to regulator-only/hash-committed unless a lawful basis is asserted; or (b) leave publication ungated. Recommendation: (a) — a standard whose canonical public output is an unlawful processing operation in its primary jurisdiction is dead on arrival with the AI Office and the DPAs it courts; pseudonymization does not exempt Art. 9 data, so anonymization before the public boundary is required.
+- **Q9. AIIC identifier lifecycle and state authority.** `public_incident_id` is modeled only as an immutable regex-checked string inside an immutable, content-addressed Evidence Bundle, yet the RFC anchors it on CVE — whose ids are stateful (RESERVED, PUBLISHED, REJECTED, DISPUTED) and whose merge/split/supersession operations are table-stakes for any registry built on dedupe (Q6). There is no representation for a reserved-but-unpublished id, a rejected/withdrawn id, a vendor-disputed incident, or the merge (two ids → one incident) and split (one id → two incidents) outcomes deduplication actually produces, and because the id lives frozen in a sealed bundle there is no place for its status to evolve. Choice: (a) define a companion id-resolution service / out-of-band state registry that owns the mutable lifecycle and a normative `supersedes`/`merged-from`/`split-into` typed relationship; or (b) accept that AIIC ids can never change state, foreclosing reserve/reject/merge/split/embargo. Recommendation: (a) — the lifecycle must live in a companion id-state authority, since ACEF immutability freezes the bundle's copy of the id at mint time and a dedupe that can only link but never resolve will double-count the §5.9 corpus.
+- **Q10. Federated-mint uniqueness invariant.** §5.3 lets providers and deployers mint AIIC ids offline "within their own scope," citing the CNA model — but CVE/CNA avoids collisions precisely by central pre-allocation of disjoint numeric blocks to each assigner, and `AIIC-YYYY-NNNN…` is a single flat sequence with no per-assigner segment, prefix, or block. Two independent assigners will both mint `AIIC-2026-0001`, and a transferable cross-vendor flaw (where "own scope" is undefined) guarantees two vendors mint scoped ids for one flaw before the last-resort path is consulted. Choice: (a) add an assigner segment to the id format; (b) mandate central block reservation before offline minting; or (c) require a central broker for every mint. Recommendation: (b) or (a) — the RFC borrows CVE's federation but drops the one component that makes it collision-free; as written "federated" equals "guaranteed collision," and the only proposed id error checks shape, not uniqueness or allocation.
+- **Q11. Public id vs embargoed incident.** The `eu-ai-act-art73-2026` template requires `public_incident_id` present and well-formed (§5.7), yet the same record's `coordinated_disclosure.status` can be `private` with a future `embargo_until` (§5.6), and Art. 73 reports to a market-surveillance authority are confidential, not public. With no reserved-but-unannounced id state, populating `public_incident_id` instantly creates a citable, sequentially-enumerable public identifier that signals the existence and rough timing of an unpatched, embargoed flaw — a coordinated-disclosure failure the security community (CRFM, FIRST, CERT/CC) will refuse to join. Choice: (a) introduce a RESERVED visibility state with a minted id non-enumerable/non-public until embargo lifts; (b) forbid `public_incident_id` on records with `status: private`/`coordinated` and use an internal reference; or (c) make the Art. 73 template require only an internal reference. Recommendation: (a) — coordinated disclosure structurally requires reserving an identifier before the incident is public.
+
+**High — each blocks a stated headline capability or adoption.**
+
+- **Q12. Schema location and version gate.** The RFC targets `acef-conventions/v1.x/incident_report.schema.json` and `…/severity_vector.schema.json` with `$id: …/v1.x/…`, but `v1.x/` does not exist and is not resolvable: the validator selects `v1/` (FROZEN) for `core_version` 1.0.x and `v1.1/` for 1.1.x, and `incident_report.schema.json` is not present in `v1.1/`. Extending the record requires a deliberate new copy under a concrete minor gated on a stated `core_version`, not an edit to frozen `v1/` and not a phantom range directory; the RFC also never states which `core_version` value gates these fields given RFC-0001 already claimed 1.1.0. Choice: (a) ship under `v1.1/` sharing RFC-0001's `core_version: 1.1.0` gate; or (b) introduce a distinct next minor (e.g. 1.2.0) with its own directory. Recommendation: commit to a concrete minor — "v1.x" is a range, not a directory.
+- **Q13. Two severity fields, no binding rule.** The existing payload makes `severity` (enum critical|major|minor|informational) REQUIRED, while the profile adds optional `severity_vector` (`ACEF-SEV:1.0`). The RFC never states which is authoritative on disagreement, whether `severity` MUST be derivable from / consistent with the vector, or whether a validator must reject `severity: minor` paired with a catastrophic vector. Moreover §3/§5.4 assert the Evidence Bundle "never carries any derived single severity number," but the required `severity` enum *is* a derived single rating living in Evidence — a self-contradiction. Choice: (a) make `severity` a deterministic, validator-checked projection of the vector with a consistency error code; (b) declare the vector authoritative and `severity` a free coarse label; or (c) deprecate one. Recommendation: (a), and reconcile §3/§5.4 to acknowledge `severity` as a pre-existing in-Evidence derived rating.
+- **Q14. Redundant harm classifications with no canonical source.** The record carries required closed `incident_type`, repeatable scheme-tagged `harm_domain`, AND `taxonomy_crosswalk` members (`nist_ai_600_1`, `cset`, `mit_domain`), plus top-level `causality`/`tangibility`/`realization`/`genai_risk_category` that duplicate `mit_causal`/`cset.tangibility`/CSET-imminency/`nist_ai_600_1`. None is canonical, no inter-scheme map ships, and no validator consistency rule exists, so a bundle can declare `incident_type: bias` while `harm_domain` says a violence category with nothing detecting it. Choice: (a) designate ONE canonical normalized core every card MUST populate, with all scheme members derived/validated from it; or (b) ship inter-scheme equivalence tables plus per-pair consistency error codes. Recommendation: (a) — parallel hand-populated encodings guarantee drift and reproduce the fragmentation (§2.1) the profile exists to solve.
+- **Q15. Crosswalk schema closure, version pinning, and x-* interaction.** Appendix B declares `taxonomy_crosswalk` and `coordinated_disclosure` as `{additionalProperties: true}` with no per-member subschema, while §7 proposes an ERROR for "taxonomy_crosswalk missing the profile's mandatory members" — unimplementable on open objects (cannot catch a misspelled member or a wrong-typed `aiid.incident_id`). Only `mit_domain` carries a `taxonomy_version`, though Appendix C admits every scheme drifts. The new members are core (un-prefixed) but post-v1.0, and their interaction with the spec's x-*-only safely-ignorable/round-trip rule is unspecified. Choice: (a) closed per-member subschemas, each with a required scheme `version`/`edition` pin, conformance on closed core members only, unknown keys must be `x-*`-namespaced; or (b) keep open objects and drop the §7 error. Recommendation: (a).
+- **Q16. Cross-profile requiredness resolution.** A single incident bundle will routinely declare `eu-ai-act-art73-2026`, `oecd-ai-incidents-2025`, and the GPAI Art. 55 provisions at once, each mandating a different crosswalk-member subset. The spec roll-up is per-provision and independent; the RFC never states whether requiredness is the UNION of all declared profiles, nor how the §7 error names WHICH profile's member is absent. Choice: (a) union of all declared profiles' mandatory sets with the error carrying the offending profile id + member path; or (b) evaluate each profile independently, one error per failing profile. Recommendation: (a) union for completeness, with per-profile attribution in the error payload — otherwise two conformant validators can disagree on a triple-profiled incident, breaking Assessment-Bundle determinism.
+- **Q17. Legal-discoverability driver for Q1.** Fixing candid internal analysis (`root_cause_analysis`, `lessons_learned`, `corrective_actions`, `impact_assessment`) on the SAME record that becomes a mandatory public/regulatory submission can waive legal-professional-privilege / work-product protection and convert the internal post-mortem into discoverable, admissible evidence. The very property Q1 praises ("one record avoids divergence") is what makes adoption legally dangerous. This must be a first-class input to Q1: (a) extend and accept the privilege risk, mitigated only by per-field redaction (deferred); or (b) resolve toward a separate `incident_card` partitioning the public report from the privileged internal record. Recommendation: treat privilege/discoverability as a reason favoring (b) or, at minimum, a mandatory disclosure-time projection excluding privileged fields.
+- **Q18. Multi-jurisdiction clock extensibility.** The thesis is to crosswalk "one incident into every framework," and CLAUDE.md mandates China CAC, US federal, and Korea support — but the only binding template is EU Art. 73, and `coordinated_disclosure.regulatory_timeline.framework` is a closed enum `eu-ai-act-art73 | eu-ai-act-art55 | other`, collapsing every non-EU regime into "other" with no clock encoding. Binding regimes are silently absent (US OMB vendor reporting; China CAC incident-reporting measures + PIPL/DSL data-localization that conflicts with export to a global registry; Korea AI Basic Act). Choice: (a) make `framework` an open, scheme-tagged registry of jurisdictions each with its own clock model (plus a China localization/routing story); or (b) explicitly scope the profile EU-Art.73-only and rename it. Recommendation: (a) — a layer that encodes one jurisdiction's clocks is an EU adapter mislabeled as cross-framework.
+- **Q19. Publisher liability and verification posture for non-owner filings.** The federated model lets external researchers and affected parties mint public AIIC ids and file reports naming ANOTHER party's system as subject, while ACEF signatures are OPTIONAL and `reporter_role`/`trust_level` are self-declared with no proof. The RFC never defines who is the legal controller/publisher of the resulting public record, what verification/authenticity/`trust_level` floor public entries must meet, whether the named vendor gets notice/right-of-reply/takedown, or whether a public AIIC report MUST be signed with an id↔key binding. Choice: (a) require public AIIC reports signed with a defined id↔key binding and a minimum `trust_level`, plus a normative right-of-reply / dispute / takedown process and a stated controllership model; or (b) accept self-attested, unsigned filings and inherit AIID's unreliability plus unbounded operator liability. Recommendation: (a).
+- **Q20. Dedupe-key privacy and salting tension.** Q6's candidate key is `SHA-256(value_chain_role + subject identity + harm_domain + occurrence_date)`, but three of four inputs are bounded low-entropy enums/dates and "subject identity" is undefined. If "subject identity" is a guessable model/vendor string and the hash is published, an attacker can exhaustively enumerate a small keyspace offline and recover the redacted subject, defeating the `confidentiality: redacted|hash-committed` model. A salted/keyed construction fixes the leak but breaks cross-database dedupe. Choice: (a) define "subject identity" precisely and never publish the key on redacted-subject records; (b) keyed/peppered construction held by a central resolver (sacrifice offline dedupe); or (c) raise pre-image entropy. Recommendation: resolve the confidentiality-vs-dedupe tension explicitly — Q6 pins the algorithm but never asks whether the construction protects or leaks.
+- **Q21. Spam/Sybil/poisoning gate for the corpus and Top-25.** §5.9 computes the Top AI Failure Modes shortlist as Danger Score (frequency × severity) over the public corpus, but `severity_vector` is self-asserted and the frequency term is a raw count with no admission gate, no anti-Sybil control, and no consistency check against the narrative. An adversary can mint many AIIC ids and file high-severity reports against a rival, or flood near-misses to bury a real one; the Q6 dedupe key collapses duplicates but does nothing against distinct fabricated incidents. The frequency over a self-selected corpus also biases toward well-reported/English/EU harms. Choice: (a) require an admission/authenticity gate (mandatory signing + minimum `trust_level`, tied to Q19) before a report counts, and disclose the reporting-propensity bias; or (b) ship the Danger Score as a vandalism target. Recommendation: (a).
+- **Q22. Incentive to volunteer self-incriminating near-miss data.** The motivation calls `near_miss` "the most valuable and least-reported signal," but the same record doubles as legally-discoverable compliance evidence: a voluntary near-miss can be used by a regulator (notice supporting a later failure-to-report finding) or a plaintiff (notice of a known defect). `safe_harbor_ref` protects EXTERNAL reporters, not the self-reporting organization. Choice: (a) define an aggregation/anonymity tier and/or a self-reporter safe-harbor (with the legal/policy backing) making voluntary disclosure non-incriminating; or (b) accept that the corpus collapses to mandatory EU serious-incident reports. Recommendation: (a) — the headline value depends entirely on voluntary disclosure of legally risky data.
+- **Q23. Identifier and crosswalk behavior under record-level redaction.** `confidentiality` and redaction are properties of the WHOLE `evidence_records[]` entry (field-level/selective disclosure is deferred by the spec), but the profile co-locates the PUBLIC report (`public_incident_id`, `taxonomy_crosswalk`, `severity_vector`) on the SAME record carrying trade-secret `root_cause_analysis`/`impact_assessment`. There is no mechanism to publish the crosswalk while redacting the root cause, and the RFC never states how `public_incident_id`/`aiid_incident_id` behave when the carrying record is redacted (dropped → linkage breaks; retained on a regulator-only record → an embargoed id leaks). Choice: (a) require the deferred field-level machinery (scope creep); (b) split into two records (resurrects the Q1 divergence); or (c) declare a fixed set of linkage/crosswalk fields exempt from redaction with a normative per-confidentiality-state presence rule. Recommendation: this collision must drive Q1's resolution and a normative per-field publishability map.
+
+**Medium — real but narrower or mechanical.**
+
+- **Q24. Error-code allocation.** §7 proposes five new error codes "in the existing ACEF-0xx space," but the active operation rules restrict new codes to 070–080 without spec-author approval, and that band is fully exhausted (ACEF-070 through ACEF-080 all assigned, 080 the ceiling). Choice: (a) obtain spec-author approval to open a new contiguous range (e.g. 081–090) and reserve concrete numbers in this RFC; or (b) consolidate into fewer codes. Recommendation: (a) — reserve concrete numbers now rather than leaving `ACEF-0xx` placeholders.
+- **Q25. Incident-graph edge typing.** §5.8 claims `entity_refs` is "the analog of STIX relationship objects" with "no new machinery," but `entity_refs` is four UNTYPED URN buckets and typed directional edges live only in package-level `relationships[]`, whose `relationship_type` is a CLOSED enum (wraps|calls|fine_tunes|deploys|trains_on|evaluates_with|oversees) with NO incident edges (no caused_by/harms/mitigated_by/transferable_to). `transferability.related_incident_ids` and `coordinator_ref`/`safe_harbor_ref` are therefore free-string payload foreign keys — the pattern §5.8 claims to avoid. Choice: (a) extend the closed `relationship_type` enum with incident edge types (a Core change to add to §8); or (b) accept untyped co-occurrence and stop claiming STIX-SRO equivalence. Recommendation: (a).
+- **Q26. Array determinism.** ACEF mandates byte-identical output via RFC 8785, but JCS sorts object keys, NOT array elements. The profile introduces several order-significant arrays whose canonical order is unspecified: `harm_domain[]`, `nist_ai_600_1.categories[]`, `aiid.report_ids[]`, `stix.object_refs[]`, `transferability.related_incident_ids[]`, `harm_distribution_basis[]`. Two exporters could emit different orders, breaking the bundle digest and the Q6 dedupe hash. Recommendation: specify a normative deterministic sort per array (e.g. lexicographic on the canonicalized member).
+- **Q27. STIX direction and fidelity contract.** §5.8, Appendix A, and `taxonomy_crosswalk.stix.object_refs` treat STIX as a peer framework, but the RFC never states whether integration is one-way emit (ACEF→STIX), one-way ingest (STIX→ACEF), or bidirectional, nor any round-trip fidelity contract, and `object_refs: [string]` has no resolution model. Choice: (a) emit-only with a stated drop-list; (b) ingest with a STIX→ACEF mapping table; or (c) bidirectional with an explicit lossless subset. Recommendation: pick a direction and ship the mapping table plus an `object_refs` resolution/namespacing rule.
+- **Q28. AIID dependency, licensing, and cardinality.** The dedupe spine pins to `aiid.incident_id` (integer) as the "hard link," but AIID is licensed CC-BY-SA 4.0 (a seeded corpus or derived Top-25 inherits BY-SA copyleft + attribution, possibly incompatible with registry licensing); AIID's model is one `incident_id` to many `report_ids` and it periodically merges/splits/renumbers, so a single immutable integer assumes a 1:1 cardinality AIID does not provide; and AIAAIC / OECD AIM use different id schemes with no typed hard-link. Choice: (a) state the corpus license and resolve BY-SA vs registry-licensing, constrain the AIIC↔AIID cardinality, define behavior on AIID renumber/merge, and add typed hard-links for other registries; or (b) drop AIID as the privileged spine in favor of ACEF's own dedupe key. Recommendation: (a) at minimum; flag the single-external-mutable-copyleft-spine as a dependency risk the RFC currently omits.
+
+## 10. Status and next steps
+
+- **Status.** Working Draft for review — Revision 10 (standards-track candidate). No normative force until accepted. The §5–§8 body incorporates the Q1–Q28 resolutions and fixes all Appendix D editorial defects in place; the Appendix B schema excerpts carry normative shape (required subfields, commitment `patternProperties`, the `card_source` overlay, RFC-6901 publishability-map keys, controlled GDPR/Crockford vocabularies). The `incident_dedupe_key` spine, the `harm_class`/`harm_distribution_basis` vocabularies, and the verified NIST registry are now in the normative body; the Art. 73 death-clock keys on `death_involved`; `DISPUTED` is a `disputed` overlay; and validation is split into card-only vs source-backed modes (§5.11). Revision 10 makes the **v1.1/v1.2 conformance phasing structural** (new §11): the registry-dependent behaviors, [NR-1] governance, third-party-publisher governance, and the Top-25 corpus move to the v1.2 surface, and the v1.1 `public_incident_id` is reframed as a **self-asserted handle** (`id_grade: self-asserted`, ≥128-bit suffix) whose domain-control proof is an OPTIONAL online check (§5.3) — so v1.1 conformance MUST NOT depend on any institution.
+- **Controlled vocabularies now shipped in this RFC (no longer owed):** the ACEF-defined `harm_class` taxonomy and core→scheme derivation tables (§5.2), the `harm_distribution_basis` axis (§5.2), the GDPR Art. 6/9 condition enums (Appendix B), and the **verified** NIST AI 600-1 final-category registry (§5.5). The `incident_dedupe_key` spine is now normatively specified in §5.5.
+- **External primary-document transcriptions — explicitly SCOPED OUT of the v1.1 normative conformance surface (do not block v1.1 adoption):** the OECD criterion #3/#19 closed value sets, the EU Art. 73 / GPAI Art. 55 *internal template field names*, the STIX Incident Core Extension field names (ingest), and AIID renumber/merge operational behavior. These live in OECD/EC/OASIS/AIID documents and MUST be transcribed verbatim from the source, never invented. Until transcribed they are **non-normative**: the affected template members validate structurally (key presence, edition pin) but their *closed value enumerations* are promoted only on the **v1.2 closed-enum conformance surface**. The core ACEF incident-card architecture, the `incident_dedupe_key` spine, the EU Art. 73 clock model, the ACEF-owned vocabularies, and the verified NIST registry are all on the v1.1 normative surface and do not depend on these. **[NR-1] AIIC identifier-governance document** (full state machine + dispute/republish procedure + admission/right-of-reply policy + the `registry-canonical` `id_grade`) is a **numbered normative reference that gates v1.2, not v1.1**: because v1.1 treats `public_incident_id` as a **self-asserted handle** (`id_grade: self-asserted`, §5.3) needing no institution, v1.1 does **not** depend on [NR-1]. **Final adoption of the v1.2 registry surface (§11) is conditional on simultaneous approval of [NR-1]**; v1.1 ships against the minimum conformance hooks (assigner-registry snapshot, id-state proof, dispute overlay, rejection/replacement) already fixed in §5.3, which implementers prototype against while [NR-1] is finalized in parallel.
+- **EC Art. 73 reporting-template dependency (tracked; scoped out of v1.1).** A *regulator-usable* Art. 73 output — one whose fields map 1:1 onto the form a market-surveillance authority actually ingests — additionally depends on the **field names of the European Commission's draft Art. 73 serious-incident reporting template (September-2025 draft / consultation)**, which are **not yet final** and MUST be transcribed verbatim, never invented. This is **scoped out of the v1.1 normative conformance surface**: v1.1 validates the Art. 73 *clock model and trigger facts* (§5.7) structurally and correctly, but binding the card to the EC template's exact internal field labels is a v1.2 closed-enum promotion that waits on the final EC template. This dependency is tracked here so an adopter does not mistake v1.1's correct clock computation for a drop-in to the EC form.
+- **Downstream implementation artifacts (NOT RFC text; produced when the RFC is accepted):** the standalone JSON Schema files under `acef-conventions/v1.1/`, the registry id-state service, and the executable conformance suite (its vectors are enumerated in §6).
+- **Residuals owed before normative promotion.** A small set of items remain `[unverified]` in Appendix C/E and MUST be reconciled against primary sources first: the OECD closed value-sets for criteria #3/#19, the EU Art. 73 and GPAI Art. 55 internal template field names, AIID renumber/merge behavior, the STIX Incident Core Extension field names, and the final Digital Omnibus adoption status/dates. Q16 was re-verified for this revision (Appendix E Q16).
+- **Public comment.** Period to be set by the ACEF steering committee per spec §6.1.
+- **Partnership.** Before implementation, align with the OECD.AI incidents work, the Responsible AI Collaborative (AIID), CSET, and the CRFM coordinated-flaw-disclosure authors, so the crosswalk reflects each framework accurately and the effort is collaborative.
+- **Sequencing.** The framing and crosswalk concept are low cost and can be published alongside the AI Commons website launch. The reference implementation and the identifier-governance work are heavier and SHOULD be sequenced after they will not compete with the higher-priority workstreams.
+- **Verification.** The Appendix C items that remain `[unverified]` are the external transcriptions scoped out of the v1.1 conformance surface (above); they MUST be resolved against primary sources only before the affected **v1.2 closed enums / STIX ingest mappings** are promoted — they do NOT block the v1.1 normative fields, which are already verified or ACEF-owned.
+
+## 11. Rollout & conformance phasing
+
+This profile is delivered in two phases, splitting the **normative conformance surface** so the in-demand half that depends on no institution (the crosswalk/template data format riding binding EU Art. 73 demand) ships now as **v1.1**, while the registry/governance half — a multi-year institutional effort — is deferred to **v1.2** without changing the identifier format. The id format (`AIIC-{assigner}-{year}-{≥128-bit suffix}`, §5.3) is **identical across both phases**; only the `id_grade` discriminator and the surrounding conformance machinery differ (`self-asserted` in v1.1 → `registry-canonical` in v1.2).
+
+**Load-bearing rule: v1.1 conformance MUST NOT depend on any institution.** Every v1.1 normative behavior is reproducible by a single party with no central service, no registry, and no governance body — minting is local, validation is offline-deterministic (pattern + JWS self-consistency, §5.3) or source-backed (§5.11), and the only online behavior (the domain-control proof) is OPTIONAL. Nothing on the v1.1 surface waits on an institution that does not yet exist.
+
+**Conformance surface assignment.**
+
+| Normative surface item | v1.1 (ships now, no institution required) | v1.2 (registry surface, partnership-gated) |
+|---|---|---|
+| `incident_report` / `incident_card` partition, `card_source` overlay (§5.1) | yes | — |
+| `harm_core` + closed versioned `taxonomy_crosswalk` (§5.2/§5.5) | yes | — |
+| `ACEF-SEV:1.0` vector + deterministic `band()` (§5.4) | yes | — |
+| `coordinated_disclosure` + EU Art. 73 / OECD templates (§5.6/§5.7) | yes | — |
+| `card_source.eu_ai_act_facts` confidential Art. 73 path (§5.7) | yes | — |
+| §5.11 publishability map + GDPR Art. 9 gate (source-backed + card-only) | yes | — |
+| `public_incident_id` format + `id_grade: self-asserted`, ≥128-bit suffix (§5.3) | yes | — |
+| Offline-deterministic validation: pattern + JWS self-consistency, no attribution (§5.3) | yes | — |
+| OPTIONAL online **domain-control** verifier — control *at check time* (§5.3) | yes (optional online class) | — |
+| `id_grade: registry-canonical` (§5.3) | — | yes |
+| Registry-dependent behaviors: cross-org global-uniqueness admission, the mutable id-state lifecycle authority, dispute/merge/split resolution (§5.3/§5.8) | — | yes |
+| **[NR-1]** AIIC identifier-governance dependency (§10) | — | yes (gates v1.2 adoption) |
+| Third-party-publisher governance: non-owner `trust_level` floor, right-of-reply/takedown, controllership model (§5.11, Appendix E Q19) | — | yes |
+| Online-uniqueness + public-registry-admission conformance classes (§6) | — | yes |
+| Top-25 corpus / Danger Score analytics (§5.9) | — | yes (depends on the corpus existing) |
+
+The registry-dependent behaviors, the [NR-1] governance dependency, the third-party-publisher governance, and the Top-25 corpus are all on the **v1.2** surface; none is a v1.1 conformance dependency.
+
+**The EU Art. 73 compliance critical path does not touch the public-card surface.** An organization meeting its binding Art. 73 obligation files a **confidential** serious-incident report to a market-surveillance authority. That filing runs entirely through the **source-backed path**: the validator computes the reporting clock from `incident_report.card_source.eu_ai_act_facts` (§5.7), and the report carries at most a `RESERVED` `public_incident_id` (`id_grade: self-asserted`) and **produces no public `incident_card`** (§5.3 embargo safety). Consequently **neither the public-card projection nor the §5.11 publishability gate sits on the regulatory-filing critical path** — both engage only when an organization later chooses to publish a card after embargo lifts. The regulatory-compliance value of v1.1 is therefore fully available on a path that needs no institution and touches no public surface; the registry, the public projection, and the publishability gate are upside, not prerequisites, for Art. 73 compliance.
+
+**Phasing summary.** v1.1 is a self-contained data format requiring no institution that delivers the binding-regulation value immediately. v1.2 adds the federated-registry trust layer ([NR-1]-gated) that upgrades self-asserted handles to registry-canonical ids and turns the OPTIONAL online checks into a governed admission process — strictly additive, with no v1.1 artifact invalidated.
+
+---
+
+## Appendix A. Field crosswalk (condensed)
+
+This crosswalk is keyed to the **current `incident_card` model**: a single canonical `harm_core` with the scheme members as derived projections (§5.2/§5.5). The Revision 0 fields it replaces (`incident_type` on the public card, a standalone `harm_domain`, top-level `tangibility`/`causality` duplicates) are gone; `aiid.incident_id` is a **soft cross-reference**, not a hard link (the dedupe spine is ACEF's own key — §5.5, Appendix E Q6/Q28).
+
+| `incident_card` field | EU Art. 73 / 3(49) | CSET | NIST AI 600-1 | MIT (causal + domain) | AIID | STIX 2.1 |
+|---|---|---|---|---|---|---|
+| `public_incident_id` | report identifier | n/a | n/a | n/a | `incident_id` (soft cross-ref) | SDO `id` |
+| `harm_core.harm_class` | 3(49)(a–d) trigger array | harm types | risk-category enrichment | domain.subdomain | CSETv1 + GMF | n/a |
+| `harm_core.realization` | "leads to" (event) | imminency (event/issue/near-miss) | n/a | n/a | harm or near-harm | n/a |
+| `harm_core.causality` | "directly or indirectly" | n/a | malfunction/misuse/ecosystem | Causal: entity, intent, timing | accidental vs deliberate | SRO `relationship_type` |
+| `harm_core.tangibility` | (a)/(d) vs (c) | tangibility axis | n/a | n/a | inherited (CSETv1) | n/a |
+| `severity_vector` → `severity` | informs (does not set) the 3(49) trigger | (CSET Severity planned, not in v1 — no built mapping) | n/a | n/a | n/a | n/a |
+| `value_chain_role` | provider/deployer | n/a | Human-AI Configuration | entity (attribution) | developer vs deployer | identity SDO |
+| `autonomy_level` | n/a | CSETv1 autonomy | Human-AI Configuration | n/a | CSETv1 autonomy | n/a |
+| `harm_distribution_basis` (§5.11-gated) | (c) rights | CSETv1 distribution basis | Harmful Bias / Homogenization | 1.1 discrimination | CSETv1 | n/a |
+| `coordinated_disclosure` | reporting acts | n/a | MANAGE | n/a | n/a | `object_marking_refs` |
+| `transferability` | n/a | n/a | n/a | n/a | n/a | SRO `related-to` |
+
+*(Adoption prerequisite, §10):* a row-complete crosswalk covering every `incident_report` and `incident_card` field is included with this RFC before final adoption; the condensed table above is representative, not the complete set.
+
+## Appendix B. `incident_card` schema excerpt (normative shape; v1.1)
+
+The public `incident_card` record. Closed (`additionalProperties: false`); unknown keys MUST be `x-*`-namespaced elsewhere in the envelope to be safely ignorable. The frozen `incident_report` (v1/) is unchanged. Crosswalk member subschemas and the `harm-core-taxonomy.json` / `severity_vector.schema.json` companions are referenced, not inlined.
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://acef.ai/schemas/v1.1/incident_card.schema.json",
+  "title": "ACEF Incident Card Payload (public projection of incident_report)",
+  "type": "object",
+  "required": ["public_incident_id", "harm_core"],
+  "properties": {
+    "public_incident_id": {
+      "type": "string",
+      "pattern": "^AIIC-[A-Z0-9]{2,8}-[0-9]{4}-[0-9A-HJKMNP-TV-Z]{26,}$",
+      "description": "Assigner-scoped, non-enumerable, self-asserted federated handle (Crockford base32 suffix, >=128 bits); lifecycle state held out-of-band (§5.3). Carries id_grade."
+    },
+    "id_grade": {
+      "type": "string", "enum": ["self-asserted", "registry-canonical"],
+      "description": "Trust grade of public_incident_id (§5.3). In v1.1 always 'self-asserted'; 'registry-canonical' is reserved for the v1.2 registry surface (§11)."
+    },
+    "severity": {
+      "type": "string", "enum": ["critical", "major", "minor", "informational"],
+      "description": "Coarse rating; MUST equal band(severity_vector) when the vector is present (§5.4; ACEF-088)."
+    },
+    "harm_core": {
+      "type": "object",
+      "required": ["realization", "causality", "harm_class"],
+      "additionalProperties": false,
+      "properties": {
+        "realization": { "type": "string", "enum": ["harm_event", "harm_issue", "near_miss"] },
+        "causality": {
+          "type": "object", "additionalProperties": false,
+          "required": ["entity", "intent", "timing"],
+          "properties": {
+            "entity": { "type": "string", "enum": ["human", "ai", "other"] },
+            "intent": { "type": "string", "enum": ["intentional", "unintentional", "other"] },
+            "timing": { "type": "string", "enum": ["pre_deployment", "post_deployment", "other"] }
+          }
+        },
+        "harm_class": { "$ref": "harm-core-taxonomy.json#/$defs/harm_class" },
+        "tangibility": { "type": "string", "enum": ["tangible", "intangible"] }
+      }
+    },
+    "value_chain_role": {
+      "type": "string",
+      "enum": ["foundation_model", "fine_tuned_model", "integrated_application", "third_party_component"]
+    },
+    "autonomy_level": {
+      "type": "string", "enum": ["autonomous", "human_on_the_loop", "human_in_the_loop"]
+    },
+    "incident_dedupe_key": {
+      "type": "string", "pattern": "^sha256:[0-9a-f]{64}$",
+      "description": "Cross-DB dedupe spine (§5.5). Emitted ONLY on public records; omit on non-public."
+    },
+    "incident_dedupe_key_hmac": {
+      "type": "string", "pattern": "^hmac-sha256:[0-9a-f]{64}$",
+      "description": "Keyed variant for redacted-subject dedupe; pepper held by the §5.3 resolver."
+    },
+    "severity_vector": {
+      "type": "string", "pattern": "^ACEF-SEV:1\\.0/",
+      "description": "Recomputable vector (§5.4). The coarse `severity` enum MUST equal band(severity_vector)."
+    },
+    "sector_of_deployment": {
+      "type": "object", "additionalProperties": false,
+      "required": ["scheme", "code"],
+      "properties": { "scheme": { "enum": ["isic-rev4", "other"] }, "code": { "type": "string" } }
+    },
+    "harm_distribution_basis": {
+      "type": "array",
+      "items": { "type": "string", "enum": ["race", "sex", "national_origin", "disability", "religion", "sexual_orientation_or_gender_identity", "financial_means", "age", "geography", "ideology", "familial_status", "other"] },
+      "description": "Closed CSETv1 axis (§5.2). GDPR Art.9 special-category; §5.11 governs publishability (regulator-only by default; a *_commitment field carries the hash-committed form)."
+    },
+    "taxonomy_crosswalk": { "$ref": "taxonomy_crosswalk.schema.json", "description": "Closed, version-pinned members; derived projections of harm_core (§5.5)." },
+    "coordinated_disclosure": { "$ref": "coordinated_disclosure.schema.json", "description": "Single canonical shape (§5.6)." },
+    "transferability": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "affects_other_models": { "type": "boolean" },
+        "scope_note": { "type": "string" },
+        "related_incident_ids": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "declared_publication_basis": {
+      "type": "object", "additionalProperties": false,
+      "description": "Declared (not adjudicated) basis required before publishing special-category/identifying fields (§5.11).",
+      "properties": {
+        "art6_basis": { "type": "string", "enum": ["consent", "contract", "legal_obligation", "vital_interests", "public_task", "legitimate_interests"], "description": "GDPR Art. 6(1)(a)-(f)." },
+        "art9_condition": { "type": "string", "enum": ["explicit_consent", "employment_social_security", "vital_interests", "not_for_profit_body", "made_public_by_data_subject", "legal_claims", "substantial_public_interest", "health_social_care", "public_health", "archiving_research_statistics"], "description": "GDPR Art. 9(2)(a)-(j)." },
+        "anonymization_method": { "type": "string" }
+      },
+      "anyOf": [
+        { "required": ["art6_basis", "art9_condition"] },
+        { "required": ["anonymization_method"] }
+      ]
+    }
+  },
+  "patternProperties": {
+    "^[a-z0-9_]+_commitment$": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "description": "Hash-committed projection of a non-public source field (§5.11), e.g. description_commitment, harm_distribution_basis_commitment."
+    }
+  },
+  "additionalProperties": false
+}
+```
+
+The private projection-source overlay on `incident_report` (also v1.1, gated on `core_version: 1.1.0`; `incident_report`'s frozen `v1/` payload is unchanged):
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://acef.ai/schemas/v1.1/incident_report.card_source.schema.json",
+  "title": "incident_report v1.1 projection-source overlay (card_source)",
+  "type": "object",
+  "properties": {
+    "card_source": {
+      "type": "object", "additionalProperties": false,
+      "required": ["public_incident_id", "id_state", "harm_core", "publishability_map"],
+      "description": "Private inputs from which incident_card is generated (§5.1). When present it is the projection source, so these four are required. Privileged-analysis fields stay on incident_report and are NEVER part of card_source's public projection.",
+      "properties": {
+        "public_incident_id": { "type": "string", "pattern": "^AIIC-[A-Z0-9]{2,8}-[0-9]{4}-[0-9A-HJKMNP-TV-Z]{26,}$" },
+        "id_grade": { "type": "string", "enum": ["self-asserted", "registry-canonical"], "description": "Trust grade (§5.3); 'self-asserted' in v1.1." },
+        "id_state": { "type": "string", "enum": ["RESERVED", "PUBLISHED", "REJECTED"] },
+        "disputed": { "type": "boolean", "description": "Overlay on PUBLISHED (§5.3); a card may be PUBLISHED and disputed simultaneously." },
+        "coordinated_disclosure": { "$ref": "coordinated_disclosure.schema.json" },
+        "severity_vector": { "type": "string", "pattern": "^ACEF-SEV:1\\.0/" },
+        "harm_core": { "$ref": "incident_card.schema.json#/properties/harm_core" },
+        "eu_ai_act_facts": {
+          "type": "object", "additionalProperties": false,
+          "description": "Structured Art. 73 trigger facts, required to validate a CONFIDENTIAL/embargoed Art. 73 report before any public card exists (§5.7). death_involved is carried explicitly because it is NOT derivable from harm_class (physical_health covers both death and non-fatal serious health harm, which take different clocks).",
+          "required": ["edition", "serious_incident_triggers", "widespread", "death_involved"],
+          "properties": {
+            "edition": { "const": "reg-2024-1689" },
+            "serious_incident_triggers": { "type": "array", "items": { "enum": ["3.49.a", "3.49.b", "3.49.c", "3.49.d"] } },
+            "widespread": { "type": "boolean" },
+            "death_involved": { "type": "boolean" }
+          }
+        },
+        "publishability_map": {
+          "type": "object",
+          "description": "Per-field disposition (§5.11). KEYS are RFC 6901 JSON Pointers into the source incident_report (e.g. /root_cause_analysis), not free strings. The root pointer \"\" is forbidden; each key MUST be a syntactically valid JSON Pointer with ~0/~1 escaping and MUST resolve to exactly one source value (checked in source-backed validation, §5.11).",
+          "propertyNames": { "pattern": "^(/([^/~]|~0|~1)*)+$" },
+          "additionalProperties": { "enum": ["public", "regulator-only", "hash-committed", "anonymized", "omitted"] }
+        }
+      }
+    }
+  },
+  "additionalProperties": true
+}
+```
+
+## Appendix C. Verification status and sources
+
+**Verified (cite directly):**
+
+- EU AI Act Article 3(49) serious-incident triggers (a) death or serious harm to health, (b) serious and irreversible disruption of critical infrastructure, (c) infringement of fundamental-rights obligations under Union law, (d) serious harm to property or the environment. **Primary source:** Regulation (EU) 2024/1689, Art. 3(49) — EUR-Lex http://data.europa.eu/eli/reg/2024/1689/oj (tracker https://artificialintelligenceact.eu/article/3/ is a convenience link only).
+- EU AI Act Article 73 reporting and clocks: general not later than 15 days; critical-infrastructure (3(49)(b)) or widespread infringement not later than 2 days; death not later than 10 days; all from awareness; incomplete initial reports permitted. **Primary source:** Regulation (EU) 2024/1689, Art. 73 — EUR-Lex http://data.europa.eu/eli/reg/2024/1689/oj ; EU AI Office / AI Act Service Desk https://ai-act-service-desk.ec.europa.eu/en/ai-act/article-73 (official). Tracker links are convenience only.
+- EU AI Act Article 55 GPAI systemic-risk duties including tracking, documenting, and reporting serious incidents to the AI Office; applied from 2 Aug 2025. **Primary source:** Regulation (EU) 2024/1689, Art. 55 — EUR-Lex http://data.europa.eu/eli/reg/2024/1689/oj.
+- Art. 73 high-risk application date 2 Aug 2026 (Art. 113), as adopted. **Primary source:** Regulation (EU) 2024/1689, Art. 113 — EUR-Lex http://data.europa.eu/eli/reg/2024/1689/oj. Digital Omnibus deferral (2 Dec 2027 / 2 Aug 2028) is provisional/pending adoption — Council of the EU press materials (Appendix E Q7).
+- OECD common reporting framework reported as 8 dimensions, 29 criteria, 7 mandatory, synthesized from the OECD AI System Classification Framework, AIID, the OECD Global Product Recalls Portal, and AIM. Sources: OECD "Towards a common reporting framework for AI incidents" (2025) https://www.oecd.org/content/dam/oecd/en/publications/reports/2025/02/towards-a-common-reporting-framework-for-ai-incidents_8c488fdb/f326d4ac-en.pdf ; OECD "Defining AI incidents and related terms" (2024) https://www.oecd.org/en/publications/defining-ai-incidents-and-related-terms_d1a8d965-en.html ; OECD AI risks and incidents topic page https://www.oecd.org/en/topics/sub-issues/ai-risks-and-incidents.html
+- CVE identifier syntax (variable-length sequence since 2014); CNA federated assignment hierarchy; CVE JSON 5.0 small-required-core. Sources: https://www.cve.org/ProgramOrganization/Structure ; https://cveproject.github.io/cve-schema/schema/docs/
+- CVSS v4.0 recomputable vector and Base/Threat/Environmental/Supplemental separation; "technical severity, not risk." Source: https://www.first.org/cvss/v4.0/specification-document
+- CWE two-layer weakness-versus-instance model and the CWE Top 25 multiplicative methodology. Sources: https://cwe.mitre.org/data/definitions/1435.html ; https://cwe.mitre.org/top25/archive/2025/2025_methodology.html
+- Stanford CRFM "In-House Evaluation Is Not Enough," arXiv 2503.16861 (2025): standardized AI flaw reports, broad disclosure with legal safe harbors, a neutral coordination center, and probabilistic prevalence. Source: https://arxiv.org/abs/2503.16861
+- STIX 2.1 thin-core Incident SDO plus a separately versioned Incident Core Extension; uniform metadata envelope; typed relationship objects. Source: https://docs.oasis-open.org/cti/stix/v2.1/os/stix-v2.1-os.html
+- ISO/IEC 29147 (disclosure) and ISO/IEC 30111 (handling); FIRST multi-party CVD; CERT/CC coordinated disclosure.
+
+**Resolved since Revision 0 (now treated as verified; see Appendix E):**
+
+- The OECD 8 dimensions / 29 criteria / 7 mandatory and the definitions of "AI incident", "AI hazard", "serious AI incident" — **transcribed** from OECD AI Papers No. 34 (Feb 2025) and "Defining AI incidents and related terms" (2024) in Appendix E Q2 and §5.7. The serious-incident/hazard/disaster definitions remain OECD *working* definitions (so labeled).
+- Digital Omnibus / Art. 73 date — **determined** (Appendix E Q7): provisional agreement, not yet adopted; would defer high-risk obligations to 2 Dec 2027 (Annex III) / 2 Aug 2028 (Annex I). Encoded as per-provision effective dates with `pending-final-adoption` status (§5.7).
+- The non-EU jurisdiction clocks (US CIRCIA pending; China CAC tiered + PIPL/DSL localization; Korea AI Basic Act) — **researched** from primary/official sources (Appendix E Q18, §5.7).
+
+**Still verify before normative promotion:**
+
+- The OECD closed value-sets for criterion #3 (Annex C) and #19 (critical-functions list) if the template enumerates them.
+- The internal field/section names of the EC's Art. 73 reporting template and the GPAI Art. 55 template (draft/consultation; must not be invented).
+- CSET "Severity"/"Spread" remain planned, not in CSET v1 — no built CSET mapping for `severity_vector` (honored: `HG`/`BR` are ACEF-defined, §5.4).
+- MIT Domain subdomain count (23 paper / 24 April-2025 repo); a card pins one `taxonomy_version` (§5.5).
+- NIST AI 600-1 final category names — **RESOLVED** (the 12 final names are verified against `NIST.AI.600-1.pdf` and shipped as a closed registry in §5.5; no longer owed).
+- STIX Incident Core Extension field names (emit-only, ingest deferred until confirmed — §5.8).
+- AIID renumber/merge behavior and CC-BY-SA propagation (Appendix E Q6/Q28).
+
+These residuals MUST be reconciled against primary sources before the affected field is promoted to normative.
+
+## Appendix D. Editorial-defect ledger — all reconciled in Revision 2
+
+Surfaced by the 2026-06-08 structured review. These were defects in the Revision 0 text (contradictions between sections, prose-vs-schema mismatches, naming errors). **All 15 are reconciled in Revision 2**; the entries are retained as an audit trail with the fixing section noted. Fix map: #1 `coordinated_disclosure` single shape → §5.6/App B; #2 `transferability` single location → §5.2/§5.6; #3 concrete `v1.1` (no `v1.x`) → §5.10/App B/header; #4 severity boundary precise → §3/§5.4; #5 `mapping_permission` removed from per-card crosswalk → §5.5; #6 Art. 73 trigger array + shortest clock → §5.5/§5.7; #7 `harm_distribution_basis` single location → §5.2; #8 `genai_risk_category` → controlled vocab under `nist_ai_600_1` → §5.2; #9 `AIIC` naming unified + prefix accurate under partition → §2.4/§5.1/§5.3; #10 Top-25 within-harm-class + de-normativized → §5.9; #11 trigger derives from harm facts, not the vector → §4/§5.4/App A; #12 identifier mechanism named (no longer out-of-scope-yet-required) → §3/§5.3; #13 `sector_of_deployment` structurally scheme-tagged → §5.2; #14 one canonical source per concept (`harm_core`) → §5.2; #15 backward-compat regression well-defined under `core_version: 1.0.0` → §5.10/§6.
+
+1. **`coordinated_disclosure` defined twice with divergent shapes.** §5.6 specifies a rich block (`coordinator_ref`, `safe_harbor_ref`, `embargo_until`, `regulatory_timeline{framework, awareness_date, deadline}`, `remediation_timeline{…}`), but Appendix B's schema for the same object lists ONLY `status`, `reporter_role`, and a `transferability_known` boolean — omitting every timeline/ref field in §5.6 and introducing `transferability_known`, which appears nowhere in §5.6. Pick one canonical shape.
+2. **`transferability` double-located and self-contradictory.** §5.2/Appendix B define a top-level `transferability` object `{affects_other_models, scope_note, related_incident_ids}`, while Appendix B's `coordinated_disclosure` also adds a `transferability_known` boolean. The relationship between `transferability.affects_other_models` and `coordinated_disclosure.transferability_known` is undefined and they can contradict. Collapse to one location.
+3. **Schema-version naming inconsistent throughout.** The header, §5.1, §5.2, §5.4, §5.10, §6, and the Appendix B `$id` all say "v1.x", but the established convention is the concrete minor `v1.1/` selected by `core_version` 1.1.0. Verified: `v1.x/` does not exist, `v1/` is frozen, and `incident_report.schema.json` is not present in `v1.1/`. "v1.x" is a non-resolvable range; commit to a concrete minor (see Q12).
+4. **Evidence/Assessment boundary contradicts the schema it builds on.** §3/§5.4 assert "the Evidence Bundle never carries any derived single severity number," but the pre-existing REQUIRED Evidence field `severity` (critical|major|minor|informational) IS a derived single rating living in Evidence. Reconcile the boundary statement with the existing required field (see Q13).
+5. **`mapping_permission` prose contradicts schema, and the borrowed CWE value set is mislabeled.** §5.5 prose says "Every member … carries a mapping-permission marker borrowed from CWE," but the code block shows `mapping_permission` ONLY on the `oecd` member. CWE's actual values are Allowed / Allowed-with-Review / Discouraged / Prohibited (a maintainer-side, per-entry property), not the producer-set `allowed|discouraged` pair the RFC attaches to one foreign-taxonomy member.
+6. **Art. 73 deadline check ill-defined for compound incidents.** `taxonomy_crosswalk.eu_ai_act.serious_incident_trigger` is a SINGLE enum `3.49.a|b|c|d|null`, but the 2-day clock applies to "3(49)(b) critical-infrastructure OR widespread infringement" (widespread is a cross-cutting modifier, not one of the four letters), and a single incident can satisfy MULTIPLE triggers (death AND critical-infrastructure) with different clocks (death 10d, b 2d, general 15d). The single-enum field cannot represent the multi-trigger/widespread cases, so the §7 deadline-consistency error cannot fire correctly for the most time-critical case.
+7. **`harm_distribution_basis` specified twice with different shapes and gating.** A top-level `array[string]` in §5.2 (gated "only when `harm_domain` indicates discrimination") AND a member of `taxonomy_crosswalk.cset` in §5.5. Two storage locations invite divergence and complicate the Q6 dedupe; the cross-field "only when discrimination" gate also needs a DSL rule and error code §7 never provides. Choose one canonical location.
+8. **`genai_risk_category` duplicates `taxonomy_crosswalk.nist_ai_600_1.categories[]`** with no stated relationship (subset? authoritative?), and is an unconstrained free string despite Appendix C warning NIST names differ between draft and final — so it will silently admit draft/typo'd names, defeating normalization.
+9. **`AIIC` acronym defined two ways.** §5.3 says "AIIC stands for AI Incident Card," while §2.4/§4 use "AIC" ("which AIC would align to", "AIC carries the AIID incident id"). The regex prefix is `AIIC` while prose uses `AIC`. Worse, the "Card" expansion presupposes Q1's still-open answer (the new `incident_card` type); if Q1 resolves to "extend `incident_report`," the AIIC ("Card") prefix is misnamed.
+10. **§5.9 Danger Score contradicts the RFC's own severity philosophy.** §5.4 asserts severity-is-not-risk and that there is "no defensible exchange rate between diffuse bias and physical injury," yet §5.9's single multiplicative Danger Score (frequency × severity) across heterogeneous harm types reintroduces exactly the incommensurability the vector design refuses.
+11. **§4 claims a CSET-severity capability Appendix C says is unbuilt.** §4 asserts "`severity_vector` drives Art. 3(49) trigger class," but Appendix C explicitly says the CSET Severity dimension is "planned, not in v1" and instructs "do not assert a built CSET mapping for `severity_vector`." The trigger class should derive from the Art. 3(49) facts (tangibility, `harm_domain`), not the not-yet-defined vector.
+12. **Identifier declared out-of-scope yet hard-required by a binding template.** §3 lists "the governance and legal constitution of any identifier-assignment body" as OUT of scope and §5.3 calls federated assignment a "sketch," yet §5.7 already specifies a binding template that HARD-REQUIRES `public_incident_id` present and well-formed. The RFC mandates the identifier in a binding template before resolving whether/how it can be assigned (see Q3, Q9, Q10).
+13. **`sector_of_deployment` described as "scheme-tagged" but is a bare string.** The scheme lives only in prose, inconsistent with `harm_domain`'s machine-readable `{scheme, code}` structure in the same section. Make it structurally scheme-tagged.
+14. **`{entity, intent, timing}` encoded three times with no single source.** Top-level `causality` (§5.2), `mit_causal` crosswalk member (§5.5), and the §4 mapping row. Likewise `tangibility` (top-level) duplicates `cset.tangibility`, and `realization` duplicates CSET imminency. Declare one canonical source per concept (see Q14).
+15. **Backward-compat regression as described cannot be the artifact §6 references.** §6 lists the backward-compat regression as the only evidence that "v1.0 `incident_report` bundles validate clean," but that test must run a v1.0 bundle against the NEW schema set under the correct concrete minor — and the RFC mislocates the schema ("v1.x"), never states the gate `core_version` value, and never asserts the frozen golden bundles remain untouched (see Q12).
+
+## Appendix E. Open-question resolutions (Q1–Q28)
+
+This appendix is the **decision record** for every question in §9 and §9.1. As of Revision 2 the resolutions are incorporated into the normative §5–§8 body; this appendix retains the rationale, primary sources, verify verdicts, and residuals. Q1–Q16 were produced by a research pipeline in which each answer was independently adversarially verified against primary/repository sources (the "must not be invented" discipline of Appendix C); Q16 — whose adversarial verify originally did not run — was **re-verified against the repository for Revision 2** (see its entry). Q17–Q28 were authored from the Q1–Q16 resolutions, directly repository-verified facts, and primary-source web research (Q18). Where this record once contradicted the body (most consequentially Q1 extend→partition, and the Q10/Q11 identifier conflict), the **body now governs** and the conflicting recommendations are reconciled with reconciliation notes. **Blanket precedence rule:** for any entry carrying a "Reconciliation note", the note and the cited body section govern; the prose beneath it is **historical decision-record text, superseded where it differs** — do not read it as live normative guidance. Any item still marked [unverified] MUST be reconciled against primary sources before that field is promoted to normative (Appendix C / §10).
+
+### Q1 — Extend incident_report vs new incident_card record type
+
+_Status: workflow-resolved · adversarial-verify: **sound-with-corrections** · confidence: **high** · **incorporated as the §5.1 partition; text below is historical**_
+
+> **Reconciliation note.** Resolution incorporated normatively in §5.1 (private `incident_report` + generated public `incident_card` + `card_source` overlay). The analysis below is the historical decision record; §5.1 governs.
+
+**Resolution (Q1): Reject pure-extend. Partition into `incident_report` (private, full-fidelity) + a new `incident_card` record type (public, normalized projection).**
+
+The §5.1/§9 recommendation ("extend, revisit if the field set grows large") is superseded. Field-set size is not the deciding axis; ACEF's redaction architecture and legal discoverability are, and both foreclose pure-extend. These were first-class inputs per Q17 and Q23.
+
+Verified against the repository:
+- `confidentiality`, `redaction_method`, and `access_policy` are whole-record envelope fields (`src/acef/models/records.py:71-73`), and `redact_record` (`src/acef/redaction.py:207-261`) replaces the ENTIRE payload with a single SHA-256 hash commitment under one `confidentiality` value (`HASH_COMMITTED`). The only supported method is `sha256-hash-commitment`; field-level/selective redaction is deferred by the spec.
+- Consequently a single extended `incident_report` cannot publish `taxonomy_crosswalk`/`public_incident_id`/`severity_vector` while redacting `root_cause_analysis`/`impact_assessment`: they share one redaction unit. This is the Q23 collision, confirmed empirically — not hypothetical. Pure-extend therefore cannot be built without the deferred field-level redaction machinery (Q23 option (a) = scope creep, also out-of-bounds under the active-operation rules).
+- `incident_report.schema.json` co-locates candid internal-analysis fields (`root_cause_analysis`, `corrective_actions`, `impact_assessment`, `lessons_learned`) with the fields the RFC would add for public reporting. Placing that analysis on the record that becomes a mandatory Art. 73 / Art. 55 submission risks waiving legal-professional-privilege / work-product protection (Q17). The "no divergence" virtue Q1 praises is precisely the legal hazard.
+
+Two independent blocking-class concerns (redaction collision + privilege/discoverability) both point to partition.
+
+Precedent corroborates partitioning public-thin from private-detailed, linked components. The OASIS STIX 2.1 Incident SDO is a deliberate stub; its Incident Extension Suite states (verbatim) that the 1.0 core extension "embedded [impact, events, and tasks] within the Incident object itself, however this was found to have limitations," and v2.0 "separated [them] into independent SDOs" (oasis-open/cti-stix-common-objects, `extension-definition-specifications/incident-ef7/Incident Extension Suite.adoc`). CVE's RESERVED state and CNA pre-publication workflow separate a public-citable record from CNA-held detail (NVD CVE process; cve.org FAQ). CWE separates a weakness *type* from a CVE *instance*.
+
+Decision:
+1. `incident_report` remains the internal/regulatory record: full fidelity, privileged analysis fields, default `confidentiality: regulator-only` (a valid enum value, verified `enums.py`) or stricter; never the public artifact.
+2. Introduce a new `incident_card` record type carrying ONLY the normalized, publishable fields proposed in §5.2 (`public_incident_id`/`AIIC`, `taxonomy_crosswalk`, `severity_vector`, `realization`, `tangibility`, `causality`, `coordinated_disclosure`, `transferability`). This makes the `AIIC` = "AI Incident **Card**" prefix correct, resolving Appendix D #9 (which records that, under pure-extend, the "Card" prefix is misnamed).
+3. The card is a **deterministic derived projection** of its `incident_report`, computed via `redaction.py` plus a normative per-field publishability map. This IS the disclosure-time projection Q8 mandates and the per-confidentiality-state presence rule Q23(c) recommends; because the card is generated, not hand-authored, the "split resurrects Q1 divergence" objection (Q23 option (b)) is dissolved.
+4. The two records are linked by shared `public_incident_id` and a typed relationship. NOTE (design dependency, not yet built): `relationship_type` is a CLOSED enum — `wraps|calls|fine_tunes|deploys|trains_on|evaluates_with|oversees` (verified `enums.py:114-123` and `acef-conventions/v1/manifest.schema.json:319-323`), with no incident/derivation edge. A typed report→card link requires extending this enum (e.g. `public_projection_of`) — a Core change folded into Q25 and §8.
+
+This confines special-category `harm_distribution_basis` and free-text `description`/`impact_assessment` to the private report by default, serving Q8's lawful-basis requirement. Note the field set involved (`public_incident_id`, `taxonomy_crosswalk`, `severity_vector`, `realization`, `causality`, `coordinated_disclosure`, `transferability`, etc.) is PROPOSED by RFC-0002 and is absent from every concrete schema today; and `incident_report.schema.json` is frozen in `v1/` and absent from `v1.1/` (verified). Therefore BOTH options already require a new concrete-minor schema — "extend is cheaper" does not hold (Q12).
+
+Residuals (must be specified before this is normative): the new relationship edge name and direction (Q25); the field-by-field projection/publishability map (reusing `redaction.py`); the concrete minor / `core_version` gate, v1.1 sharing RFC-0001's 1.1.0 vs a new 1.2.0 directory (Q12); and the card's own AIIC id-state interaction with the embargoed-id-leak surface (Q9/Q11). Privilege preservation by partition is jurisdiction-dependent and still requires counsel review and a stated controllership model (Q19) — the split removes the co-location hazard but does not by itself guarantee privilege.
+
+
+*Primary sources:* https://github.com/oasis-open/cti-stix-common-objects/blob/main/extension-definition-specifications/incident-ef7/Incident%20Extension%20Suite.adoc; https://docs.oasis-open.org/cti/stix/v2.1/os/stix-v2.1-os.html
+
+*Residual unknowns:*
+- The typed report→card relationship requires extending the closed relationship_type enum (Core change, Appendix D/Q25); exact edge name (e.g. public_projection_of / derived_from) and direction must be fixed when Q25 resolves.
+- The deterministic projection function (which report fields map/redact/transform into card fields) is the per-field publishability map Q8/Q23(c) demand; its exact field-by-field rules are not yet specified and must be authored, reusing redaction.py.
+- Concrete minor / core_version gate for the new incident_card schema (Q12) is unresolved — v1.1 (sharing RFC-0001's 1.1.0) vs a new 1.2.0 directory.
+- Whether the card carries its own AIIC id state (RESERVED vs PUBLISHED) interacts with Q9/Q11 lifecycle authority — out of scope here but the split makes the embargoed-id-leak surface smaller (the private report can hold a reserved id without a public card existing).
+- Legal-privilege preservation by partition is jurisdiction-dependent; the split removes the co-location hazard but does not by itself guarantee privilege — counsel review and a stated controllership model (Q19) remain required.
+
+*Verifier flagged (folded into the text above):*
+- None material. Every load-bearing factual claim was verified against a primary source. Minor: the answer's prose presents the phrase 'was found to have limitations' as a verbatim OASIS quote attributed loosely to 'oasis-open cti-stix-common-objects'; this is in fact an exact verbatim quote, but it lives specifically in 'extension-definition-specifications/incident-ef7/Incident Extension Suite.adoc', not the repo root README — the citation should pin the exact .adoc path (which the sources block does correctly).
+- Minor framing (not a fabrication): the answer asserts CVE 'separates the public, citable record from non-public CNA-held detail.' cve.org has no single explicit statement to this effect; it is an accurate inference from the documented RESERVED state and CNA pre-publication workflow (NVD CVE-process page; cve.org FAQ). Should be stated as characterized-from-process, not quoted.
+- Field names realization/tangibility/causality/severity_vector/coordinated_disclosure/transferability/public_incident_id/harm_distribution_basis are RFC-0002 *proposed* payload fields (§5.2 / Appendix B), NOT fields in the currently frozen incident_report.schema.json. The answer mostly frames them as proposed, but the RFC text should make explicit they do not yet exist in any concrete schema.
+
+
+### Q2 — OECD common reporting framework: exact 8 dimensions / 29 criteria / 7 mandatory
+
+_Status: workflow-resolved · adversarial-verify: **sound-with-corrections** · confidence: **high**_
+
+Q2 - RESOLVED (primary-source transcription verified). Appendix C's assumption that the criteria text is not exposed is incorrect: the full text is in Table 2.2 (pp.17-18) and Annex B Table B.1 of OECD 'Towards a common reporting framework for AI incidents,' OECD AI Papers No. 34, Feb 2025 (DSTI/DPC/GPAI(2024)5/FINAL; DOI 10.1787/f326d4ac-en). Dimension names are from Table 2.1; per-dimension counts of the 29 SELECTED criteria are from Box 2.2 (do not confuse with Table 2.1's 88 CANDIDATE criteria column 14/17/10/11/10/15/5/6). 8 dimensions to 29 criteria (mandatory *; counts from Box 2.2): Incident metadata (9; Box 2.2 'Metadata dimension'): 1.Title*; 2.Description of the incident*; 3.How is the AI system(s) related to the incident*; 4.Submitter information (role, affiliation, etc.)*; 5.Date of first known occurrence; 6.Country(ies) where incident occurred; 7.Supporting material(s) about the incident*; 8.Name and version of the AI system(s)/product(s); 9.Organisation(s) that developed and/or deployed the AI system. Harm details (4): 10.Severity* {Hazard; serious hazard; incident; serious incident; disaster; other}; 11.Harm type* {Physical; psychological; reputational; economic/property; environmental; public interest/critical infrastructure; human or fundamental rights; other}; 12.If applicable, quantification of harm; 13.Incident linked to use of AI system(s) in unintended/wrongful way (and how). People and planet (3): 14.Affected stakeholder(s); 15.Adverse impacts on human rights or fundamental rights; 16.Associated AI Principles. Economic context (4): 17.Industry(ies) [ISIC]; 18.Business function(s) where the AI incident occurred; 19.Incident linked to the functioning of critical functions/infrastructure; 20.Breadth of deployment. Data and input (1): 21.Incident linked to the training data of AI system(s) (and how). AI model (3): 22.Incident linked to the AI model (and how); 23.Usage rights; 24.Incident linked to interaction of multiple AI systems. Task and output (2): 25.Task(s) of AI system(s); 26.Maximum autonomy level of AI system(s) {No-action/human support; low-action/human-in-the-loop; medium-action/human-on-the-loop; high-action/human-out-of-the-loop; other}. Other information about this incident (3): 27.If applicable, action(s) taken {Prevention; mitigation; ceasing; remediation; other}; 28.If applicable, steps to reproduce the incident; 29.Additional information. Total = 29. 7 mandatory (only asterisked entries; matches prose 'seven mandatory criteria ... denoted by an asterisk in Table 2.2'): #1, #2, #3, #4, #7, #10, #11. OECD definitions (verbatim; serious-incident/hazard/disaster are OECD draft/working definitions from 'Defining AI incidents and related terms,' May 2024, DOI 10.1787/d1a8d965-en; AI incident/AI hazard also in CRF Box 1.1 citing OECD (2024); cite all as dated OECD working definitions): AI incident: 'an event, circumstance or series of events where the development, use or malfunction of one or more AI systems directly or indirectly leads to any of the following harms: (a) injury or harm to the health of a person or groups of people; (b) disruption of the management and operation of critical infrastructure; (c) violations of human rights or a breach of obligations under the applicable law intended to protect fundamental, labour and intellectual property rights; (d) harm to property, communities or the environment.' AI hazard: same form, 'could plausibly lead to an AI incident, i.e., any of [the same four harm classes].' Serious AI incident: '...directly or indirectly leads to any of the following harms: (a) the death of a person or serious harm to the health of a person or groups of people; (b) a serious and irreversible disruption of the management and operation of critical infrastructure; (c) a serious violation of human rights or a serious breach of obligations under the applicable law intended to protect fundamental, labour and intellectual property rights; (d) serious harm to property, communities or the environment.' (Aligns with EU AI Act; subset of AI incidents.) Implementation note: OECD has no stable machine-readable criterion ID scheme; criteria are numbered 1-29 by position. Key taxonomy_crosswalk.oecd.criteria[].id to the OECD ordinal (e.g. oecd-crf-2025/10 for Severity) as a documented ACEF-local convention; pin criteria_edition: oecd-crf-2025. The mandatory-core DSL rule MUST require criteria #1,2,3,4,7,10,11; criterion #10's value space is {hazard|serious_hazard|incident|serious_incident|disaster|other}. Do not re-key to OECD AIM: AIM is iterating and may field a subset, but 'AIM uses 27 criteria' is [unverified] and must be omitted until OECD publishes a stable AIM registry. Appendix C's OECD verify-before-normative item can be closed; residual caveats: (a) serious-incident/hazard/disaster remain working definitions, (b) closed value sets for criterion #3 (Annex C) and #19 (critical-functions list, CISA/EU) must be transcribed verbatim if the template enumerates them.
+
+
+*Primary sources:* https://www.oecd.org/content/dam/oecd/en/publications/reports/2025/02/towards-a-common-reporting-framework-for-ai-incidents_8c488fdb/f326d4ac-en.pdf; https://www.oecd.org/content/dam/oecd/en/publications/reports/2025/02/towards-a-common-reporting-framework-for-ai-incidents_8c488fdb/f326d4ac-en.pdf; https://www.oecd.org/content/dam/oecd/en/publications/reports/2024/05/defining-ai-incidents-and-related-terms_88d089ec/d1a8d965-en.pdf; https://www.oecd.org/en/publications/defining-ai-incidents-and-related-terms_d1a8d965-en.html
+
+*Residual unknowns:*
+- The 2024 'Defining' report labels every definition 'Draft definition'/'working definition'; the 2025 CRF report reuses the AI incident/AI hazard text in Box 1.1 without the 'draft' qualifier but does not separately re-issue 'serious AI incident'. OECD has not published a later non-draft consolidation, so 'serious AI incident'/'serious AI hazard'/'AI disaster' remain OECD WORKING definitions, not finalized standards. The RFC's oecd-ai-incidents-2025 template (legal_force voluntary) should cite them as OECD working definitions, dated, with the DOI.
+- Table 2.1's right-hand 'Number of criteria' column counts the 88 CANDIDATE criteria per dimension (14/17/10/11/10/15/5/6 = 88), NOT the 29 selected. The per-dimension counts of the 29 SELECTED criteria come from Box 2.2 (9/4/3/4/1/3/2/3). A spec author must not confuse the two; the 29-criterion grouping is authoritative in Table B.1's leftmost 'Dimension' column.
+- OECD provides no stable machine-readable criterion ID scheme of its own (criteria are numbered 1-29 by list position in Table 2.2). The RFC's taxonomy_crosswalk.oecd.criteria[].id values are therefore an ACEF-local convention; recommend keying id to the OECD criterion ordinal (e.g. 'oecd-crf-2025/10' for Severity) and pinning a criteria_version/edition since OECD AIM is iterating the framework (AIM is noted as using 27 criteria vs the report's 29).
+- Criterion #3 sub-criteria reference '(Annex C)' and the critical-infrastructure list references CISA/EU sources; if the ACEF template enumerates these closed value sets it must transcribe Annex C and the Table 2.2 critical-functions list verbatim (both are in the same PDF, pp.17-18 and Annex C) rather than approximating.
+
+*Verifier flagged (folded into the text above):*
+- IMPLEMENTATION NOTE 'AIM currently fields 27 criteria vs the report's 29': UNVERIFIED. The primary CRF PDF confirms 29; a targeted web check found no OECD or secondary source for the 27 criteria AIM figure. The OECD AIM page does not quantify its implemented subset. Remove or mark unverified.
+- PAGE NUMBERS cited (Table 2.1 p.14, Box 2.2 p.16, Table 2.2 p.17, Box 1.1 p.11, Table B.1 p.23) are plausible but not exactly pinned. Table 2.2 spans pages 17-18, so Table 2.2 (p.17) is a slight simplification; cite pp.17-18.
+- CRF REPORT DOI 10.1787/f326d4ac-en is from the OECD URL path, not self-cited in the report body. Low risk; the document self-identifies as OECD AI Papers No. 34, Feb 2025, DSTI/DPC/GPAI(2024)5/FINAL.
+
+
+### Q3 — AIIC identifier governance: who operates root and last-resort assigner
+
+_Status: workflow-resolved · adversarial-verify: **sound-with-corrections** · confidence: **high**_
+
+**Q3 (Identifier governance) — RESOLVED.** The AIIC root, the last-resort assigner, and the dispute body are constituted on the CVE model, but with authority held by a neutral nonprofit rather than a vendor or a single government.
+
+- **Root / Secretariat — AI Commons (neutral nonprofit).** AI Commons operates the AIIC root: it administers assigner scopes, runs the canonical registry, and — critically — operates a *central ID-reservation service with per-assigner quotas*. The operator MUST be a neutral, member-governed nonprofit modeled on FIRST.Org, Inc. (a North Carolina 501(c)(3), member-elected board, steward of CVSS and EPSS via SIGs — verified against FIRST governance materials and a US-government EPSS write-up), not an AI vendor and not a single state. In April 2025 CISA had to exercise a last-minute 11-month option-period extension on its MITRE/CVE contract to avoid a lapse in service (widely reported as an "emergency" extension); tying a global registry to one government's appropriations cycle is therefore a single point of failure, and a nonprofit root is structurally safer.
+- **Last-resort assigner — the AIIC-LR function of AI Commons.** Mirroring how MITRE is simultaneously Secretariat, a Top-Level Root, and a CNA-LR (CNA Operational Rules v4.1.0, Board-approved 2025-05-14: "MITRE currently acts as the Secretariat, a TL-Root, and a CNA-LR"), AI Commons wears the last-resort hat for transferable/cross-vendor flaws no single provider owns. The precedent that last-resort capacity is a small, expandable set of neutral assigners is confirmed by Red Hat becoming a third CNA-LR in February 2025. One or more neutral co-assigners (e.g., a CERT/CC- or OECD.AI-aligned body, by partnership) MAY be authorized later as the assigner population grows; until then the AIIC-LR is sufficient. [Note: in CVE today only CISA and MITRE are Top-Level Roots; CISA-ICS, JPCERT/CC, ENISA, Red Hat, Google, etc. are Roots beneath a TL-Root — the AIIC model adopts the *tiering*, not any specific roster.]
+- **Dispute body — an AIIC Board.** A multi-stakeholder board patterned on the CVE Board (which establishes the program's strategic direction, governance, operational structure, policies, and rules, and approves every policy document by full Board vote) owns the rules and adjudicates scope and disputes by vote. Seats span providers, deployers, independent researchers, civil-society registries (AIID/AIAAIC), and observers from OECD.AI (the OECD operates the AI Incidents Monitor (AIM) and convenes the Working Party on AI Governance, AIGO; OECD AI instruments are non-binding Council Recommendations, so OECD's role is alignment/observer, never delegated assigner authority) and a data-protection authority. The Root is the arbiter of last resort only; routine disputes resolve at the Board.
+- **Minimum governance instrument — two documents.** An **AIIC Board Charter** (constitutes the Board, voting, the Secretariat/Root role) plus **AIIC Assigner Operational Rules** (scope, reservation, ID lifecycle, dispute escalation), both Board-approved and publicly versioned, under a permissive Terms of Use. Participation is non-contractual, exactly as in CVE (Board Charter + CNA Operational Rules under a public Terms of Use). No contracts are required to stand the program up.
+
+**Coupling to Q9/Q10/Q11 (must be honored).** CVE's flat `CVE-YYYY-NNNN` namespace stays collision-free *because every reservation goes through one central service* — the cve-services ID-reservation/quota mechanism (per-org `id_quota`/`total_reserved`/`available`; canonical source: the CVEProject/cve-services repository), not because assigners mint offline in private blocks. The §5.3 sketch ("providers and deployers MAY mint AIIC ids offline within their own scope") therefore borrows CVE's federation while dropping the one component that makes it safe. **Resolution:** the Root MUST operate a central AIIC reservation/quota broker; §5.3 is recast from "mint offline within scope" to "reserve from a central quota keyed on `obligation_role`." This central broker is also the home for the RESERVED/PUBLISHED/REJECTED/MERGED lifecycle that Q9/Q11 require — the immutable Evidence Bundle freezes only a *snapshot* of the id, while mutable state lives in the broker/registry.
+
+**ACEF-fidelity note.** The governance layer needs no new schema (verified against the repo): assigner "scope" maps to the existing `obligation_role` enum, assigner identity to the required `collector` field (envelope) and `producer` field (manifest), and public-entry trust to the existing `trust_level` ladder — all confirmed present in `acef-conventions/v1/record-envelope.schema.json`, `acef-conventions/v1/manifest.schema.json`, and `src/acef/models/enums.py`. Per spec §1.0.1, the *legal constitution* of these bodies remains out of normative scope; this resolution names the operator model and instrument so that the binding `eu-ai-act-art73-2026` template (which hard-requires `public_incident_id`) has a defined assigner before it can ship (resolves editorial defect #12).
+
+**Residual unknown (stated, not invented):** [unverified] whether AI Commons is today a formal legal entity able to hold IP, accept a Terms of Use, and act as registry data controller — no primary source establishes its current legal form. If it is an informal steering committee, a host/fiscal-sponsor nonprofit must be named before it can be Root of record. The OECD/DPA Board seats are partnership outcomes, not facts settled here.
+
+
+*Primary sources:* https://www.cve.org/Resources/Media/Archives/OldWebsite/cve/request_id.html; https://www.cve.org/Resources/Roles/Cnas/CNA_Rules_v4.1.0.pdf; https://www.cve.org/Resources/Roles/Board/General/Board-Charter.pdf; https://github-wiki-see.page/m/CVEProject/cve-services/wiki/Developer-Guide-to-CVE-Services-API; https://www.redhat.com/ja/blog/red-hat-now-cve-numbering-authority-last-resort-cve-program; https://www.first.org/about/policies/FIRST-Bylaws.pdf
+
+*Residual unknowns:*
+- Whether AI Commons is/will be incorporated as a formal legal entity (501(c)(3)-equivalent) capable of holding IP, signing a Terms of Use, and acting as data controller for a public registry — this is a legal-formation question the RFC cannot answer; if AI Commons is currently an informal steering committee, a host nonprofit (e.g., a fiscal sponsor) is needed before it can be the Root of record.
+- Exact division of last-resort authority for genuinely cross-vendor/transferable flaws: whether a single AI Commons LR suffices or a CERT/CC- or OECD-aligned co-assigner is operationally required — depends on partnership outcomes with OECD.AI / Responsible AI Collaborative (AIID) / CRFM noted in RFC §10.
+- Whether OECD.AI/AIGO would accept a formal Board-observer role or co-stewardship; OECD instruments are non-binding Recommendations, so its participation is endorsement/alignment, not delegated assigner authority — the precise relationship is a partnership negotiation, not a fact verifiable now.
+- Data-controllership and GDPR liability of the Root operating a public registry (couples to Q8/Q19) — naming the operator is necessary but not sufficient; the controllership model must be settled with counsel before public minting.
+- The dispute-body voting model (full-consensus vs majority, vendor-vs-researcher balance, anti-capture quorum rules) — CVE's per-issue single-vote model is a template but the exact AIIC Board composition/voting weights are a charter-drafting decision.
+
+*Verifier flagged (folded into the text above):*
+- RATIONALE ERROR (not in proposedRfcText, but in the cited rationale): 'Current Top-Level Roots are CISA, CISA-ICS, and MITRE.' This is factually wrong. Per the CVE Program's own Structure page (https://www.cve.org/programorganization/Structure) and the Nov 2025 ENISA-Root blog, there are only TWO Top-Level Roots: CISA and MITRE. CISA-ICS (CISA ICS) is a Root UNDER the CISA TL-Root, not a TL-Root. The cited source for this claim is the Q1-2024 Medium report, explicitly tagged sourceType:secondary — and it is outdated/misread. Correct framing: TL-Roots = {CISA, MITRE}; Roots under them include CISA-ICS, CERT@VDE, JPCERT/CC, Red Hat, Google, ENISA, etc.
+- CITATION-ATTRIBUTION SLIP: The exact quote 'a Root that does not report to another Root, and is thus responsible to the CVE Board' is sourced to the CVE request_id.html glossary URL. That exact wording is actually from the ARCHIVED CVE Terminology page (https://www.cve.org/Resources/Media/Archives/OldWebsite/about/terminology.html). The CURRENT CVE Glossary (https://www.cve.org/resourcessupport/Glossary) uses different wording ('The highest-level Root responsible for the governance and administration of a specified hierarchy'). The quote is genuine CVE text but attributed to the wrong/older page; cite the archived terminology page for that exact phrasing.
+- NAMING IMPRECISION: The answer calls the OECD tool the 'AI Incidents and Hazards Monitor.' OECD's official product name is the 'AI Incidents Monitor (AIM)' on OECD.AI. The OECD topic page covers 'AI risks and incidents' (incidents and hazards), but the named monitor is 'AI Incidents Monitor (AIM)'. Minor; substance (OECD operates an incident monitor via OECD.AI) is correct.
+- UNVERIFIED LEGAL-ENTITY CLAIM (already flagged by the author as a residual unknown, correctly): that 'AI Commons' is a legal entity capable of being incorporated as / hosted by a 501(c)(3)-equivalent, holding IP, signing a Terms of Use, and acting as registry data controller. No primary source establishes AI Commons' current legal form. The author flags this honestly; it must stay marked unverified in the RFC.
+
+
+### Q4 — ACEF-SEV:1.0 exact metric set
+
+_Status: workflow-resolved · adversarial-verify: **sound-with-corrections** · confidence: **high** · **CLOSED by Revision 2: §5.4 now fixes the full metric list, fixed order, and the normative `band()` projection table.** Residual notes below about "unresolved cutpoints / undecided score scale" are superseded — the band table in §5.4 is the decision; ACEF-SEV uses no 0.0–10.0 numeric score (the projection is a direct metric-combination → enum table, and prevalence never affects the band)._
+
+Q4 resolution — ACEF-SEV:1.0 metric set. ACEF-SEV:1.0 is a recomputable, slash-delimited, fixed-order vector string beginning ACEF-SEV:1.0/, modeled structurally on CVSS v4.0. Per the FIRST CVSS v4.0 specification, vectors MUST order metrics in a fixed sequence (every other ordering invalid), are slash-concatenated Name:Value pairs, treat omitted optional metrics as Not Defined (X), and are self-contained representations from which any score is deterministically derived. ACEF-SEV mirrors the CVSS four-group separation, renamed for AI-incident severity. Producers MUST emit groups in order I, T, E, S; within a group, metrics MUST appear in the order listed. Group I is mandatory; T/E/S are optional and any omitted metric defaults to X. Like CVSS Base, Group I is technical severity (magnitude of harm if realized), explicitly NOT risk; Group E carries deployment-specific factors a downstream analyst folds into risk in the Assessment Bundle. The vector is Evidence; any single derived number or rating is Assessment.
+
+Group I — Intrinsic Harm (mandatory):
+- HT Harm Type — P physical/bodily harm to health (EU Art 3(49)(a)) | R fundamental-rights infringement (3(49)(c)) | K critical-infrastructure disruption (3(49)(b)) | E property/environmental damage (3(49)(d)) | S societal/systemic (diffuse harm outside 3(49)). [EU Art 3(49) verified against artificialintelligenceact.eu/article/3.]
+- HG Harm Gravity — H high | L low | N negligible. (ACEF-defined magnitude scale; NOT a CSET mapping — CSET Severity dimension is planned, not in v1.)
+- RV Reversibility — A automatic | U user/operator-recoverable | I irrecoverable. (Borrowed from CVSS v4.0 Recovery semantics {Automatic, User, Irrecoverable}; I aligns with EU 3(49)(b) "irreversible". Grounded on EU 3(49)(b) + CVSS Recovery, NOT on a named OECD criterion — see residual unknowns.)
+- SC Scope — C changed (harm crosses the system's authorization/security boundary into a subsequent system) | U unchanged. (ACEF-defined binary, analogous to CVSS v3.1 Scope. NOTE: CVSS v4.0 replaced the single Scope flag with separate Subsequent-System impact metrics; this is NOT a literal v4.0 metric.)
+- BR Affected-Population Breadth — I individual | G group/community | P population-scale/widespread. (Grounded on the EU "widespread" modifier; ACEF-defined, NOT a built CSET "Spread" scale — CSET Spread is planned, not in v1.)
+
+Group T — Threat / Realization (optional):
+- RZ Realization — E harm_event | S harm_issue | N near_miss. (Mirrors payload realization; CSET imminency split.)
+- RP Reproduction Prevalence — probabilistic token RP:<rate>@<N> where <rate> is a decimal in [0,1] and <N> a positive-integer trial count (e.g. RP:0.62@200 = reproduced in 62% of 200 trials), replacing a binary "reproduces." Encodes the CRFM recommendation to report prevalence/frequency rather than single examples. [The concept is supported by CRFM (arXiv 2503.16861); the specific "statistical validity metrics ... frequency ... for relevant prompts" wording is UNVERIFIED against the paper body. The RP:<rate>@<N> wire format is an ACEF construction.] Omittable when N/A.
+- XF Transferability — Y flaw expected in other models | N model-specific | X unknown. (Mirrors payload transferability. Grounded verbatim in CRFM arXiv 2503.16861: "jailbreaks and other flaws that can transfer across different providers' GPAI systems".)
+
+Group E — Environmental / Contextual (optional; risk-tailoring, NOT severity):
+- AU Autonomy — L human-in-the-loop | O human-on-the-loop | A autonomous. (Mirrors payload autonomy_level. Three-level axis operationalized in the AI Incident Database CSETv1 taxonomy, incidentdatabase.ai/taxonomies/csetv1 — secondary; the CSET "Adding Structure to AI Harm" report itself does NOT define an autonomy axis.)
+- EX Deployment Exposure — H public/open | L limited | N sandbox/non-production. (ACEF-defined.)
+- KC Sector Criticality — H high (e.g. health, critical infrastructure, justice) | M medium | L low. (ACEF-defined.)
+
+Group S — Supplemental (optional, score-neutral, informational):
+- SF Safety — P predictable human injury present | N negligible. (Borrowed from CVSS v4.0 Supplemental Safety {Present, Negligible}, defined by reference to IEC 61508 consequence categories.)
+- VL Value-Chain Locus — F foundation_model | T fine_tuned_model | A integrated_application | C third_party_component. (Mirrors payload value_chain_role.)
+- DB Differential-Distribution flag — Y harm differentially distributed on a protected attribute | N. (Marker only; the basis itself lives in harm_distribution_basis.)
+
+Example: ACEF-SEV:1.0/HT:R/HG:H/RV:I/SC:C/BR:P/RZ:E/RP:0.62@200/XF:Y/AU:A/EX:H/KC:H/SF:N/VL:F/DB:Y.
+
+The grammar, value tables, and a deterministic single-severity derivation function (computed only into the Assessment Bundle) are specified in severity_vector.schema.json under the concrete new minor selected by Q12 (NOT in frozen v1/; severity_vector.schema.json does not yet exist, and v1.1/ currently lacks incident_report.schema.json — both verified in-repo). A severity_vector present but unparseable against this grammar raises a new ERROR code: the 070-080 range is exhausted (ACEF-080 is the ceiling, verified in src/acef/errors.py), so a code in the 081+ range requires spec-author approval per Q24. Per Q13, the pre-existing required coarse severity enum {critical, major, minor, informational} SHOULD be a deterministic, validator-checked projection of this vector.
+
+Residual unknowns (do not promote to normative without resolving): (1) RV reversibility is grounded on EU 3(49)(b) + CVSS Recovery, NOT on a named OECD criterion — the OECD 2024 "recurrence and reversibility" harm dimension is not pinned to a numbered criterion (verify against the OECD PDF, Q2). (2) HG and BR are ACEF-defined; do NOT label them CSET mappings (CSET Severity/Spread are planned, unbuilt — verified verbatim). (3) The CRFM "frequency over relevant prompts" verbatim wording underpinning RP is UNVERIFIED against the paper body; the concept is confirmed but the exact quote and the RP:<rate>@<N> format are ACEF constructions — a methodology note must define how <rate> is made comparable across reporters (prompt set, harness). (4) SC changed/unchanged is a v3.1-style/ACEF construct, not a literal CVSS v4.0 metric.
+
+
+*Primary sources:* https://www.first.org/cvss/v4.0/specification-document; https://www.first.org/cvss/v4.0/specification-document; https://nvd.nist.gov/vuln-metrics/cvss; https://arxiv.org/abs/2503.16861; https://cset.georgetown.edu/publication/adding-structure-to-ai-harm/; https://artificialintelligenceact.eu/article/3/
+
+*Residual unknowns:*
+- The OECD common reporting framework's 29 criteria are not publicly exposed at criterion-text granularity; the OECD 2024 'Defining AI incidents' report references a harm dimension of 'recurrence and reversibility' but it is not pinned to a numbered criterion. RV (reversibility) is therefore grounded on EU Art 3(49)(b) 'irreversible' + CVSS Recovery, NOT on a named OECD criterion. Confirm against the OECD PDF (Q2) before claiming OECD provenance.
+- CSET 'Severity' and 'Spread' dimensions remain PLANNED and unbuilt as of v1; ACEF-SEV's HG (gravity) and BR (breadth) are ACEF-defined, modeled on EU/CVSS, and MUST NOT be presented as a CSET mapping (per RFC Appendix C and Appendix D item 11).
+- The RP:<rate>@<N> encoding (rate decimal in [0,1], N positive-integer trial count) is an ACEF construction inspired by the CRFM 'frequency over relevant prompts' language; CRFM does not specify a wire format. The prompt-set/harness definition that makes <rate> comparable across reporters belongs to a methodology note, out of scope for the vector.
+- Whether ACEF-SEV is mandatory/optional under the new profiles and how it reconciles with the existing required coarse severity enum is governed by Q13 (recommend severity = deterministic projection of the vector), not resolved here.
+- Final error-code number for an unparseable severity_vector: cannot use ACEF-070..080 (exhausted, ACEF-080 is the ceiling, verified in src/acef/); requires spec-author approval to open 081+ (Q24).
+
+*Verifier flagged (folded into the text above):*
+- CRFM verbatim quote overstated: the answer asserts the RP token is grounded verbatim in CRFM via the exact string 'statistical validity metrics that describe the frequency with which undesirable outputs appear for relevant prompts.' That exact wording is NOT confirmed against the primary source: arXiv 2503.16861's abstract does not contain it (verified via WebFetch), and the paper body was not retrieved. The RFC's own Appendix C marks the CRFM field list as only 'directionally confirmed, granular names not.' The concept (probabilistic prevalence) is supportable; the verbatim attribution is not.
+- Autonomy source mis-attribution: the rationale says the autonomy axis is verified at cset.georgetown.edu (Adding Structure to AI Harm). That report defines tangible/intangible harm but does NOT define an autonomy axis (verified via WebFetch). The three-level autonomy axis is operationalized in the AI Incident Database CSETv1 taxonomy (incidentdatabase.ai/taxonomies/csetv1, SECONDARY), not in the primary CSET report. Fact verified; primary-source attribution wrong.
+- SC Scope: the proposed text calls the binary changed/unchanged flag a 'CVSS v4.0 subsequent-system concept.' CVSS v4.0 removed the single Scope flag of v3.1 and replaced it with separate Subsequent-System impact metrics (VC/VI/VA + SC/SI/SA). The changed/unchanged flag is a v3.1-style/ACEF construct, not a literal CVSS v4.0 metric.
+
+
+### Q5 — Normalization fields opt-in per report vs default once profile adopted
+
+_Status: workflow-resolved · adversarial-verify: **sound** · confidence: **high**_
+
+**Q5 resolution — profile-scoped mandatory core, opt-in enrichment (NOT blanket opt-in, NOT blanket default-on).**
+
+Decision. Normalization fields are neither uniformly opt-in nor uniformly default-required. They follow a graduated model that is already this RFC's stated design (§3, §5.7, §5.10) and is fully expressible by the existing reference validator with no new machinery:
+
+1. No profile declared -> fully inert. A v1.0 `incident_report` bundle that declares no incident profile in `manifest.profiles[]` triggers zero normalization requiredness. Verified: `src/acef/validation/engine.py` runs the rule-evaluation phase only `if profiles:` (line 399), and profiles resolve from `manifest.profiles[]` keyed by `profile_id` (lines 580-581). The fields remain schema-optional, and backward compatibility holds without a special case.
+
+2. Profile declared -> that profile's mandatory CORE becomes conditional-required; everything else stays opt-in enrichment. Declaring a profile does NOT make the whole §5.2 field set expected. Each template (`eu-ai-act-art73-2026`, `oecd-ai-incidents-2025`, and the GPAI Art. 55 / Commitment 9 incident provisions on `eu-gpai-code-of-practice-2025`) marks only its own small mandatory core as required, authored as DSL `field_present` / `exists_where` rules (operators present in `src/acef/validation/operators.py`). All other normalization fields stay optional: a rule out of scope for the bundle returns `skipped` -> SKIPPED in roll-up (verified in `src/acef/validation/rule_engine.py` and `src/acef/validation/rollup.py`), never a failure. Producers MAY always populate enrichment fields above the core; they MAY NOT silently omit a declared profile's core (that is the `field_present` failure, surfaced via the §7 error codes once allocated — Q24 notes the 070-080 band is exhausted and a new range needs spec-author approval).
+
+3. No per-report opt-out below a declared profile's core. Opt-in is offered above the core, not below it. To omit Art. 73 mandatory fields, an organization omits the `eu-ai-act-art73-2026` declaration, not the fields. This keeps two conformant validators in agreement on what a declared bundle requires (Assessment-Bundle determinism) and keeps the cross-profile union question (Q16) well-defined: requiredness is the union of the declared profiles' mandatory cores.
+
+Mechanism. This is the RFC-0001 version-gating pattern: requiredness is driven by `manifest.profiles[]` declaration and gated on `manifest.versioning.core_version`. Requiredness lives in template DSL, never in schema `required[]`; the schema keeps the fields optional so v1.0 bundles validate clean (§5.10, §6 backward-compat regression). NOTE (Q12/Appendix-D defect): the RFC's `v1.x` schema target is a non-resolvable range — `acef-conventions/v1/` is frozen and `incident_report.schema.json` is absent from `acef-conventions/v1.1/` — so this resolution presumes the extended record ships under a concrete stated minor with its `core_version` gate chosen by Q12. Q5 fixes the policy and confirms the mechanism; it does not pick the minor.
+
+Precedent. This matches both anchors the RFC adopts. OECD's common reporting framework (the canonical anchor, §2.4/§5.5) is 8 dimensions / 29 criteria with only 7 mandatory; the remaining 22 are optional enrichment provided "where available," and the framework is explicitly designed to serve both mandatory and voluntary reporting (OECD, Towards a common reporting framework for AI incidents, 2025). CVE JSON 5.x (the identifier anchor, §5.3) likewise pairs a small required core with optional enrichment and scopes requiredness by container/role — the `cna` container requires product/version, problemTypes, descriptions, and references that the `adp` container does not (cveproject.github.io/cve-schema/schema/docs/). A profile/role-scoped mandatory core is the established interoperability pattern; blanket-default-on is used by neither precedent.
+
+Interaction with Q22 (why volunteer near-miss data). `realization: near_miss` and the broader voluntary corpus are enrichment, NOT core, under every profile. The voluntary `oecd-ai-incidents-2025` template MUST NOT make `near_miss` or special-category enrichment mandatory, and the binding `eu-ai-act-art73-2026` template requires only what Art. 73 legally compels. Blanket-default-on would have forced legally discoverable, self-incriminating near-miss data and special-category `harm_distribution_basis` onto every report — destroying the voluntary-disclosure incentive Q22 identifies as load-bearing and colliding with Q8's GDPR Art. 9 concern. The opt-in-enrichment posture is a precondition for Q22's separate fix (aggregation/anonymity tier + self-reporter safe harbor); it does not by itself solve Q22, but it is the only Q5 outcome compatible with solving it.
+
+Residual unknowns. The concrete membership of each profile's mandatory core is downstream of Q2 (transcribe OECD's 7 mandatory criteria from the OECD PDF — not invented here) and Q14 (designate the single canonical normalized core to avoid redundant hand-populated encodings). The gating `core_version` and the concrete schema directory are Q12. Q5 fixes the policy and confirms the mechanism; those three resolve the concrete field lists and the gate.
+
+
+*Primary sources:* https://www.oecd.org/content/dam/oecd/en/publications/reports/2025/02/towards-a-common-reporting-framework-for-ai-incidents_8c488fdb/f326d4ac-en.pdf; https://cveproject.github.io/cve-schema/schema/docs/
+
+*Residual unknowns:*
+- The exact membership of each profile's mandatory core is downstream of Q2 (OECD's 7 mandatory criteria must be transcribed from the OECD PDF) and Q14/Appendix-D (which of the redundant harm encodings is the single canonical normalized core). Q5 fixes the policy (profile-scoped mandatory core + opt-in enrichment) but the concrete field list per profile cannot be finalized until Q2 and Q14 resolve.
+- Whether near_miss-only / voluntary OECD bundles need a lighter-weight profile-less or 'voluntary' declaration path so an org can contribute enrichment data without triggering any mandatory core. This intersects Q22's safe-harbor/anonymity tier and is not settled by Q5 alone.
+- The concrete core_version that gates these fields (1.1.0 shared with RFC-0001 vs a new 1.2.0) is Q12, not Q5; Q5's mechanism description assumes that gate is chosen but does not pick it.
+
+
+### Q6 — Canonical cross-database dedupe key
+
+_Status: workflow-resolved · adversarial-verify: **sound-with-corrections** · confidence: **high** · **PROMOTED into normative §5.5 in Revision 6**_
+
+> **Reconciliation note (Revision 6/7).** The dedupe key is now normative in §5.5 (and the fields are in the Appendix B schema). Terminology update governs over the text below: the harm input is **`harm_core.harm_class`** (the canonical core), not the older "`harm_domain`/`harm_domain_primary`" phrasing. §5.5 governs.
+
+Q6 - canonical cross-database dedupe key. ACEF defines incident_dedupe_key by the RFC-0001 finding_record.dedupe_key construction (finding_record.schema.json 58-61): the sha256 prefix plus lowercase hex of SHA-256 of JCS-canonicalize of object K, pattern caret-sha256-colon-64-lowercase-hex-dollar. SHA-256 only, no hash agility, per RFC-0001 Q5, matching every other content-addressed identifier in ACEF. K is a JSON object (never a concatenated string, which is non-deterministic and delimiter-injectable) canonicalized via RFC 8785 JCS as acef.integrity.canonicalize = rfc8785.dumps (integrity.py 51), over four members: harm_domain_primary (canonical harm per Q14, NFC-normalized), occurrence_date_utc (occurrence_date astimezone UTC truncated to YYYY-MM-DD), subject_identity, and value_chain_role. NOTE: harm_domain_primary and value_chain_role are NEW RFC-0002 section 5.2 fields, NOT in current incident_report.schema.json (whose required fields are incident_type, severity, description); they are added as additive, optional, conditional-required-under-profile fields, leaving v1.0 bundles unaffected. subject_identity is the natural-key triple provider, name, version (all required strings, manifest.schema.json 95 and 107-118), NFC-normalized and case-folded, joined with U+007C; it is NOT subject_id, which is a random per-bundle UUID (manifest.schema.json 97-100) that never matches across databases. occurrence_date is an ISO 8601 date-time (incident_report.schema.json 43-47) and is OPTIONAL; the key uses its UTC calendar date so reporters logging different instants of one event collapse, and MUST fall back to detection_date under the same truncation when null. Timezone-boundary near-duplicates are reconciled at Assessment-layer clustering, not by the key. Q28: taxonomy_crosswalk.aiid.incident_id is a non-authoritative soft cross-reference, NOT part of K and NOT the spine. AIID is one-incident-to-many-reports (confirmed: incidentdatabase.ai and Partnership on AI) and CC-BY-SA 4.0 (confirmed: incidentdatabase.ai footer), so a seeded corpus inherits BY-SA copyleft plus attribution to resolve against registry licensing; AIID merge/split/renumber is asserted by RFC-0002 Q28 but UNVERIFIED against AIID primary sources, and an AIID id change upstream MUST NOT invalidate the ACEF key. Q20: three of four inputs are low-entropy and provider/name/version is often guessable, so a published unsalted key is offline-enumerable and would defeat the confidentiality model. Therefore (1) incident_dedupe_key MUST be emitted only on records whose confidentiality is public (enum public, redacted, hash-committed, regulator-only, under-nda at enums.py 141-145); on any non-public value it MUST be omitted, consistent with the Q8/Q23 disclosure-time redaction projection reusing redaction.py. (2) For redacted-subject dedupe, ACEF defines incident_dedupe_key_hmac = the hmac-sha256 prefix plus hex of HMAC-SHA-256(pepper, JCS-canonicalize(K)), pepper held only by the central id/dedupe resolver left open by Q3/Q9; non-invertible without the pepper, degrading to link-only if no resolver exists. The key is a deterministic evidence field; any clustering or section 5.9 Top-25 roll-up consuming it is Assessment-layer; the field is additive, optional, conditional-required only under the incident profile. A normative deterministic sort (Q26) MUST be specified for harm_domain so the primary member feeding K is reproducible. Residual: harm_domain_primary depends on Q14; pepper custodian on Q3/Q9; detection_date fallback to be added to schema and validator; AIID renumber unverified.
+
+
+*Primary sources:* file:///Users/chandlervaughn/Development/ACEF/planning/ACEF-RFC-0001-agent-reliability-primitives.md
+
+*Residual unknowns:*
+- AIID merge/split/RENUMBER behavior over time: RFC Q28 asserts AIID 'periodically merges/splits/renumbers,' and the one-to-many cardinality + CC-BY-SA license are confirmed, but I could NOT independently confirm the 'renumber' claim from a primary AIID source. If AIID never renumbers, the soft-link is safer than stated; if it does, the soft-link is exactly the correct design. Verify against AIID's data model docs before treating renumber behavior as normative.
+- The exact pepper-custodian: the keyed (HMAC) variant requires a single resolver to hold the pepper. That body is the same one Q3/Q9 leave open (AIIC root / id-state authority). If no central resolver is constituted, the HMAC variant is unimplementable and cross-database dedupe of redacted-subject incidents degrades to no-dedupe (link-only) for those records — acceptable but should be stated.
+- harm_domain is repeatable and scheme-tagged ({scheme, code}); the key uses a single designated 'primary' member. Which member is primary depends on Q14's resolution (designate ONE canonical normalized harm core). Until Q14 lands, 'harm_domain_primary' selection rule (e.g., the OECD/canonical member, else first after deterministic sort per Q26) is provisional.
+- Whether occurrence_date may be absent (it is optional in the v1 schema; only detection of the field is required when the incident profile is declared). The recipe must define a deterministic fallback (e.g., detection_date truncated to UTC date) when occurrence_date is null, which is a small additional rule to fix in the schema/validator.
+
+*Verifier flagged (folded into the text above):*
+- AIID renumber/merge/split unverified against AIID primary sources; claim is from RFC-0002 Q28 prose only. Answer already flags it.
+- Answer cites ACEF v0.3 for no-hash-agility; schema says v0.4, RFC-0001 Q5 fixes SHA-256 for v1.1. Minor, not a fabrication.
+- value_chain_role and harm_domain absent from all current JSON schemas; only in RFC-0002 section 5.2 prose. confidentiality is an envelope enum, not an incident_report payload field. Additive-new-field framing is correct but must be stated.
+
+
+### Q7 — Digital Omnibus deferral of EU AI Act Article 73 date
+
+_Status: workflow-resolved · adversarial-verify: **sound-with-corrections** · confidence: **high**_
+
+**Q7. Date anchor — RESOLVED (status-dated 2026-06-08; re-verify at OJ publication).**
+
+Finding. The 2026 Digital Omnibus on AI (COM(2025) 836 final; procedure 2025/0359(COD); proposed 19 Nov 2025) reached a provisional trilogue agreement on 7 May 2026 (Coreper approval 13 May 2026). As of 2026-06-08 it is **not yet adopted and not published in the Official Journal**; it awaits the European Parliament plenary vote (June 2026) and formal Council adoption, targeted before 2 August 2026. It does **not** amend Article 73 by name. It postpones the **high-risk obligations** (Chapter III) on which Article 73 depends, using **fixed dates** — **2 December 2027** for Annex III stand-alone high-risk systems and **2 August 2028** for Annex I systems embedded in regulated products — replacing the Commission's originally proposed conditional "standards-readiness" trigger. The AI Act's **general application date remains 2 August 2026**. (Note: Article 50(2) transparency obligations are *not* wholly unchanged — for content placed on the market before 2 Aug 2026 they are postponed to 2 December 2026, with the transitional grace period compressed; the 2 Aug 2026 anchor governs new systems.) Source: European Parliament Legislative Train Schedule (https://www.europarl.europa.eu/legislative-train/package-digital-package/file-digital-omnibus-on-ai), confirmed directly; corroborated by COM(2025) 836 and multiple May-2026 practitioner analyses; Council file ST-9247-2026-INIT [cited as existing; internal text not independently read].
+
+Mechanism. Article 73 ("Reporting of serious incidents by providers of high-risk AI systems," Chapter III, Section 3) has no independent date in Article 113; formally it applies from the general 2 August 2026 date, but it only binds providers **of high-risk AI systems**. The Omnibus amends the application-date/transitional provisions (**reported as Article 113 and related — commentary-level; no consolidated OJ text exists to quote yet**) so that Annex III / Annex I systems become subject to the high-risk regime only from the postponed dates. Therefore Art. 73's **effective** application moves to **2 December 2027 (Annex III)** and **2 August 2028 (Annex I)**, even though the article itself is not renamed or re-dated. The 15/2/10-day awareness-clock deadlines inside Art. 73 are unchanged (verified against the Art. 73 text).
+
+Decision for this RFC.
+1. **No change to the evidence model.** Identifiers, severity vector, taxonomy crosswalk, and all incident fields are date-anchor-independent **evidence**; regulatory applicability is **assessment**. The Evidence/Assessment boundary makes the date question a template/validator concern, not a schema concern. No backward-compatibility impact.
+2. **Parameterize the Art. 73 application dates in the template, not in prose.** When `eu-ai-act-art73-2026.json` is authored (§5.7), the Art. 73 high-risk reporting provisions and the Art. 6/Annex-III–gated obligations MUST carry **per-provision `effective_date`** values rather than relying on a single `default_effective_date`. Use the existing template mechanism already present in `src/acef/templates/eu-ai-act-2024.json` (per-provision `effective_date`, supported by `templates/models.py` and applied as an override in the validation engine). Set Annex III high-risk Art. 73 provisions to `2027-12-02` and Annex I to `2028-08-02`, **conditioned on Omnibus adoption**; until the amending Regulation is published in the OJ, retain the as-enacted `2026-08-02` as the in-force date and record the postponement as a forward-looking note. This keeps the template a single source of truth and avoids hardcoding a date that is currently sub judice.
+3. **Keep clocks independent of the anchor.** The deadline-consistency validation (15/2/10-day clocks keyed on `coordinated_disclosure.regulatory_timeline.awareness_date`) is independent of the application-date anchor and is unaffected.
+
+Caveat (status-dated 2026-06-08). The Omnibus is a provisional agreement, not yet law. If it is **not** adopted before 2 August 2026, the as-enacted high-risk timeline (and thus Art. 73's 2 August 2026 effective application for Annex III) stands. Re-verify against the Official Journal at publication; update the template `effective_date` values and this note accordingly; supersede this resolution if the final consolidated text diverges from the 2027-12-02 / 2028-08-02 dates or touches Chapter III Section 3 (Art. 72/73) wording directly.
+
+
+*Primary sources:* https://www.europarl.europa.eu/legislative-train/package-digital-package/file-digital-omnibus-on-ai; https://www.europarl.europa.eu/RegData/docs_autres_institutions/commission_europeenne/com/2025/0836/COM_COM(2025)0836_EN.pdf; https://data.consilium.europa.eu/doc/document/ST-9247-2026-INIT/en/pdf
+
+*Residual unknowns:*
+- The Omnibus is not yet law as of 2026-06-08: no Official Journal publication, no final consolidated legal text. The exact amending article numbers (reported as Article 113 and related transitional provisions) and whether the final text touches any Chapter III Section 3 (Art. 72/73) wording cannot be quoted from a published consolidated source yet; commentary says the postponement is achieved via the application-date provisions, not a standalone Art. 73 amendment.
+- Whether grandfathering applies to high-risk systems already on the market before the new dates, and the precise treatment of Art. 73(9) sectoral-equivalence carve-outs under the agreed text, is not yet confirmable from primary sources.
+- Council ST-9247-2026-INIT exists and is cited but its internal wording was not directly machine-read in this session (PDF binary not text-extractable via the available fetch tool); its exact framing of the general-date-vs-high-risk-postponement split is taken from secondary corroboration, not first-hand quotation.
+- Some granular procedural details surfaced by deep-research (e.g., specific plenary vote tallies and intermediate committee reference numbers) could not be independently corroborated and are treated as unverified; they are not load-bearing for this resolution.
+
+*Verifier flagged (folded into the text above):*
+- MINOR OVERSTATEMENT (not fabricated): 'Article 50 transparency obligations largely stay on the original schedule / on that date.' Primary research shows Article 50(2) transparency obligations for AI-generated content placed on the market before 2 Aug 2026 are postponed to 2 December 2026 (grace period compressed from 6 to 3 months). The general/new-system anchor stays 2 Aug 2026, so 'largely' is defensible but the unqualified claim understates a real 4-month transitional delay. Corrected in verifiedRfcText.
+- ATTRIBUTION PRECISION (flagged, not fabricated): The claim that the Omnibus 'amends the application-date/transitional provisions (reported as Article 113 and related)' to defer the high-risk regime is corroborated by the europarl legislative train file and multiple practitioner analyses, but cannot be quoted from a published consolidated legal text because the Regulation is not yet adopted or in the Official Journal. The answer already flags this in residual unknowns; verifiedRfcText keeps the '[reported]' qualifier explicit.
+- NOT INDEPENDENTLY READ (already self-flagged): Council document ST-9247-2026-INIT is cited as existing but its internal wording was not machine-read in this session. The answer correctly discloses this; it is not load-bearing because the same facts are independently confirmed by the europarl legislative train file (fetched) and the research pass.
+- NOT VERIFIED (already self-flagged, non-load-bearing): exact amending article numbers beyond Art. 113, grandfathering treatment of pre-date high-risk systems, and Art. 73(9) sectoral-equivalence carve-out treatment under the agreed text. Properly marked unverified by the answer.
+
+
+### Q8 — Disclosure-time redaction gate + GDPR lawful basis for special-category harm data
+
+_Status: workflow-resolved · adversarial-verify: **sound-with-corrections** · confidence: **high** · **incorporated in §5.11 with two corrections**_
+
+> **Reconciliation note (Revision 3).** Two terminology/mechanism updates from the body govern over the text below: (1) the field is named **`declared_publication_basis`** (not `lawful_basis`), to signal it is a *declared*, not *adjudicated*, position; (2) because `incident_card` is a **separate record containing only publishable fields**, the gate is a **field-projection** rule across two records (`omitted`/`regulator-only`/`hash-committed`/`anonymized`/`public`), **not** per-field redaction of one record — so the "via redaction.py / no new machinery" phrasing below is superseded. The standard is "publication-gated by a declared basis", not "lawful by construction". See §5.11.
+
+**Q8 resolution - adopt (a): a normative, validator-enforced disclosure-time redaction projection.**
+
+Decision. The profile MUST gate the public-disclosure boundary. A disclosure-time redaction projection is REQUIRED whenever `coordinated_disclosure.status` is `public` or `public_incident_id` is present on the record. By default the projection sets the special-category and identifying fields - `harm_distribution_basis`, free-text `description`, and `impact_assessment` - to `confidentiality: regulator-only`, or replaces them with a SHA-256 hash commitment (`confidentiality: hash-committed`), unless one of two conditions holds: (i) the record carries a structured `lawful_basis` object asserting BOTH a GDPR Art. 6(1) lawful basis AND an Art. 9(2) condition for the public processing; or (ii) the field has been irreversibly anonymized under a declared anonymization method (not pseudonymization). Option (b) - ungated publication - is rejected: ACEF's canonical public output would otherwise be an unlawful Art. 9(1) processing operation in its primary jurisdiction.
+
+Mechanism (reuses existing primitives; no new machinery). The projection is implemented with the existing `redaction.py` (`apply_redaction` / `redact_record` / `redact_package`; SHA-256 hash commitment; Core `event_log` attestation) and the existing `confidentiality` envelope field (verified values: `public | redacted | hash-committed | regulator-only | under-nda`). The transition is enforced by a new cross-record validator rule modeled on the existing `enforce_redaction_policy_version` rule (ACEF-074): a `public`/`public_incident_id`-bearing record carrying un-projected special-category fields with no asserted `lawful_basis` and no anonymization marker is an ERROR. Reserve a concrete code in a new contiguous band (proposed 081-090; the 070-080 band is exhausted at ACEF-080, verified against `src/acef/errors.py`) subject to spec-author approval (ties to Q24). The projection is deterministic (RFC 8785 canonicalization + fixed field set), so two exporters produce byte-identical public output.
+
+Rationale (verified primary sources). Publishing to a federated public registry is "processing": GDPR Art. 4(2) defines processing to include "disclosure by transmission, dissemination or otherwise making available." `harm_distribution_basis` (which the profile populates with race, sex, national origin, disability, religion, sexual orientation/gender identity) and the free-text fields reveal data prohibited by Art. 9(1) (data "revealing racial or ethnic origin," "religious or philosophical beliefs," and "data concerning a natural person's sex life or sexual orientation"; https://gdpr-info.eu/art-9-gdpr/). Lawful publication requires BOTH an Art. 6(1) basis AND an Art. 9(2) condition - Art. 9 is a separate gate on top of Art. 6. The UK ICO states this verbatim ("you must identify both a lawful basis under Article 6 and a condition for processing special category data under Article 9"; https://ico.org.uk/for-organisations/uk-gdpr-guidance-and-resources/lawful-basis/special-category-data/what-are-the-rules-on-special-category-data/), as UK GDPR guidance corroborating the materially identical EU GDPR Art. 9 structure; EDPB Guidelines 2/2019 confirm Art. 9(2) does not recognize contract-necessity, so special-category processing must fit an Art. 9(2) exception or fall back to explicit consent. No Art. 9(2) condition cleanly supports an open public registry run by a private standards body: 9(2)(a) explicit consent is unreliable and unwithdrawable at registry scale; 9(2)(e) "manifestly made public by the data subject" fails because the reporter, not the data subject, records the attribute; 9(2)(g)/(j) require a basis in Union/Member-State law and Art. 89(1) safeguards, and Recital 157 limits registry disclosure to "persons having a legitimate interest" - not the general public. Per Recital 26 (https://gdpr-info.eu/recitals/no-26/), pseudonymized data "should be considered to be information on an identifiable natural person" and stays fully in scope including Art. 9; only data anonymized so the subject "is not or no longer identifiable," judged against "all the means reasonably likely to be used," exits GDPR. Therefore hash-commitment of an identifier alone does not exempt the data - true anonymization or an asserted dual lawful basis is the only lawful field-level path, and the gate defaults closed.
+
+Boundary and compatibility. The projection asserts no verdict - it is a deterministic Evidence transformation that strips fields and substitutes hash commitments - so the evidence-vs-assessment boundary holds; whether an asserted `lawful_basis` is *sufficient* is an Assessment-layer / legal-review judgment, not an Evidence-schema adjudication. Backward compatible: the rule fires only on the new public-disclosure transition, which no v1.0 `incident_report` bundle declares. This resolution interacts with Q17 (privilege), Q20 (dedupe-key leakage), and Q23 (per-confidentiality publishability map) and MUST be reconciled with them.
+
+Residual unknowns (do not treat as settled). [unverified] The WP29 Opinion 05/2014 on Anonymisation Techniques (WP216, adopted 10 April 2014; singling-out / linkability / inference framework) is the operative anonymization standard and is directionally well established, but its exact wording (e.g. "risk virtually non-existent") was NOT retrieved this session; confirm against the primary PDF (https://ec.europa.eu/justice/article-29/documentation/opinion-recommendation/files/2014/wp216_en.pdf) before quoting it normatively. The specific DPA/ECJ enforcement cases surfaced by automated research were NOT verifiable and several appear fabricated; they are excluded and MUST NOT be cited. [unverified-absence] No current Union/Member-State law is verified to authorize a public AI-incident registry under Art. 9(2)(g)/(j); none was found, so the gate MUST default closed. The new error-code ordinal is not yet reserved (Q24).
+
+
+*Primary sources:* https://gdpr-info.eu/recitals/no-26/; https://ico.org.uk/for-organisations/uk-gdpr-guidance-and-resources/lawful-basis/special-category-data/what-are-the-rules-on-special-category-data/; https://www.edpb.europa.eu/sites/default/files/files/file1/edpb_guidelines-art_6-1-b-adopted_after_public_consultation_en.pdf
+
+*Residual unknowns:*
+- WP29 Opinion 05/2014 on Anonymisation Techniques (the operative anonymization standard 'risk virtually non-existent' / singling-out, linkability, inference tests) is paraphrased in the deep-research synthesis but I did not retrieve the primary PDF in this session; the threshold is directionally well-established but the exact wording should be confirmed against the official EDPB/WP29 document before the spec quotes it normatively.
+- The numerous specific DPA enforcement decisions and ECJ case names produced by the deep-research pass (e.g., 'Nachtweberei Steffensen', 'VG Bautzen v. Saxony', dated CNIL/Garante/Dutch DPA AI-registry actions) could NOT be independently verified and several appear fabricated; they are deliberately excluded from the citations and MUST NOT be cited in the RFC.
+- Whether any future Union or Member-State law will supply an Art. 9(2)(g)/(j) basis specifically authorizing a public AI-incident registry is unknown; today none is verified to exist, so the gate must default closed.
+- The precise interaction between an asserted lawful_basis object and per-Member-State Art. 9(3)/Art. 89(1) safeguard requirements is jurisdiction-specific and is an Assessment-layer / legal-review concern, not something the Evidence schema can fully adjudicate.
+- Error-code number: the 070-080 band is exhausted (ACEF-080 ceiling), so the new code requires opening 081-090 with spec-author approval per the active operation rules (ties to Q24); the concrete ordinal is not yet reserved.
+
+*Verifier flagged (folded into the text above):*
+- ICO attribution nuance: the cited ICO page is UK GDPR (post-Brexit) guidance, not an EU GDPR primary source. The dual-basis quote is verified verbatim on that page, and the Art. 6 + Art. 9 dual-gate is materially identical under EU GDPR, but the RFC should attribute it as UK ICO guidance corroborating the EU GDPR Art. 9 structure rather than imply the ICO authoritatively interprets EU GDPR.
+- Source-list entry #4 cites https://artificialintelligenceact.eu/ for the GDPR Art. 9(1)/(2) text - a non-authoritative AI Act tracker, not a GDPR primary source. It is NOT cited in proposedRfcText, so the RFC text is unaffected; the authoritative source for Art. 9 is gdpr-info.eu/art-9. No load-bearing claim depends on the wrong URL.
+- WP29 Opinion 05/2014 exact phrasing ('risk virtually non-existent') is unverified - already correctly flagged by the answer as a residual unknown and NOT quoted normatively in the RFC text. The document's existence (WP216, 10 April 2014) and its singling-out/linkability/inference framework ARE verified.
+
+
+### Q9 — AIIC id lifecycle states + out-of-band resolution authority
+
+_Status: workflow-resolved · adversarial-verify: **sound-with-corrections** · confidence: **high**_
+
+**Q9 resolution: adopt (a) — a companion AIIC id-state registry owns the mutable lifecycle; the Evidence Bundle stays immutable.**
+
+The false-binary framing dissolves once we note ACEF already separates immutable artifacts from mutable state, and that CVE — the anchor precedent — does exactly the same thing.
+
+**1. State lives out-of-band, not in the bundle.** `public_incident_id` (an RFC-0002 profile field, not a Core envelope field) remains a frozen, regex-checked string inside the sealed, content-addressed Evidence Bundle. Its lifecycle state is owned by a companion **AIIC Registry** system-of-record and dereferenced at read time. This mirrors CVE: record state (RESERVED/PUBLISHED/REJECTED) lives in `cveMetadata.state`, controlled by CVE Services, *outside* the CNA/ADP content containers (cve-schema docs, cveproject.github.io/cve-schema/schema/docs/). An immutable id plus an external state authority is the CVE design, not a workaround.
+
+**2. Three hard states, one soft tag (mirroring CVE).** Registry states: `RESERVED` (id allocated, no public bundle yet — the mechanism that makes Q11 embargo / Q10 reservation tractable), `PUBLISHED` (a signed Evidence Bundle carrying the id exists and is public), `REJECTED` (duplicate / mis-assigned / withdrawn; id is retired, never reused, and remains resolvable as an invalid marker — per NVD vulnerability-status, a REJECTED record remains on the list so users know the id is invalid). A re-publish (`REJECTED→PUBLISHED`) is permitted but exceptional: in CVE it is effected by submitting a NEW record under the same id, not an in-place toggle (CVE FAQ "Marking a CVE ID 'REJECT' Is Not Permanent"; Vulnogram "Publishing a Rejected CVE Record"); AIIC SHOULD adopt the same mechanism. Separately, a `disputed` **tag** (not a state) MAY be set by a vendor/affected party and MAY persist indefinitely without forcing rejection — CVE keeps DISPUTED a non-terminal tag rather than a state (CVE "States and Tags" podcast description; CVE 2024 DISPUTED-tag clarification blog), and we adopt that to represent unresolved good-faith disagreement.
+
+**3. One normative supersession relation: `replaced_by`.** Reject, merge, and split are all expressed by a single typed registry relation `replaced_by: [AIIC-id, ...]`, modeled on CVE's rejected-container `replacedBy` ("array of CVE IDs that this CVE ID was replaced by"). Merge = N rejected ids each `replaced_by` the one surviving id; split = one rejected id `replaced_by` the N successors. CVE has no MERGED/SPLIT schema state — merge/split are out-of-band administrative processes encoded as REJECTED + `replacedBy` (CNA rules); AIIC follows the same leaner modeling. This is the canonical resolution edge that lets the §5.9 corpus *resolve* duplicates rather than merely link them (a link-only dedupe double-counts). This relation MUST live in the registry, not in package-level `relationships[]`: that enum is closed (`wraps|calls|fine_tunes|deploys|trains_on|evaluates_with|oversees`) and its `source_ref`/`target_ref` are pattern-restricted to entity URNs (`urn:acef:(sub|cmp|dat|act):<uuid>`) — incident ids are not entities, so Core's relationship machinery structurally cannot carry id-supersession (verified: manifest.schema.json).
+
+**4. Corrections are new bundles, not mutations.** When facts change, the producer issues a NEW Evidence Bundle reusing the same `public_incident_id` and chaining to its predecessor via the existing `metadata.prior_package_ref` (the bundle digest = SHA-256 of the RFC 8785-canonicalized `content-hashes.json`; spec §3.1.3). The id is stable across revisions; each revision is its own immutable, independently verifiable bundle — CVE's "modified record" pattern expressed in ACEF's existing chaining primitive.
+
+**5. Boundary and compatibility.** The registry status document (state, tag, `replaced_by`) is a NEW registry-layer artifact introduced by this RFC; it is never an Evidence field, consistent with ACEF's evidence-vs-assessment boundary ("the Evidence Bundle contains no self-reported compliance claims … preserving the separation between evidence and judgment"; spec §1.0.2/§3.7). No v1.0 bundle is affected (none carry `public_incident_id`); the registry is net-new infrastructure gated behind profile adoption.
+
+**Residual:** the registry's *operating entity* (root + last-resort assigner) is Q3 and stays open; the dereference transport overlaps the §3 "no transport protocol" exclusion and is deferred to a companion registry spec; whether to add distinct `MERGED`/`SPLIT` sub-states or keep CVE's leaner `REJECTED`+`replaced_by`-only modeling is a companion-spec choice (CVE precedent favors fewer states). Q9 must be resolved jointly with Q10 (assigner segmentation) and Q11 (RESERVED visibility).
+
+
+*Primary sources:* https://github.com/CVEProject/cve-documents/blob/master/Glossary.md; https://www.youtube.com/watch?v=PtOFL5k8vWQ; https://cveproject.github.io/cve-schema/schema/docs/; https://www.cve.org/Resources/Media/Archives/Blogs/2020/2020-12-31_All-2020-Archived-Blogs-Excluding-Our-CVE-Story-Blogs.pdf; https://nvd.nist.gov/vuln/vulnerability-status
+
+*Residual unknowns:*
+- The governance/legal constitution of the AIIC Registry (who operates the root and last-resort assigner) is RFC Q3 and remains open; this resolution specifies the id-state mechanism but not the operating entity.
+- CVE JSON 5.x has no explicit MERGED/SPLIT state value — merge/split are expressed via REJECTED + replacedBy plus out-of-band process docs. Whether AIIC should add distinct MERGED/SPLIT registry sub-states or follow CVE's REJECTED+replaced_by-only modeling is a design choice deferred to the companion registry spec; CVE precedent favors the latter (fewer states).
+- The exact registry resolution protocol/transport (how a verifier dereferences public_incident_id to its current state) is out of scope here and overlaps the out-of-scope 'transport protocol' exclusion in RFC §3; a companion registry spec must define it.
+- Interaction with Q10 (federated-mint uniqueness) and Q11 (RESERVED-vs-embargo): RESERVED-as-registry-state is necessary for both, but the assigner-segment/block-reservation decision (Q10) is independent and must be resolved jointly.
+
+*Verifier flagged (folded into the text above):*
+- Citation pin error (not a factual error): the claim 'CVE has exactly three STATES (RESERVED, PUBLISHED, REJECTED); disputed is a separate TAG' is attributed to https://github.com/CVEProject/cve-documents/blob/master/Glossary.md. I could not verify that this Glossary.md file at that path is the authoritative source. The verified primary sources for this exact claim are the CVE Program podcast 'CVE Records States and Tags' (youtube.com/watch?v=PtOFL5k8vWQ, whose description states 'the three states of CVE Record (RESERVED, PUBLISHED, and REJECTED)' and lists DISPUTED among tags) and the NVD Vulnerability Status page (https://nvd.nist.gov/vuln/vulnerability-status). The substance of the claim is CORRECT; only the cited URL is unverified/likely wrong.
+- The proposedRfcText asserts the registry status document is 'a registry/Assessment-layer artifact.' The ACEF spec's evidence-vs-assessment boundary (verified, lines 42-43/469/1383) supports keeping an id's current STATUS out of the Evidence Bundle, but the spec does not define a 'registry layer' nor place a per-id status document in the Assessment Bundle. The registry is net-new infrastructure the RFC proposes; calling it 'Assessment-layer' overstates spec grounding. Flagged as an RFC design proposal, not an existing spec artifact.
+
+
+### Q10 — Federated-mint uniqueness invariant (offline collision avoidance)
+
+_Status: workflow-resolved · adversarial-verify: **sound-with-corrections** · confidence: **high** · **RECONCILED with Q11 in §5.3**_
+
+> **Reconciliation note (Revision 2).** Q10 (add an assigner segment) and Q11 (use a non-sequential, non-enumerable suffix) were partially in tension in Revision 1. Revision 2 adopts a single unified identifier in §5.3 that satisfies **both**: `AIIC-{assigner}-{year}-{random}` — the assigner segment gives each minter a disjoint namespace (Q10's collision-freedom) and the high-entropy random suffix replaces the sequential counter (Q11's embargo-safety/non-enumerability). The body §5.3 governs; the analysis below is retained as the decision record.
+
+**Q10 resolution — adopt (a): assigner-segmented id with one-time central namespace reservation (the GCVE model).**
+
+Decision. Change the public identifier format to embed a globally-registered assigner segment:
+
+  `AIIC-{assigner_id}-YYYY-NNNN…`  →  pattern `^AIIC-[0-9]{4,}-[0-9]{4}-[0-9]{4,}$`
+
+where `{assigner_id}` is a numeric, zero-padded-to-≥4, variable-length id permanently assigned to a registered AIIC assigner (provider, deployer, or the last-resort assigner) by the §5.3 root; `YYYY` is the assignment year; `NNNN…` is the assigner's own offline sequence (≥4 digits, arbitrary length, no capacity cap). This supersedes the §5.2 / Appendix B pattern `^AIIC-[0-9]{4}-[0-9]{4,}$`.
+
+Rationale (grounded in CVE/GCVE allocation; verified). A CVE id is a flat `CVE-YYYY-NNNN…` sequence (≥4 variable digits, post-2014 syntax) with NO per-CNA segment in the id — assigner identity lives in record metadata, not the string (cve.org syntax-change archive). CVE is collision-free for two reasons §5.3 dropped: the central program allocates each CNA a disjoint numeric block (or on-demand reservation), and a central reservation registry (CVE Services / cveawg) records ownership of every reserved id, so a CNA assigning offline only ever uses numbers it already owns. §5.3 as written borrows CVE's federation language but keeps neither mechanism, so two assigners deterministically both mint `AIIC-2026-0001`, and a cross-vendor transferable flaw (where "own scope" is undefined) yields two scoped ids for one flaw; the only proposed id error checks shape (`^AIIC-…$`), not allocation. Rather than re-introduce a per-id central call, make disjointness STRUCTURAL via the assigner segment — the fix the Global CVE Allocation System chose when it federated CVE: `GCVE-<GNA-ID>-<YEAR>-<UNIQUE-ID>`, with the numbered GNA prefix first and `GCVE-0-…` mapping legacy CVE (gcve.eu FAQ / BCP-04, verified). Critically, gcve.eu states GNAs allocate WITHOUT central block pre-allocation — the prefix namespace partition alone guarantees disjointness — which is exactly why option (a) needs no per-id broker. This also restores ACEF's own native federation property: every other ACEF id is a `urn:acef:{pkg|sub|cmp|dat|act|rec}:<uuid>` URN (SDK emits UUIDv4; collision-free under offline minting with no coordination — verified in acef-conventions/v1 schemas); `AIIC` was the lone exception.
+
+Why not (b) or (c). (c) "central broker per mint" contradicts §5.3's mandate to mint offline within scope and is a single point of failure. (b) "central block reservation before offline minting" still needs an assigner identity, adds an online dependency before each minting session, and leaves the legible id silent about who minted it. (a) keeps offline minting fully working — an assigner mints inside its own segment with no per-incident central call. The only central act is a one-time reservation of the assigner-id NAMESPACE (the §5.3 root "administers scopes"), not blocks per incident.
+
+Validator-checkable allocation invariant (normative). A conformant validator MUST, for every `public_incident_id`:
+1. **Shape + segment extraction.** Match `^AIIC-(?P<assigner>[0-9]{4,})-(?P<year>[0-9]{4})-(?P<seq>[0-9]{4,})$`. Failure → new ERROR "public_incident_id malformed or missing assigner segment".
+2. **Assigner registration.** `{assigner_id}` MUST appear in the AIIC assigner registry referenced by the bundle's profile config (analogous to the `namespace_lints` registry pattern already used for ACEF-077, which exists at `src/acef/validation/namespace_lints/`). An unregistered assigner_id is a graceful pass only when no incident profile is declared; under `eu-ai-act-art73-2026` / `oecd-ai-incidents-2025` / the GPAI Art. 55 incident provisions it is a new ERROR "public_incident_id assigner_id not registered".
+3. **Intra-bundle uniqueness.** Reuses the existing within-package duplicate-detection machinery (cf. ACEF-021 "Duplicate URNs" / ACEF-026 "Duplicate record_id", both verified as within-package-only today): two records carrying the same `public_incident_id` → ERROR.
+4. **Cross-bundle uniqueness is guaranteed by construction, not by the validator.** Because each assigner mints only inside its own `{assigner_id}` segment, no two registered assigners can produce the same id; the validator asserts segment-registration and shape, and global disjointness follows. The validator does NOT (and cannot, within a sealed content-addressed bundle) attest global uniqueness — that property is delegated to the registered-assigner invariant, exactly as CVE/GCVE delegate it to disjoint allocation rather than to any per-id check.
+
+Error allocation. The two new codes (malformed/missing assigner segment; unregistered assigner_id) require a new error range: the reserved 070–080 band is exhausted (verified — `errors.py` docstring fixes the reserved range at ACEF-001..ACEF-080 and ACEF-080 is the highest defined code), so per Q24 these are reserved in a new contiguous range (e.g. 081+) pending spec-author approval — do not leave `ACEF-0xx` placeholders.
+
+Residual (defer to Q3/Q9/Q11). This fixes the TECHNICAL uniqueness invariant. WHO operates the assigner registry (Q3 governance), the RESERVED/published/withdrawn lifecycle and merge/split/supersession state (Q9), and the embargoed-id visibility problem (Q11) remain open; the assigner-id registry is the natural host for that mutable state but this resolution does not decide it. Editorial (Appendix D item 9, verified): if Q1 keeps `incident_report` (not a new `incident_card`), retain the `AIIC` prefix for continuity but drop the "Card" expansion in §5.3 and reconcile the AIIC/AIC prose inconsistency.
+
+[Unverified, out of scope for Q10:] the OECD "7 mandatory criteria" referenced elsewhere in this RFC are NOT transcribed here and per Q2 must be taken from the OECD source before the `oecd-ai-incidents-2025` template is authored; Q10's resolution does not depend on them.
+
+
+*Primary sources:* https://www.cve.org/programorganization/Structure; https://www.cve.org/resourcessupport/allresources/cnarules; https://www.cve.org/allresources/cveservices
+
+*Residual unknowns:*
+- The exact width and encoding of the assigner segment (numeric vs base32, fixed vs variable length) must be fixed in the AIIC scheme spec; recommend numeric, variable-length, zero-pad-min-4 to mirror the year-sequence and avoid a baked-in assigner cap.
+- Whether the assigner-id registry is operated by AI Commons as the §5.3 'root' is governance, still open under Q3 — this resolution specifies the technical invariant, not who runs the registry.
+- Interaction with Q9 (id lifecycle/state authority) and Q11 (RESERVED/embargo visibility): the assigner segment makes ids disjoint but the reserved/published/withdrawn state still needs the companion id-state authority Q9 recommends; the assigner-id registry can host that state.
+- The last-resort assigner for transferable cross-vendor flaws still needs a defined trigger (when no single party owns 'scope'); option (a) prevents collision but does not by itself decide WHO mints — that arbitration is Q3/Q9 governance.
+- ACEF-format error numbers are placeholders: the 070-080 band is fully exhausted (verified: ACEF-080 is the ceiling), so the new uniqueness/assigner-registration errors require spec-author approval to open a new range (e.g. 081+), per Q24.
+
+*Verifier flagged (folded into the text above):*
+- Cited source URL 'https://acef.ai/schemas/v1/manifest.schema.json' is the schema's internal $id string, not a verified live/retrievable web page. The UUID-URN federation fact IS verified in the LOCAL repo (acef-conventions/v1/manifest.schema.json, record-envelope.schema.json), but the citation should point to the repo path, not present acef.ai as a retrieved web source.
+- Cited source URL 'https://github.com/acef/spec/blob/main/src/acef/errors.py' was NOT verified to exist as a public GitHub repo. The error-code facts (ACEF-021, ACEF-026, ACEF-077, ACEF-080 ceiling) ARE verified in the LOCAL file /Users/chandlervaughn/Development/ACEF/src/acef/errors.py, so the claims hold; the public URL itself is unverified and should be cited as a local repo path.
+- Minor: the proposed validator step 3 calls intra-bundle public_incident_id uniqueness a 'mirror of ACEF-026'. ACEF-026 is specifically 'Duplicate record_id within the package' and public_incident_id is a payload field, not a record_id. The mechanism analogy (within-package duplicate detection, cf. ACEF-021/026) is correct but the precise code-mirror framing is loose.
+- Minor/non-load-bearing: the schemas enforce a generic hex-UUID regex pattern, not a strict RFC-4122 version-4 nibble check. The SDK generates uuid4, so 'UUIDv4' is accurate for emitted ids, but the schema does not structurally enforce the v4 marker. Does not affect the collision-free-under-offline-minting argument.
+
+
+### Q11 — Reserved-but-unpublished id state vs embargoed incident
+
+> **Reconciliation note (Revision 2).** Reconciled with Q10 into the single §5.3 identifier `AIIC-{assigner}-{year}-{random}` with lifecycle states RESERVED → PUBLISHED → REJECTED → DISPUTED. The high-entropy `{random}` suffix delivers the non-enumerability Q11 requires; the `{assigner}` segment delivers Q10's collision-freedom. Note the verification correction below: a CVE RESERVED id is in fact publicly visible, so ACEF deliberately diverges by keeping a RESERVED AIIC id non-public and non-enumerable. The body §5.3 governs.
+
+_Status: workflow-resolved · adversarial-verify: **sound-with-corrections** · confidence: **high**_
+
+Q11 resolution - RESERVED visibility state, non-enumerable id, projection gating (hybrid a+b). Adopt (a) and (b) together and correct the id format.
+
+1. Non-enumerable id (format fix). The AIIC suffix MUST be drawn from a non-sequential, collision-resistant space, NOT the flat zero-padded counter implied by ^AIIC-[0-9]{4}-[0-9]{4,}$. Grounding (verified): contrary to this RFC's CVE framing, a CVE id in the RESERVED state is PUBLICLY VISIBLE - when allocated it is added to the public CVE List as a placeholder, only the details are withheld (cve.org FAQ; NVD omits RESERVED records from its dataset, so numbering gaps are a downstream artifact, not a confidentiality channel). The CVE Program explicitly states it does not support non-public aspects of coordinated disclosure (embargoes/NDAs) and does not define or require embargo periods (cve.org CVE-and-CVD page). CVE tolerates a visible reserved id only because its sequence is non-contiguous, block-allocated, and unbound to a product. A flat sequential AIIC counter has none of those mitigations and would leak existence and timing. (Also subsumes part of Q10: a wide random space removes collisions without per-assigner blocks.)
+
+2. RESERVED visibility state owned by the companion id-state authority (depends on Q9(a)). Embargo confidentiality is a PROCESS property, not an identifier property - FIRST multiparty guidelines v1.1 (in the absence of clear evidence of prior public disclosure, stakeholders should provide a reasonable embargo period to vendors) and CERT/CC (default 45 days after the initial report to the vendor; CVE id assigned before publication and shared privately during coordination). Because the AIIC id is frozen inside an immutable, content-addressed Evidence Bundle, the bundle cannot own a mutable RESERVED-to-PUBLISHED transition; that state MUST live in the Q9 companion id-state authority.
+
+3. Projection gating (the part the bundle CAN enforce). While coordinated_disclosure.status is private/coordinated (or embargo_until is future), public_incident_id MUST NOT appear in cleartext in any public projection. The carrying record's envelope confidentiality MUST be regulator-only (verified enum: public/redacted/hash-committed/regulator-only/under-nda), satisfying the eu-ai-act-art73-2026 requiredness with a regulator-visible reserved reference. IMPLEMENTATION GAP: the existing redaction.py hash-commits the WHOLE payload (redact_record() replaces the entire payload with one sha256 commitment and flips confidentiality to hash-committed); it does NOT do field-level redaction. There are therefore exactly two conformant options and the RFC must pick one: (i) carry the reserved id ONLY on a regulator-only record and emit NO public projection while embargoed - no public dedupe link until lift, but no new code needed; or (ii) preserve a public hash-committed dedupe link while embargoed, which REQUIRES new per-field commitment machinery - the field-level/selective-disclosure path the spec defers and Q23 flags as scope creep. The earlier draft's zero-new-machinery claim is incorrect and is struck. The cleartext id is promoted to a public projection only when status is public AND embargo_until has elapsed. A new validator rule (ERROR; reserve a code in the Q24 range) fires when public_incident_id is present in cleartext on a record whose confidentiality is public while status is private/coordinated or embargo_until is future.
+
+Rejected alternatives. Pure (a) as originally worded (reserve like CVE, non-public until lift) is rejected: reserved CVE ids are public, so the CVE analogy alone does not protect the embargo. Pure (b)/(c) (internal-ref-only as the sole answer) is rejected: it severs the cross-database linkage the profile exists to provide.
+
+Residual unknowns (do not invent): unverified - whether Art. 73 confidential reporting permits the authority submission to carry the regulator-only reserved id in cleartext, or whether even the authority copy must be tokenized - depends on the Commission's not-yet-public Art. 73 template (Appendix C). The exact non-enumerable suffix encoding is deferred to Q10. Whether a hash-committed reserved id is sufficiently non-correlatable depends on the Q20 entropy analysis. Contingent on Q9 resolving to a companion id-state authority; if Q9 resolves to ids-never-change-state, Q11 falls back to option (c) and option (3)(ii) is not implementable.
+
+
+*Primary sources:* https://www.cve.org/ResourcesSupport/AllResources/CNARules; https://www.cve.org/ResourcesSupport/FAQs; https://www.cve.org/Resources/Media/Archives/OldWebsite/cve/identifiers/tech-guidance.html; https://nvd.nist.gov/vuln/vulnerability-status; https://www.first.org/global/sigs/vulnerability-coordination/multiparty/guidelines-v1.1; https://certcc.github.io/CERT-Guide-to-CVD/tutorials/coord_certcc/
+
+*Residual unknowns:*
+- Whether Art. 73 confidential reporting permits the market-surveillance authority submission to carry the regulator-only reserved id in cleartext, or whether even the authority-facing copy must be tokenized, depends on the European Commission not-yet-public Art. 73 reporting template field set (Appendix C flags this as unverified; must not be invented).
+- The exact non-enumerable id format for AIIC (random base32 suffix vs UUIDv4-derived digits) is a downstream of Q10 uniqueness resolution and is not fixed here; this resolution only requires that the suffix be non-sequential and collision-resistant.
+- Whether a hash-committed reserved id in the public projection is sufficiently non-correlatable, or whether even the hash commitment should be withheld until embargo lift, depends on the Q20 dedupe-key entropy analysis (low-entropy inputs could let an attacker brute-force the committed id).
+- The promotion mechanism RESERVED to PUBLIC cannot live in the immutable bundle and depends entirely on the Q9 companion id-state authority being defined; if Q9 resolves to ids never change state, this resolution is not implementable and Q11 must fall back to option (c) internal-ref-only.
+
+*Verifier flagged (folded into the text above):*
+- OVERSTATED and VERIFIED FALSE against the repo: zero new machinery / no new fields / reuse existing ACEF machinery. src/acef/redaction.py redact_record() (lines 244-258) hash-commits the ENTIRE canonicalized payload, replacing it with a single _commitment sha256 over the whole payload. It does NOT do field-level redaction. You cannot carry the id only as a hash-committed commitment while withholding the rest of the payload; the function yields one opaque whole-payload commitment with no separately-retrievable public_incident_id commitment, so it cannot preserve the Q6 dedupe link as claimed. Field-level/selective disclosure is EXPLICITLY DEFERRED by the spec and flagged as scope creep in this RFC's own Q23 (line 258). Projection gating that keeps a public link therefore needs NEW machinery.
+- MINOR IMPRECISION: CERT/CC typically a 45-day embargo from initial date of attempted contact. Verified CERT/CC policy is publish 45 days after the INITIAL REPORT TO THE VENDOR (adjustable for active exploitation). Substantively correct, wording slightly loose.
+- UNVERIFIABLE BY DESIGN (answer flags it): Art. 73 reports are confidential not public, and whether the authority copy may carry the reserved id in cleartext, depend on the Commission's not-yet-public Art. 73 template. Retained as unverified in the RFC text.
+
+
+### Q12 — Schema target directory and concrete core_version gate
+
+_Status: workflow-resolved · adversarial-verify: **sound** · confidence: **high** · **corrected for the partition in Revision 3**_
+
+> **Reconciliation note (Revision 3).** Any text below instructing authoring of `v1.1/incident_report.schema.json` as "the v1.0 payload plus the §5.2 optional fields" is superseded by the partitioned architecture: the §5.2 fields belong on the **new `incident_card`** schema, and the v1.1 `incident_report` overlay adds **only** the private `card_source` block (§5.1, Appendix B). The frozen `v1/incident_report` payload is unchanged. The body §5.10/Appendix B govern.
+
+Q12 resolution - Schema location and version gate. RESOLVED: option (a), with the v1.x naming removed throughout.
+
+The normalized incident fields and the severity vector ship under the existing acef-conventions/v1.1/ directory and share RFC-0001 core_version 1.1.0 gate. There is no new minor (1.2.0) and no new directory.
+
+Concretely:
+- Author acef-conventions/v1.1/incident_report.schema.json, a self-contained extended copy of the v1.0 payload plus the section 5.2 optional fields, and acef-conventions/v1.1/severity_vector.schema.json. Both use id https://acef.ai/schemas/v1.1/<name>.schema.json.
+- Do not edit acef-conventions/v1/incident_report.schema.json. v1/ is FROZEN (boundaries.md: v1.0 schemas FROZEN, must be byte-identical pre/post v0.4 work, Use acef-conventions/v1.1/ for new schemas, per VAL-SCHEMA-010 and VAL-REGRESSION-001).
+- Replace every v1.x reference in this RFC (header line, sections 5.1, 5.2, 5.4, 5.10, 6, and the Appendix B id) with the concrete v1.1. This closes Appendix D item 3.
+
+Rationale, grounded in the reference implementation: the validator selector (src/acef/schemas/registry.py, schema_version_for_core_version) maps core_version 1.0.x to the v1 token and every minor at or above 1, including a hypothetical 1.2.0, to the v1.1 token (asserted by tests/unit/test_version_selector.py line 56: schema_version_for_core_version of 1.2.0 equals v1.1). Option (b) would therefore not yield a separate directory without first rewriting that selector and its committed test, for no functional gain: the incident profile is purely additive, and the section 3.1.4 minor-version additivity rule already permits multiple feature families to co-inhabit one minor so long as every addition is optional-at-schema and conditional-required-at-validator and v1.0 bundles validate clean. This is the pattern RFC-0001 used for event_log and transparency_disclosure: pre-existing v1.0 record types needing extension were re-copied and extended into v1.1/ (each with id under v1.1) while the frozen v1/ copies stayed byte-identical; the v1.1 to v1 fallback chain (VERSION_FALLBACK maps v1 to v1 only, and v1.1 to v1.1 then v1) resolves only the unchanged record types from v1/. incident_report is structurally identical and follows the same route.
+
+Backward compatibility (confirmed in code): a v1.0 incident_report bundle declares core_version 1.0.x; the selector returns the v1 token; the v1 token has no fallback into v1.1 (the version-gate guarantee per VAL-VALIDATION-002), so the bundle loads the frozen v1/incident_report.schema.json and never picks up the new optional fields. The six v1.0 golden bundles under tests/conformance/golden-bundles/ are unaffected and continue to validate clean; this RFC asserts they remain untouched. This also supplies the assertion flagged missing in Appendix D item 15: the backward-compat regression vector runs a v1.0 bundle through the v1-token schema set under core_version 1.0.x, fixes the gate value 1.1.0 for the new fields, and asserts the frozen golden bundles are unchanged.
+
+Deferred (out of scope for this resolution): the actual field set of v1.1/incident_report.schema.json and v1.1/severity_vector.schema.json remains gated on Q4 (the ACEF-SEV metric set) and Q13 (severity versus severity_vector reconciliation). This resolution fixes only the schema directory and the version gate.
+
+
+*Residual unknowns:*
+- The RFC text in Appendix D item 3 already flags the 'v1.x' naming as an editorial defect to reconcile; this resolution fixes the directory/gate but the actual schema files (v1.1/incident_report.schema.json with merged v1.0 fields + new optional fields, and v1.1/severity_vector.schema.json) still have to be authored and is gated on Q4 (the ACEF-SEV metric set) and Q13 (severity vs severity_vector reconciliation).
+- Whether the maintainers want the eventual v1.1/incident_report.schema.json to be a full self-contained copy of all v1.0 fields plus extensions (the event_log/transparency_disclosure pattern) versus a $ref-composition over the frozen v1/ schema; the existing v1.1 precedents are full copies, so the self-contained-copy approach is recommended for consistency, but this is a not-yet-ratified style choice.
+- If a genuinely separate conformance minor (1.2.0) is ever wanted for marketing/conformance-claim reasons, registry.py's selector and test_version_selector.py:56 would need to be extended to route 1.2.x to a v1.2 token+directory; that is out of scope for this RFC and not warranted by the additive nature of the incident profile.
+
+*Verifier flagged (folded into the text above):*
+- none - all load-bearing claims verified against primary repo files
+
+
+### Q13 — Authority/consistency rule between required severity enum and optional severity_vector
+
+_Status: workflow-resolved · adversarial-verify: **sound-with-corrections** · confidence: **high** · **CLOSED by Revision 2/3: §5.4 has the normative band() table**_
+
+> **Reconciliation note (Revision 3).** Any residual below saying the band cutpoints or score scale are "unresolved until Q4" is superseded: §5.4 now fixes a direct metric-combination → enum `band()` table (no numeric 0.0–10.0 scale), checked by ACEF-088. The §5.4 table governs.
+
+**Q13 resolution — `severity` is a deterministic projection of `severity_vector`; the vector is authoritative where present.** Adopt option (a). Repo-verified: `acef-conventions/v1/incident_report.schema.json` (L7, L25-29) makes `severity` REQUIRED and a closed enum (`critical|major|minor|informational`); that file is in FROZEN `v1/` and is absent from `v1.1/`, so the extension lands in a new concrete minor (see Q12), never an edit to the frozen enum.
+
+**Rule.** Where a record carries a parseable `severity_vector`, the vector is the authoritative, recomputable source of technical severity: the vector yields a deterministic `ACEF-SEV` score, and the score projects to a coarse band via a fixed table (the CVSS-v4.0 model — vector → numeric score → optional qualitative band, where the band is a deterministic function of the score and the standard is explicit that this is "technical severity," not risk; see https://www.first.org/cvss/v4.0/specification-document). `severity` MUST equal that projected band. When BOTH `severity` and `severity_vector` are present, the reference validator MUST compute the band and emit a consistency ERROR if `severity` does not equal it. The check fires ONLY when both fields are present: records with `severity` and no vector — every v1.0 bundle and all vector-less `incident_report` records (e.g. GPAI Art. 55 / NIST MANAGE) — keep `severity` as a free-standing required coarse label and never trip the rule, preserving backward compatibility (verified: `test-vectors/nist-rmf/govern-map-measure-manage-pass.acef/records/incident_report.jsonl` carries `"severity":"minor"` with no vector). This is implementable with existing machinery: `src/acef/validation/cross_record.py` already runs conditional cross-record consistency rules that emit a specific code (`enforce_tenant_uniformity`→ACEF-075, `enforce_redaction_policy_version`→ACEF-074); a severity↔vector projection check is the same pattern. Options (b) and (c) are rejected: (b) lets `severity:minor` sit on a catastrophic vector undetected, defeating the auditability the vector exists for; (c) cannot deprecate the enum (FROZEN `v1/`, serves vector-less records) nor the vector (the profile's load-bearing recomputable artifact).
+
+**Error code.** The consistency code is RESERVED, not assigned. Verified: ACEF-070 through ACEF-080 are all assigned in `src/acef/errors.py` (080 is the ceiling); ACEF-081 does NOT yet exist. A new code requires Q24 spec-author approval of a new band. Do NOT hard-code `ACEF-081` until Q24 is granted; treat the number as illustrative.
+
+**Boundary reconciliation (RFC §3 / §5.4 editorial fix — Appendix D item 4).** The contradiction is internal to THIS RFC, not the spec. RFC §5.4 (L121) states "the Evidence Bundle never carries that [derived severity] number" and RFC §3 routes "a single severity score, a risk rating, or a 'top failure modes' ranking" to the Assessment Bundle — yet the pre-existing REQUIRED Evidence field `severity` is itself a coarse derived rating in Evidence. Reconcile by narrowing the RFC claim: *The Evidence Bundle carries no compliance verdict, no `provision_status`, and no probability-weighted risk rating — those are Assessment-layer outputs (spec §3.7; spec L469 "No compliance status in the Evidence Bundle," spec L881 "No provision_status in the Evidence Bundle"). It MAY carry a coarse, recomputable technical-severity classification: the required `severity` enum is exactly such a classification — the deterministic band-projection of `severity_vector`, the direct analog of CVSS v4.0's optional qualitative rating — and is legitimate Evidence. The recomputable `severity_vector` itself is Evidence; the single numeric `ACEF-SEV` score derived from it remains Assessment-only. What stays Assessment-only is any risk rating or "top failure modes" ranking that weights severity by probability or compliance consequence (e.g. the §5.9 Danger Score = frequency × severity).* The spec itself already places `severity` inside `incident_report` (spec L225) and `risk_register` (spec L76) as Evidence, confirming a recorded coarse classification is in-Evidence by design.
+
+**Residuals.** The concrete error number depends on Q24 (new error band). The exact band cutpoints depend on Q4 (the `ACEF-SEV:1.0` metric set and score function); the projection table is finalized once Q4 fixes the score scale, including whether probabilistic prevalence (RFC §5.4, L120) influences the band — it MUST NOT, to keep "severity is not risk" (RFC §5.4, L119). [unverified until Q4/Q24 resolve: cutpoint values, whether ACEF-SEV adopts a 0.0–10.0 scale, and the assigned code number.]
+
+
+*Primary sources:* https://www.first.org/cvss/v4.0/specification-document
+
+*Residual unknowns:*
+- Concrete error-code number is unresolved: ACEF-070..080 are exhausted, so the consistency code depends on Q24 spec-author approval of a new band (illustrated here as ACEF-081, not authoritative).
+- The exact ACEF-SEV:1.0 metric set and its deterministic scoring function are not yet defined (Q4); the band table that projects a vector score to the {critical|major|minor|informational} enum cannot be finalized until Q4 fixes the metric list and score formula.
+- The four-band enum {critical|major|minor|informational} must be mapped onto whatever numeric band cutpoints ACEF-SEV produces; whether ACEF adopts a CVSS-style 0.0-10.0 scale or a different range is undecided (Q4), so the exact cutpoints are TBD.
+- Interaction with §5.4's optional probabilistic-prevalence expression: whether prevalence influences the projected band (severity-if-realized vs. frequency-weighted) needs Q4 to confirm the projection uses magnitude-only, consistent with the stated 'severity is not risk' constraint.
+
+*Verifier flagged (folded into the text above):*
+- Attribution error: the answer says the sentence 'the Evidence Bundle never carries any derived single severity number' lives in 'the spec §3/§5.4' / '§3/§5.4'. Verified: that wording is in RFC-0002 itself (§3, line 52: derived 'single severity score, a risk rating' belong in Assessment; §5.4, line 121: 'the Evidence Bundle never carries that number'), NOT in planning/ACEF-Spec-Outline-v0.1.md. A grep of the spec for 'derived single severity'/'single severity number' returns zero hits. The §3/§5.4 references are RFC sections; the self-contradiction is internal to the RFC, not the spec. The proposedRfcText must say it is editing RFC §3/§5.4, not spec text.
+- Imprecise spec-line attribution: 'spec lines 60/469/881 bar pass/fail, provision_status, and self-reported compliance claims.' Verified line 469 ('No compliance status in the Evidence Bundle ... provision status, pass/fail') and line 881 ('No provision_status in the Evidence Bundle') DO support that. But line 60 is the 'Open boundary enforcement' design-principle row (Apache 2.0 / CC-BY licensing + namespaced vendor extensions); it does not bar pass/fail. The 'Evidence and assessment are separate artifacts' principle is at spec line ~57, not 60. Cite lines 469 and 881 for the boundary; drop line 60.
+- Framing nuance (not an invented fact): the answer says CVSS makes 'the vector authoritative.' The verified FIRST CVSS v4.0 chain is vector -> numeric score -> optional qualitative rating; the rating is a deterministic function of the score, which is computed from the vector. Substantively correct, but the authoritative artifact in CVSS is the vector+score; phrase the projection as vector-score-band to be exact.
+
+
+### Q14 — Reconcile incident_type / harm_domain / taxonomy_crosswalk (canonical harm core)
+
+_Status: workflow-resolved · adversarial-verify: **sound-with-corrections** · confidence: **high**_
+
+Q14. Adopt (a): one canonical normalized harm core (causality, realization, harm_class as closed ACEF enums) that every normalized card MUST populate; demote crosswalk members to optional derived projections. harm_class keys to EU AI Act Art. 3(49)(a)-(d). incident_type and severity stay unchanged in the frozen v1 schema; the extension lands in v1.1. A present crosswalk member contradicting the derived value emits one new code (placeholder ACEF-081, gated on Q24) via enforce_harm_core_consistency in the v1.1 cross-record phase. Reject (b): no NxN tables, no per-pair codes; the DSL has only 10 single-field operators.
+
+
+*Primary sources:* https://cwe.mitre.org/documents/cwe_usage/mapping_navigation.html
+
+*Residual unknowns:*
+- The exact closed code list and value semantics of the new `harm_core.harm_class` taxonomy (harm-core-taxonomy.json) must be authored against EU Art. 3(49)(a-d) and a small AI-harm domain set; this RFC fixes the design (closed, ACEF-owned, derivation-source), not the final code list. Coordinate with Q2 (OECD criteria) and the unstable CSET-Severity / NIST-final-name warnings in Appendix C.
+- The one-directional core→scheme derivation tables (core harm_class → nist_ai_600_1 category, → cset harm_type, → mit_domain) are necessarily lossy/partial because target schemes drift (Appendix C) and are one-to-many. The RFC must state that derivation MAY be a partial map and that an UNMAPPABLE core value leaves the corresponding crosswalk member absent (not an error) — only a PRESENT member that CONTRADICTS the core is an error. Exact mapping rows are an authoring task gated on Q2/Appendix-C verification.
+- Whether `harm_class` should structurally subsume `tangibility` (since Art.3(49) tangible-vs-intangible is one of its keys) or keep `tangibility` as a separate derived field needs an editorial decision tied to Appendix D items 7 and 14; recommendation leans to folding tangibility INTO harm_class to eliminate the duplicate storage location.
+- The concrete new error code number depends on Q24's resolution to open the 081-090 band (spec-author approval required); this resolution assumes a single code (placeholder ACEF-081) is allocated there.
+
+*Verifier flagged (folded into the text above):*
+- nlpaics-1.4 quote fabricated; paraphrase.
+- ACEF-081 placeholder pending Q24.
+- Removed draft fields are draft RFC not frozen schema.
+
+
+### Q15 — Closed per-member-versioned crosswalk subschemas vs additionalProperties:true; x-* interaction
+
+_Status: workflow-resolved · adversarial-verify: **sound-with-corrections** · confidence: **high** · **naming reconciled in Revision 4/5**_
+
+> **Reconciliation note (Revision 5).** Any "`scheme_version`" naming below is superseded: the body standardizes the version-pin field name on **`edition`** across all crosswalk members (`mit_domain` additionally keeps `taxonomy_version` as MIT's own member-specific label). §5.5 governs.
+
+**Q15 resolution — adopt (a): closed, version-pinned per-member crosswalk subschemas; extensions only via `x-*`.**
+
+`taxonomy_crosswalk` and `coordinated_disclosure` MUST NOT be `additionalProperties: true`. Each defined scheme member (`oecd`, `eu_ai_act`, `cset`, `nist_ai_600_1`, `mit_causal`, `mit_domain`, `aiid`, `stix`) gets a typed subschema with its own `additionalProperties: false`, and each populated scheme member carries a REQUIRED `scheme_version` string pinning the edition of the foreign taxonomy it encodes (generalizing today's `mit_domain.taxonomy_version`, e.g. `mit_domain.scheme_version: "2025-04"`; other per-member tokens such as `nist_ai_600_1.scheme_version`, `cset.scheme_version`, `stix.scheme_version` are [illustrative] and MUST be transcribed from each scheme's primary source before the subschemas are authored). Conformance — including the §7 "missing mandatory members" ERROR and per-member type checks (e.g. `aiid.incident_id` typed as integer per Appendix A) — is evaluated ONLY over these closed core members. Both objects close with the repo's established X6 pattern (v1.1/manifest.schema.json:96–102): `patternProperties: { "^x-[a-z0-9-]+/?$": { "type": "object" } }` plus `additionalProperties: false`. Unknown keys are therefore rejected unless `x-*`-namespaced; any `x-*` member is accepted, safely-ignorable, preserved on round-trip, and MUST NOT affect conformance (spec §3 extension semantics, line 1386; ACEF-053, line 1271). The §7 missing-mandatory-members ERROR is RETAINED — it is now implementable.
+
+Rationale (repo-verified): payload conformance is driven entirely by per-record-type JSON Schema validation (`src/acef/validation/schema_validator.py::validate_record_schemas`), and incident_report.schema.json:148 plus RFC Appendix B lines 334/346 set `additionalProperties: true` on both objects. On an open object the validator emits zero diagnostics for a misspelled member or a wrong-typed `aiid.incident_id`, so the §7 ERROR and any type check are structurally impossible — option (b) keeps that bug and abandons the interoperability guarantee. The closure mechanism already exists in-repo (the X6 vendor-namespace container) so reuse is zero new machinery. Closing the object and channeling all extensions through `x-*` is the only design consistent with ACEF's normative rule (spec line 1386) that stripping all `x-*` fields and re-canonicalizing yields a valid package with identical conformance outcomes; an open core object would let a producer place a conformance-affecting key un-prefixed inside a core object, defeating that invariant.
+
+Peer-framework precedent (verified against primary sources, with one attribution corrected): STIX 2.1's Extension Definition Policy (§3.1) normatively requires extension object schemas to set `additionalProperties`/`unevaluatedProperties` to `false` (closed objects); STIX objects additionally carry a `spec_version` under the base STIX 2.1 spec [note: `spec_version` is a base-spec object property, NOT an EDP-specific schema mandate — do not cite the EDP as the source of the version requirement]. CVSS v4.0 pins its version inline as a leading token (`CVSS:4.0/…`, verified at first.org), the precedent the RFC mirrors with `ACEF-SEV:1.0/`. CVE JSON 5.0 is a closed, schema-constrained core with vendor extension confined to namespaced containers (verified at cveproject.github.io). A per-member `scheme_version` is mandatory because Appendix C documents that every scheme drifts (MIT 23→24 subdomains per RFC:142/385; NIST AI 600-1 draft vs final; CSET Severity planned-not-built); without it a crosswalk member is unverifiable evidence.
+
+Backward compatibility: the closed subschemas land only on the new concrete-minor `incident_report` schema (see Q12 — NOT frozen `v1/`) and become conditional-required only when a profile (`eu-ai-act-art73-2026` / `oecd-ai-incidents-2025` / GPAI Art. 55) is declared; v1.0 bundles with no `taxonomy_crosswalk` and no profile validate clean (spec §8.1 version-gating).
+
+Residual (do not invent): the per-member field lists and the exact `scheme_version` token vocabulary (OECD criteria, EU Art. 3(49) trigger encoding incl. the "widespread" modifier per Appendix D #6, CSET axes, NIST final category names, STIX `object_refs` resolution) MUST be transcribed from primary sources before the subschemas are authored — these are the Appendix C / Q2 / Q27 verification items. This resolution fixes the closure-and-versioning contract, not the member contents. The now-implementable §7 error must be made deterministic across validators via the Q16 cross-profile requiredness resolution.
+
+
+*Primary sources:* https://docs.oasis-open.org/cti/stix-edp/v1.0/stix-edp-v1.0.html; https://www.first.org/cvss/v4.0/specification-document
+
+*Residual unknowns:*
+- The exact per-member subschema field lists (OECD criteria identifiers, EU Art. 3(49) trigger encoding incl. the 'widespread' modifier per Appendix D #6, CSET axes, NIST AI 600-1 final category names, STIX object_refs resolution) must be transcribed from primary sources before the subschemas are authored — Appendix C/Q2/Q27 verification items; this resolution fixes the closure+versioning design, not the member contents.
+- Whether scheme_version is universally REQUIRED on every populated member or only on schemes with multiple live editions — recommend REQUIRED on all to avoid silent drift, but a scheme with a single canonical edition (e.g. EU Art. 3(49) letters) may take a fixed/const value; spec author to confirm per member.
+- Concrete minor and core_version gate for the new incident_report schema is deferred to Q12 (this answer assumes a concrete minor directory, not v1.x/).
+- Interaction with cross-profile requiredness (Q16): the §7 'missing mandatory members' error, now implementable, still needs the union-vs-independent resolution and per-profile attribution from Q16 to be deterministic across validators.
+
+*Verifier flagged (folded into the text above):*
+- STIX EDP attribution overreach: the answer states (in both rationale and proposedRfcText) that 'STIX 2.1's Extension Definition Policy mandates additionalProperties:false AND a required spec_version' on extension schemas. VERIFIED against the OASIS STIX-EDP v1.0 (docs.oasis-open.org/cti/stix-edp/v1.0/): EDP §3.1 DOES normatively require object definitions to set additionalProperties or unevaluatedProperties to false. But the EDP does NOT mandate a required 'spec_version' field on extension JSON Schemas. 'spec_version' is a general STIX 2.1 object common property (required for any SDO/SRO under the base spec), not an EDP-specific extension-schema requirement. The closed+versioned framing survives, but the specific attribution of 'required spec_version' to the EDP is a conflation and must be corrected.
+- Illustrative version tokens presented as if authoritative: nist_ai_600_1.scheme_version: '2024-07', cset.scheme_version: 'v1', stix.scheme_version: '2.1', mit_domain.scheme_version: '2025-04'. Only mit_domain.taxonomy_version ('2024-08'|'2025-04') is grounded in the RFC (Appendix A line 136). The others are plausible illustrations, NOT transcribed from primary sources; the answer's own residual list correctly fences them, but the proposedRfcText presents them inline without an [illustrative] marker.
+- aiid.incident_id MUST be an integer: SUPPORTED by RFC Appendix A line 137 (aiid: { incident_id: integer }) — this is a repo-internal design claim, not an external AIID API guarantee. It is sound as an RFC design decision but is not independently verified against the AIID schema; left as-is since it is the RFC's own sketch.
+
+
+### Q16 — Multi-profile union/intersection requiredness + per-profile error attribution
+
+_Status: workflow-resolved · **re-verified against the repository in Revision 2** · confidence: **high**_
+
+> **Re-verification note (Revision 2).** The load-bearing claim is confirmed in the repo: `src/acef/validation/engine.py:563` evaluates each declared profile in an independent loop (`for profile_id in profile_ids:`) and keys every roll-up/result to a single `profile_id` (`engine.py:432–454`). The union of mandatory sets is therefore the emergent result of independent per-profile evaluation with no order-dependent cross-profile merge, and a missing-member error can carry the offending `profile_id` + RFC 6901 `path` without a model change. Incorporated normatively in §5.7 / §7 (ACEF-081).
+
+**Q16 resolution — RESOLVED: union of declared profiles' mandatory sets, with per-profile-attributed errors.**
+
+Requiredness for crosswalk members (and any other profile-gated field) is the UNION of the mandatory sets of all declared profiles. A member required by ANY declared profile is required; one profile's silence never masks another profile's requirement.
+
+Attribution is per-profile and per-member. The validator does NOT emit a single aggregated "crosswalk incomplete" error. It emits one error per (profile, missing-member) pair, where the error carries:
+- the offending crosswalk member as an RFC 6901 JSON Pointer in the error `path` (e.g. `/taxonomy_crosswalk/oecd`), and
+- the mandating `profile_id` in the error `details` (e.g. `{"profile_id": "oecd-ai-incidents-2025"}`).
+
+This is not new machinery. The reference validator already evaluates each declared profile in an independent loop (`engine.py`, `for profile_id in profile_ids`) and keys every roll-up and result to a single `profile_id` (`rollup.compute_provision_outcome`; `ProvisionSummary.profile_id`). The union is the emergent set produced by independent per-profile evaluation with NO global cross-profile aggregation step. `ValidationDiagnostic` already exposes `code`/`message`/`path`/`details`, so attribution requires no model change.
+
+Rationale (determinism): a globally-aggregated requiredness error would be order-dependent — two conformant validators could blame different profiles or merge-sort the failure list differently, violating the spec §3.7 reproducibility mandate and breaking Assessment-Bundle determinism for triple-profiled incidents. Because each per-profile error is self-identifying, the result set is independent of profile declaration/evaluation order. This mirrors the CWE/CVE precedent of attributing a mapping obligation to the specific catalog that requires it (Appendix C), not to a merged super-requirement.
+
+Normative consequences:
+1. Each template (`eu-ai-act-art73-2026`, `oecd-ai-incidents-2025`, GPAI Art.55 provisions) MUST declare its own mandatory crosswalk members as explicit DSL rules. The validator computes requiredness as the union of these per-template declarations; it MUST NOT introduce any cross-profile merge that is not order-stable.
+2. The §7 "profile declared but `taxonomy_crosswalk` missing the profile's mandatory members" error MUST carry `path` (member pointer) + `details.profile_id`. It is allocated a concrete code in the new band requested by Q24 (placeholder `ACEF-08x`; exact number assigned with Q24).
+3. In multi-subject bundles the error attribution triple is (profile_id, member_path, subject_scope).
+
+Dependency: this resolution is only IMPLEMENTABLE if Q15 resolves to closed per-member crosswalk subschemas — on open `additionalProperties:true` objects a missing-vs-misspelled member is undetectable. Q16(a) is therefore conditional on Q15(a).
+
+Residual unknown (not invented here): the concrete union CONTENT cannot be finalized until the OECD mandatory-7 criteria (Q2) and the EU Art.73 template field names (Appendix C, "verify before normative") are transcribed from primary sources. This RFC fixes the resolution mechanism, not the per-template member lists.
+
+
+*Primary sources:* https://cwe.mitre.org/data/definitions/1435.html
+
+*Residual unknowns:*
+- Depends on Q15 resolving to closed per-member crosswalk subschemas; on open `additionalProperties:true` objects the §7 'missing mandatory member' error is unimplementable (cannot distinguish missing from misspelled), so the union rule cannot fire reliably until Q15(a) is adopted.
+- Each new template (eu-ai-act-art73-2026, oecd-ai-incidents-2025, GPAI Art.55 provisions) must enumerate its own mandatory crosswalk members as explicit DSL rules; the exact OECD mandatory-7 member list is still Q2 (unverified, must be transcribed from the OECD PDF) and the EU Art.73 template field names are unverified (Appendix C), so the concrete union content cannot be fixed until those are sourced.
+- The concrete error code for 'profile declared but crosswalk missing mandatory member' is still unallocated — §7 placeholders are ACEF-0xx and Q24 notes the 070-080 band is exhausted, so this needs a spec-author-approved code in a new band (e.g. 081-090).
+- Multi-subject bundles already key roll-up per subject_scope; the union-with-attribution rule must compose with per-subject evaluation so the error names (profile_id, member_path, subject_scope) as a triple — verified the model supports subject_scope but no test vector yet exercises triple-profile × multi-subject simultaneously.
+
+
+### Q17 — Legal-privilege / discoverability as a deciding input to Q1
+
+_Status: RESOLVED (via Q1) — design-reasoning + US/EU privilege doctrine_
+
+Privilege/work-product waiver is adopted as a first-class driver of Q1, and it points the same way the redaction-collision analysis does: **partition**. Under US doctrine, voluntarily disclosing candid internal analysis to an adversary or to a regulator can waive attorney-client privilege (including subject-matter waiver of related communications) and forfeit work-product protection; placing `root_cause_analysis`, `lessons_learned`, `corrective_actions`, and `impact_assessment` on the SAME record that becomes a mandatory Art. 73 / Art. 55 public-or-regulatory submission therefore risks converting the internal post-mortem into discoverable, admissible litigation evidence. The "one record, no divergence" property Q1 praised is precisely the legal hazard.
+
+Resolution: Q1 is resolved to a partitioned model (`incident_report` private + a derived public `incident_card`) for this reason in addition to the Q23 redaction-collision reason. The candid analysis fields stay on the private `incident_report` and are excluded by default from the `incident_card` via the Q8 disclosure-time projection. This does not, by itself, *guarantee* privilege (privilege is jurisdiction- and fact-dependent), but it removes the co-location hazard that would otherwise waive it wholesale.
+
+
+*Sources:* US work-product doctrine / Fed. R. Civ. P. 26(b)(3); attorney-client subject-matter waiver on disclosure (general doctrine, not case-cited here)
+
+*Residual unknowns:*
+- Privilege preservation by partition is jurisdiction-dependent; counsel review and a stated registry-controllership model (Q19) remain required.
+- Whether a regulator's confidentiality guarantee (Art. 73 reports are confidential to the market-surveillance authority) independently preserves privilege is a legal question outside ACEF's scope.
+
+
+### Q18 — Multi-jurisdiction reporting clocks beyond EU Art. 73 (US, China, Korea)
+
+_Status: RESOLVED — web-research (Perplexity, primary/official sources), date-stamped 2026-06-08_
+
+Decision: replace the closed `coordinated_disclosure.regulatory_timeline.framework` enum (`eu-ai-act-art73 | eu-ai-act-art55 | other`) with an **open, scheme-tagged jurisdiction registry**: `{ jurisdiction, instrument, clock_model }`, where `clock_model` accommodates the four structurally-different regimes found below. Add a `data_residency` / `cross_border_restricted` flag because at least one binding regime (China) forbids the global-registry export the profile assumes. A layer that encodes only EU clocks is an EU adapter mislabeled as cross-framework; CLAUDE.md mandates China CAC, US-federal, and Korea support.
+
+Findings as of 2026-06-08 (each a date-stamped finding, not a permanent fact):
+
+- **EU — binding.** Art. 73 awareness clocks 15 / 2 / 10 days (general / critical-infrastructure-or-widespread / death), effective with the high-risk obligations (see Q7 on the Digital Omnibus deferral). Art. 55 GPAI serious-incident duty to the AI Office, applied 2 Aug 2025.
+- **United States — NO binding AI-incident clock.** OMB M-24-10 (28 Mar 2024) imposed risk-management/documentation duties, not incident-reporting timelines, and was rescinded/replaced by M-25-21 and M-25-22 (3 Apr 2025), which likewise impose no post-incident reporting clock. The only binding cross-sector clock is **CIRCIA** (cyber, critical-infrastructure, not AI-specific): proposed 72 h for a substantial cyber incident and 24 h for a ransom payment — but the **final rule was not published as of June 2026** (the May 2026 target passed; town-hall reopening announced 26 May 2026), so it is not yet legally effective. Encode US as `clock_model: pending` / `none` accordingly.
+- **China — binding and the most stringent.** CAC **National Cybersecurity Incident Reporting Management Measures** (issued 11 Sep 2025, effective 1 Nov 2025): tiered clocks of **30 min / 1 h / 2 h / 4 h** keyed to operator class × severity (Extremely Major / Major / Relatively Major / General), plus a 30-day post-incident analysis report. **Network Data Security Management Regulations** (effective 1 Jan 2025): 24 h for risks threatening national security/public interest. **Interim Measures for Generative AI Services** (15 Aug 2023) Art. 14 "promptly" (enforcement-interpreted ~24 h). **Deep Synthesis Provisions** (10 Jan 2023) "timely" (~24 h). CRITICAL CONFLICT: **PIPL/DSL/CSL data-localization** — CII operators must store personal information and "important data" in China, and cross-border transfer requires a CAC security assessment; this directly conflicts with exporting an incident report to a global AIIC registry. The profile MUST carry a residency/routing flag and MUST NOT assume a single global public export for CN incidents.
+- **South Korea — binding Act, no incident clock.** **AI Basic Act** (adopted 26 Dec 2024, effective 22 Jan 2026): a risk-management-centric regime; "serious incident" reporting exists but with **no defined numeric deadline** (unlike Art. 73). Fine grace period to 22 Jan 2027; extraterritorial, with a local-agent requirement above revenue/user thresholds. Encode Korea as `clock_model: risk_management_no_clock`.
+
+
+*Sources:* EU Art. 73: https://artificialintelligenceact.eu/article/73/; US M-25-21/M-25-22 (3 Apr 2025): https://www.wiley.law/alert-Trump-Administration-Revamps-Guidance-on-Federal-Use-and-Procurement-of-AI; CIRCIA status (final rule pending, May 2026): https://www.federalregister.gov/documents/2026/05/26/2026-10417/town-hall-meetings-to-provide-input-on-cyber-incident-reporting-for-critical-infrastructure-act; China CAC Measures (eff. 1 Nov 2025): https://www.twobirds.com/en/insights/2025/china/new-cybersecurity-incident-reporting-measures-in-china-critical-compliance-updates-for-businesses ; https://www.lw.com/en/insights/china-cac-announces-new-cybersecurity-incident-reporting-measures; China data localization (PIPL/DSL/CSL): https://www.dlapiperdataprotection.com/countries/china/transfer.html; Korea AI Basic Act (eff. 22 Jan 2026): https://www.cooley.com/news/insight/2026/2026-01-27-south-koreas-ai-basic-act-overview-and-key-takeaways
+
+*Residual unknowns:*
+- China tiered clocks vary by operator class (CAC/PSB vs departmental vs provincial vs general network operators); the template's CN clock_model must capture operator-class as a parameter, not a single duration.
+- CIRCIA effective date is unknown pending final-rule publication; the US entry must be re-checked after publication.
+- Exact field/section names of any non-EU reporting template must be transcribed from the official instrument before they are encoded (same discipline as Appendix C); not invented here.
+
+
+### Q19 — Registry-operator/publisher liability, verification floor, right-of-reply
+
+_Status: RESOLVED — adopt (a); design-reasoning grounded in GDPR controllership, CVE/AIID practice_
+
+Decision: adopt (a). A public `incident_card` — especially one filed by an external researcher or affected party naming ANOTHER party's system as subject — MUST meet an authenticity floor and a content-governance process before it enters the public registry/corpus:
+
+1. **Mandatory signing with an id↔key binding.** Public cards MUST be JWS-signed (the existing `signing.py`, RS256/ES256) and the signature MUST bind the `public_incident_id` to a registered signer key, so a card's provenance is verifiable and a fabricated/defamatory filing cannot masquerade as a vendor's own disclosure. (ACEF signatures are optional in general; the registry imposes signing as an admission condition, not a Core change.)
+2. **Minimum `trust_level` floor** for corpus inclusion (the existing envelope `trust_level` ladder), so self-asserted, unverifiable entries do not silently rank in the §5.9 Danger Score (ties Q21).
+3. **Right-of-reply / dispute / takedown.** A named subject MUST be able to contest an entry; this is the DISPUTED lifecycle state (Q9) adjudicated by the AIIC Board (Q3).
+4. **Stated controllership/publisher model.** The registry operator (Q3 = a neutral nonprofit, e.g. AI Commons) is the data controller for published special-category data (GDPR) and the publisher for defamation purposes; this MUST be settled with counsel before public minting (ties Q8).
+
+Option (b) — accept unsigned, self-attested third-party filings — is rejected: it inherits AIID's known unreliability and exposes the operator to unbounded liability for published special-category and potentially defamatory content.
+
+
+*Sources:* GDPR controllership for published special-category data (Arts. 4(7), 9) — see Q8 sources; CVE DISPUTED-state / CNA dispute process: https://www.cve.org/ResourcesSupport/Glossary; Existing ACEF signing (RS256/ES256): src/acef/signing.py (repo)
+
+*Residual unknowns:*
+- Whether AI Commons is a legal entity able to act as controller/publisher is [unverified] (same as Q3 residual).
+- The exact takedown/right-of-reply SLA and the evidentiary standard for a vendor dispute are AIIC Board charter decisions, not schema.
+
+
+### Q20 — Dedupe-hash brute-forceability and definition of subject identity
+
+_Status: RESOLVED (via Q6) — design-reasoning_
+
+Resolved inside Q6. Summary: (1) `subject_identity` is defined precisely as the NFC-normalized, case-folded natural-key triple `provider|name|version` (NOT the per-bundle UUID `subject_id`, which never matches across databases). (2) Because three of the four key inputs are low-entropy and the triple is often guessable, the subject-bearing `incident_dedupe_key` MUST be emitted ONLY on records whose `confidentiality` is `public`; on any non-public value it MUST be omitted (consistent with the Q8/Q23 disclosure-time projection), so a published hash can never be brute-forced back to a redacted subject. (3) For dedupe across redacted-subject records, Q6 defines a keyed `incident_dedupe_key_hmac` = HMAC-SHA-256(pepper, JCS(K)) with the pepper held only by the central resolver (Q3/Q9); it is non-invertible without the pepper and degrades to link-only if no resolver exists. This resolves the confidentiality-vs-dedupe conflict explicitly rather than leaving it latent.
+
+
+*Sources:* Resolved within Q6 (see Q6 sources: RFC-0001 finding_record.dedupe_key construction; src/acef/integrity.py JCS)
+
+*Residual unknowns:*
+- The pepper custodian is the same body Q3/Q9 leave open; absent a resolver, redacted-subject cross-database dedupe is link-only (acceptable, must be stated).
+
+
+### Q21 — Anti-abuse / Sybil / authenticity gate for the corpus and Danger Score
+
+_Status: RESOLVED — adopt (a); design-reasoning grounded in CWE Top-25 / KEV curation_
+
+Decision: adopt (a). A report counts toward the §5.9 corpus and the Top-AI-Failure-Modes Danger Score ONLY if it passes an **admission/authenticity gate**: mandatory JWS signature + minimum `trust_level` (the Q19 floor), plus a validator narrative-consistency check that the self-asserted `severity_vector` (Q4) is not contradicted by the record's structured facts. The Q6 dedupe key collapses identical duplicates but does NOT stop an adversary minting many DISTINCT fabricated high-severity reports against a rival, so the authenticity gate — not dedupe — is the real anti-Sybil control. The reporting-propensity bias MUST be disclosed as a known limitation: a frequency term over a self-selected public corpus measures *reported* danger, skewed toward well-reported / English-language / EU-regulated harms.
+
+Additionally (Appendix D #10): the §5.9 Danger Score = frequency × severity contradicts the §5.4 "severity-is-not-risk / no exchange rate between diffuse bias and physical injury" principle. Recommendation: rank the shortlist **within harm class** (or publish per-harm-type leaderboards), never as a single cross-class multiplicative score, so the artifact does not silently reintroduce the incommensurability the severity-vector design refuses.
+
+
+*Sources:* CWE Top-25 methodology uses curated NVD/CVE data, not open submissions: https://cwe.mitre.org/top25/archive/2025/2025_methodology.html; CISA KEV is vetted, not crowd-sourced (analogous curation floor)
+
+*Residual unknowns:*
+- The exact minimum trust_level for corpus inclusion is an AIIC Board policy parameter.
+- The narrative-consistency check (severity_vector vs facts) needs a concrete rule set; partly downstream of Q4's final metric semantics.
+
+
+### Q22 — Incentive / liability shield for voluntary self-reported near-miss data
+
+_Status: RESOLVED — adopt (a); design-reasoning grounded in aviation ASRS precedent_
+
+Decision: adopt (a). The near-miss corpus — the profile's headline value — depends on organizations volunteering data that is otherwise legally discoverable against them, so the profile MUST provide both a mechanism and a policy:
+
+1. **Aggregation/anonymity tier (mechanism ACEF can ship).** Voluntary `near_miss` data may be contributed to the corpus in a de-identified / k-anonymized form not attributable to the reporting organization, reusing the Q8 disclosure-time projection and the Q20 keyed dedupe so the contribution still deduplicates without exposing the contributor.
+2. **Self-reporter safe-harbor (policy deliverable).** Extend `safe_harbor_ref` semantics to cover the SELF-reporting organization (today it protects only external reporters), pursued as a legal/policy instrument by AI Commons with regulators — modeled on aviation's ASRS, where NASA operates a confidential, de-identified reporting system with limited immunity precisely because voluntary safety reporting requires de-identification + immunity to overcome self-incrimination.
+
+Q5 already keeps `near_miss` as enrichment-not-core under every profile, so blanket-default-on never forces self-incriminating disclosure; this resolution supplies the positive incentive on top. Without it, the corpus collapses to what Art. 73 already compels. Option (b) is rejected as accepting that collapse.
+
+
+*Sources:* Aviation ASRS (NASA-operated, confidential, de-identified, limited immunity): https://asrs.arc.nasa.gov/overview/immunity.html; Reuses Q8 projection + Q20 keyed dedupe (this RFC)
+
+*Residual unknowns:*
+- The safe-harbor legal immunity is a policy/legislative deliverable, NOT a schema field; ACEF supplies the anonymity tier mechanism, not the legal immunity itself.
+- Whether a de-identified near-miss still satisfies a regulator's notice expectations is jurisdiction-dependent.
+
+
+### Q23 — Record-level redaction granularity vs intentionally half-public record
+
+_Status: RESOLVED (via Q1 + Q8) — repo-verified_
+
+Resolved by Q1's partition, which is effectively option (c) realized structurally. Because ACEF redaction is whole-record (verified: `redact_record` replaces the entire payload with one SHA-256 hash commitment under a single `confidentiality` value; field-level/selective disclosure is deferred by the spec), a single extended record cannot be half-public/half-secret. The Q1 split puts the publishable linkage/crosswalk fields (`public_incident_id`, `taxonomy_crosswalk`, `severity_vector`, `aiid` soft-link) on the public `incident_card` and the trade-secret/privileged fields (`root_cause_analysis`, `impact_assessment`) on the regulator-only `incident_report`. The Q8 disclosure-time projection IS the "fixed set of linkage/crosswalk fields exempt from redaction with a per-confidentiality-state presence rule" that option (c) describes. This avoids both option (a) (building deferred field-level redaction = scope creep, out of bounds) and option (b)'s hand-maintained divergence (dissolved because the card is a *generated* projection, not a hand-authored twin). Linkage-id behavior under redaction is now defined: the public id lives on the public card; the private report may hold a RESERVED id (Q9/Q11) without any public card existing, so an embargoed id never leaks.
+
+
+*Sources:* Whole-record redaction: src/acef/redaction.py (repo); confidentiality is an envelope field: src/acef/models/records.py (repo); Resolved within Q1 + Q8 (this RFC)
+
+*Residual unknowns:*
+- The field-by-field projection/publishability map (which report fields appear, are transformed, or are dropped on the card) must be authored, reusing redaction.py (shared residual with Q1/Q8).
+
+
+### Q24 — Error-code band 070-080 exhaustion and allocation
+
+_Status: RESOLVED — repo-verified; requires spec-author range approval · **§7 is authoritative**_
+
+> **Reconciliation note (Revision 3).** §7 is the authoritative error-code list and supersedes any differing semantics below: it allocates **ACEF-081–088** (Revision 0 listed only five and used `ACEF-0xx` placeholders). In particular ACEF-083 is the offline syntax/assigner-snapshot check (uniqueness is online-only), ACEF-084 keys on the Art. 73 trigger *array* + `widespread`, ACEF-086 references `declared_publication_basis`, and ACEF-088 (severity↔band consistency) was added. See §7.
+
+Verified in `src/acef/errors.py`: ACEF-070 through ACEF-080 are ALL assigned and **ACEF-080 is the current ceiling** — the band the active-operation rules restrict new codes to is fully exhausted. The five §7 codes (and the additional conditions surfaced by these resolutions) cannot fit. Decision: request spec-author RFC approval to open the **081-090** range and reserve concrete numbers now rather than leaving `ACEF-0xx` placeholders:
+
+- **ACEF-081** (ERROR): incident profile declared but `taxonomy_crosswalk` missing the profile's mandatory members — carries `profile_id` + RFC 6901 `path` (Q16).
+- **ACEF-082** (ERROR): `severity_vector` present but not parseable against `ACEF-SEV:1.0` (Q4).
+- **ACEF-083** (ERROR): `public_incident_id` does not match the `AIIC-YYYY-NNNN…` pattern (or, post-Q10, the assigner-segmented format).
+- **ACEF-084** (ERROR): `eu-ai-act-art73-2026` declared, `serious_incident_trigger` set, but the `regulatory_timeline` deadline is inconsistent with the trigger class (15 / 2 / 10-day clocks).
+- **ACEF-085** (ERROR): `harm_core` consistency — a present crosswalk member contradicts the derived `harm_core` value (Q14).
+- **ACEF-086** (ERROR): public disclosure (`status: public` or `public_incident_id` present) without the Q8 disclosure-time redaction projection / `lawful_basis` on special-category fields.
+- **ACEF-087** (INFO): `realization` is `near_miss` — informational marker, never a failure.
+
+Seven codes; 081-090 has room. All require spec-author approval per the ops error-code-discipline rule; numbers are *reserved-pending-approval*, not yet live.
+
+
+*Sources:* src/acef/errors.py — ACEF-070..080 all assigned, 080 is the ceiling (repo-verified); .claude/rules/ops-active.md — new codes restricted to 070-080 without spec-author RFC approval
+
+*Residual unknowns:*
+- Final numbers are subject to spec-author assignment; if the maintainers consolidate conditions, fewer than seven may be used.
+
+
+### Q25 — Typed incident-graph edges vs the closed relationship_type enum
+
+_Status: RESOLVED — adopt (a); repo-verified · **edge homes refined in Revision 3**_
+
+> **Reconciliation note (Revision 3).** §5.8/§8 split the edges by home and supersede any text below that places id-lifecycle edges in `relationships[]`: the **in-bundle** edges (`public_projection_of`, `caused_by`, `harms`, `mitigated_by`, `transferable_to`) extend the `relationship_type` enum AND broaden `source_ref`/`target_ref` to accept record URNs; the **id-lifecycle** edges (`supersedes`/`merged_from`/`split_into`) live in the registry id-state document, not `relationships[]`. §5.8 governs.
+
+Verified in `acef-conventions/v1/manifest.schema.json:322`: `relationship_type` is the CLOSED enum `wraps | calls | fine_tunes | deploys | trains_on | evaluates_with | oversees` — no incident or derivation edges. §5.8's claim that `entity_refs` is "the analog of STIX relationship objects" with "no new machinery" is therefore false for the graph use case: `entity_refs` is four UNTYPED URN buckets, and `transferability.related_incident_ids` / `coordinator_ref` / `safe_harbor_ref` are free-string payload foreign keys — exactly the pattern §5.8 claims to avoid.
+
+Decision: adopt (a). Extend the closed `relationship_type` enum with incident/derivation edges and add the change to the §8 spec-amendments list as a Core change: `public_projection_of` (the Q1 report→card link), `caused_by`, `harms`, `mitigated_by`, `transferable_to`, and the Q9 lifecycle edges `supersedes` / `merged_from` / `split_into`. Where the current free-string fields denote graph edges, they SHOULD be expressed as typed `relationships[]` (or `entity_refs`) instead. Retract the "no new machinery" claim. Until the enum is extended, the incident graph is untyped co-occurrence, materially weaker than the STIX-SRO model invoked as justification.
+
+
+*Sources:* acef-conventions/v1/manifest.schema.json:319-323 — closed relationship_type enum (repo-verified); STIX 2.1 typed SROs: https://docs.oasis-open.org/cti/stix/v2.1/os/stix-v2.1-os.html
+
+*Residual unknowns:*
+- Exact edge names/directions are a Core-schema decision (couples to Q1's report→card edge and Q9's lifecycle edges).
+- Extending a closed Core enum is a version-gated change; must ship under the concrete minor chosen by Q12 and not touch frozen v1/.
+
+
+### Q26 — Deterministic canonical ordering for new repeatable arrays under JCS
+
+_Status: RESOLVED — repo-verified; design-reasoning_
+
+RFC 8785 (JCS) canonicalizes object KEYS but does NOT reorder array ELEMENTS, so any order-insignificant array the profile adds is a determinism hole: two exporters could emit different orders, breaking the bundle digest and making the Q6 dedupe hash non-canonical. ACEF already establishes the fix-pattern elsewhere (verified: `export.py` sorts records via `sort_records` and sorts directories/files for a deterministic walk).
+
+Decision: specify a normative deterministic sort for each new order-insignificant repeatable array — sort ascending by the RFC-8785/JCS canonical byte sequence of the element (lexicographic on the canonicalized member), applied before hashing and serialization. Applies to `harm_domain[]`, `nist_ai_600_1.categories[]`, `aiid.report_ids[]` (numeric ascending), `stix.object_refs[]`, `transferability.related_incident_ids[]`, and `harm_distribution_basis[]`. This makes the Q6 `harm_domain_primary` selection deterministic and keeps the bundle byte-identical across exporters (and across the Python/TypeScript SDKs). Arrays whose order is semantically meaningful (e.g. an ordered `notification_timeline[]`) are exempt and MUST be documented as order-significant.
+
+
+*Sources:* RFC 8785 JCS sorts keys, not array elements (spec); export.py sort_records + sorted dir/file walk (repo-verified determinism precedent)
+
+*Residual unknowns:*
+- Each new array must be classified order-significant vs order-insignificant in the schema; misclassification reintroduces non-determinism.
+
+
+### Q27 — STIX integration directionality and round-trip fidelity
+
+_Status: RESOLVED — adopt (a) emit-only for v1.1; design-reasoning_
+
+Decision: adopt (a) emit-only (ACEF→STIX) for the first minor; defer ingest and bidirectional round-trip. `taxonomy_crosswalk.stix.object_refs[]` entries MUST be resolvable STIX 2.1 identifiers (the `type--UUIDv4` form, e.g. `incident--<uuid>`), each pointing to a STIX SDO the producer asserts corresponds to this incident; ACEF does not ingest or round-trip STIX in v1.1, so no STIX→ACEF mapping table is promised yet. Ship a documented ACEF→STIX **drop-list** (which ACEF fields have no STIX home). Defer bidirectional/lossless round-trip to a later minor once the STIX Incident Core Extension field names are confirmed — Appendix C flags those exact field names as unconfirmed, so the ingest mapping MUST NOT be authored against invented names. As written today, `object_refs: [string]` with no resolution model makes STIX linkage decorative; the `type--UUID` resolution rule + emit-only direction makes it buildable for a CTI connector.
+
+
+*Sources:* STIX 2.1 Incident SDO + separately-versioned Incident Core Extension: https://docs.oasis-open.org/cti/stix/v2.1/os/stix-v2.1-os.html ; https://github.com/oasis-open/cti-stix-common-objects (Incident Extension Suite); STIX 2.1 identifier format type--UUIDv4 (spec)
+
+*Residual unknowns:*
+- STIX Incident Core Extension exact field names are [unverified] (Appendix C); ingest/bidirectional deferred until confirmed.
+- Whether object_refs should also permit ACEF URNs (for ACEF-hosted counterparts) vs STIX-only ids is a connector-design choice.
+
+
+### Q28 — AIID coupling: CC-BY-SA copyleft, integer-id cardinality, missing hard links
+
+_Status: RESOLVED (via Q6) — license/model confirmed; renumber [unverified]_
+
+Decision: keep the ACEF `incident_dedupe_key` (Q6) as the dedupe spine; `taxonomy_crosswalk.aiid.incident_id` is a NON-authoritative soft cross-reference, never the spine.
+
+- **License (confirmed CC-BY-SA 4.0).** The AI Incident Database is licensed CC-BY-SA 4.0. A corpus seeded from AIID content — or a Top-25 derived from AIID — would inherit BY-SA attribution + share-alike copyleft, potentially incompatible with a permissive registry license. Recommendation: license the ACEF-native corpus independently and LINK to AIID (carry the `aiid.incident_id` as a reference) rather than EMBED AIID content, so copyleft does not propagate; state this explicitly (the RFC is meticulous about IP elsewhere and currently silent here).
+- **Cardinality (confirmed one-to-many) + renumber resilience.** AIID's model is one `incident_id` → many `report_ids`; the AIIC↔AIID relationship is therefore at most many-to-one (multiple AIIC cards MAY reference one AIID incident). Because the ACEF key does not depend on AIID, an AIID renumber/merge/split MUST NOT invalidate it. (AIID's "renumber/merge/split" frequency itself is [unverified] against AIID primary sources — see Q6 residual.)
+- **Symmetry.** Add soft cross-reference slots for AIAAIC and OECD AIM ids alongside `aiid`, so the "federated" posture does not privilege one external, mutable, copyleft database as the spine.
+
+
+*Sources:* AIID CC-BY-SA 4.0 + incident-to-report model: https://incidentdatabase.ai/ (site footer / about) ; Partnership on AI / Responsible AI Collaborative; Resolved within Q6 (this RFC)
+
+*Residual unknowns:*
+- AIID renumber/merge/split behavior over time is [unverified] against AIID's data-model docs; verify before treating renumber behavior as normative.
+- CC-BY-SA-vs-registry-license compatibility is a legal determination; the link-not-embed recommendation mitigates but does not fully settle it.
+
