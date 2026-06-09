@@ -50,7 +50,10 @@ from pathlib import Path
 DEFAULT_RFC = Path(__file__).resolve().parent.parent / "planning" / "ACEF-RFC-0002-ai-incident-reporting-profile.md"
 
 # Overclaim tokens that MUST NOT survive in the normative body (VAL-RFC-006).
+# Matched case-INSENSITIVELY so capitalised variants (e.g. "Forgery-Resistant",
+# "Institution-Free") cannot evade the scan.
 OVERCLAIM_TOKENS = ("forgery-resistant", "institution-free")
+OVERCLAIM_TOKEN_RES = tuple(re.compile(re.escape(tok), re.IGNORECASE) for tok in OVERCLAIM_TOKENS)
 
 # An "offline ... durable" attribution overclaim: the words "offline" and
 # "durable" co-occurring within a short window (an attribution sentence). The
@@ -63,8 +66,22 @@ OFFLINE_DURABLE_RE = re.compile(
 # Required sections for the id_grade + optional-online consistency check.
 REQUIRED_SECTIONS = ("5.3", "5.7", "5.11", "6")
 
-# A top-level section heading: "## 1. ...", "## 11. ...", "## Appendix A. ...".
-TOP_HEADING_RE = re.compile(r"^## (\d+|Appendix [A-Z])\b")
+# Both Appendix B schema excerpts MUST be present (by their canonical $id). C1
+# fails if EITHER expected block is missing, even if the surviving blocks are
+# valid JSON. This prevents a silent regression that drops one excerpt.
+REQUIRED_SCHEMA_IDS = (
+    "https://acef.ai/schemas/v1.1/incident_card.schema.json",
+    "https://acef.ai/schemas/v1.1/incident_report.card_source.schema.json",
+)
+
+# Any level-2 heading line: "## <anything>". C3 collects EVERY such heading so
+# a stray/unexpected heading (e.g. "## References") cannot slip past the scan.
+ANY_TOP_HEADING_RE = re.compile(r"^## (.+?)\s*$")
+
+# The canonical key of an EXPECTED top-level heading: "## 1. ...", "## 11. ...",
+# or "## Appendix A. ...". Used to normalise an expected heading line to its key
+# ("1".."11", "Appendix A".."Appendix E").
+EXPECTED_HEADING_RE = re.compile(r"^## (\d+|Appendix [A-Z])\b")
 
 # Optional-online domain-control framing markers. A section satisfies the
 # framing requirement if it carries the "id_grade" discriminator AND at least
@@ -86,22 +103,41 @@ def _emit(ok: bool, check: str, detail: str) -> bool:
 
 
 def check_json_blocks(text: str) -> bool:
-    """C1: every ```json fenced block parses as valid JSON."""
+    """C1: every ```json fenced block parses, and BOTH Appendix B excerpts exist.
+
+    Parsing alone is insufficient: the sweep must guarantee the two normative
+    Appendix B schema excerpts (``incident_card`` and ``card_source``) are both
+    present. C1 fails if either canonical ``$id`` is absent, even when every
+    surviving block is valid JSON.
+    """
     blocks = re.findall(r"```json\n(.*?)```", text, re.S)
     if not blocks:
         return _emit(False, "C1 json-blocks", "no ```json blocks found (expected >=2)")
     failures: list[str] = []
+    seen_ids: set[str] = set()
     for idx, block in enumerate(blocks, start=1):
         try:
-            json.loads(block)
+            parsed = json.loads(block)
         except json.JSONDecodeError as exc:
             failures.append(f"block #{idx}: {exc}")
+            continue
+        if isinstance(parsed, dict):
+            block_id = parsed.get("$id")
+            if isinstance(block_id, str):
+                seen_ids.add(block_id)
     if failures:
         return _emit(False, "C1 json-blocks", "; ".join(failures))
+    missing_ids = [sid for sid in REQUIRED_SCHEMA_IDS if sid not in seen_ids]
+    if missing_ids:
+        return _emit(
+            False,
+            "C1 json-blocks",
+            f"all {len(blocks)} block(s) parse, but missing required Appendix B $id(s): {', '.join(missing_ids)}",
+        )
     return _emit(
         True,
         "C1 json-blocks",
-        f"all {len(blocks)} ```json block(s) parse as valid JSON",
+        f"all {len(blocks)} ```json block(s) parse as valid JSON; both Appendix B $id(s) present",
     )
 
 
@@ -117,13 +153,27 @@ def check_fences_balanced(text: str) -> bool:
 
 
 def check_heading_order(text: str) -> bool:
-    """C3: sections 1..11 then Appendix A..E appear in exact order."""
+    """C3: the COMPLETE set of ``## `` headings is exactly §1..§11, App A..E.
+
+    Collects EVERY level-2 heading (not just the ones that match the expected
+    pattern), then maps each to its canonical key. An expected heading maps to
+    its number/appendix key; an unexpected heading (e.g. ``## References``) maps
+    to a sentinel ``!<raw>`` so it can never coincide with an expected key. The
+    full ordered list must equal the expected sequence — any stray, missing,
+    duplicated, or reordered heading fails the check.
+    """
     expected = [str(n) for n in range(1, 12)] + [f"Appendix {letter}" for letter in "ABCDE"]
     found: list[str] = []
     for line in text.splitlines():
-        m = TOP_HEADING_RE.match(line)
-        if m:
-            found.append(m.group(1))
+        raw = ANY_TOP_HEADING_RE.match(line)
+        if raw is None:
+            continue
+        em = EXPECTED_HEADING_RE.match(line)
+        if em:
+            found.append(em.group(1))
+        else:
+            # Unexpected heading: record a sentinel that cannot match any key.
+            found.append(f"!{raw.group(1)}")
     if found != expected:
         return _emit(
             False,
@@ -133,7 +183,7 @@ def check_heading_order(text: str) -> bool:
     return _emit(
         True,
         "C3 heading-order",
-        "sections 1-11 then Appendix A-E present in order",
+        "sections 1-11 then Appendix A-E present in order; no stray ## headings",
     )
 
 
@@ -153,8 +203,8 @@ def check_no_overclaim(text: str) -> bool:
     body = _normative_body(text)
     findings: list[str] = []
 
-    for token in OVERCLAIM_TOKENS:
-        n = body.count(token)
+    for token, token_re in zip(OVERCLAIM_TOKENS, OVERCLAIM_TOKEN_RES):
+        n = len(token_re.findall(body))
         if n:
             findings.append(f'"{token}" x{n}')
 
@@ -163,7 +213,7 @@ def check_no_overclaim(text: str) -> bool:
         findings.append(f'"offline...durable" overclaim x{len(od)}')
 
     # Whole-document counts reported as independent evidence (non-gating).
-    whole_overclaim = sum(text.count(t) for t in OVERCLAIM_TOKENS)
+    whole_overclaim = sum(len(r.findall(text)) for r in OVERCLAIM_TOKEN_RES)
     whole_od = len(OFFLINE_DURABLE_RE.findall(text))
 
     if findings:
