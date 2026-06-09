@@ -161,10 +161,25 @@ def check_heading_order(text: str) -> bool:
     to a sentinel ``!<raw>`` so it can never coincide with an expected key. The
     full ordered list must equal the expected sequence — any stray, missing,
     duplicated, or reordered heading fails the check.
+
+    The scan is fence-aware: a ``## `` line INSIDE a fenced code block (e.g. a
+    shell comment ``## References`` in a ````bash```` example) is body content,
+    NOT a Markdown heading, and is ignored. Fence state toggles on every line
+    that opens or closes a ``` fence.
     """
     expected = [str(n) for n in range(1, 12)] + [f"Appendix {letter}" for letter in "ABCDE"]
     found: list[str] = []
+    in_fence = False
     for line in text.splitlines():
+        if line.lstrip().startswith("```"):
+            # A fence marker line opens or closes a fenced code block. The marker
+            # line itself is never a heading; flip state and move on.
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            # Inside a fenced code block: any ``## `` line is code/comment body,
+            # not a Markdown heading. Skip it.
+            continue
         raw = ANY_TOP_HEADING_RE.match(line)
         if raw is None:
             continue

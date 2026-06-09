@@ -144,6 +144,30 @@ def test_c3_fails_on_stray_unexpected_heading() -> None:
     assert sweep.check_heading_order(text) is False
 
 
+def test_c3_ignores_hash_heading_inside_fenced_code_block() -> None:
+    # An otherwise-valid §1..§11 + Appendix A..E skeleton that ALSO contains a
+    # fenced code block whose body has a `## References` line (a shell comment).
+    # That fenced `## ` line is NOT a Markdown heading and MUST be ignored: the
+    # heading scan must be fence-aware and C3 MUST still PASS.
+    skeleton = _ordered_top_headings()
+    fenced = "```bash\n# usage\n## References\n## 99. not a heading\necho ok\n```\n"
+    # Place the fenced block in the middle so the surrounding headings still
+    # frame it as document body, not a trailing artifact.
+    text = skeleton + fenced
+    assert sweep.check_heading_order(text) is True
+
+
+def test_c3_ignores_hash_heading_inside_text_fence() -> None:
+    # Same defect, ```text fence variant, with the fence interleaved between
+    # real headings. The fenced `## 99.` must not be collected as a heading.
+    head = "".join(f"## {n}. Section {n}\nbody\n" for n in range(1, 6))
+    fenced = "```text\n## 99. fenced pseudo-heading\n```\n"
+    tail = "".join(f"## {n}. Section {n}\nbody\n" for n in range(6, 12))
+    tail += "".join(f"## Appendix {letter}. Title\nbody\n" for letter in "ABCDE")
+    text = head + fenced + tail
+    assert sweep.check_heading_order(text) is True
+
+
 # --- C4: no-overclaim --------------------------------------------------------
 
 
