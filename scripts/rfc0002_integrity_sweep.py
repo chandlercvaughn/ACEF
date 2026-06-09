@@ -153,14 +153,22 @@ def _fence_open_info(line: str) -> tuple[str, int] | None:
     """If ``line`` is a CommonMark code-fence OPENER, return ``(char, length)``.
 
     An opener is, after <=3 spaces of indentation, a run of >=3 identical fence
-    characters (`` ` `` or ``~``). The info string (the run's trailing text) is
-    irrelevant to opening. Returns ``None`` for non-fence lines.
+    characters (`` ` `` or ``~``). Returns ``None`` for non-fence lines.
+
+    CommonMark restriction (load-bearing): a BACKTICK-fenced opener's info string
+    MUST NOT contain a backtick — if it does, the line is NOT a valid fence
+    opener and is ordinary content (a stray ``## `` heading after it must stay
+    visible to C3). TILDE fences carry no such restriction: backticks ARE allowed
+    in a tilde opener's info string.
     """
     m = FENCE_LINE_RE.match(line)
     if m is None:
         return None
     run = m.group(2)
-    return run[0], len(run)
+    fence_char = run[0]
+    if fence_char == "`" and "`" in m.group(5):
+        return None
+    return fence_char, len(run)
 
 
 def _is_fence_close(line: str, open_char: str, open_len: int) -> bool:

@@ -194,6 +194,32 @@ def test_c3_ignores_hash_heading_inside_tilde_fence() -> None:
     assert sweep.check_heading_order(text) is True
 
 
+def test_c3_backtick_opener_with_backtick_in_info_is_not_a_fence() -> None:
+    # CommonMark: a BACKTICK fenced-code opener's info string MUST NOT contain a
+    # backtick; otherwise the line is NOT a valid fence opener and is ordinary
+    # content. Here the malformed ```` ```py`x ```` line is plain content, so the
+    # `## References` that follows is a REAL stray heading the sweep must flag,
+    # and the later closing ``` is itself just content. C3 MUST FAIL (the stray
+    # `## References` is detected, not hidden by a false fence). With the old
+    # logic the malformed line opens a fence and the `## References` leaks into
+    # fence body -> C3 wrongly PASSES (a false-green in the integrity gate).
+    skeleton = _ordered_top_headings()
+    text = skeleton + "```py`x\n## References\nsome refs\n```\n"
+    assert sweep.check_heading_order(text) is False
+
+
+def test_c3_tilde_opener_with_backtick_in_info_is_a_valid_fence() -> None:
+    # Positive control: a TILDE fence opener MAY carry a backtick in its info
+    # string (CommonMark restricts only backtick fences). So ``~~~a`b`` is a
+    # valid opener and the `## 99.` inside it is correctly ignored -> C3 PASSES.
+    head = "".join(f"## {n}. Section {n}\nbody\n" for n in range(1, 6))
+    fenced = "~~~a`b\n## 99. tilde-fenced pseudo-heading\n~~~\n"
+    tail = "".join(f"## {n}. Section {n}\nbody\n" for n in range(6, 12))
+    tail += "".join(f"## Appendix {letter}. Title\nbody\n" for letter in "ABCDE")
+    text = head + fenced + tail
+    assert sweep.check_heading_order(text) is True
+
+
 def test_c3_inner_triple_does_not_close_outer_quad_fence() -> None:
     # A `## 1.`-shaped heading sits AFTER the inner ``` but still INSIDE the outer
     # ```` block. If the inner ``` prematurely closed the outer fence, that line
