@@ -1,0 +1,135 @@
+{
+  "template_id": "oecd-ai-incidents-2025",
+  "template_name": "OECD Common Reporting Framework for AI Incidents (voluntary)",
+  "version": "1.0.0",
+  "jurisdiction": "international",
+  "source_legislation": "OECD, 'Towards a common reporting framework for AI incidents', OECD AI Papers No. 34 (Feb 2025), DSTI/DPC/GPAI(2024)5/FINAL, DOI 10.1787/f326d4ac-en",
+  "instrument_type": "code_of_practice",
+  "legal_force": "voluntary",
+  "instrument_status": "final",
+  "default_effective_date": null,
+  "superseded_by": null,
+  "applicable_system_types": ["high-risk", "gpai", "gpai-systemic", "limited-risk", "minimal-risk"],
+  "oecd_framework": {
+    "edition": "oecd-crf-2025",
+    "source": "OECD AI Papers No. 34 (Feb 2025); Box 2.2 selected-criteria counts; Table 2.2 mandatory asterisks; transcribed verbatim per RFC-0002 §5.7 / Appendix E Q2 — not invented.",
+    "total_dimensions": 8,
+    "total_criteria": 29,
+    "mandatory_count": 7,
+    "optional_count": 22,
+    "criterion_id_convention": "oecd-crf-2025/<n> keyed to the OECD ordinal position (ACEF-local convention; OECD has no stable machine-readable criterion id scheme — RFC-0002 §5.5 / Appendix E Q2).",
+    "non_binding_note": "The OECD common reporting framework is a benchmark designed to serve BOTH mandatory and voluntary reporting; the 7 'mandatory' criteria are the framework's own completeness core, not a binding ACEF fail-gate. ACEF marks this template legal_force=voluntary: an unmet criterion surfaces as an advisory (warning) disposition, never a binding NOT_SATISFIED that blocks conformance. Distinct from the binding eu-ai-act-art73-2026 template.",
+    "dimensions": [
+      {"name": "Incident metadata", "selected_criteria": 9, "ordinals": [1, 2, 3, 4, 5, 6, 7, 8, 9]},
+      {"name": "Harm details", "selected_criteria": 4, "ordinals": [10, 11, 12, 13]},
+      {"name": "People and planet", "selected_criteria": 3, "ordinals": [14, 15, 16]},
+      {"name": "Economic context", "selected_criteria": 4, "ordinals": [17, 18, 19, 20]},
+      {"name": "Data and input", "selected_criteria": 1, "ordinals": [21]},
+      {"name": "AI model", "selected_criteria": 3, "ordinals": [22, 23, 24]},
+      {"name": "Task and output", "selected_criteria": 2, "ordinals": [25, 26]},
+      {"name": "Other information about this incident", "selected_criteria": 3, "ordinals": [27, 28, 29]}
+    ],
+    "mandatory_criteria_ordinals": [1, 2, 3, 4, 7, 10, 11],
+    "mandatory_criteria": [
+      {"id": "oecd-crf-2025/1", "ordinal": 1, "dimension": "Incident metadata", "name": "Title"},
+      {"id": "oecd-crf-2025/2", "ordinal": 2, "dimension": "Incident metadata", "name": "Description of the incident"},
+      {"id": "oecd-crf-2025/3", "ordinal": 3, "dimension": "Incident metadata", "name": "How is the AI system(s) related to the incident", "closed_value_set_deferred_to": "v1.2", "closed_value_set_note": "Criterion #3's value set (OECD Annex C) is a closed enumeration that must be transcribed verbatim from the OECD source; that transcription is the v1.2 closed-enum surface (RFC-0002 §10 / Appendix C). In v1.1 #3 validates STRUCTURALLY only (criterion id + edition presence), never by enumerated value."},
+      {"id": "oecd-crf-2025/4", "ordinal": 4, "dimension": "Incident metadata", "name": "Submitter information (role, affiliation, etc.)"},
+      {"id": "oecd-crf-2025/7", "ordinal": 7, "dimension": "Incident metadata", "name": "Supporting material(s) about the incident"},
+      {"id": "oecd-crf-2025/10", "ordinal": 10, "dimension": "Harm details", "name": "Severity", "value_space": ["hazard", "serious_hazard", "incident", "serious_incident", "disaster", "other"]},
+      {"id": "oecd-crf-2025/11", "ordinal": 11, "dimension": "Harm details", "name": "Harm type", "value_space": ["physical", "psychological", "reputational", "economic_property", "environmental", "public_interest_critical_infrastructure", "human_or_fundamental_rights", "other"]}
+    ]
+  },
+  "provisions": [
+    {
+      "provision_id": "oecd-mandatory-core",
+      "provision_name": "OECD Mandatory Reporting Core (7 criteria)",
+      "normative_text_ref": "OECD CRF 2025, Table 2.2 (mandatory criteria, asterisked); Box 2.2 (selected-criteria counts)",
+      "description": "The OECD common reporting framework designates SEVEN of its 29 criteria as mandatory (asterisked in Table 2.2): #1 Title, #2 Description of the incident, #3 How is the AI system(s) related to the incident, #4 Submitter information, #7 Supporting material(s), #10 Severity, #11 Harm type. These form the framework's completeness core. Because the OECD framework is a VOLUNTARY benchmark (legal_force=voluntary) — explicitly designed to serve both mandatory and voluntary reporting — ACEF surfaces an unmet mandatory criterion as an ADVISORY (warning) disposition, never a binding NOT_SATISFIED. The criteria live on incident_card.taxonomy_crosswalk.oecd.criteria[] (each id keyed to the OECD ordinal oecd-crf-2025/<n>, §5.5).",
+      "effective_date": null,
+      "applicable_to": [],
+      "sub_provisions": [
+        {"provision_id": "oecd-crf-2025/1", "normative_text_ref": "OECD CRF 2025 criterion 1", "description": "Title (mandatory)."},
+        {"provision_id": "oecd-crf-2025/2", "normative_text_ref": "OECD CRF 2025 criterion 2", "description": "Description of the incident (mandatory)."},
+        {"provision_id": "oecd-crf-2025/3", "normative_text_ref": "OECD CRF 2025 criterion 3", "description": "How is the AI system(s) related to the incident (mandatory). Closed value set (Annex C) deferred to v1.2 — structural validation only in v1.1."},
+        {"provision_id": "oecd-crf-2025/4", "normative_text_ref": "OECD CRF 2025 criterion 4", "description": "Submitter information (mandatory)."},
+        {"provision_id": "oecd-crf-2025/7", "normative_text_ref": "OECD CRF 2025 criterion 7", "description": "Supporting material(s) about the incident (mandatory)."},
+        {"provision_id": "oecd-crf-2025/10", "normative_text_ref": "OECD CRF 2025 criterion 10", "description": "Severity (mandatory). Value space {hazard|serious_hazard|incident|serious_incident|disaster|other}."},
+        {"provision_id": "oecd-crf-2025/11", "normative_text_ref": "OECD CRF 2025 criterion 11", "description": "Harm type (mandatory)."}
+      ],
+      "required_evidence_types": ["incident_card"],
+      "minimum_evidence_count": {},
+      "evidence_freshness_max_days": null,
+      "retention_years": null,
+      "evaluation_dsl_note": "HONESTY (mirrors the eu-ai-act-art73-2026 template). The DSL-CORRECT check the generic engine CAN express is the existential presence + edition-pin of the OECD crosswalk member (exists_where on incident_card.taxonomy_crosswalk.oecd.edition). The PER-ORDINAL completeness check — 'does criteria[] contain an entry for each mandatory ordinal #1,2,3,4,7,10,11?' — is NOT DSL-expressible: criteria[] is an order-insensitive array (§5.10), exists_where resolves a SINGLE RFC-6901 pointer per record, and jsonpointer has NO array-wildcard, so no operator can scan array entries by an `id` predicate; hard-coding criteria/0/id would wrongly reject a valid card whose criteria are sorted differently (the index-0 anti-pattern). Encoding the 7 ordinals as fixed-index field_present rules is therefore a false signal and is NOT done. Instead: (a) the member-presence + edition-pin is encoded as an honest advisory exists_where rule; (b) the per-ordinal mandatory-core completeness is DECLARED in validator_delegated_enforcement and oecd_framework.mandatory_criteria for a richer (validator/SDK) completeness checker — and because the whole template is voluntary, even a delegated completeness gap is ADVISORY, never binding. All retained rules are warning severity.",
+      "validator_delegated_enforcement": {
+        "owner_feature": "F-M3-TEMPLATE-OECD",
+        "surface": "v1.1 (structural) → v1.2 (closed-enum value sets)",
+        "disposition": "advisory",
+        "normative_refs": ["RFC-0002 §5.5", "RFC-0002 §5.7", "RFC-0002 §10", "RFC-0002 Appendix C", "RFC-0002 Appendix E Q2"],
+        "why_not_dsl": "criteria[] is an order-insensitive array; exists_where resolves one RFC-6901 pointer per record and jsonpointer has no array-wildcard, so the generic DSL cannot scan array entries by an `id` predicate or verify per-ordinal completeness without a brittle hard-coded index.",
+        "checks": [
+          {
+            "id": "oecd-mandatory-core-completeness",
+            "dsl_expressible": false,
+            "disposition": "advisory",
+            "requirement": "incident_card.taxonomy_crosswalk.oecd.criteria[] contains an entry (keyed oecd-crf-2025/<n>) for each of the 7 mandatory ordinals #1, #2, #3, #4, #7, #10, #11. A missing mandatory criterion surfaces ADVISORY (warning / PARTIALLY_SATISFIED), never a binding NOT_SATISFIED — the OECD framework is voluntary.",
+            "mandatory_ordinals": [1, 2, 3, 4, 7, 10, 11],
+            "reason": "Order-insensitive array-element scan by `id` predicate is not expressible in the generic ACEF DSL (no array-wildcard in jsonpointer; exists_where resolves a single pointer)."
+          },
+          {
+            "id": "oecd-3-19-closed-value-set-deferral",
+            "dsl_expressible": false,
+            "disposition": "deferred-to-v1.2",
+            "requirement": "OECD criterion #3 (oecd-crf-2025/3, 'How is the AI system(s) related to the incident' — Annex C value set) and criterion #19 (oecd-crf-2025/19, 'Incident linked to the functioning of critical functions/infrastructure' — CISA/EU critical-functions list) carry CLOSED value enumerations that must be transcribed VERBATIM from the OECD primary source before they can be enforced by value. That transcription is the v1.2 closed-enum surface (RFC-0002 §10 / Appendix C, residual caveat (b)). In v1.1 #3/#19 validate STRUCTURALLY only — presence of the criterion id and the edition pin (oecd-crf-2025) — never by enumerated value. The template MUST NOT invent OECD enum values.",
+            "deferred_criteria": ["oecd-crf-2025/3", "oecd-crf-2025/19"],
+            "v1_2_surface": true,
+            "reason": "The closed value sets for OECD #3 (Annex C) and #19 (critical-functions list) are external transcriptions scoped out of v1.1; inventing enum values would misrepresent the OECD source. v1.1 validates these members structurally (id/edition presence) only."
+          }
+        ]
+      },
+      "evaluation": [
+        {
+          "rule_id": "oecd-member-edition-pinned",
+          "rule": "exists_where",
+          "params": {"record_type": "incident_card", "field": "/payload/taxonomy_crosswalk/oecd/edition", "op": "eq", "value": "oecd-crf-2025", "min_count": 1},
+          "severity": "warning",
+          "message": "ADVISORY (voluntary, never binding): an incident_card aligned to the OECD common reporting framework should carry a taxonomy_crosswalk.oecd member pinned to edition 'oecd-crf-2025'. This is the DSL-CORRECT existential presence check; the per-ordinal mandatory-core completeness (#1,2,3,4,7,10,11) is order-insensitive-array work delegated to the validator/SDK completeness checker (see validator_delegated_enforcement), and remains advisory. Covers OECD mandatory criteria oecd-crf-2025/1, oecd-crf-2025/2, oecd-crf-2025/3, oecd-crf-2025/4, oecd-crf-2025/7, oecd-crf-2025/10, oecd-crf-2025/11."
+        },
+        {
+          "rule_id": "oecd-card-subject-linked",
+          "rule": "entity_linked",
+          "params": {"record_type": "incident_card", "entity_type": "subject"},
+          "severity": "warning",
+          "message": "ADVISORY: an OECD-aligned incident_card should link to the subject AI system whose incident is reported (supports OECD criteria #8 Name/version and #9 Organisation enrichment); voluntary, non-binding."
+        }
+      ],
+      "evaluation_scope": null
+    },
+    {
+      "provision_id": "oecd-optional-enrichment",
+      "provision_name": "OECD Optional Enrichment Criteria (22 criteria)",
+      "normative_text_ref": "OECD CRF 2025, Box 2.2 (selected criteria minus the 7 mandatory)",
+      "description": "The remaining 22 of the 29 OECD criteria are OPTIONAL enrichment, provided 'where available' (OECD CRF 2025). They span the Date/Country/AI-system-name metadata (#5,6,8,9), the rest of Harm details (#12,13), People-and-planet (#14,15,16), Economic context (#17,18,19,20), Data/input (#21), AI model (#22,23,24), Task/output (#25,26), and Other information (#27,28,29). They are INFORMATIONAL in ACEF (info severity) — their absence is neither a fail nor a warning. Criterion #19 (critical-functions/infrastructure) carries a closed value set deferred to the v1.2 closed-enum surface (Appendix C); validated structurally only in v1.1.",
+      "effective_date": null,
+      "applicable_to": [],
+      "sub_provisions": [],
+      "required_evidence_types": [],
+      "minimum_evidence_count": {},
+      "evidence_freshness_max_days": null,
+      "retention_years": null,
+      "evaluation_dsl_note": "The 22 optional criteria are enrichment 'where available'; their per-ordinal presence is the same order-insensitive-array-scan the generic DSL cannot express. The single retained rule is an info-severity advisory that the OECD member exists at all; per-ordinal optional completeness is left to the validator/SDK and is purely informational (never warning, never fail).",
+      "evaluation": [
+        {
+          "rule_id": "oecd-optional-enrichment-present",
+          "rule": "exists_where",
+          "params": {"record_type": "incident_card", "field": "/payload/taxonomy_crosswalk/oecd/edition", "op": "eq", "value": "oecd-crf-2025", "min_count": 1},
+          "severity": "info",
+          "message": "INFORMATIONAL: where available, an OECD-aligned incident_card may enrich with the 22 optional OECD criteria (#5,6,8,9,12-18,20-29). Their per-ordinal presence is delegated (order-insensitive array); criterion #19's closed critical-functions value set is deferred to the v1.2 closed-enum surface (Appendix C). Purely advisory, non-binding."
+        }
+      ],
+      "evaluation_scope": null
+    }
+  ],
+  "test_vectors": []
+}
