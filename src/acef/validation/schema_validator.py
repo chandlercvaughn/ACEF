@@ -96,7 +96,16 @@ def validate_record_schemas(
         # dicts, letting malformed records evade Phase 1 checks.
         record_type = record.get("record_type", "")
         payload = record.get("payload", {}) if isinstance(record.get("payload"), dict) else {}
-        if not record_type:
+        # A validator MUST NEVER crash on malformed input. ``record_type`` may be
+        # a non-string (number, bool, array, object) in malformed JSON, which
+        # would raise AttributeError on the ``.startswith(...)`` / allowlist-
+        # membership calls below. The record-envelope schema already flags a
+        # wrong-typed ``record_type`` (ACEF-004), so a non-string is handled
+        # exactly like a missing/empty one: skip the allowlist + payload path and
+        # rely on the envelope diagnostic. ``not record_type`` already covers the
+        # empty-string / None / empty-collection cases; the isinstance guard
+        # covers truthy non-strings (e.g. ``123``, ``True``, ``[\"x\"]``).
+        if not record_type or not isinstance(record_type, str):
             continue
 
         # ``x-``-namespaced record types are vendor extensions: they have no

@@ -26,6 +26,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+
 from acef.validation.schema_validator import validate_record_schemas
 
 # A 26-char Crockford-base32 suffix (>=128 bits, the pattern minimum).
@@ -211,4 +213,66 @@ def test_unknown_record_type_still_acef_003() -> None:
     diagnostics = validate_record_schemas([record], "v1.1")
     assert "ACEF-003" in _codes(diagnostics), (
         f"An unknown record_type must still emit ACEF-003. Got: {[(d.code, d.message) for d in diagnostics]}"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Robustness: a NON-STRING record_type must NOT crash the validator           #
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    "bad_record_type",
+    [
+        123,
+        True,
+        1.5,
+        ["x"],
+        {"k": "v"},
+        None,
+    ],
+    ids=["int", "bool", "float", "list", "dict", "null"],
+)
+def test_non_string_record_type_does_not_crash(bad_record_type: Any) -> None:
+    """A malformed record whose ``record_type`` is a NON-STRING must NOT crash
+    the validator (no unhandled ``AttributeError`` on ``.startswith`` / allowlist
+    membership). The validator must return controlled diagnostics — the
+    record-envelope schema (``record_type`` requires a string) already flags the
+    wrong-typed value with ACEF-004 (VAL-SCH-001).
+
+    Regression for the roborev High finding: the allowlist path called
+    ``record_type.startswith("x-")`` / membership without an ``isinstance(str)``
+    guard, so non-string JSON crashed ``validate_record_schemas`` /
+    ``validate_bundle`` instead of returning diagnostics.
+    """
+    record = _envelope("placeholder", {"k": "v"})
+    # Replace the (string) record_type with the malformed non-string value.
+    record["record_type"] = bad_record_type
+
+    # MUST NOT raise. A validator never crashes on malformed input.
+    diagnostics = validate_record_schemas([record], "v1.1")
+
+    codes = _codes(diagnostics)
+    # The envelope schema diagnostic (record_type must be a string) is reported.
+    assert "ACEF-004" in codes, (
+        "A non-string record_type must be flagged by the envelope schema "
+        f"(ACEF-004), not crash the validator. Got: {[(d.code, d.message) for d in diagnostics]}"
+    )
+
+
+def test_non_string_record_type_in_bundle_returns_diagnostics() -> None:
+    """A bundle whose record has an integer ``record_type`` returns diagnostics
+    rather than raising — the envelope-schema diagnostic for the wrong-typed
+    ``record_type`` is present and no unhandled exception escapes (VAL-SCH-001)."""
+    good = _envelope("incident_card", {})
+    bad = _envelope("placeholder", {})
+    bad["record_type"] = 42
+
+    diagnostics = validate_record_schemas([good, bad], "v1.1")
+
+    # The malformed (second) record's envelope violation is reported on its path.
+    envelope_paths = {d.path for d in diagnostics if d.code == "ACEF-004" and d.path.startswith("/records/1")}
+    assert envelope_paths, (
+        "The non-string record_type at index 1 must produce an ACEF-004 envelope "
+        f"diagnostic. Got: {[(d.code, d.path, d.message) for d in diagnostics]}"
     )
