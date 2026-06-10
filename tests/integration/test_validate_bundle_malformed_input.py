@@ -559,10 +559,16 @@ def test_malformed_metadata_timestamp_on_signed_bundle_never_crashes(tmp_path: P
     _write_bundle(bundle_dir, manifest)
     # Minimal integrity surface: a content-hashes.json + a signatures dir so the
     # signature-verification path (which consumes manifest_ts) is reached.
+    #
+    # The content-hashes.json MUST be a FLAT path->hash mapping (the shape
+    # ``check_integrity`` expects). A nested ``{"algorithm": ..., "files": {}}``
+    # has a non-string value (``files``), which trips the integrity type gate
+    # (ACEF-014) and RETURNS EARLY — the signature path is never reached, so the
+    # test would not exercise its target. An empty flat mapping ``{}`` passes the
+    # type gate, so check_integrity proceeds into ``_check_signatures`` where the
+    # non-string manifest timestamp is consumed (and handled gracefully).
     (bundle_dir / "hashes").mkdir(parents=True, exist_ok=True)
-    (bundle_dir / "hashes" / "content-hashes.json").write_text(
-        json.dumps({"algorithm": "sha-256", "files": {}}), encoding="utf-8"
-    )
+    (bundle_dir / "hashes" / "content-hashes.json").write_text(json.dumps({}), encoding="utf-8")
     sig_dir = bundle_dir / "signatures"
     sig_dir.mkdir(parents=True, exist_ok=True)
     (sig_dir / "broken.jws").write_text("not-a-real-jws", encoding="utf-8")
@@ -570,6 +576,14 @@ def test_malformed_metadata_timestamp_on_signed_bundle_never_crashes(tmp_path: P
     assessment = _run_never_raises(bundle_dir)
     assert isinstance(assessment, AssessmentBundle)
     assert _has_diagnostics(assessment)
+    # Prove the signature-verification path was ACTUALLY reached (not short-
+    # circuited by the integrity type gate): the broken.jws is not a valid
+    # 3-part JWS, so ``_check_signatures`` emits ACEF-012. Its presence is
+    # evidence the guarded manifest-timestamp path ran without raising.
+    codes = [e.get("code") for e in assessment.structural_errors]
+    assert "ACEF-012" in codes, (
+        f"signature-verification path was not reached: expected ACEF-012 from the broken .jws, got codes={codes}"
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -620,6 +634,58 @@ def test_pathological_input_triggers_backstop_no_raise(tmp_path: Path, monkeypat
     assert fatal.get("severity") == "fatal"
     assert "RuntimeError" in fatal.get("message", "")
     assert sentinel in fatal.get("message", "")
+
+
+def test_backstop_preserves_pre_failure_diagnostics_on_late_crash(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When a LATE phase raises, the backstop must return the diagnostics
+    collected BEFORE the failure point IN ADDITION to the fatal ACEF-001 — it
+    must NOT drop earlier findings.
+
+    Construction: the bundle has no ``hashes/content-hashes.json``, so the
+    Phase-2 integrity check emits a real ACEF-014 BEFORE the Phase-3 reference
+    check runs. We then monkeypatch ``check_references`` to raise. The returned
+    assessment MUST contain BOTH the earlier ACEF-014 (proving pre-failure
+    diagnostics survive) AND the fatal ACEF-001 (proving the crash is
+    surfaced). Before the incremental-flush fix, ACEF-014 was buffered in a
+    local and dropped when the later phase raised — only ACEF-001 came back.
+    """
+    import acef.validation.engine as engine_mod
+
+    sentinel = "late-phase-crash-after-early-diagnostics-9c2e"
+
+    def _boom(*_args: Any, **_kwargs: Any) -> Any:
+        raise RuntimeError(sentinel)
+
+    # check_references runs in Phase 3, AFTER Phase 2 integrity has already
+    # collected ACEF-014 for the missing content-hashes.json.
+    monkeypatch.setattr(engine_mod, "check_references", _boom)
+
+    bundle_dir = tmp_path / "earlydiag.acef"
+    manifest = {
+        "versioning": {"core_version": "1.0.0"},
+        "metadata": {
+            "package_id": "urn:acef:pkg:fuzz",
+            "timestamp": "2026-01-01T00:00:00Z",
+        },
+        "record_files": [],
+    }
+    _write_bundle(bundle_dir, manifest)
+    # Deliberately omit hashes/content-hashes.json so Phase-2 integrity emits a
+    # known early diagnostic (ACEF-014) before the patched Phase-3 crash.
+
+    assessment = _run_never_raises(bundle_dir)
+    assert isinstance(assessment, AssessmentBundle)
+    codes = [e.get("code") for e in assessment.structural_errors]
+    # The fatal backstop diagnostic must be present...
+    assert "ACEF-001" in codes, f"backstop must emit fatal ACEF-001, got codes={codes}"
+    # ...AND the earlier integrity diagnostic collected before the crash must
+    # NOT have been dropped.
+    assert "ACEF-014" in codes, (
+        "backstop dropped pre-failure diagnostics: expected the Phase-2 ACEF-014 "
+        f"(missing content-hashes.json) to survive the late crash, got codes={codes}"
+    )
 
 
 def test_backstop_does_not_swallow_well_formed_input(tmp_path: Path) -> None:

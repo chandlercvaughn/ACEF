@@ -398,7 +398,17 @@ def _run_validation_phases(
     # ``package_timestamp`` scalar are resolved by the caller via
     # ``_resolve_package_scalars`` and passed in — they are guaranteed strings,
     # so no wrong-typed metadata scalar reaches a Pydantic/timestamp sink here.
-    all_diagnostics: list[ValidationDiagnostic] = []
+    #
+    # Diagnostics are flushed into ``assessment.structural_errors`` INCREMENTALLY
+    # as each phase completes (not buffered in a local until the end). This is
+    # load-bearing: if a LATER phase (e.g. ``check_references`` or a v1.1 rule
+    # family) raises, the caller's untrusted-input backstop must still return
+    # every diagnostic collected UP TO the failure point — not drop them. Each
+    # diagnostic reaches ``assessment.structural_errors`` exactly once, so the
+    # success path produces no duplicates.
+    def _flush(diagnostics: list[ValidationDiagnostic]) -> None:
+        for diag in diagnostics:
+            assessment.structural_errors.append(diag.to_dict())
 
     # Phase 1: Schema validation — route to v1/ or v1.1/ schemas based on
     # the bundle's declared core_version (resolved above into
@@ -407,20 +417,20 @@ def _run_validation_phases(
     # in a v1.0-declared bundle correctly emit ACEF-003.
     schema_diagnostics = validate_manifest_schema(manifest_data, schema_version)
     schema_diagnostics.extend(validate_record_schemas(all_records_data, schema_version))
-    all_diagnostics.extend(schema_diagnostics)
+    _flush(schema_diagnostics)
 
     # Surface record-file type-mismatch and early-load diagnostics gathered
     # during JSONL parse.
-    all_diagnostics.extend(record_file_type_mismatches)
-    all_diagnostics.extend(early_load_diagnostics)
+    _flush(record_file_type_mismatches)
+    _flush(early_load_diagnostics)
 
     # Phase 2: Integrity verification
     integrity_diagnostics = check_integrity(bundle_path)
-    all_diagnostics.extend(integrity_diagnostics)
+    _flush(integrity_diagnostics)
 
     # Phase 3: Reference checking
     reference_diagnostics = check_references(manifest_data, all_records_data, bundle_path)
-    all_diagnostics.extend(reference_diagnostics)
+    _flush(reference_diagnostics)
 
     # Phase 3b: Cross-record validation (v1.1 only)
     # Gated on schema_version so v1.0 bundles are byte-equivalent to pre-v0.4
@@ -442,7 +452,7 @@ def _run_validation_phases(
             all_records_data,
             signature_count=_xr_sig_count,
         )
-        all_diagnostics.extend(cross_record_diagnostics)
+        _flush(cross_record_diagnostics)
 
         # Phase 3c: v1.1 rule families (banned claim-language lint,
         # state-class taxonomy enforcement, mode-gated forbidden record
@@ -470,7 +480,7 @@ def _run_validation_phases(
             all_records_data,
             assessment_bundle=_assessment_data,
         )
-        all_diagnostics.extend(v1_1_rule_diagnostics)
+        _flush(v1_1_rule_diagnostics)
 
         # Phase 3d: Vendor-namespace lint hooks (WS3.10 /
         # F-M1-NAMESPACE-LINT-HOOK). Registered patterns under
@@ -485,11 +495,11 @@ def _run_validation_phases(
             manifest_data,
             all_records_data,
         )
-        all_diagnostics.extend(namespace_lint_diagnostics)
+        _flush(namespace_lint_diagnostics)
 
-    # Record all structural errors
-    for diag in all_diagnostics:
-        assessment.structural_errors.append(diag.to_dict())
+    # All pre-profile structural diagnostics have already been flushed into
+    # ``assessment.structural_errors`` incrementally (above) so they survive a
+    # late-phase crash via the caller's backstop. No final buffer flush remains.
 
     # Phase 4: Rule evaluation (only if profiles specified)
     # Note: spec S3.6 says "Validators MUST report ALL errors encountered within
