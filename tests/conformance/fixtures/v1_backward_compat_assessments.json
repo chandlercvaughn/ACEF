@@ -69,7 +69,7 @@
         "evidence_refs": [
           "urn:acef:rec:855460ea-7b53-4ce2-981c-875d3dbfa210"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "china-cac-labeling-2025",
         "provision_id": "cac-explicit-label",
@@ -83,7 +83,7 @@
         "evidence_refs": [
           "urn:acef:rec:855460ea-7b53-4ce2-981c-875d3dbfa210"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "china-cac-labeling-2025",
         "provision_id": "cac-explicit-label",
@@ -97,7 +97,7 @@
         "evidence_refs": [
           "urn:acef:rec:855460ea-7b53-4ce2-981c-875d3dbfa210"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "china-cac-labeling-2025",
         "provision_id": "cac-explicit-label",
@@ -111,7 +111,7 @@
         "evidence_refs": [
           "urn:acef:rec:855460ea-7b53-4ce2-981c-875d3dbfa210"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "china-cac-labeling-2025",
         "provision_id": "cac-explicit-label",
@@ -126,7 +126,7 @@
           "urn:acef:rec:4617b4e9-e5db-4b40-8f02-005b713e2542",
           "urn:acef:rec:c51f3889-f83a-4af9-92fc-da71e3cb6b42"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "china-cac-labeling-2025",
         "provision_id": "cac-implicit-metadata",
@@ -141,7 +141,7 @@
           "urn:acef:rec:4617b4e9-e5db-4b40-8f02-005b713e2542",
           "urn:acef:rec:c51f3889-f83a-4af9-92fc-da71e3cb6b42"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "china-cac-labeling-2025",
         "provision_id": "cac-implicit-metadata",
@@ -156,7 +156,7 @@
           "urn:acef:rec:4617b4e9-e5db-4b40-8f02-005b713e2542",
           "urn:acef:rec:c51f3889-f83a-4af9-92fc-da71e3cb6b42"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "china-cac-labeling-2025",
         "provision_id": "cac-implicit-metadata",
@@ -171,7 +171,7 @@
           "urn:acef:rec:4617b4e9-e5db-4b40-8f02-005b713e2542",
           "urn:acef:rec:c51f3889-f83a-4af9-92fc-da71e3cb6b42"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "china-cac-labeling-2025",
         "provision_id": "cac-implicit-metadata",
@@ -186,7 +186,7 @@
           "urn:acef:rec:4617b4e9-e5db-4b40-8f02-005b713e2542",
           "urn:acef:rec:c51f3889-f83a-4af9-92fc-da71e3cb6b42"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "china-cac-labeling-2025",
         "provision_id": "cac-implicit-metadata",
@@ -201,7 +201,7 @@
           "urn:acef:rec:27fb43de-f7a7-4677-9bb3-6fa411c376e7",
           "urn:acef:rec:60f768e6-53c8-4613-816f-3083fc40c8db"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "china-cac-labeling-2025",
         "provision_id": "cac-log-retention",
@@ -216,7 +216,7 @@
           "urn:acef:rec:27fb43de-f7a7-4677-9bb3-6fa411c376e7",
           "urn:acef:rec:60f768e6-53c8-4613-816f-3083fc40c8db"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "china-cac-labeling-2025",
         "provision_id": "cac-log-retention",
@@ -231,7 +231,7 @@
           "urn:acef:rec:27fb43de-f7a7-4677-9bb3-6fa411c376e7",
           "urn:acef:rec:60f768e6-53c8-4613-816f-3083fc40c8db"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "china-cac-labeling-2025",
         "provision_id": "cac-log-retention",
@@ -249,7 +249,7 @@
           "urn:acef:rec:4617b4e9-e5db-4b40-8f02-005b713e2542",
           "urn:acef:rec:c51f3889-f83a-4af9-92fc-da71e3cb6b42"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "china-cac-labeling-2025",
         "provision_id": "cac-log-retention",
@@ -263,7 +263,7 @@
         "evidence_refs": [
           "urn:acef:rec:60f768e6-53c8-4613-816f-3083fc40c8db"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "china-cac-labeling-2025",
         "provision_id": "cac-log-retention",
@@ -278,7 +278,7 @@
           "urn:acef:rec:4617b4e9-e5db-4b40-8f02-005b713e2542",
           "urn:acef:rec:c51f3889-f83a-4af9-92fc-da71e3cb6b42"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "china-cac-labeling-2025",
         "provision_id": "cac-watermark",
@@ -293,7 +293,7 @@
           "urn:acef:rec:4617b4e9-e5db-4b40-8f02-005b713e2542",
           "urn:acef:rec:c51f3889-f83a-4af9-92fc-da71e3cb6b42"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "china-cac-labeling-2025",
         "provision_id": "cac-watermark",
@@ -308,7 +308,7 @@
           "urn:acef:rec:4617b4e9-e5db-4b40-8f02-005b713e2542",
           "urn:acef:rec:c51f3889-f83a-4af9-92fc-da71e3cb6b42"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "china-cac-labeling-2025",
         "provision_id": "cac-watermark",
@@ -461,7 +461,7 @@
         "evidence_refs": [
           "urn:acef:rec:804e6e6a-5080-49ef-b109-1d717dd95698"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-10",
@@ -475,7 +475,7 @@
         "evidence_refs": [
           "urn:acef:rec:9a4939af-6f51-47dc-b720-991cb3fcfef4"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-10",
@@ -489,7 +489,7 @@
         "evidence_refs": [
           "urn:acef:rec:9a4939af-6f51-47dc-b720-991cb3fcfef4"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-10",
@@ -503,7 +503,7 @@
         "evidence_refs": [
           "urn:acef:rec:804e6e6a-5080-49ef-b109-1d717dd95698"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-10",
@@ -517,7 +517,7 @@
         "evidence_refs": [
           "urn:acef:rec:3d621167-8506-4a28-98bc-054969747b2b"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-11",
@@ -531,7 +531,7 @@
         "evidence_refs": [
           "urn:acef:rec:3d621167-8506-4a28-98bc-054969747b2b"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-11",
@@ -546,7 +546,7 @@
           "urn:acef:rec:52e798dd-5b7f-4cbf-a319-3ec7cde997e0",
           "urn:acef:rec:86bee24a-6eef-4089-9c8c-c8e5258f7835"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-12",
@@ -561,7 +561,7 @@
           "urn:acef:rec:52e798dd-5b7f-4cbf-a319-3ec7cde997e0",
           "urn:acef:rec:86bee24a-6eef-4089-9c8c-c8e5258f7835"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-12",
@@ -576,7 +576,7 @@
           "urn:acef:rec:52e798dd-5b7f-4cbf-a319-3ec7cde997e0",
           "urn:acef:rec:86bee24a-6eef-4089-9c8c-c8e5258f7835"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-12",
@@ -591,7 +591,7 @@
           "urn:acef:rec:52e798dd-5b7f-4cbf-a319-3ec7cde997e0",
           "urn:acef:rec:86bee24a-6eef-4089-9c8c-c8e5258f7835"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-12",
@@ -605,7 +605,7 @@
         "evidence_refs": [
           "urn:acef:rec:52e798dd-5b7f-4cbf-a319-3ec7cde997e0"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-12",
@@ -619,7 +619,7 @@
         "evidence_refs": [
           "urn:acef:rec:f1962d08-6353-4ed8-ab6b-b3463ce4a551"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-13",
@@ -633,7 +633,7 @@
         "evidence_refs": [
           "urn:acef:rec:f1962d08-6353-4ed8-ab6b-b3463ce4a551"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-13",
@@ -647,7 +647,7 @@
         "evidence_refs": [
           "urn:acef:rec:df927ca2-fd06-4dfe-82c6-2e421d8e5106"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-14",
@@ -661,7 +661,7 @@
         "evidence_refs": [
           "urn:acef:rec:df927ca2-fd06-4dfe-82c6-2e421d8e5106"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-14",
@@ -675,7 +675,7 @@
         "evidence_refs": [
           "urn:acef:rec:3d621167-8506-4a28-98bc-054969747b2b"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-15",
@@ -689,7 +689,7 @@
         "evidence_refs": [
           "urn:acef:rec:3d621167-8506-4a28-98bc-054969747b2b"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-15",
@@ -703,7 +703,7 @@
         "evidence_refs": [
           "urn:acef:rec:a204affe-7d86-4dde-93ce-df2ff059dd04"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-17",
@@ -717,7 +717,7 @@
         "evidence_refs": [
           "urn:acef:rec:a204affe-7d86-4dde-93ce-df2ff059dd04"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-17",
@@ -732,7 +732,7 @@
           "urn:acef:rec:8935c655-5956-4564-9f2b-796b8d25904e",
           "urn:acef:rec:b6a206bd-5823-431b-a797-6990c6317aab"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-9",
@@ -756,7 +756,7 @@
           "urn:acef:rec:962db5e0-fc2f-4cfc-8e9a-981836a25ae9",
           "urn:acef:rec:f1962d08-6353-4ed8-ab6b-b3463ce4a551"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-9",
@@ -770,7 +770,7 @@
         "evidence_refs": [
           "urn:acef:rec:b6a206bd-5823-431b-a797-6990c6317aab"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-9",
@@ -784,7 +784,7 @@
         "evidence_refs": [
           "urn:acef:rec:b6a206bd-5823-431b-a797-6990c6317aab"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-9",
@@ -799,7 +799,7 @@
           "urn:acef:rec:8935c655-5956-4564-9f2b-796b8d25904e",
           "urn:acef:rec:b6a206bd-5823-431b-a797-6990c6317aab"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-9",
@@ -813,7 +813,7 @@
         "evidence_refs": [
           "urn:acef:rec:962db5e0-fc2f-4cfc-8e9a-981836a25ae9"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-9",
@@ -858,7 +858,7 @@
         "evidence_refs": [
           "urn:acef:rec:244c326e-7d12-4e05-8369-7ad05a2fa9d5"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-53",
@@ -872,7 +872,7 @@
         "evidence_refs": [
           "urn:acef:rec:d5d8c1bf-f24f-4357-a082-a7409033343b"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-53",
@@ -886,7 +886,7 @@
         "evidence_refs": [
           "urn:acef:rec:17cd1346-09a2-4f55-bcf5-08fb1b6f38a9"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-53",
@@ -900,7 +900,7 @@
         "evidence_refs": [
           "urn:acef:rec:17cd1346-09a2-4f55-bcf5-08fb1b6f38a9"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-53",
@@ -1091,7 +1091,7 @@
         "evidence_refs": [
           "urn:acef:rec:a805c374-9c3f-4389-8da4-05dadb98a94a"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-10",
@@ -1105,7 +1105,7 @@
         "evidence_refs": [
           "urn:acef:rec:e97ee37a-c44d-4818-b718-e825dd3e7a14"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-10",
@@ -1119,7 +1119,7 @@
         "evidence_refs": [
           "urn:acef:rec:e97ee37a-c44d-4818-b718-e825dd3e7a14"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-10",
@@ -1133,7 +1133,7 @@
         "evidence_refs": [
           "urn:acef:rec:a805c374-9c3f-4389-8da4-05dadb98a94a"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-10",
@@ -1147,7 +1147,7 @@
         "evidence_refs": [
           "urn:acef:rec:83248bdb-7d49-49a3-9e57-215414ec2299"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-11",
@@ -1161,7 +1161,7 @@
         "evidence_refs": [
           "urn:acef:rec:83248bdb-7d49-49a3-9e57-215414ec2299"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-11",
@@ -1175,7 +1175,7 @@
         "evidence_refs": [
           "urn:acef:rec:bc3421bb-06a4-4b88-b72c-ab3c66394dc1"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-13",
@@ -1189,7 +1189,7 @@
         "evidence_refs": [
           "urn:acef:rec:bc3421bb-06a4-4b88-b72c-ab3c66394dc1"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-13",
@@ -1215,7 +1215,7 @@
         "evidence_refs": [
           "urn:acef:rec:4f89d40e-ab0c-4455-b60d-49eb45a4450e"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-53",
@@ -1229,7 +1229,7 @@
         "evidence_refs": [
           "urn:acef:rec:a805c374-9c3f-4389-8da4-05dadb98a94a"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-53",
@@ -1243,7 +1243,7 @@
         "evidence_refs": [
           "urn:acef:rec:a805c374-9c3f-4389-8da4-05dadb98a94a"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-53",
@@ -1257,7 +1257,7 @@
         "evidence_refs": [
           "urn:acef:rec:2d0ff685-040d-41fe-b784-85cacb2ba251"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-9",
@@ -1277,7 +1277,7 @@
           "urn:acef:rec:39baee65-2172-4947-ac40-708a3c7ac4ff",
           "urn:acef:rec:bc3421bb-06a4-4b88-b72c-ab3c66394dc1"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-9",
@@ -1291,7 +1291,7 @@
         "evidence_refs": [
           "urn:acef:rec:2d0ff685-040d-41fe-b784-85cacb2ba251"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-9",
@@ -1305,7 +1305,7 @@
         "evidence_refs": [
           "urn:acef:rec:2d0ff685-040d-41fe-b784-85cacb2ba251"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-9",
@@ -1319,7 +1319,7 @@
         "evidence_refs": [
           "urn:acef:rec:2d0ff685-040d-41fe-b784-85cacb2ba251"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-9",
@@ -1333,7 +1333,7 @@
         "evidence_refs": [
           "urn:acef:rec:39baee65-2172-4947-ac40-708a3c7ac4ff"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-9",
@@ -1347,7 +1347,7 @@
         "evidence_refs": [
           "urn:acef:rec:47e5102d-0595-41cc-b9d2-d48a51838c46"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "nist-ai-rmf-1.0",
         "provision_id": "govern-1",
@@ -1361,7 +1361,7 @@
         "evidence_refs": [
           "urn:acef:rec:47e5102d-0595-41cc-b9d2-d48a51838c46"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "nist-ai-rmf-1.0",
         "provision_id": "govern-1",
@@ -1399,7 +1399,7 @@
         "evidence_refs": [
           "urn:acef:rec:47e5102d-0595-41cc-b9d2-d48a51838c46"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "nist-ai-rmf-1.0",
         "provision_id": "govern-1",
@@ -1413,7 +1413,7 @@
         "evidence_refs": [
           "urn:acef:rec:47e5102d-0595-41cc-b9d2-d48a51838c46"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "nist-ai-rmf-1.0",
         "provision_id": "govern-1",
@@ -1451,7 +1451,7 @@
         "evidence_refs": [
           "urn:acef:rec:2d0ff685-040d-41fe-b784-85cacb2ba251"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "nist-ai-rmf-1.0",
         "provision_id": "map-1",
@@ -1465,7 +1465,7 @@
         "evidence_refs": [
           "urn:acef:rec:2d0ff685-040d-41fe-b784-85cacb2ba251"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "nist-ai-rmf-1.0",
         "provision_id": "map-1",
@@ -1479,7 +1479,7 @@
         "evidence_refs": [
           "urn:acef:rec:2d0ff685-040d-41fe-b784-85cacb2ba251"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "nist-ai-rmf-1.0",
         "provision_id": "map-1",
@@ -1493,7 +1493,7 @@
         "evidence_refs": [
           "urn:acef:rec:2d0ff685-040d-41fe-b784-85cacb2ba251"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "nist-ai-rmf-1.0",
         "provision_id": "map-1",
@@ -1507,7 +1507,7 @@
         "evidence_refs": [
           "urn:acef:rec:83248bdb-7d49-49a3-9e57-215414ec2299"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "nist-ai-rmf-1.0",
         "provision_id": "measure-1",
@@ -1521,7 +1521,7 @@
         "evidence_refs": [
           "urn:acef:rec:83248bdb-7d49-49a3-9e57-215414ec2299"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "nist-ai-rmf-1.0",
         "provision_id": "measure-1",
@@ -1535,7 +1535,7 @@
         "evidence_refs": [
           "urn:acef:rec:83248bdb-7d49-49a3-9e57-215414ec2299"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "nist-ai-rmf-1.0",
         "provision_id": "measure-1",
@@ -1549,7 +1549,7 @@
         "evidence_refs": [
           "urn:acef:rec:83248bdb-7d49-49a3-9e57-215414ec2299"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "nist-ai-rmf-1.0",
         "provision_id": "measure-1",
@@ -1563,7 +1563,7 @@
         "evidence_refs": [
           "urn:acef:rec:83248bdb-7d49-49a3-9e57-215414ec2299"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "nist-ai-rmf-1.0",
         "provision_id": "measure-1",
@@ -1577,7 +1577,7 @@
         "evidence_refs": [
           "urn:acef:rec:83248bdb-7d49-49a3-9e57-215414ec2299"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "nist-ai-rmf-1.0",
         "provision_id": "measure-1",
@@ -1622,7 +1622,7 @@
           "urn:acef:rec:a77c6741-755b-4390-b37c-3e7000f9f377",
           "urn:acef:rec:d02b86ed-ab44-41fb-b46e-87120fb0ca1f"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-50.2",
@@ -1637,7 +1637,7 @@
           "urn:acef:rec:a77c6741-755b-4390-b37c-3e7000f9f377",
           "urn:acef:rec:d02b86ed-ab44-41fb-b46e-87120fb0ca1f"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-50.2",
@@ -1652,7 +1652,7 @@
           "urn:acef:rec:a77c6741-755b-4390-b37c-3e7000f9f377",
           "urn:acef:rec:d02b86ed-ab44-41fb-b46e-87120fb0ca1f"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-50.2",
@@ -1667,7 +1667,7 @@
           "urn:acef:rec:a77c6741-755b-4390-b37c-3e7000f9f377",
           "urn:acef:rec:d02b86ed-ab44-41fb-b46e-87120fb0ca1f"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-50.2",
@@ -1754,7 +1754,7 @@
           "urn:acef:rec:a7a8bbe7-9954-4685-9068-6106a4b885fd",
           "urn:acef:rec:f8d7f96c-5358-4acd-af6a-a1754ae7bdc0"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "nist-ai-rmf-1.0",
         "provision_id": "govern-1",
@@ -1768,7 +1768,7 @@
         "evidence_refs": [
           "urn:acef:rec:f8d7f96c-5358-4acd-af6a-a1754ae7bdc0"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "nist-ai-rmf-1.0",
         "provision_id": "govern-1",
@@ -1783,7 +1783,7 @@
           "urn:acef:rec:a7a8bbe7-9954-4685-9068-6106a4b885fd",
           "urn:acef:rec:f8d7f96c-5358-4acd-af6a-a1754ae7bdc0"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "nist-ai-rmf-1.0",
         "provision_id": "govern-1",
@@ -1797,7 +1797,7 @@
         "evidence_refs": [
           "urn:acef:rec:61e77222-cd1b-49a7-9798-ee56980d5efa"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "nist-ai-rmf-1.0",
         "provision_id": "manage-1",
@@ -1811,7 +1811,7 @@
         "evidence_refs": [
           "urn:acef:rec:61e77222-cd1b-49a7-9798-ee56980d5efa"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "nist-ai-rmf-1.0",
         "provision_id": "manage-1",
@@ -1825,7 +1825,7 @@
         "evidence_refs": [
           "urn:acef:rec:61e77222-cd1b-49a7-9798-ee56980d5efa"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "nist-ai-rmf-1.0",
         "provision_id": "manage-1",
@@ -1839,7 +1839,7 @@
         "evidence_refs": [
           "urn:acef:rec:41d17d4c-3f0c-4324-a9a1-003fbd477a0d"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "nist-ai-rmf-1.0",
         "provision_id": "map-1",
@@ -1853,7 +1853,7 @@
         "evidence_refs": [
           "urn:acef:rec:41d17d4c-3f0c-4324-a9a1-003fbd477a0d"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "nist-ai-rmf-1.0",
         "provision_id": "map-1",
@@ -1867,7 +1867,7 @@
         "evidence_refs": [
           "urn:acef:rec:41d17d4c-3f0c-4324-a9a1-003fbd477a0d"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "nist-ai-rmf-1.0",
         "provision_id": "map-1",
@@ -1881,7 +1881,7 @@
         "evidence_refs": [
           "urn:acef:rec:54b99c94-b53e-420c-8361-689132621755"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "nist-ai-rmf-1.0",
         "provision_id": "measure-1",
@@ -1895,7 +1895,7 @@
         "evidence_refs": [
           "urn:acef:rec:54b99c94-b53e-420c-8361-689132621755"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "nist-ai-rmf-1.0",
         "provision_id": "measure-1",
@@ -1909,7 +1909,7 @@
         "evidence_refs": [
           "urn:acef:rec:54b99c94-b53e-420c-8361-689132621755"
         ],
-        "message": "",
+        "message": null,
         "outcome": "passed",
         "profile_id": "nist-ai-rmf-1.0",
         "provision_id": "measure-1",

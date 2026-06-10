@@ -337,14 +337,28 @@ def _normalize_rule_result(r: Any) -> dict[str, Any]:
       / ``error``),
     * ``subject_scope`` — WHICH subject(s) this evaluation applies to (the same
       rule fires once per subject in a multi-subject bundle),
-    * ``message`` — the human-readable result message (``None`` normalized to
-      ``""``),
+    * ``message`` — the human-readable result message. ``RuleResult.message`` is
+      ``str | None``; ``None`` is PRESERVED AS ``None`` (serialized as JSON
+      ``null``), NOT coerced to ``""``. A real serialized-output regression that
+      flips a rule message from ``null`` to the empty string ``""`` (or vice
+      versa) is a backward-compat change and MUST flip this projection — coercing
+      both to ``""`` would mask it. (``message`` is the only optional field on the
+      captured models; every other field below is a required ``str`` / enum / list
+      that is never ``None``, so no other field needs ``None``-preservation.)
     * ``evidence_refs`` — the evidence the rule matched.
 
     This REPLACES the prior ``{outcome -> count}`` reduction, which let a changed
     ``rule_id`` / ``subject_scope`` / ``severity`` / ``message`` pass silently as
     long as the per-outcome counts were preserved.
     """
+    # ``message`` is the single ``None``-able field on RuleResult. Validate it is
+    # exactly ``None`` or ``str`` (mypy-clean, no silent str() coercion of other
+    # types), then store it DIRECTLY so ``null`` round-trips to JSON ``null`` and
+    # a null↔"" serialized-output regression is caught.
+    message = r.message
+    assert message is None or isinstance(message, str), (
+        f"RuleResult.message must be None or str, got {type(message).__name__}"
+    )
     return {
         "rule_id": str(r.rule_id),
         "provision_id": str(r.provision_id),
@@ -352,7 +366,7 @@ def _normalize_rule_result(r: Any) -> dict[str, Any]:
         "severity": r.rule_severity.value,
         "outcome": r.outcome.value,
         "subject_scope": [str(s) for s in r.subject_scope],
-        "message": str(r.message) if r.message is not None else "",
+        "message": message,
         "evidence_refs": [str(e) for e in r.evidence_refs],
     }
 
@@ -363,7 +377,16 @@ def _rule_result_sort_key(entry: dict[str, Any]) -> tuple[Any, ...]:
     Includes ``subject_scope`` (as a tuple) plus every identity field so that
     two results differing in ONLY one field still sort deterministically — the
     full per-rule identity is preserved, never reduced.
+
+    ``message`` is now ``str | None`` (``None`` preserved for null-fidelity), and
+    ``None`` is NOT orderable against ``str``. The message key is therefore a
+    ``(is_none, value)`` pair: a ``None`` message sorts AFTER every string message
+    (``False`` < ``True``) with an empty-string placeholder, while two strings
+    still sort lexically — a TOTAL, deterministic order that keeps a ``null`` and
+    an ``""`` message as DISTINCT, adjacent-but-not-equal sort positions.
     """
+    message = entry["message"]
+    message_key = (message is None, message if message is not None else "")
     return (
         entry["profile_id"],
         entry["provision_id"],
@@ -371,7 +394,7 @@ def _rule_result_sort_key(entry: dict[str, Any]) -> tuple[Any, ...]:
         tuple(entry["subject_scope"]),
         entry["outcome"],
         entry["severity"],
-        entry["message"],
+        message_key,
         tuple(entry["evidence_refs"]),
     )
 
