@@ -63,19 +63,46 @@ _HARM_CORE_TAXONOMY_PATH = _V1_1_DIR / "harm-core-taxonomy.json"
 # rename of the companion's $defs path can never silently pass.
 _HARM_CLASS_REF = "harm-core-taxonomy.json#/$defs/harm_class"
 
+# The normative ACEF card-level harm_class vocabulary, fixed verbatim by RFC-0002
+# §5.2 ("The code list is normative in this RFC (enumerated here): physical_health
+# (3(49)(a)), critical_infrastructure (3(49)(b)), fundamental_rights (3(49)(c)),
+# property_or_environment (3(49)(d)), and the AI-specific intangible classes
+# discrimination, misinformation_integrity, privacy_data, security_compromise,
+# economic, societal_systemic, other"). These are the closed set of ACEF class
+# NAMES. The EU Art.3(49) "3.49.*" TRIGGER codes are NOT harm_class values — they
+# live under taxonomy_crosswalk.eu_ai_act.serious_incident_triggers[] — so a
+# "3.49.a" in harm_core.harm_class MUST be rejected (pinned below).
+_NORMATIVE_HARM_CLASS_ENUM: list[str] = [
+    "physical_health",
+    "critical_infrastructure",
+    "fundamental_rights",
+    "property_or_environment",
+    "discrimination",
+    "misinformation_integrity",
+    "privacy_data",
+    "security_compromise",
+    "economic",
+    "societal_systemic",
+    "other",
+]
+
 # INTERIM STUB — replace with the real acef-conventions/v1.1/harm-core-taxonomy.json
 # once F-M2-SCHEMA-SEV-CROSS lands it (de-stub tracked). Supplies ONLY the single
 # $defs/harm_class definition the incident_card schema $ref's, so these tests run
-# GREEN before the real companion exists. The validator fixture below is
-# self-de-stubbing: it loads the real file in preference to this constant the
-# moment SEV-CROSS ships it, so no test asserts false confidence in resolvability.
+# GREEN before the real companion exists. Its enum is EXACTLY the normative ACEF
+# class-name set from RFC §5.2 above, matching the shape the real
+# harm-core-taxonomy.json#/$defs/harm_class will have (an enum of these 11
+# strings), so the self-de-stub auto-upgrade below stays seamless once SEV-CROSS
+# ships the real file. The validator fixture is self-de-stubbing: it loads the
+# real file in preference to this constant the moment SEV-CROSS ships it, so no
+# test asserts false confidence in resolvability.
 HARM_CORE_TAXONOMY_STUB: dict[str, Any] = {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "$id": "https://acef.ai/schemas/v1.1/harm-core-taxonomy.json",
     "$defs": {
         "harm_class": {
             "type": "string",
-            "enum": ["3.49.a", "3.49.b", "3.49.c", "3.49.d"],
+            "enum": list(_NORMATIVE_HARM_CLASS_ENUM),
         }
     },
 }
@@ -87,8 +114,12 @@ assert len(_VALID_SUFFIX) == 26  # noqa: S101 — fixture invariant, not a runti
 
 _VALID_PUBLIC_INCIDENT_ID = f"AIIC-OPENAI-2026-{_VALID_SUFFIX}"
 
-# A structurally valid harm_core subtree. harm_class is keyed to Art.3(49)(a-d)
-# via the harm-core-taxonomy companion schema; "3.49.a" matches the stub enum.
+# A structurally valid harm_core subtree. harm_class is a normative ACEF class
+# NAME from the closed RFC §5.2 vocabulary (here "physical_health", the 3(49)(a)
+# class), resolved via the harm-core-taxonomy companion $defs/harm_class enum. The
+# EU Art.3(49) "3.49.*" codes are crosswalk TRIGGER values (under
+# taxonomy_crosswalk.eu_ai_act.serious_incident_triggers[]), NOT harm_class — that
+# boundary is pinned by test_incident_card_rejects_eu_trigger_code_as_harm_class.
 _VALID_HARM_CORE: dict[str, Any] = {
     "realization": "harm_event",
     "causality": {
@@ -96,7 +127,7 @@ _VALID_HARM_CORE: dict[str, Any] = {
         "intent": "unintentional",
         "timing": "post_deployment",
     },
-    "harm_class": "3.49.a",
+    "harm_class": "physical_health",
 }
 
 
@@ -202,16 +233,20 @@ def test_harm_core_taxonomy_companion_resolution_auto_upgrades() -> None:
     used; once SEV-CROSS ships the real file this test (and the card validator)
     automatically exercise it, with the contract that whichever resource is in
     play declares the companion ``$id`` and supplies a ``$defs/harm_class`` enum
-    covering the Art.3(49)(a-d) classes the card fixtures use.
+    covering the normative ACEF class names (RFC §5.2) the card fixtures use.
     """
     taxonomy = _resolve_harm_core_taxonomy()
     assert taxonomy["$id"] == "https://acef.ai/schemas/v1.1/harm-core-taxonomy.json"
     harm_class = taxonomy["$defs"]["harm_class"]
     assert harm_class["type"] == "string"
-    # The Art.3(49)(a-d) class used by every card fixture MUST be admissible by
-    # whichever resource (stub today, real companion once SEV-CROSS lands) is in
+    # The normative ACEF class name used by every card fixture MUST be admissible
+    # by whichever resource (stub today, real companion once SEV-CROSS lands) is in
     # play, so the card validator's harm_class $ref keeps resolving and passing.
     assert _VALID_HARM_CORE["harm_class"] in harm_class["enum"]
+    # And the closed vocabulary is exactly the RFC §5.2 class-name set — neither
+    # stub nor real companion may admit the EU Art.3(49) "3.49.*" TRIGGER codes,
+    # which are crosswalk values, not harm_class names.
+    assert set(harm_class["enum"]) == set(_NORMATIVE_HARM_CLASS_ENUM)
     if _HARM_CORE_TAXONOMY_PATH.exists():
         # SEV-CROSS has shipped the real companion: this assertion proves the
         # test upgraded off the stub and is now exercising the production schema.
@@ -226,6 +261,33 @@ def test_incident_card_minimal_conforming_validates(
     """A minimal conforming public-projection card validates (VAL-CARD-001)."""
     errors = list(incident_card_validator.iter_errors(_valid_card()))
     assert errors == [], [e.message for e in errors]
+
+
+@pytest.mark.parametrize(
+    "trigger_code",
+    ["3.49.a", "3.49.b", "3.49.c", "3.49.d"],
+)
+def test_incident_card_rejects_eu_trigger_code_as_harm_class(
+    incident_card_validator: Draft202012Validator,
+    trigger_code: str,
+) -> None:
+    """An EU Art.3(49) TRIGGER code in ``harm_core.harm_class`` is REJECTED
+    (VAL-CARD-001).
+
+    Pins the §5.2 vocabulary boundary: the card-level ``harm_class`` enum is the
+    closed set of ACEF class NAMES (``physical_health``, ``fundamental_rights``,
+    …). The ``3.49.*`` codes are EU AI Act CROSSWALK triggers
+    (``taxonomy_crosswalk.eu_ai_act.serious_incident_triggers[]``), NOT
+    ``harm_class`` values, so a ``harm_class`` of ``"3.49.a"`` resolved through
+    the ``harm-core-taxonomy.json#/$defs/harm_class`` enum MUST fail. This guards
+    against re-introducing the conflation roborev flagged: trigger codes are not
+    harm classes.
+    """
+    card = _valid_card()
+    card["harm_core"]["harm_class"] = trigger_code
+    assert not incident_card_validator.is_valid(card), (
+        f"EU trigger code {trigger_code!r} must not validate as a harm_class name"
+    )
 
 
 @pytest.mark.parametrize(
