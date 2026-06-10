@@ -235,6 +235,79 @@ class TestACEF084:
         diags = ir.check_art73_clock([card], profiles=["eu-ai-act-art73-2026"])
         assert "ACEF-084" in _codes(diags)
 
+    def test_public_card_missing_widespread_death_facts_raises_084(self) -> None:
+        # FINDING 1: a declared-Art.73 PUBLIC card with triggers + id but with NO
+        # widespread / death_involved booleans is an INCOMPLETE Art.73 fact set.
+        # The confidential card_source.eu_ai_act_facts schema REQUIRES both; the
+        # public taxonomy_crosswalk.eu_ai_act path must not silently default them to
+        # false and pass a wrong 15-day clock. It MUST raise ACEF-084 (missing facts),
+        # not silently accept a 15-day deadline.
+        card = {
+            "record_id": "rec-card-incomplete",
+            "record_type": "incident_card",
+            "payload": {
+                "public_incident_id": _VALID_ID,
+                "id_grade": "self-asserted",
+                "harm_core": dict(_VALID_HARM_CORE),
+                "taxonomy_crosswalk": {
+                    "eu_ai_act": {
+                        "edition": "reg-2024-1689",
+                        "serious_incident_triggers": ["3.49.a"],
+                        # widespread / death_involved INTENTIONALLY ABSENT
+                    }
+                },
+                "coordinated_disclosure": {
+                    "status": "coordinated",
+                    "regulatory_timeline": [
+                        {
+                            "framework": "eu-ai-act-art73",
+                            "clock_model": "awareness_days",
+                            "awareness_date": "2026-08-01T00:00:00Z",
+                            # 15-day deadline would be ACCEPTED if both booleans
+                            # silently defaulted to false — that is the bug.
+                            "deadline": "2026-08-16T00:00:00Z",
+                        }
+                    ],
+                },
+            },
+        }
+        diags = ir.check_art73_clock([card], profiles=["eu-ai-act-art73-2026"])
+        assert "ACEF-084" in _codes(diags)
+
+    def test_public_card_complete_facts_correct_clock_passes(self) -> None:
+        # The same public card WITH both widespread + death_involved present and a
+        # correct 15-day deadline (non-fatal 3.49.a, not widespread) passes.
+        card = {
+            "record_id": "rec-card-complete",
+            "record_type": "incident_card",
+            "payload": {
+                "public_incident_id": _VALID_ID,
+                "id_grade": "self-asserted",
+                "harm_core": dict(_VALID_HARM_CORE),
+                "taxonomy_crosswalk": {
+                    "eu_ai_act": {
+                        "edition": "reg-2024-1689",
+                        "serious_incident_triggers": ["3.49.a"],
+                        "widespread": False,
+                        "death_involved": False,
+                    }
+                },
+                "coordinated_disclosure": {
+                    "status": "coordinated",
+                    "regulatory_timeline": [
+                        {
+                            "framework": "eu-ai-act-art73",
+                            "clock_model": "awareness_days",
+                            "awareness_date": "2026-08-01T00:00:00Z",
+                            "deadline": "2026-08-16T00:00:00Z",  # 15 days, correct
+                        }
+                    ],
+                },
+            },
+        }
+        diags = ir.check_art73_clock([card], profiles=["eu-ai-act-art73-2026"])
+        assert "ACEF-084" not in _codes(diags)
+
 
 # ---------------------------------------------------------------------------
 # VAL-CLOCK-001 ART73-DELEGATED: existential dual-source + framework-match
@@ -256,6 +329,74 @@ class TestArt73DelegatedExistential:
         }
         diags = ir.check_art73_existential([empty_card], profiles=["eu-ai-act-art73-2026"])
         assert "ACEF-084" in _codes(diags)
+
+    def test_public_card_incomplete_facts_does_not_satisfy_existential(self) -> None:
+        # FINDING 1 (existential side): a public card with triggers + id but WITHOUT
+        # widespread / death_involved is NOT a complete Art.73 fact carrier, so the
+        # existential dual-source rule is NOT satisfied -> ACEF-084.
+        card = {
+            "record_id": "rec-card-incomplete",
+            "record_type": "incident_card",
+            "payload": {
+                "public_incident_id": _VALID_ID,
+                "id_grade": "self-asserted",
+                "harm_core": dict(_VALID_HARM_CORE),
+                "taxonomy_crosswalk": {
+                    "eu_ai_act": {
+                        "edition": "reg-2024-1689",
+                        "serious_incident_triggers": ["3.49.a"],
+                        # widespread / death_involved ABSENT
+                    }
+                },
+                "coordinated_disclosure": {
+                    "status": "coordinated",
+                    "regulatory_timeline": [
+                        {
+                            "framework": "eu-ai-act-art73",
+                            "clock_model": "awareness_days",
+                            "awareness_date": "2026-08-01T00:00:00Z",
+                            "deadline": "2026-08-16T00:00:00Z",
+                        }
+                    ],
+                },
+            },
+        }
+        diags = ir.check_art73_existential([card], profiles=["eu-ai-act-art73-2026"])
+        assert "ACEF-084" in _codes(diags)
+
+    def test_public_card_complete_facts_satisfies_existential(self) -> None:
+        # The same public card WITH both booleans present is a complete fact carrier
+        # and (with a framework-matched timeline entry) satisfies the existential rule.
+        card = {
+            "record_id": "rec-card-complete",
+            "record_type": "incident_card",
+            "payload": {
+                "public_incident_id": _VALID_ID,
+                "id_grade": "self-asserted",
+                "harm_core": dict(_VALID_HARM_CORE),
+                "taxonomy_crosswalk": {
+                    "eu_ai_act": {
+                        "edition": "reg-2024-1689",
+                        "serious_incident_triggers": ["3.49.a"],
+                        "widespread": False,
+                        "death_involved": False,
+                    }
+                },
+                "coordinated_disclosure": {
+                    "status": "coordinated",
+                    "regulatory_timeline": [
+                        {
+                            "framework": "eu-ai-act-art73",
+                            "clock_model": "awareness_days",
+                            "awareness_date": "2026-08-01T00:00:00Z",
+                            "deadline": "2026-08-16T00:00:00Z",
+                        }
+                    ],
+                },
+            },
+        }
+        diags = ir.check_art73_existential([card], profiles=["eu-ai-act-art73-2026"])
+        assert "ACEF-084" not in _codes(diags)
 
     def test_reserved_id_card_source_only_satisfied(self) -> None:
         # A reserved-id no-public-card report is satisfied by card_source alone.
@@ -686,7 +827,8 @@ class TestACEF085:
 
     def test_eu_ai_act_trigger_contradicts_harm_class_raises_085(self) -> None:
         # harm_class physical_health keys to trigger 3.49.a; a member asserting
-        # ONLY 3.49.d (property_or_environment) contradicts the core.
+        # ONLY 3.49.d (property_or_environment) — and MISSING the derived 3.49.a —
+        # contradicts the core.
         card = {
             "record_id": "r",
             "record_type": "incident_card",
@@ -694,6 +836,46 @@ class TestACEF085:
                 "harm_core": dict(_VALID_HARM_CORE),
                 "taxonomy_crosswalk": {
                     "eu_ai_act": {"edition": "reg-2024-1689", "serious_incident_triggers": ["3.49.d"]}
+                },
+            },
+        }
+        diags = ir.check_crosswalk_harm_core_consistency([card])
+        assert "ACEF-085" in _codes(diags)
+
+    def test_compound_triggers_with_derived_present_passes(self) -> None:
+        # A COMPOUND incident: harm_class physical_health derives 3.49.a; the array
+        # carries 3.49.a (present) PLUS 3.49.b (critical_infrastructure, a different
+        # keyed class). One incident may satisfy multiple Art.3(49) triggers
+        # (RFC §5.5/§5.7) — the additional 3.49.b is NOT a contradiction. No ACEF-085.
+        card = {
+            "record_id": "r",
+            "record_type": "incident_card",
+            "payload": {
+                "harm_core": dict(_VALID_HARM_CORE),  # physical_health
+                "taxonomy_crosswalk": {
+                    "eu_ai_act": {
+                        "edition": "reg-2024-1689",
+                        "serious_incident_triggers": ["3.49.a", "3.49.b"],
+                    }
+                },
+            },
+        }
+        diags = ir.check_crosswalk_harm_core_consistency([card])
+        assert "ACEF-085" not in _codes(diags)
+
+    def test_triggers_present_but_missing_derived_raises_085(self) -> None:
+        # harm_class physical_health derives 3.49.a; an array with triggers but
+        # WITHOUT 3.49.a (e.g. only 3.49.b/3.49.d) contradicts the derived core.
+        card = {
+            "record_id": "r",
+            "record_type": "incident_card",
+            "payload": {
+                "harm_core": dict(_VALID_HARM_CORE),  # physical_health -> 3.49.a
+                "taxonomy_crosswalk": {
+                    "eu_ai_act": {
+                        "edition": "reg-2024-1689",
+                        "serious_incident_triggers": ["3.49.b", "3.49.d"],
+                    }
                 },
             },
         }
@@ -765,4 +947,45 @@ class TestACEF088:
             "payload": {"severity_vector": "ACEF-SEV:1.0/HT:P/HG:H/RV:A/SC:U/BR:P"},
         }
         diags = ir.check_severity_band_consistency([card])
+        assert "ACEF-088" not in _codes(diags)
+
+    def test_cross_container_root_severity_vs_card_source_vector_raises_088(self) -> None:
+        # A source-backed incident_report carries the REQUIRED root payload.severity
+        # while the severity_vector lives under payload.card_source. band() of the
+        # card_source vector -> critical, but root severity says minor -> ACEF-088.
+        report = {
+            "record_id": "rec-report-1",
+            "record_type": "incident_report",
+            "payload": {
+                "incident_type": "malfunction",
+                "severity": "minor",
+                "description": "x",
+                "card_source": {
+                    "public_incident_id": _VALID_ID,
+                    "id_grade": "self-asserted",
+                    "harm_core": dict(_VALID_HARM_CORE),
+                    "severity_vector": "ACEF-SEV:1.0/HT:P/HG:H/RV:A/SC:U/BR:P",
+                },
+            },
+        }
+        diags = ir.check_severity_band_consistency([report])
+        assert "ACEF-088" in _codes(diags)
+
+    def test_cross_container_root_severity_matches_card_source_vector_passes(self) -> None:
+        report = {
+            "record_id": "rec-report-1",
+            "record_type": "incident_report",
+            "payload": {
+                "incident_type": "malfunction",
+                "severity": "critical",
+                "description": "x",
+                "card_source": {
+                    "public_incident_id": _VALID_ID,
+                    "id_grade": "self-asserted",
+                    "harm_core": dict(_VALID_HARM_CORE),
+                    "severity_vector": "ACEF-SEV:1.0/HT:P/HG:H/RV:A/SC:U/BR:P",
+                },
+            },
+        }
+        diags = ir.check_severity_band_consistency([report])
         assert "ACEF-088" not in _codes(diags)

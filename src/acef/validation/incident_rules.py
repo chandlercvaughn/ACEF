@@ -256,14 +256,41 @@ def _eu_facts_for_clock(payload: dict[str, Any]) -> tuple[dict[str, Any] | None,
     return None, ""
 
 
+def _art73_facts_complete(facts: dict[str, Any]) -> bool:
+    """True iff an ``eu_ai_act`` fact block carries the FULL Art.73 trigger set the
+    shortest-clock derivation depends on (§5.7): at least one ``serious_incident_triggers``
+    member AND BOTH ``widespread`` and ``death_involved`` as explicit BOOLEANS.
+
+    The confidential ``card_source.eu_ai_act_facts`` schema already REQUIRES both
+    booleans; this helper applies the SAME completeness requirement to the public
+    ``taxonomy_crosswalk.eu_ai_act`` path. Without it, a public card declaring only
+    triggers + id would let the clock silently DEFAULT ``widespread`` /
+    ``death_involved`` to ``false`` and accept a wrong 15-day deadline instead of
+    surfacing the missing facts. An incomplete declared-Art.73 fact block is NOT a
+    valid clock source — it is an ACEF-084 (missing required Art.73 facts) failure.
+    """
+    triggers = [t for t in _as_list(facts.get("serious_incident_triggers")) if isinstance(t, str)]
+    if not triggers:
+        return False
+    if not isinstance(facts.get("widespread"), bool):
+        return False
+    if not isinstance(facts.get("death_involved"), bool):
+        return False
+    return True
+
+
 def _has_art73_facts(payload: dict[str, Any]) -> bool:
-    """True iff this payload carries public_incident_id + Art.3(49) trigger facts
-    on EITHER the public path or the confidential card_source path (§5.7)."""
+    """True iff this payload carries public_incident_id + a COMPLETE Art.3(49) trigger
+    fact block on EITHER the public path or the confidential card_source path (§5.7).
+
+    "Complete" requires the booleans ``widespread`` + ``death_involved`` (the
+    shortest-clock inputs) to be PRESENT, not silently defaulted — see
+    :func:`_art73_facts_complete`. An incomplete public fact block does NOT satisfy
+    the existential dual-source rule (it cannot anchor a correct clock)."""
     facts, kind = _eu_facts_for_clock(payload)
     if facts is None or not kind:
         return False
-    triggers = [t for t in _as_list(facts.get("serious_incident_triggers")) if isinstance(t, str)]
-    if not triggers:
+    if not _art73_facts_complete(facts):
         return False
     # The public_incident_id lives on the card payload, or on card_source.
     pid = payload.get("public_incident_id")
@@ -298,6 +325,27 @@ def check_art73_clock(
         payload = _payload_of(rec)
         facts, kind = _eu_facts_for_clock(payload)
         if facts is None or not kind:
+            continue
+        # A declared-Art.73 fact block MUST carry the full shortest-clock input set
+        # (>=1 trigger + boolean widespread + boolean death_involved). An incomplete
+        # block (e.g. a public taxonomy_crosswalk.eu_ai_act with triggers + id but no
+        # widespread/death_involved) must NOT silently default the missing booleans
+        # to false and pass a wrong 15-day deadline — raise ACEF-084 (missing facts).
+        if not _art73_facts_complete(facts):
+            diags.append(
+                ValidationDiagnostic(
+                    "ACEF-084",
+                    (
+                        f"Record {_record_id_of(rec)!r}: eu-ai-act-art73-2026 declared and the Art.73 "
+                        f"fact block (read from {kind}) is INCOMPLETE — it must carry at least one "
+                        f"serious_incident_triggers member AND boolean 'widespread' AND boolean "
+                        f"'death_involved' (the shortest-clock inputs, §5.7). The clock MUST NOT "
+                        f"default the missing booleans to false. Add the missing widespread / "
+                        f"death_involved facts at {kind}."
+                    ),
+                    path=f"/{_record_id_of(rec)}/{kind}",
+                )
+            )
             continue
         clock_days = shortest_art73_clock_days(facts)
         cd = _coordinated_disclosure_of(payload)
@@ -659,6 +707,22 @@ def _trigger_to_class() -> dict[str, str]:
     return out
 
 
+@lru_cache(maxsize=1)
+def _class_to_triggers() -> dict[str, frozenset[str]]:
+    """Return ``{harm_class: {3.49.x, ...}}`` — the REVERSE of the trigger keying.
+
+    A harm_class may derive zero or more Art.3(49) triggers (the keying is partial:
+    only 4 of the 11 classes key to a 3.49.* letter). This drives the
+    derivation-CONSISTENCY direction of ACEF-085: if a card lists EU triggers, the
+    trigger derived from its ``harm_class`` MUST be among them. Additional triggers
+    keying to a different class are valid COMPOUND members, not contradictions.
+    """
+    out: dict[str, set[str]] = {}
+    for trig, hc in _trigger_to_class().items():
+        out.setdefault(hc, set()).add(trig)
+    return {hc: frozenset(trigs) for hc, trigs in out.items()}
+
+
 def check_crosswalk_harm_core_consistency(records: list[dict[str, Any]]) -> list[ValidationDiagnostic]:
     """ACEF-085: a PRESENT ``taxonomy_crosswalk`` member contradicts the value
     derived from ``harm_core`` (§5.5). Derivation is one-directional and partial:
@@ -671,14 +735,19 @@ def check_crosswalk_harm_core_consistency(records: list[dict[str, Any]]) -> list
       derivation row's NIST projection for the card's ``harm_class`` (the one
       external enum already transcribed/closed). A category outside the row
       contradicts the core.
-    - ``eu_ai_act.serious_incident_triggers[]`` — every listed Art.3(49) trigger
-      keys (via art3_49_trigger_keying) to a harm_class; the card's harm_class
-      MUST be among the keyed classes for at least the listed triggers. A trigger
-      whose keyed class disagrees with the card's harm_class contradicts the core.
+    - ``eu_ai_act.serious_incident_triggers[]`` — the trigger DERIVED from the
+      card's ``harm_class`` (via art3_49_trigger_keying) MUST be PRESENT in the
+      listed triggers. One incident MAY satisfy MULTIPLE Art.3(49) triggers
+      (RFC §5.5/§5.7), so additional triggers keying to a DIFFERENT harm_class are
+      valid COMPOUND members, NOT contradictions. A contradiction is a list that
+      omits the derived trigger while still asserting other triggers (the card
+      claims harm_class X but does not list X's own 3.49 trigger). When the card's
+      harm_class derives no 3.49.* trigger (the keying is partial), this check is a
+      no-op for that card.
     """
     diags: list[ValidationDiagnostic] = []
     rows = _derivation_rows_by_class()
-    trig_to_class = _trigger_to_class()
+    class_to_triggers = _class_to_triggers()
 
     for _idx, rec in _records_iter(records):
         if _record_type_of(rec) != "incident_card":
@@ -711,24 +780,29 @@ def check_crosswalk_harm_core_consistency(records: list[dict[str, Any]]) -> list
                         )
                     )
 
-        # eu_ai_act trigger contradiction.
+        # eu_ai_act derivation consistency: the trigger derived from harm_class MUST
+        # be present in a non-empty trigger list. Additional triggers keying to other
+        # classes are valid compound members (NOT contradictions). When harm_class
+        # derives no 3.49.* trigger, the check is a no-op.
         eu = _as_dict(crosswalk.get("eu_ai_act"))
-        listed_triggers = [t for t in _as_list(eu.get("serious_incident_triggers")) if isinstance(t, str)]
-        for trig in listed_triggers:
-            keyed_class = trig_to_class.get(trig)
-            if keyed_class is not None and keyed_class != harm_class:
-                diags.append(
-                    ValidationDiagnostic(
-                        "ACEF-085",
-                        (
-                            f"Record {_record_id_of(rec)!r}: taxonomy_crosswalk.eu_ai_act trigger "
-                            f"{trig!r} keys to harm_class {keyed_class!r}, which contradicts the "
-                            f"card's harm_core.harm_class={harm_class!r} (§5.5). Re-derive the "
-                            f"crosswalk member from harm_core, or correct harm_core."
-                        ),
-                        path=f"/{_record_id_of(rec)}/taxonomy_crosswalk/eu_ai_act/serious_incident_triggers",
-                    )
+        listed_triggers = {t for t in _as_list(eu.get("serious_incident_triggers")) if isinstance(t, str)}
+        derived_triggers = class_to_triggers.get(harm_class, frozenset())
+        if listed_triggers and derived_triggers and derived_triggers.isdisjoint(listed_triggers):
+            expected = ", ".join(sorted(derived_triggers))
+            present = ", ".join(sorted(listed_triggers))
+            diags.append(
+                ValidationDiagnostic(
+                    "ACEF-085",
+                    (
+                        f"Record {_record_id_of(rec)!r}: taxonomy_crosswalk.eu_ai_act asserts "
+                        f"serious_incident_triggers [{present}] but OMITS the trigger derived from "
+                        f"harm_core.harm_class={harm_class!r} (expected {expected}; §5.5). A compound "
+                        f"incident MAY list additional Art.3(49) triggers, but the harm_class's own "
+                        f"derived trigger must be present. Add {expected}, or correct harm_core."
+                    ),
+                    path=f"/{_record_id_of(rec)}/taxonomy_crosswalk/eu_ai_act/serious_incident_triggers",
                 )
+            )
     return diags
 
 
@@ -770,15 +844,44 @@ def check_near_miss_marker(records: list[dict[str, Any]]) -> list[ValidationDiag
 def check_severity_band_consistency(records: list[dict[str, Any]]) -> list[ValidationDiagnostic]:
     """ACEF-088: a record carries BOTH ``severity`` and ``severity_vector`` and the
     coarse ``severity`` disagrees with ``band(severity_vector)`` (§5.4). Fires ONLY
-    when both fields are present and the vector is bandable."""
+    when both fields are present and the vector is bandable.
+
+    Three comparison surfaces (§5.4):
+
+    - same-container on the public payload (incident_card: root severity/vector);
+    - same-container on a card_source block;
+    - CROSS-container on a source-backed incident_report — the REQUIRED root
+      ``payload.severity`` vs the ``payload.card_source.severity_vector`` (the
+      private card carries the precise vector while the public root carries only
+      the coarse band). A root severity disagreeing with ``band(card_source.vector)``
+      is an ACEF-088 mismatch.
+
+    Each distinct severity FIELD is judged at most once (the root-vs-root and
+    root-vs-card_source comparisons share the same root ``severity`` field, so the
+    root case is only emitted under one of them) to avoid double-counting.
+    """
     diags: list[ValidationDiagnostic] = []
     for _idx, rec in _records_iter(records):
         if _record_type_of(rec) not in ("incident_card", "incident_report"):
             continue
         payload = _payload_of(rec)
-        for container, where in ((payload, ""), (_as_dict(payload.get("card_source")), "/card_source")):
-            severity = container.get("severity")
-            vector = container.get("severity_vector")
+        card_source = _as_dict(payload.get("card_source"))
+
+        # (severity_value, severity_path, vector_value) comparison pairs. The root
+        # severity prefers its OWN (same-container) vector when present; otherwise it
+        # is compared against the card_source vector (cross-container) so a
+        # source-backed report with only a card_source vector is still checked.
+        root_vector = payload.get("severity_vector")
+        root_vector_for_root = root_vector if isinstance(root_vector, str) else card_source.get("severity_vector")
+        pairs: list[tuple[Any, str, Any]] = [
+            (payload.get("severity"), f"/{_record_id_of(rec)}/severity", root_vector_for_root),
+            (
+                card_source.get("severity"),
+                f"/{_record_id_of(rec)}/card_source/severity",
+                card_source.get("severity_vector"),
+            ),
+        ]
+        for severity, sev_path, vector in pairs:
             if not isinstance(severity, str) or not isinstance(vector, str):
                 continue
             projected = band(vector)
@@ -793,7 +896,7 @@ def check_severity_band_consistency(records: list[dict[str, Any]]) -> list[Valid
                             f"band(severity_vector)={projected!r} (§5.4). Set severity to the band() "
                             f"projection of severity_vector, or remove one of the two fields."
                         ),
-                        path=f"/{_record_id_of(rec)}{where}/severity",
+                        path=sev_path,
                     )
                 )
     return diags
@@ -1056,11 +1159,21 @@ def _declared_profile_ids(manifest: dict[str, Any]) -> list[str]:
 def run_incident_rules(
     manifest: dict[str, Any],
     records: list[dict[str, Any]],
+    *,
+    requested_profiles: list[str] | None = None,
 ) -> list[ValidationDiagnostic]:
     """Run all offline incident rule families and return a merged diagnostic list.
 
     Invoked from the engine's v1.1 dispatch ONLY (after ``schema_version ==
     "v1.1"``), so a v1.0 bundle never reaches these checks (VAL-VLD-001).
+
+    Profile-conditional rules (the Art.73 clock + existential checks, the
+    ACEF-081 mandatory-crosswalk check) evaluate against the UNION of the
+    manifest-declared profile ids (``manifest.profiles[]``) and the profile ids
+    REQUESTED by the caller (``validate_bundle(..., profiles=[...])`` / CLI
+    ``--profile``). Without the requested set, a bundle that does not self-declare
+    ``eu-ai-act-art73-2026`` but is validated against it by argument would bypass
+    the delegated ACEF-084 checks entirely.
 
     The validation mode is **source-backed** when the bundle carries any
     incident_report with a ``card_source`` (the producer/holder-of-both context);
@@ -1072,7 +1185,16 @@ def run_incident_rules(
     if not isinstance(records, list):
         records = []
 
+    # Union of manifest-declared + caller-requested profile ids, order-stable:
+    # declared ids first (manifest order), then any requested id not already
+    # present. Deterministic (no set iteration) for reproducible diagnostics.
     profiles = _declared_profile_ids(manifest)
+    if requested_profiles:
+        seen = set(profiles)
+        for pid in requested_profiles:
+            if isinstance(pid, str) and pid and pid not in seen:
+                profiles.append(pid)
+                seen.add(pid)
 
     # Source-backed iff some incident_report carries a card_source block.
     source_backed = any(

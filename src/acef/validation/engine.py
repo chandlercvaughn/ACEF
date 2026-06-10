@@ -494,9 +494,17 @@ def _run_validation_phases(
         # (ACEF-083, NO attribution — a forged self-consistent card passes
         # offline by design; attribution is F-M3-DOMAIN-CONTROL's OPTIONAL online
         # verifier, a separate module), and ACEF-081/082/085/087/088.
+        # Thread the caller-requested ``profiles`` (validate_bundle argument / CLI
+        # ``--profile``) into the incident rules so the profile-conditional Art.73
+        # (ACEF-084) and mandatory-crosswalk (ACEF-081) checks evaluate against the
+        # UNION of requested + manifest-declared profile ids. Without this, a bundle
+        # validated against ``eu-ai-act-art73-2026`` by argument — but not
+        # self-declaring it in ``manifest.profiles`` — would bypass the delegated
+        # ACEF-084 checks (the generic template DSL cannot express them).
         incident_rule_diagnostics = run_incident_rules(
             manifest_data,
             all_records_data,
+            requested_profiles=profiles,
         )
         _flush(incident_rule_diagnostics)
 

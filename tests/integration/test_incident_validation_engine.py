@@ -300,6 +300,27 @@ class TestArt73ClockEngine:
         assessment = validate_bundle(bundle)
         assert "ACEF-084" in _codes(assessment)
 
+    def test_profiles_arg_without_manifest_declaration_runs_art73_checks(self, tmp_path: Path) -> None:
+        # FINDING 2: a bundle that does NOT declare the Art.73 profile in its manifest,
+        # but for which the caller (validate_bundle / CLI --profile) requests
+        # ["eu-ai-act-art73-2026"], MUST still get the delegated ACEF-084 checks. A
+        # wrong-clock bundle (death -> 10 days required; 15-day deadline stated) ->
+        # ACEF-084.
+        payload = _card_source_payload(
+            triggers=["3.49.a"], widespread=False, death=True, deadline="2026-08-16T00:00:00Z"
+        )
+        # profiles=None -> the manifest does NOT declare eu-ai-act-art73-2026.
+        bundle = _build_incident_bundle(
+            tmp_path,
+            core_version="1.1.0",
+            record_type="incident_report",
+            payload=payload,
+            profiles=None,
+        )
+        # Requested only through the validate_bundle profiles argument.
+        assessment = validate_bundle(bundle, profiles=["eu-ai-act-art73-2026"])
+        assert "ACEF-084" in _codes(assessment)
+
 
 # ---------------------------------------------------------------------------
 # VAL-PUB-001: §5.11 publishability gate (ACEF-086) through the engine
