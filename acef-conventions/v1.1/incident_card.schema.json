@@ -250,6 +250,10 @@
       "type": "string",
       "pattern": "^sha256:[0-9a-f]{64}$",
       "description": "Hash-committed projection of a non-public source field (§5.11), e.g. description_commitment, harm_distribution_basis_commitment. Value MUST equal 'sha256:' + hex(SHA-256(JCS(source_value))) at the source path whose §5.11 disposition is hash-committed (commitment-linkage; orphan/mismatch raises ACEF-086)."
+    },
+    "^x-[a-z0-9-]+/?$": {
+      "type": "object",
+      "description": "X6 vendor-extension namespace (§5.5 / Appendix E Q15; repo pattern v1.1/manifest.schema.json:96-102). Any `x-*`-namespaced key is accepted, safely-ignorable, preserved on round-trip, and MUST NOT affect conformance. Non-`x-`, non-`_commitment` unknown top-level keys remain rejected by additionalProperties: false."
     }
   },
   "additionalProperties": false
