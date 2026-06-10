@@ -40,45 +40,74 @@
           "description": "Serious harm to property or the environment — 15-day default clock."
         }
       ],
-      "required_evidence_types": ["incident_card"],
-      "minimum_evidence_count": {"incident_card": 1},
+      "required_evidence_types": ["incident_card", "incident_report"],
+      "minimum_evidence_count": {},
       "evidence_freshness_max_days": null,
       "retention_years": 10,
+      "evaluation_dsl_note": "Dual confidential/public path (§5.7 dual clock-source rule, RFC-0002 line 278). The Art. 3(49) trigger facts are reachable on EITHER the public card (incident_card.taxonomy_crosswalk.eu_ai_act, §5.5) OR the CONFIDENTIAL source-backed path (incident_report.card_source.eu_ai_act_facts, §5.7). The ACEF DSL has no rule-level OR combinator, so the EITHER/OR is encoded with the vacuous-truth of the UNIVERSAL field_present operator: each path's rule targets one record_type and passes vacuously when no record of that type exists. A RESERVED-id confidential filing carries NO public incident_card (§5.7 critical path), so the public-card rules pass vacuously and the card_source rules carry the requirement; a published-card report satisfies the public-card rules and the card_source rules pass vacuously. There is therefore NO has_record_type incident_card fail-rule — that would block the confidential path.",
       "evaluation": [
         {
-          "rule_id": "art3-49-incident-card",
+          "rule_id": "art3-49-incident-evidence-present",
           "rule": "has_record_type",
           "params": {"type": "incident_card", "min_count": 1},
-          "severity": "fail",
-          "message": "At least one incident_card record is required — Art. 73 reporting is driven by the normalized incident card"
+          "severity": "warning",
+          "message": "A public incident_card is the published Art. 73 surface; on the CONFIDENTIAL source-backed path (§5.7) a RESERVED-id incident_report with card_source and NO public card is fully valid, so this is advisory not binding"
         },
         {
-          "rule_id": "art3-49-trigger-array-present",
+          "rule_id": "art3-49-trigger-array-present-public",
           "rule": "field_present",
           "params": {"record_type": "incident_card", "field": "/payload/taxonomy_crosswalk/eu_ai_act/serious_incident_triggers"},
           "severity": "fail",
-          "message": "Every incident_card must carry taxonomy_crosswalk.eu_ai_act.serious_incident_triggers[] — the Art. 3(49) trigger array drives the reporting clock"
+          "message": "A public incident_card must carry taxonomy_crosswalk.eu_ai_act.serious_incident_triggers[] — the Art. 3(49) trigger array drives the reporting clock (public clock-source path, §5.7)"
         },
         {
-          "rule_id": "art3-49-widespread-present",
+          "rule_id": "art3-49-trigger-array-present-source",
+          "rule": "field_present",
+          "params": {"record_type": "incident_report", "field": "/payload/card_source/eu_ai_act_facts/serious_incident_triggers"},
+          "severity": "fail",
+          "message": "A source-backed incident_report.card_source must carry eu_ai_act_facts.serious_incident_triggers[] — the CONFIDENTIAL Art. 3(49) trigger array drives the reporting clock before any public card exists (§5.7)"
+        },
+        {
+          "rule_id": "art3-49-widespread-present-public",
           "rule": "field_present",
           "params": {"record_type": "incident_card", "field": "/payload/taxonomy_crosswalk/eu_ai_act/widespread"},
           "severity": "fail",
-          "message": "Every incident_card must carry taxonomy_crosswalk.eu_ai_act.widespread (boolean modifier of trigger (c)) — it can shorten the clock to 2 days"
+          "message": "A public incident_card must carry taxonomy_crosswalk.eu_ai_act.widespread (boolean modifier of trigger (c)) — it can shorten the clock to 2 days"
         },
         {
-          "rule_id": "art3-49-death-involved-present",
+          "rule_id": "art3-49-widespread-present-source",
+          "rule": "field_present",
+          "params": {"record_type": "incident_report", "field": "/payload/card_source/eu_ai_act_facts/widespread"},
+          "severity": "fail",
+          "message": "A source-backed incident_report.card_source must carry eu_ai_act_facts.widespread (boolean modifier of trigger (c)) — it can shorten the confidential clock to 2 days (§5.7)"
+        },
+        {
+          "rule_id": "art3-49-death-involved-present-public",
           "rule": "field_present",
           "params": {"record_type": "incident_card", "field": "/payload/taxonomy_crosswalk/eu_ai_act/death_involved"},
           "severity": "fail",
-          "message": "Every incident_card must carry taxonomy_crosswalk.eu_ai_act.death_involved (boolean) — Art. 3(49)(a) covers death OR serious health harm and the 10-day clock is death-only"
+          "message": "A public incident_card must carry taxonomy_crosswalk.eu_ai_act.death_involved (boolean) — Art. 3(49)(a) covers death OR serious health harm and the 10-day clock is death-only"
         },
         {
-          "rule_id": "art3-49-trigger-in-closed-set",
+          "rule_id": "art3-49-death-involved-present-source",
+          "rule": "field_present",
+          "params": {"record_type": "incident_report", "field": "/payload/card_source/eu_ai_act_facts/death_involved"},
+          "severity": "fail",
+          "message": "A source-backed incident_report.card_source must carry eu_ai_act_facts.death_involved (boolean) — Art. 3(49)(a) covers death OR serious health harm and the 10-day confidential clock is death-only (§5.7)"
+        },
+        {
+          "rule_id": "art3-49-edition-pinned-public",
           "rule": "exists_where",
           "params": {"record_type": "incident_card", "field": "/payload/taxonomy_crosswalk/eu_ai_act/edition", "op": "eq", "value": "reg-2024-1689", "min_count": 1},
           "severity": "warning",
-          "message": "The eu_ai_act crosswalk member should pin edition 'reg-2024-1689' so the trigger codes resolve to the enacted Art. 3(49) text"
+          "message": "The public eu_ai_act crosswalk member should pin edition 'reg-2024-1689' so the trigger codes resolve to the enacted Art. 3(49) text"
+        },
+        {
+          "rule_id": "art3-49-edition-pinned-source",
+          "rule": "exists_where",
+          "params": {"record_type": "incident_report", "field": "/payload/card_source/eu_ai_act_facts/edition", "op": "eq", "value": "reg-2024-1689", "min_count": 1},
+          "severity": "warning",
+          "message": "The confidential card_source.eu_ai_act_facts should pin edition 'reg-2024-1689' so the trigger codes resolve to the enacted Art. 3(49) text"
         }
       ],
       "evaluation_scope": null
@@ -107,38 +136,46 @@
           "description": "In the event of the death of a person, the report shall be provided immediately and no later than 10 days after the date on which the provider (or deployer) became aware of, or has reason to believe, the causal link to the AI system."
         }
       ],
-      "required_evidence_types": ["incident_card"],
-      "minimum_evidence_count": {"incident_card": 1},
+      "required_evidence_types": ["incident_card", "incident_report"],
+      "minimum_evidence_count": {},
       "evidence_freshness_max_days": null,
       "retention_years": 10,
+      "evaluation_dsl_note": "Dual confidential/public path (§5.7). public_incident_id and coordinated_disclosure.regulatory_timeline[] are required on EITHER the public card OR the confidential incident_report.card_source path, encoded with field_present vacuous-truth pairs (see the article-3-49 note). notification_timeline[] is a TOP-LEVEL field on incident_report (incident_report.schema.json), NOT on the CLOSED incident_card schema (which has no such field), so its rule targets incident_report only (finding @139). regulatory_timeline[] is an ORDER-INSENSITIVE array (§5.10): its entries key on `framework` (NOT `jurisdiction`) and the EU entry MAY appear at any index, so the rule asserts ARRAY PRESENCE position-independently via field_present and MUST NOT hard-code an index (finding @132). DSL GAP for F-M3-VALIDATOR-RULES: the conditional-requiredness of a matching regulatory_timeline[] entry with framework=='eu-ai-act-art73' (and a deadline consistent with the §5.7 shortest-applicable clock, ACEF-084) is NOT expressible in the current DSL — exists_where resolves a single RFC-6901 pointer per record and jsonpointer has no array-wildcard (/-/), so no operator can scan order-insensitive array entries by a field predicate. coordinated_disclosure.schema.json (§5.6) and RFC-0002 line 270 explicitly delegate this matching-entry/ACEF-084 check to the validator (F-M3-VALIDATOR-RULES), not the template DSL.",
       "evaluation": [
         {
-          "rule_id": "art73-public-incident-id-present",
+          "rule_id": "art73-public-incident-id-present-public",
           "rule": "field_present",
           "params": {"record_type": "incident_card", "field": "/payload/public_incident_id"},
           "severity": "fail",
-          "message": "Every incident_card must carry a well-formed public_incident_id — Art. 73 reporting hard-requires the identifier (a self-asserted AIIC handle is sufficient; §5.3)"
+          "message": "A public incident_card must carry a well-formed public_incident_id — Art. 73 reporting hard-requires the identifier (a self-asserted AIIC handle is sufficient; §5.3)"
         },
         {
-          "rule_id": "art73-regulatory-timeline-present",
+          "rule_id": "art73-public-incident-id-present-source",
+          "rule": "field_present",
+          "params": {"record_type": "incident_report", "field": "/payload/card_source/public_incident_id"},
+          "severity": "fail",
+          "message": "A source-backed incident_report.card_source must carry a well-formed (typically RESERVED) public_incident_id — Art. 73 reporting hard-requires the identifier even on the confidential path (a self-asserted AIIC handle is sufficient; §5.3)"
+        },
+        {
+          "rule_id": "art73-regulatory-timeline-present-public",
           "rule": "field_present",
           "params": {"record_type": "incident_card", "field": "/payload/coordinated_disclosure/regulatory_timeline"},
           "severity": "fail",
-          "message": "Every incident_card must carry coordinated_disclosure.regulatory_timeline[] — Art. 73 requires at least one regulatory-clock entry whose deadline matches the shortest applicable clock (§5.7)"
+          "message": "A public incident_card must carry coordinated_disclosure.regulatory_timeline[] — Art. 73 requires at least one regulatory-clock entry whose deadline matches the shortest applicable clock (§5.7). Order-insensitive (§5.10): presence is asserted position-independently; the matching framework=='eu-ai-act-art73' entry and its ACEF-084 deadline consistency are checked by the validator (F-M3-VALIDATOR-RULES)"
         },
         {
-          "rule_id": "art73-eu-clock-entry",
-          "rule": "exists_where",
-          "params": {"record_type": "incident_card", "field": "/payload/coordinated_disclosure/regulatory_timeline/0/jurisdiction", "op": "eq", "value": "eu-ai-act-art73", "min_count": 1},
+          "rule_id": "art73-regulatory-timeline-present-source",
+          "rule": "field_present",
+          "params": {"record_type": "incident_report", "field": "/payload/card_source/coordinated_disclosure/regulatory_timeline"},
           "severity": "fail",
-          "message": "At least one regulatory_timeline[] entry must declare jurisdiction 'eu-ai-act-art73' with a deadline consistent with the §5.7 shortest applicable clock (ACEF-084 on mismatch)"
+          "message": "A source-backed incident_report.card_source must carry coordinated_disclosure.regulatory_timeline[] — Art. 73 requires at least one regulatory-clock entry on the confidential path (§5.7). Order-insensitive (§5.10): presence is asserted position-independently; the matching framework=='eu-ai-act-art73' entry and its ACEF-084 deadline consistency are checked by the validator (F-M3-VALIDATOR-RULES)"
         },
         {
           "rule_id": "art73-notification-timeline-present",
           "rule": "field_present",
-          "params": {"record_type": "incident_card", "field": "/payload/notification_timeline"},
+          "params": {"record_type": "incident_report", "field": "/payload/notification_timeline"},
           "severity": "fail",
-          "message": "Every incident_card must carry a notification_timeline[] — Art. 73 reporting reconstructs the awareness->report chain from the order-significant notification timeline (§5.10)"
+          "message": "Every incident_report must carry a notification_timeline[] — it is the order-significant (§5.10) top-level incident_report field (incident_report.schema.json) from which Art. 73 reporting reconstructs the awareness->report chain; the CLOSED incident_card schema does not carry it"
         },
         {
           "rule_id": "art73-card-subject-linked",
