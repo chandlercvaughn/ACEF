@@ -1,0 +1,218 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://acef.ai/schemas/v1.1/severity_vector.schema.json",
+  "title": "ACEF Recomputable Severity Vector (ACEF-SEV:1.0)",
+  "description": "Normative grammar, metric value tables, and band() projection for the ACEF-SEV:1.0 severity vector (RFC-0002 §5.4; ACEF core_version 1.1.0). A self-contained, recomputable, slash-delimited, fixed-order vector string modeled structurally on CVSS v4.0. It is Evidence, not risk: Group I expresses the magnitude of harm if realized, NOT probability-weighted risk (severity-is-not-risk). A vector begins `ACEF-SEV:1.0/` and concatenates `Name:Value` pairs with `/`, in group order I, T, E, S and in the listed order within a group; any omitted optional metric defaults to Not-Defined (X). Group I is mandatory. A present-but-unparseable vector raises ACEF-082 (§7). This schema validates the WIRE-FORMAT string structurally via `pattern` (prefix + the fixed-order metric grammar), and additionally publishes (a) the full normative metric value tables in `$defs/metric_value_tables` and (b) the normative band() table in `$defs/band_table`. Per §5.4: \"This table is reproduced normatively in severity_vector.schema.json; the table here governs and the schema file MUST match it\" — the band_table below MUST match §5.4 byte-for-meaning. Deterministic data artifact: no wall-clock or random values.",
+  "type": "string",
+  "pattern": "^ACEF-SEV:1\\.0/HT:[PRKES](/HG:[HLN])?(/RV:[AUI])?(/SC:[CU])?(/BR:[IGP])?(/RZ:[ESN])?(/RP:(0(\\.[0-9]+)?|1(\\.0+)?)@[1-9][0-9]*)?(/XF:[YNX])?(/AU:[LOA])?(/EX:[HLN])?(/KC:[HML])?(/SF:[PN])?(/VL:[FTAC])?(/DB:[YN])?$",
+  "$comment": "Wire-format grammar (§5.4): the vector MUST begin `ACEF-SEV:1.0/`, MUST carry mandatory Group-I metric HT, and MAY carry the remaining metrics in the fixed group order I (HT,HG,RV,SC,BR), T (RZ,RP,XF), E (AU,EX,KC), S (SF,VL,DB). Each metric appears at most once; omitted optional metrics default to Not-Defined (X) per §5.4. RP uses the wire form `RP:<rate>@<N>` with rate in [0,1] over N>=1 trials. The full closed value table for every metric is published in $defs/metric_value_tables; the deterministic projection to the coarse `severity` enum is published in $defs/band_table. The example vector from §5.4 (`ACEF-SEV:1.0/HT:R/HG:H/RV:I/SC:C/BR:P/RZ:E/RP:0.62@200/XF:Y/AU:A/EX:H/KC:H/SF:N/VL:F/DB:Y`) validates against this pattern.",
+  "examples": [
+    "ACEF-SEV:1.0/HT:R/HG:H/RV:I/SC:C/BR:P/RZ:E/RP:0.62@200/XF:Y/AU:A/EX:H/KC:H/SF:N/VL:F/DB:Y",
+    "ACEF-SEV:1.0/HT:P/HG:N"
+  ],
+  "$defs": {
+    "severity": {
+      "type": "string",
+      "description": "The coarse `severity` enum carried on the card (§5.4). When `severity_vector` is present, `severity` MUST equal band(severity_vector) per $defs/band_table; a disagreement raises ACEF-088 (§7). This enum is the band() projection TARGET.",
+      "enum": [
+        "critical",
+        "major",
+        "minor",
+        "informational"
+      ]
+    },
+    "metric_value_tables": {
+      "description": "The full normative ACEF-SEV:1.0 metric value tables (§5.4). Each metric belongs to one of four groups evaluated in fixed order I, T, E, S; within a group the metrics appear in the listed order. `mandatory` flags Group-I metric HT (and HG, which the band() requires); all other metrics are optional and default to Not-Defined (X) when omitted. The structural wire-format `pattern` at the schema root encodes the same closed value sets.",
+      "groups": {
+        "I": {
+          "name": "Intrinsic Harm",
+          "optional": false,
+          "order": ["HT", "HG", "RV", "SC", "BR"],
+          "metrics": {
+            "HT": {
+              "name": "harm type",
+              "mandatory": true,
+              "description": "Harm type keyed to EU Art. 3(49)(a-d) (§5.4).",
+              "values": {
+                "P": "physical (3(49)(a))",
+                "R": "fundamental-rights (3(49)(c))",
+                "K": "critical-infrastructure (3(49)(b))",
+                "E": "property/environmental (3(49)(d))",
+                "S": "societal/systemic"
+              }
+            },
+            "HG": {
+              "name": "harm gravity",
+              "mandatory": false,
+              "description": "ACEF-defined gravity (NOT a CSET mapping; CSET Severity is unbuilt). Band() input.",
+              "values": {
+                "H": "high",
+                "L": "low",
+                "N": "negligible"
+              }
+            },
+            "RV": {
+              "name": "reversibility",
+              "mandatory": false,
+              "description": "CVSS v4.0 Recovery semantics; `I` aligns with 3(49)(b) \"irreversible\". Band() input.",
+              "values": {
+                "A": "automatic",
+                "U": "user-recoverable",
+                "I": "irrecoverable"
+              }
+            },
+            "SC": {
+              "name": "scope",
+              "mandatory": false,
+              "description": "Whether the harm crosses a security/authorization boundary (CVSS v4.0 scope). Folded into BR by band(), not scored twice (§5.4).",
+              "values": {
+                "C": "changed",
+                "U": "unchanged"
+              }
+            },
+            "BR": {
+              "name": "affected-population breadth",
+              "mandatory": false,
+              "description": "Grounded on the EU \"widespread\" modifier; ACEF-defined (NOT a built CSET \"Spread\"). Band() input.",
+              "values": {
+                "I": "individual",
+                "G": "group",
+                "P": "population-scale"
+              }
+            }
+          }
+        },
+        "T": {
+          "name": "Threat/Realization",
+          "optional": true,
+          "order": ["RZ", "RP", "XF"],
+          "metrics": {
+            "RZ": {
+              "name": "realization",
+              "mandatory": false,
+              "values": {
+                "E": "event",
+                "S": "issue",
+                "N": "near-miss"
+              }
+            },
+            "RP": {
+              "name": "reproduction prevalence",
+              "mandatory": false,
+              "description": "Wire form `RP:<rate>@<N>`, rate in [0,1] over N>=1 trials (CRFM prevalence recommendation; the wire format is an ACEF construction). RP never changes the band; it informs an optional Assessment-layer risk score only (§5.4).",
+              "wire_format": "RP:<rate>@<N>",
+              "rate_range": [0, 1],
+              "trials_constraint": "N >= 1"
+            },
+            "XF": {
+              "name": "transferability",
+              "mandatory": false,
+              "values": {
+                "Y": "yes",
+                "N": "no",
+                "X": "not-defined"
+              }
+            }
+          }
+        },
+        "E": {
+          "name": "Environmental/Contextual",
+          "optional": true,
+          "description": "Risk-tailoring, not severity; carried for a downstream analyst to fold into risk in the Assessment Bundle (§5.4).",
+          "order": ["AU", "EX", "KC"],
+          "metrics": {
+            "AU": {
+              "name": "autonomy",
+              "mandatory": false,
+              "values": {
+                "L": "human-in-the-loop",
+                "O": "human-on-the-loop",
+                "A": "autonomous"
+              }
+            },
+            "EX": {
+              "name": "deployment exposure",
+              "mandatory": false,
+              "values": {
+                "H": "high",
+                "L": "low",
+                "N": "negligible"
+              }
+            },
+            "KC": {
+              "name": "sector criticality",
+              "mandatory": false,
+              "values": {
+                "H": "high",
+                "M": "medium",
+                "L": "low"
+              }
+            }
+          }
+        },
+        "S": {
+          "name": "Supplemental",
+          "optional": true,
+          "description": "Score-neutral supplemental metrics (§5.4).",
+          "order": ["SF", "VL", "DB"],
+          "metrics": {
+            "SF": {
+              "name": "safety",
+              "mandatory": false,
+              "description": "CVSS v4.0 Supplemental Safety.",
+              "values": {
+                "P": "present",
+                "N": "negligible"
+              }
+            },
+            "VL": {
+              "name": "value-chain locus",
+              "mandatory": false,
+              "values": {
+                "F": "foundation-model",
+                "T": "fine-tuned-model",
+                "A": "integrated-application",
+                "C": "third-party-component"
+              }
+            },
+            "DB": {
+              "name": "differential-distribution flag",
+              "mandatory": false,
+              "values": {
+                "Y": "yes",
+                "N": "no"
+              }
+            }
+          }
+        }
+      }
+    },
+    "band_table": {
+      "description": "NORMATIVE band() projection from the Group-I metrics to the coarse `severity` enum (§5.4). \"This table is reproduced normatively in severity_vector.schema.json; the table here governs and the schema file MUST match it\" (§5.4) — these rows MUST match §5.4 exactly. Evaluate top-to-bottom; the FIRST matching row wins. Inputs are the Group-I metrics HG (gravity), BR (breadth), RV (reversibility) parsed from the vector. HT (harm type) is deliberately EXCLUDED because harm types are incommensurable (banding by type would smuggle in a cross-type exchange rate the design rejects); SC (scope-changed) is folded into BR rather than scored twice. RP prevalence NEVER changes the band. A card whose `severity` disagrees with the first-match band raises ACEF-088 (§7).",
+      "inputs": ["HG", "BR", "RV"],
+      "evaluation": "first-match-top-to-bottom",
+      "rows": [
+        {
+          "condition": "HG:H AND (BR:P OR RV:I)",
+          "severity": "critical"
+        },
+        {
+          "condition": "HG:H",
+          "severity": "major"
+        },
+        {
+          "condition": "HG:L AND (BR:P OR RV:I)",
+          "severity": "major"
+        },
+        {
+          "condition": "HG:L",
+          "severity": "minor"
+        },
+        {
+          "condition": "HG:N",
+          "severity": "informational"
+        }
+      ]
+    }
+  }
+}

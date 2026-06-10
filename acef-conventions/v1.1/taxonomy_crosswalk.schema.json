@@ -1,0 +1,259 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://acef.ai/schemas/v1.1/taxonomy_crosswalk.schema.json",
+  "title": "ACEF Taxonomy Crosswalk (closed, version-pinned, per-member derived projections of harm_core)",
+  "description": "The taxonomy_crosswalk object referenced by incident_card (RFC-0002 §5.5, Appendix E Q15; ACEF core_version 1.1.0). Maps one incident to each framework. Every member is OPTIONAL, CLOSED (its own additionalProperties: false), and VERSION-PINNED, and is a DERIVED PROJECTION of harm_core (§5.2): when present a member MUST be consistent with the core, checked by the ACEF-owned one-directional core->scheme derivation rows in harm-core-taxonomy.json (a contradiction raises ACEF-085, §7 — a VALIDATOR-enforced cross-record check, not encoded structurally here). The crosswalk object itself is closed: unknown members are rejected unless `x-*`-namespaced (matching `^x-[a-z0-9-]+(/[a-z0-9-]+)*$`, accepting the bare `x-<vendor>` and the slash-qualified `x-<vendor>/<segment>(/<segment>)*` forms), per the §5.5 / Appendix-E-Q15 closure rule and the repo X6 vendor-namespace pattern (v1.1/manifest.schema.json:96-102). Closure lets the validator catch a misspelled member, a wrong-typed value, or a missing mandatory member — impossible under the Revision 0 additionalProperties: true. Version-pin field: every member uses `edition` EXCEPT `mit_domain`, which uses MIT's own `taxonomy_version` label as its edition pin (no member uses `scheme_version`). Each member's `edition`/`taxonomy_version` is REQUIRED so a populated member is verifiable evidence (schemes drift: NIST draft<->final, CSET v1<->planned, MIT 2024<->2025 subdomains). Determinism: every order-insensitive array (oecd.criteria[], eu_ai_act.serious_incident_triggers[], nist_ai_600_1.categories[], aiid.report_ids[] numeric ascending, stix.object_refs[]) MUST be sorted ascending by the RFC-8785 canonical byte sequence of its elements before hashing and serialization (§5.10). NOTE: members whose CLOSED external value enumeration is not yet transcribed from its primary source (oecd criteria values, cset axes, mit_domain subdomains) validate STRUCTURALLY here (key presence + edition pin + base type) but their value-sets are promoted only on the v1.2 closed-enum conformance surface (§10); nist_ai_600_1.categories is the one external enum already transcribed/verified (§5.5) and is closed here.",
+  "type": "object",
+  "additionalProperties": false,
+  "patternProperties": {
+    "^x-[a-z0-9-]+(/[a-z0-9-]+)*$": {
+      "type": "object",
+      "description": "X6 vendor-extension namespace (§5.5 / Appendix E Q15). Accepts both the bare `x-<vendor>` form and the slash-qualified namespace form `x-<vendor>/<segment>(/<segment>)*` documented in the repo (e.g. x-freddy and x-freddy/voice-rubric-emission, as cited in v1.1/manifest.schema.json:95 and present in tests/conformance/golden-bundles/). Segments are lowercase [a-z0-9-]; uppercase keys, non-`x-` keys, and a bare trailing slash (x-freddy/) are rejected. Any matching `x-*` key is accepted, safely-ignorable, preserved on round-trip, and MUST NOT affect conformance; non-`x-` unknown members are rejected by additionalProperties: false."
+    }
+  },
+  "properties": {
+    "oecd": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "edition"
+      ],
+      "description": "OECD common reporting framework crosswalk (§5.5). OECD is the canonical anchor; criterion ids key to the OECD ordinal positions (`oecd-crf-2025/<n>`), transcribed from the OECD primary source — not invented. The closed value sets for criteria #3/#19 remain on the v1.2 closed-enum surface (§10); here the member validates structurally (edition pin + criterion id/value shape).",
+      "properties": {
+        "edition": {
+          "const": "oecd-crf-2025",
+          "description": "Version-pin (§5.5). The OECD common reporting framework edition (OECD AI Papers No. 34, Feb 2025)."
+        },
+        "criteria": {
+          "type": "array",
+          "description": "OECD criteria entries; order-insensitive, sorted per §5.10. Each id keys to the OECD ordinal `oecd-crf-2025/<n>`.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^oecd-crf-2025/[0-9]+$",
+                "description": "OECD criterion id keyed to the ordinal position (`oecd-crf-2025/<n>`)."
+              },
+              "value": {
+                "description": "Transcribed criterion value. The closed value enumeration for criteria #3/#19 is on the v1.2 closed-enum surface (§10); not constrained here."
+              }
+            }
+          }
+        }
+      }
+    },
+    "eu_ai_act": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "edition"
+      ],
+      "description": "EU AI Act Art. 3(49) serious-incident trigger crosswalk (§5.5). The trigger is an ARRAY plus a `widespread` modifier, not a single enum (one incident can satisfy multiple triggers). `death_involved` is carried because 3(49)(a) covers death OR serious health harm; the 10-day clock keys on death only (§5.7).",
+      "properties": {
+        "edition": {
+          "const": "reg-2024-1689",
+          "description": "Version-pin (§5.5). Regulation (EU) 2024/1689."
+        },
+        "serious_incident_triggers": {
+          "type": "array",
+          "description": "Art. 3(49)(a-d) trigger letters; order-insensitive, sorted per §5.10. These `3.49.*` TRIGGER codes are crosswalk values, NOT harm_class names (§5.2).",
+          "items": {
+            "type": "string",
+            "enum": [
+              "3.49.a",
+              "3.49.b",
+              "3.49.c",
+              "3.49.d"
+            ]
+          }
+        },
+        "widespread": {
+          "type": "boolean",
+          "description": "The \"widespread infringement\" modifier of (c) — a cross-cutting modifier, not a fifth trigger letter (§5.5). Drives the 2-day clock with 3.49.b (§5.7)."
+        },
+        "death_involved": {
+          "type": "boolean",
+          "description": "Whether death is involved. NOT derivable from harm_class (3(49)(a) covers death AND non-fatal serious health harm); keys the 10-day clock (§5.7)."
+        }
+      }
+    },
+    "cset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "edition"
+      ],
+      "description": "CSET (csetv1) crosswalk (§5.5). tangibility and the distribution axis live in harm_core, NOT here (Revision 0 duplication removed). The closed value enumerations for the CSET axes remain on the v1.2 closed-enum surface (§10); here the member validates structurally (edition pin + base types).",
+      "properties": {
+        "edition": {
+          "const": "csetv1",
+          "description": "Version-pin (§5.5). CSET AIID CSETv1 taxonomy."
+        },
+        "harm_type": {
+          "type": "string",
+          "description": "CSET harm type axis. Closed value set on the v1.2 closed-enum surface (§10)."
+        },
+        "autonomy": {
+          "type": "string",
+          "description": "CSET autonomy axis (operationalized in the AIID CSETv1 taxonomy). Closed value set on the v1.2 closed-enum surface (§10)."
+        },
+        "sector": {
+          "type": "string",
+          "description": "CSET sector axis. Closed value set on the v1.2 closed-enum surface (§10)."
+        }
+      }
+    },
+    "nist_ai_600_1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "edition"
+      ],
+      "description": "NIST AI 600-1 (July 2024 FINAL) risk-category enrichment (§5.5). A risk-category enrichment, NOT an incident class. The category names are a CLOSED enum verified against the NIST.AI.600-1 final PDF (distinct from the April-2024 draft names); this is the one external enum already transcribed/verified, so it is closed here.",
+      "properties": {
+        "edition": {
+          "const": "2024-07-final",
+          "description": "Version-pin (§5.5). NIST AI 600-1 final, July 2024."
+        },
+        "categories": {
+          "type": "array",
+          "description": "NIST AI 600-1 final category names; order-insensitive, sorted per §5.10. Closed enum (verified, §5.5).",
+          "items": {
+            "type": "string",
+            "enum": [
+              "CBRN Information or Capabilities",
+              "Confabulation",
+              "Dangerous, Violent, or Hateful Content",
+              "Data Privacy",
+              "Environmental Impacts",
+              "Harmful Bias or Homogenization",
+              "Human-AI Configuration",
+              "Information Integrity",
+              "Information Security",
+              "Intellectual Property",
+              "Obscene, Degrading, and/or Abusive Content",
+              "Value Chain and Component Integration"
+            ]
+          }
+        }
+      }
+    },
+    "mit_causal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "edition"
+      ],
+      "description": "MIT AI Risk Repository Causal Taxonomy crosswalk (§5.5). entity x intent x timing, mirroring harm_core.causality.",
+      "properties": {
+        "edition": {
+          "const": "2024-08",
+          "description": "Version-pin (§5.5). MIT Causal Taxonomy edition."
+        },
+        "entity": {
+          "type": "string",
+          "enum": [
+            "human",
+            "ai",
+            "other"
+          ]
+        },
+        "intent": {
+          "type": "string",
+          "enum": [
+            "intentional",
+            "unintentional",
+            "other"
+          ]
+        },
+        "timing": {
+          "type": "string",
+          "enum": [
+            "pre_deployment",
+            "post_deployment",
+            "other"
+          ]
+        }
+      }
+    },
+    "mit_domain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "taxonomy_version"
+      ],
+      "description": "MIT AI Risk Repository Domain Taxonomy crosswalk (§5.5). This is the ONLY member that uses MIT's own `taxonomy_version` label as its edition pin (no member uses `scheme_version`). The subdomain closed value sets drift (2024<->2025) and remain on the v1.2 closed-enum surface (§10); here the member validates structurally (taxonomy_version pin + base types).",
+      "properties": {
+        "taxonomy_version": {
+          "type": "string",
+          "enum": [
+            "2024-08",
+            "2025-04"
+          ],
+          "description": "MIT's own taxonomy_version label, used as this member's edition pin (§5.5)."
+        },
+        "domain": {
+          "type": "string",
+          "description": "MIT domain. Closed value set on the v1.2 closed-enum surface (§10)."
+        },
+        "subdomain": {
+          "type": "string",
+          "description": "MIT subdomain (drifts 2024<->2025). Closed value set on the v1.2 closed-enum surface (§10)."
+        }
+      }
+    },
+    "aiid": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "edition"
+      ],
+      "description": "AI Incident Database soft cross-reference (§5.5). NON-AUTHORITATIVE; hard-links when present but never replaces the incident_dedupe_key spine. AIID's one-incident-to-many-reports model is handled in Appendix E Q6/Q28.",
+      "properties": {
+        "edition": {
+          "const": "aiid",
+          "description": "Version-pin (§5.5). AIID cross-reference member marker."
+        },
+        "incident_id": {
+          "type": "integer",
+          "description": "AIID incident id (integer per Appendix A). Non-authoritative; an upstream AIID renumber MUST NOT invalidate the dedupe key (§5.5)."
+        },
+        "report_ids": {
+          "type": "array",
+          "description": "AIID report ids; order-insensitive, sorted numeric ascending per §5.10.",
+          "items": {
+            "type": "integer"
+          }
+        }
+      }
+    },
+    "stix": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "edition"
+      ],
+      "description": "STIX 2.1 emit-only cross-reference (§5.5, §5.8). object_refs[] MUST be resolvable STIX 2.1 ids (`<type>--<uuidv4>`) pointing to producer-asserted STIX SDOs. Ingest/round-trip is deferred (Appendix E Q27).",
+      "properties": {
+        "edition": {
+          "const": "2.1",
+          "description": "Version-pin (§5.5). STIX spec version 2.1."
+        },
+        "object_refs": {
+          "type": "array",
+          "description": "Resolvable STIX 2.1 ids `<type>--<uuidv4>`; order-insensitive, sorted per §5.10.",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{2,249}--[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "description": "A STIX 2.1 id of the form `<type>--<uuidv4>` (RFC 4122 v4 UUID; STIX SDO type token)."
+          }
+        }
+      }
+    }
+  }
+}
