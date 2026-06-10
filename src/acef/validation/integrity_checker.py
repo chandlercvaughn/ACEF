@@ -174,7 +174,8 @@ def _check_signatures(bundle_dir: Path, content_hashes_bytes: bytes) -> list[Val
     if manifest_path.exists():
         try:
             mdata = json.loads(manifest_path.read_text(encoding="utf-8"))
-            manifest_timestamp = mdata.get("metadata", {}).get("timestamp")
+            _md = mdata.get("metadata") if isinstance(mdata, dict) else None
+            manifest_timestamp = _md.get("timestamp") if isinstance(_md, dict) else None
         except json.JSONDecodeError:
             manifest_timestamp = None
 
@@ -341,7 +342,8 @@ def get_signature_info(bundle_dir: Path) -> tuple[int, list[str]]:
     if manifest_path.exists():
         try:
             mdata = json.loads(manifest_path.read_text(encoding="utf-8"))
-            manifest_timestamp = mdata.get("metadata", {}).get("timestamp")
+            _md = mdata.get("metadata") if isinstance(mdata, dict) else None
+            manifest_timestamp = _md.get("timestamp") if isinstance(_md, dict) else None
         except json.JSONDecodeError:
             manifest_timestamp = None
 

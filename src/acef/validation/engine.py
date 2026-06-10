@@ -289,9 +289,17 @@ def validate_bundle(
                         )
                     )
 
-    # Initialize assessment
-    package_id = manifest_data.get("metadata", {}).get("package_id", "")
-    package_timestamp = manifest_data.get("metadata", {}).get("timestamp", "")
+    # Initialize assessment. ``metadata`` is untrusted external JSON and may be
+    # a non-dict (e.g. ``"metadata": []``) even though it survived the
+    # top-level dict check above; the chained ``.get(...).get(...)`` would then
+    # raise. Coerce to an empty dict so a malformed metadata section yields
+    # empty package id/timestamp rather than crashing — the Phase-1 manifest
+    # schema already flags the wrong type (ACEF-002).
+    _metadata_section = manifest_data.get("metadata")
+    if not isinstance(_metadata_section, dict):
+        _metadata_section = {}
+    package_id = _metadata_section.get("package_id", "")
+    package_timestamp = _metadata_section.get("timestamp", "")
 
     assessment = AssessmentBundle(
         evaluation_instant=evaluation_instant,
@@ -561,7 +569,11 @@ def _evaluate_profiles(
     bundle_dir: Path,
 ) -> None:
     """Evaluate template rules for all specified profiles."""
-    subjects = manifest_data.get("subjects", [])
+    # ``subjects`` is untrusted external JSON; coerce a non-list to an empty
+    # list so the per-subject loop below cannot crash on iteration.
+    subjects = manifest_data.get("subjects")
+    if not isinstance(subjects, list):
+        subjects = []
     sig_count, sig_algs = get_signature_info(bundle_dir)
 
     for profile_id in profile_ids:
@@ -580,8 +592,16 @@ def _evaluate_profiles(
         # that disagrees with the template loaded from the registry.
         # ACEF-033: Module compatibility — spec §6.2 requires Core and
         # Profiles within the same major version.
+        # ``profiles`` and its entries are untrusted external JSON; coerce a
+        # non-list section to empty and skip non-dict declarations so the
+        # ``_decl.get(...)`` lookup below cannot crash.
+        _profiles_decls = manifest_data.get("profiles")
+        if not isinstance(_profiles_decls, list):
+            _profiles_decls = []
         manifest_profile_decl: dict[str, Any] | None = None
-        for _decl in manifest_data.get("profiles", []):
+        for _decl in _profiles_decls:
+            if not isinstance(_decl, dict):
+                continue
             if _decl.get("profile_id") == profile_id:
                 manifest_profile_decl = _decl
                 break
@@ -599,7 +619,9 @@ def _evaluate_profiles(
 
         # Core/Profiles compatibility: both must share major version per §6.2.
         try:
-            _versioning = manifest_data.get("versioning", {})
+            _versioning = manifest_data.get("versioning")
+            if not isinstance(_versioning, dict):
+                _versioning = {}
             _core_v = _versioning.get("core_version", "")
             _profiles_v = _versioning.get("profiles_version", "")
             if _core_v and _profiles_v:
@@ -638,11 +660,17 @@ def _evaluate_profiles(
 
         assessment.profiles_evaluated.append(f"{profile_id}:{template.version}")
 
-        # Determine applicable provisions from the manifest's profile declaration
+        # Determine applicable provisions from the manifest's profile
+        # declaration. Reuse the coerced ``_profiles_decls`` list (non-list
+        # already normalized to empty) and skip non-dict entries so a
+        # malformed manifest cannot crash this lookup.
         applicable_provisions = None
-        for prof in manifest_data.get("profiles", []):
+        for prof in _profiles_decls:
+            if not isinstance(prof, dict):
+                continue
             if prof.get("profile_id") == profile_id:
-                applicable_provisions = prof.get("applicable_provisions", [])
+                _ap = prof.get("applicable_provisions", [])
+                applicable_provisions = _ap if isinstance(_ap, list) else []
                 break
 
         # Filter template provisions to those declared applicable
@@ -726,12 +754,19 @@ def _evaluate_profiles(
             )
             _collect_results(assessment, pkg_results, profile_id, records)
 
-        # Evaluate per-subject provisions
+        # Evaluate per-subject provisions. Entries in ``subjects`` are
+        # untrusted external JSON; skip any non-dict subject so the
+        # ``subject.get(...)`` lookups cannot crash. ``modalities`` may also be
+        # a non-list, so coerce it for the downstream scope filter.
         if subjects and per_subject:
             for subject in subjects:
+                if not isinstance(subject, dict):
+                    continue
                 subject_id = subject.get("subject_id", "")
                 risk_class = subject.get("risk_classification", "")
                 modalities = subject.get("modalities", [])
+                if not isinstance(modalities, list):
+                    modalities = []
 
                 results = evaluate_rules_for_subject(
                     per_subject,

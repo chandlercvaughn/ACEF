@@ -215,11 +215,21 @@ def check_references(
                                 )
                             )
 
-    # Check record_files entries
+    # Check record_files entries. ``record_files`` is untrusted external JSON:
+    # it may arrive as a non-list (null / string / number / object) or as a
+    # list whose entries are non-dicts. Normalize to a list once and skip
+    # non-dict entries so this ACEF-022 file-existence loop never crashes on
+    # ``rf.get(...)``. The Phase-1 manifest-schema diagnostic already flags the
+    # malformed shape (ACEF-002); here we only need a crash guard.
     if bundle_dir:
-        for i, rf in enumerate(manifest_data.get("record_files", [])):
+        record_files = manifest_data.get("record_files")
+        if not isinstance(record_files, list):
+            record_files = []
+        for i, rf in enumerate(record_files):
+            if not isinstance(rf, dict):
+                continue
             rf_path = rf.get("path", "")
-            if rf_path:
+            if isinstance(rf_path, str) and rf_path:
                 full_path = bundle_dir / rf_path
                 if not full_path.exists():
                     diagnostics.append(
@@ -233,9 +243,15 @@ def check_references(
     # Check record counts
     _check_record_counts(manifest_data, records, diagnostics)
 
-    # Check subject_refs on components and datasets
-    for i, comp in enumerate(entities.get("components", [])):
-        for ref in comp.get("subject_refs", []):
+    # Check subject_refs on components and datasets. ``entities`` and its
+    # ``components``/``datasets`` arrays are untrusted external JSON; reuse the
+    # _list_or_empty / isinstance guards so a non-list section or a non-dict
+    # entry is skipped rather than crashing on ``.get(...)``. ``subject_refs``
+    # itself may also be a non-list, so wrap it too.
+    for i, comp in enumerate(_list_or_empty(entities.get("components"))):
+        if not isinstance(comp, dict):
+            continue
+        for ref in _list_or_empty(comp.get("subject_refs")):
             if ref and ref not in defined_urns:
                 diagnostics.append(
                     ValidationDiagnostic(
@@ -245,8 +261,10 @@ def check_references(
                     )
                 )
 
-    for i, ds in enumerate(entities.get("datasets", [])):
-        for ref in ds.get("subject_refs", []):
+    for i, ds in enumerate(_list_or_empty(entities.get("datasets"))):
+        if not isinstance(ds, dict):
+            continue
+        for ref in _list_or_empty(ds.get("subject_refs")):
             if ref and ref not in defined_urns:
                 diagnostics.append(
                     ValidationDiagnostic(
@@ -306,7 +324,10 @@ def _check_record_counts(
     # roll-up: skip any record_files entry whose declared ``record_type`` is a
     # non-string (relying on the Phase-1 manifest-schema diagnostic).
     expected_counts: dict[str, int] = {}
-    for rf in manifest_data.get("record_files", []):
+    rf_list = manifest_data.get("record_files")
+    if not isinstance(rf_list, list):
+        rf_list = []
+    for rf in rf_list:
         if not isinstance(rf, dict):
             continue
         rt = rf.get("record_type", "")
