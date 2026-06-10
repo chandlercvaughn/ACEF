@@ -1,11 +1,45 @@
 """ACEF error taxonomy — registered error codes with severity and category.
 
 Error codes follow the ACEF specification Section 3.6. The reserved code
-range is ACEF-001..ACEF-080 and is **sparsely populated by design**: codes
+range is ACEF-001..ACEF-088 and is **sparsely populated by design**: codes
 are grouped by category (001-009 schema, 010-019 integrity, 020-029
 reference, 030-039 profile, 040-049 evaluation, 050-059 format, 060-069
-merge, 070-080 agent-reliability) and unused ordinals within each band are
-left empty to allow future additions without renumbering.
+merge, 070-080 agent-reliability, 081-088 incident-reporting) and unused
+ordinals within each band are left empty to allow future additions without
+renumbering.
+
+The **081-088 incident band** is added by ACEF RFC-0002 (Normalized AI
+Incident Reporting Profile, v1.1). Unlike the v0.4 codes — which carry a
+single problem-text description in the ``(Severity, ErrorCategory,
+description)`` 3-tuple of :data:`ERROR_REGISTRY` — every incident code
+carries **structured problem + cause + fix-hint** text, modelled by
+:class:`IncidentErrorDetail` and registered in :data:`INCIDENT_ERROR_DETAILS`
+(keyed by code). The fix-hint is the implementation-facing remediation
+sentence RFC-0002 §7 fixes verbatim, so a filer sees what to fix. The
+incident codes are deliberately kept OUT of :data:`ERROR_REGISTRY` so the
+frozen v1.0 snapshot at ``tests/conformance/fixtures/v1.0-errors.json`` and
+the registry-size invariants that govern the v0.4 surface stay byte-equal.
+
+The incident band (RFC-0002 §7) is:
+
+    ACEF-081  ERROR/profile     incident profile declared but taxonomy_crosswalk
+                                missing a mandatory member (§5.7)
+    ACEF-082  ERROR/format      severity_vector present but not parseable against
+                                ACEF-SEV:1.0 (§5.4)
+    ACEF-083  ERROR/integrity   public_incident_id id-trust failure — ONE code,
+                                two class-tagged branches (offline-deterministic
+                                pattern/JWS/snapshot; online-conformance domain-
+                                control reject) (§5.3)
+    ACEF-084  ERROR/evaluation  eu-ai-act-art73-2026 deadline inconsistent with
+                                the shortest applicable clock (§5.7)
+    ACEF-085  ERROR/evaluation  a taxonomy_crosswalk member contradicts the value
+                                derived from harm_core (§5.5)
+    ACEF-086  ERROR/profile     public disclosure without satisfying the §5.11
+                                publishability map / declared_publication_basis
+    ACEF-087  INFO/profile      realization is near_miss — informational marker,
+                                never a failure (§5.5)
+    ACEF-088  ERROR/evaluation  record carries both severity and severity_vector
+                                and severity disagrees with band() (§5.4)
 
 At time of this writing the registry defines 42 codes total:
   - 31 codes in the v1.0 reserved range (ACEF-001..ACEF-060, sparse)
@@ -33,6 +67,7 @@ Each registry value is a 3-tuple ``(Severity, ErrorCategory, description)``.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
@@ -157,6 +192,151 @@ ERROR_REGISTRY: dict[str, tuple[Severity, ErrorCategory, str]] = {
         "Bundle declares analysis_mode but lacks required envelope fields for that mode",
     ),
 }
+
+
+@dataclass(frozen=True)
+class IncidentErrorDetail:
+    """Structured detail for an ACEF RFC-0002 incident error (ACEF-081..088).
+
+    The v0.4 codes in :data:`ERROR_REGISTRY` carry a single problem-text
+    description. The incident band extends that pattern: each code carries a
+    **problem** (the failing condition), a **cause** (the RFC section / source
+    path it derives from), and a **fix** hint (the implementation-facing
+    remediation sentence RFC-0002 §7 fixes verbatim). ``severity`` and
+    ``category`` reuse the existing :class:`Severity` / :class:`ErrorCategory`
+    enums so downstream consumers (rendering, Assessment Bundle roll-up) treat
+    an incident code uniformly with the v0.4 surface.
+    """
+
+    severity: Severity
+    category: ErrorCategory
+    problem: str
+    cause: str
+    fix: str
+
+    @property
+    def description(self) -> str:
+        """The single-line problem text, byte-compatible with the v0.4
+        ``ERROR_REGISTRY`` description slot (so an incident code can be
+        surfaced through the same accessor path as a v0.4 code)."""
+        return self.problem
+
+
+# RFC-0002 §7 incident error band — ACEF-081..088 (eight codes). These are
+# kept SEPARATE from ERROR_REGISTRY: the v1.0 snapshot at
+# tests/conformance/fixtures/v1.0-errors.json and the registry-size invariants
+# that govern the frozen v0.4 surface MUST stay byte-equal, so the incident
+# codes live in their own structured map rather than being appended to the
+# frozen 3-tuple registry. The fix-hint sentences are lifted verbatim from
+# RFC-0002 §7 (Revision 10).
+INCIDENT_ERROR_DETAILS: dict[str, IncidentErrorDetail] = {
+    "ACEF-081": IncidentErrorDetail(
+        severity=Severity.ERROR,
+        category=ErrorCategory.PROFILE,
+        problem=(
+            "incident profile declared but taxonomy_crosswalk missing a mandatory member — "
+            "error carries profile_id + RFC 6901 path"
+        ),
+        cause="RFC-0002 §5.7 (conditional-required crosswalk members per declared profile; Appendix E Q16)",
+        fix=(
+            "add the missing mandatory crosswalk member named at path for the declared profile_id, "
+            "or remove the profile declaration"
+        ),
+    ),
+    "ACEF-082": IncidentErrorDetail(
+        severity=Severity.ERROR,
+        category=ErrorCategory.FORMAT,
+        problem="severity_vector present but not parseable against ACEF-SEV:1.0",
+        cause="RFC-0002 §5.4 (ACEF-SEV:1.0 metric grammar)",
+        fix="emit a vector conforming to the ACEF-SEV:1.0 grammar in §5.4, or omit severity_vector",
+    ),
+    "ACEF-083": IncidentErrorDetail(
+        severity=Severity.ERROR,
+        category=ErrorCategory.INTEGRITY,
+        problem=(
+            "public_incident_id id-trust failure raised in one of two explicitly class-tagged branches "
+            "(this is ONE code, not two): class:offline-deterministic — pattern mismatch, OR (when a "
+            "snapshot is bundled) the assigner token is absent from the bundled snapshot, OR JWS "
+            "self-inconsistency; class:online-conformance — the OPTIONAL online domain-control proof was "
+            "presented but FAILS validation (the reject verdict). A network/DNS timeout or total proof "
+            "absence is the explicit unverified non-result and does NOT raise ACEF-083"
+        ),
+        cause="RFC-0002 §5.3 (offline-deterministic vs OPTIONAL online-conformance id-trust classes)",
+        fix=(
+            "for class:offline-deterministic, correct public_incident_id to the AIIC-{assigner}-{year}-{random} "
+            "pattern, bundle the assigner in the snapshot if one is referenced, and re-sign so the JWS verifies; "
+            "for class:online-conformance, present a valid current domain-control proof, or drop the proof to "
+            "land on unverified (a non-result, not this error)"
+        ),
+    ),
+    "ACEF-084": IncidentErrorDetail(
+        severity=Severity.ERROR,
+        category=ErrorCategory.EVALUATION,
+        problem=(
+            "eu-ai-act-art73-2026 declared and the stated regulatory_timeline deadline is inconsistent with the "
+            "shortest applicable clock (death_involved → 10 days; 3.49.b or widespread → 2 days; else 15 days)"
+        ),
+        cause=(
+            "RFC-0002 §5.7 (Art. 73 shortest-clock check; trigger facts read from "
+            "incident_report.card_source.eu_ai_act_facts in confidential/source-backed validation and from "
+            "incident_card.taxonomy_crosswalk.eu_ai_act in public-card validation)"
+        ),
+        fix=(
+            "set regulatory_timeline to the shortest applicable clock for the declared triggers, "
+            "or correct the trigger facts at the source path the validator read"
+        ),
+    ),
+    "ACEF-085": IncidentErrorDetail(
+        severity=Severity.ERROR,
+        category=ErrorCategory.EVALUATION,
+        problem="a present taxonomy_crosswalk member contradicts the value derived from harm_core",
+        cause="RFC-0002 §5.5 (one-directional harm_core → scheme derivation tables)",
+        fix="re-derive the crosswalk member from harm_core per §5.5, or correct harm_core if it is the wrong value",
+    ),
+    "ACEF-086": IncidentErrorDetail(
+        severity=Severity.ERROR,
+        category=ErrorCategory.PROFILE,
+        problem=(
+            "public disclosure without satisfying the §5.11 publishability map / declared_publication_basis on "
+            "special-category or privileged fields"
+        ),
+        cause="RFC-0002 §5.11 (publishability gate; declared_publication_basis + publishability_map)",
+        fix=(
+            "add a satisfying declared_publication_basis (Art. 6(1) basis + Art. 9(2) condition, or a declared "
+            "anonymization_method), or change the field's disposition to omitted/regulator-only/hash-committed in "
+            "card_source.publishability_map"
+        ),
+    ),
+    "ACEF-087": IncidentErrorDetail(
+        severity=Severity.INFO,
+        category=ErrorCategory.PROFILE,
+        problem="realization is near_miss — informational marker, never a failure",
+        cause="RFC-0002 §5.5 (near_miss realization; voluntary near-miss contribution)",
+        fix="none required — informational; suppress at the consumer if near-miss markers are not wanted",
+    ),
+    "ACEF-088": IncidentErrorDetail(
+        severity=Severity.ERROR,
+        category=ErrorCategory.EVALUATION,
+        problem=(
+            "a record carries both severity and severity_vector and the coarse severity disagrees with the band() "
+            "projection (it does not fire when only one of the two is present)"
+        ),
+        cause="RFC-0002 §5.4 (band(severity_vector) → severity projection consistency; Appendix E Q13)",
+        fix="set severity to the band() projection of severity_vector per §5.4, or remove one of the two fields",
+    ),
+}
+
+
+def incident_error_detail(code: str) -> IncidentErrorDetail | None:
+    """Return the :class:`IncidentErrorDetail` for an ACEF-081..088 incident
+    code, or ``None`` if ``code`` is not an incident code.
+
+    This is the lookup counterpart to indexing :data:`ERROR_REGISTRY` for the
+    v0.4 surface. It resolves ONLY the incident band; a v0.4 code (e.g.
+    ``ACEF-080``) or an unknown code returns ``None`` so callers can fall back
+    to :data:`ERROR_REGISTRY`.
+    """
+    return INCIDENT_ERROR_DETAILS.get(code)
 
 
 class ACEFError(Exception):
