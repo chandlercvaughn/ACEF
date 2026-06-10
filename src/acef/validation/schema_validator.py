@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import Any
 
 from acef.errors import ValidationDiagnostic
-from acef.schemas.registry import validate_against_schema
+from acef.schemas.registry import list_record_type_schemas, validate_against_schema
 
 
 def validate_manifest_schema(
@@ -63,6 +63,19 @@ def validate_record_schemas(
     """
     diagnostics: list[ValidationDiagnostic] = []
 
+    # Top-level record-type ALLOWLIST for this version's fallback chain. This is
+    # the set of independently claimable ``record_type`` values; it EXCLUDES the
+    # structural schemas (manifest, record-envelope, ...) AND the companion
+    # sub-schemas (harm-core-taxonomy, taxonomy_crosswalk, severity_vector,
+    # coordinated_disclosure, incident_report.card_source). Companions ship as
+    # ``*.schema.json`` files and are reachable only via ``$ref`` from a record
+    # schema — they are NOT valid top-level ``record_type`` values. Without this
+    # gate, a record could declare ``record_type: "incident_report.card_source"``
+    # and have its payload validated AS A RECORD (because the companion's schema
+    # FILE exists), instead of being rejected (the roborev "companion looks like
+    # a record type" finding).
+    allowed_record_types = set(list_record_type_schemas(version))
+
     for i, record in enumerate(records):
         # Validate envelope
         envelope_errors = validate_against_schema(record, "record-envelope", version)
@@ -83,26 +96,53 @@ def validate_record_schemas(
         # dicts, letting malformed records evade Phase 1 checks.
         record_type = record.get("record_type", "")
         payload = record.get("payload", {}) if isinstance(record.get("payload"), dict) else {}
-        if record_type:
-            payload_errors = validate_against_schema(payload, record_type, version)
-            for error in payload_errors:
-                # Don't report as error if schema not found (ACEF-003 instead)
-                if "not found" in str(error.message):
-                    diagnostics.append(
-                        ValidationDiagnostic(
-                            "ACEF-003",
-                            f"Unknown record_type: {record_type!r}",
-                            path=f"/records/{i}/record_type",
-                        )
+        if not record_type:
+            continue
+
+        # ``x-``-namespaced record types are vendor extensions: they have no
+        # core schema and are passed through without payload validation (kept
+        # consistent with Package.record() which accepts ``x-`` types). They are
+        # exempt from the allowlist gate.
+        if record_type.startswith("x-"):
+            continue
+
+        # ALLOWLIST gate: a record_type that is NOT an allowed top-level record
+        # type is unknown/invalid — emit ACEF-003 and DO NOT validate the payload
+        # against a (possibly-existing) companion schema. This rejects companion
+        # sub-schemas (e.g. incident_report.card_source) claimed as record_type
+        # before their payload can be mistaken for a record.
+        if record_type not in allowed_record_types:
+            diagnostics.append(
+                ValidationDiagnostic(
+                    "ACEF-003",
+                    f"Unknown record_type: {record_type!r}",
+                    path=f"/records/{i}/record_type",
+                )
+            )
+            continue
+
+        payload_errors = validate_against_schema(payload, record_type, version)
+        for error in payload_errors:
+            # Don't report as error if schema not found (ACEF-003 instead). The
+            # allowlist gate above normally precludes this branch, but it is
+            # retained as a defensive fallback (e.g. an allowlisted name whose
+            # schema file is absent in the resolved chain).
+            if "not found" in str(error.message):
+                diagnostics.append(
+                    ValidationDiagnostic(
+                        "ACEF-003",
+                        f"Unknown record_type: {record_type!r}",
+                        path=f"/records/{i}/record_type",
                     )
-                else:
-                    diagnostics.append(
-                        ValidationDiagnostic(
-                            "ACEF-004",
-                            f"Payload schema violation for {record_type} (record {i}): {error.message}",
-                            path=f"/records/{i}/payload" + _json_path(error.absolute_path),
-                        )
+                )
+            else:
+                diagnostics.append(
+                    ValidationDiagnostic(
+                        "ACEF-004",
+                        f"Payload schema violation for {record_type} (record {i}): {error.message}",
+                        path=f"/records/{i}/payload" + _json_path(error.absolute_path),
                     )
+                )
 
     return diagnostics
 
