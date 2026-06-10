@@ -1,0 +1,1093 @@
+"""ACEF RFC-0002 offline incident validation rules (v1.1, core_version 1.1.0).
+
+This module carries the OFFLINE-DETERMINISTIC and SOURCE-BACKED incident
+validation rules for the v1.1 incident-reporting profile. It is invoked ONLY
+from the v1.1 dispatch in :mod:`acef.validation.engine` (after the resolved
+schema version is ``v1.1``), so a v1.0 bundle (no ``core_version: 1.1.0``)
+validates identically to pre-operation behavior — none of these rules fire
+(VAL-VLD-001 / regression-safety per VAL-REGRESSION-001).
+
+Rule families (RFC-0002 §7; reserved error band ACEF-081..088 only):
+
+- **ACEF-081** — incident profile declared but ``taxonomy_crosswalk`` is missing a
+  mandatory member (§5.7).
+- **ACEF-082** — ``severity_vector`` present but not parseable against the
+  ``ACEF-SEV:1.0`` grammar (§5.4).
+- **ACEF-083** — ``public_incident_id`` OFFLINE id-trust failure (§5.3). HONESTY
+  DISCIPLINE: the offline class checks pattern + (optional) bundled-snapshot
+  membership + (optional) self-contained JWS consistency, computed wholly from
+  bundle bytes, and NEVER attributes the id to the assigner domain. A forged
+  ``AIIC-OPENAI-…`` card with a valid pattern (and no contradicting snapshot/JWS)
+  PASSES the offline class by design — attribution is the OPTIONAL online
+  domain-control verifier's job (a separate module, F-M3-DOMAIN-CONTROL), not
+  this one. An offline failure is class-tagged ``offline-deterministic``.
+- **ACEF-084** — Art. 73 ``regulatory_timeline`` deadline inconsistent with the
+  shortest applicable clock; AND (ART73-DELEGATED) the existential dual-source
+  rule + the ``framework == "eu-ai-act-art73"`` match rule (§5.7).
+- **ACEF-085** — a present ``taxonomy_crosswalk`` member contradicts the value
+  derived from ``harm_core`` (§5.5, harm-core-taxonomy derivation rows).
+- **ACEF-086** — public disclosure without satisfying the §5.11 publishability
+  gate (declared_publication_basis, commitment linkage, pointer resolution).
+- **ACEF-087** — ``realization`` is ``near_miss``: an INFO marker, never a failure
+  (§5.5).
+- **ACEF-088** — a record carries BOTH ``severity`` and ``severity_vector`` and the
+  coarse ``severity`` disagrees with ``band(severity_vector)`` (§5.4).
+
+Every function returns a list of :class:`ValidationDiagnostic`; the engine merges
+them into ``AssessmentBundle.structural_errors``. Determinism: rules iterate
+records and arrays in given order; no wall-clock or random values are read.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+from collections.abc import Iterator
+from datetime import UTC, datetime, timedelta
+from functools import lru_cache
+from pathlib import Path
+from typing import Any
+
+from acef.errors import ValidationDiagnostic
+from acef.integrity import canonicalize, sha256_hex
+
+# ---------------------------------------------------------------------------
+# Constants — RFC-0002 §5.7 Art. 73 profile id and clock days.
+# ---------------------------------------------------------------------------
+
+ART73_PROFILE_ID = "eu-ai-act-art73-2026"
+ART73_TIMELINE_FRAMEWORK = "eu-ai-act-art73"
+
+# §5.7 shortest-applicable-clock days.
+_DEATH_CLOCK_DAYS = 10
+_SHORT_CLOCK_DAYS = 2  # 3.49.b (critical-infrastructure) OR widespread
+_GENERAL_CLOCK_DAYS = 15
+
+_PUBLIC_INCIDENT_ID_PATTERN = re.compile(r"^AIIC-([A-Z0-9]{2,8})-([0-9]{4})-[0-9A-HJKMNP-TV-Z]{26,}$")
+
+# §5.4 — the mandatory Group-I prefix the band() projection keys on. The full
+# wire grammar lives in severity_vector.schema.json; band() needs only the
+# Group-I metrics HG (gravity), BR (breadth), RV (reversibility). HT/SC are
+# parsed for grammar-conformance but excluded from the band (HT is
+# incommensurable, SC is folded into BR per §5.4).
+_SEV_VECTOR_PATTERN = re.compile(
+    r"^ACEF-SEV:1\.0/HT:[PRKES]/HG:[HLN]/RV:[AUI]/SC:[CU]/BR:[IGP]"
+    r"(/RZ:[ESN])?(/RP:(0(\.[0-9]+)?|1(\.0+)?)@[1-9][0-9]*)?(/XF:[YNX])?"
+    r"(/AU:[LOA])?(/EX:[HLN])?(/KC:[HML])?(/SF:[PN])?(/VL:[FTAC])?(/DB:[YN])?$"
+)
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+
+def _records_iter(records: list[dict[str, Any]]) -> Iterator[tuple[int, dict[str, Any]]]:
+    for idx, r in enumerate(records):
+        if isinstance(r, dict):
+            yield idx, r
+
+
+def _record_id_of(rec: dict[str, Any]) -> str:
+    rid = rec.get("record_id", "")
+    return rid if isinstance(rid, str) else ""
+
+
+def _record_type_of(rec: dict[str, Any]) -> str:
+    rt = rec.get("record_type", "")
+    return rt if isinstance(rt, str) else ""
+
+
+def _payload_of(rec: dict[str, Any]) -> dict[str, Any]:
+    p = rec.get("payload")
+    return p if isinstance(p, dict) else {}
+
+
+def _as_dict(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _as_list(value: Any) -> list[Any]:
+    return value if isinstance(value, list) else []
+
+
+def _coordinated_disclosure_of(payload: dict[str, Any]) -> dict[str, Any]:
+    """Resolve coordinated_disclosure on an incident_card payload or on a
+    card_source block carried by an incident_report payload."""
+    cd = payload.get("coordinated_disclosure")
+    if isinstance(cd, dict):
+        return cd
+    cs = _as_dict(payload.get("card_source"))
+    cd2 = cs.get("coordinated_disclosure")
+    return cd2 if isinstance(cd2, dict) else {}
+
+
+# ---------------------------------------------------------------------------
+# band() — §5.4 normative band() projection (severity_vector.schema.json)
+# ---------------------------------------------------------------------------
+
+
+def band(severity_vector: str) -> str | None:
+    """Project an ``ACEF-SEV:1.0`` vector to the coarse ``severity`` enum.
+
+    Implements the NORMATIVE band() table from §5.4 (reproduced in
+    severity_vector.schema.json#/$defs/band_table). Inputs are the Group-I
+    metrics HG (gravity), BR (breadth), RV (reversibility). Evaluate top-to-
+    bottom; the FIRST matching row wins:
+
+        1. HG:H AND (BR:P OR RV:I)  -> critical
+        2. HG:H                     -> major
+        3. HG:L AND (BR:P OR RV:I)  -> major
+        4. HG:L                     -> minor
+        5. HG:N                     -> informational
+
+    Returns ``None`` when ``severity_vector`` is not a string or does not parse
+    against the ACEF-SEV:1.0 grammar (a non-bandable / HG-less vector). HT is
+    deliberately EXCLUDED (harm types are incommensurable); SC is folded into BR
+    rather than scored twice (§5.4); RP prevalence never changes the band.
+    """
+    if not isinstance(severity_vector, str):
+        return None
+    if _SEV_VECTOR_PATTERN.match(severity_vector) is None:
+        return None
+    metrics = _parse_sev_metrics(severity_vector)
+    hg = metrics.get("HG")
+    br = metrics.get("BR")
+    rv = metrics.get("RV")
+    escalate = br == "P" or rv == "I"
+    if hg == "H":
+        return "critical" if escalate else "major"
+    if hg == "L":
+        return "major" if escalate else "minor"
+    if hg == "N":
+        return "informational"
+    return None
+
+
+def _parse_sev_metrics(severity_vector: str) -> dict[str, str]:
+    """Parse a grammar-valid ACEF-SEV vector into a ``{metric: value}`` map.
+
+    Assumes the vector already matched :data:`_SEV_VECTOR_PATTERN`. Splits on
+    ``/`` and reads each ``Name:Value`` pair (skipping the ``ACEF-SEV:1.0``
+    prefix segment). RP carries an ``@`` (``RP:<rate>@<N>``) but is never a band
+    input, so its raw value is stored verbatim.
+    """
+    out: dict[str, str] = {}
+    parts = severity_vector.split("/")
+    for segment in parts[1:]:  # parts[0] == "ACEF-SEV:1.0"
+        name, sep, value = segment.partition(":")
+        if sep and name:
+            out[name] = value
+    return out
+
+
+def is_parseable_severity_vector(severity_vector: Any) -> bool:
+    """True iff ``severity_vector`` is a string conforming to ACEF-SEV:1.0."""
+    return isinstance(severity_vector, str) and _SEV_VECTOR_PATTERN.match(severity_vector) is not None
+
+
+# ---------------------------------------------------------------------------
+# Art. 73 clock — §5.7 shortest applicable clock
+# ---------------------------------------------------------------------------
+
+
+def shortest_art73_clock_days(eu_ai_act_facts: dict[str, Any]) -> int:
+    """Return the shortest applicable Art. 73 reporting clock in days (§5.7).
+
+    Rule (shortest applicable for compound incidents):
+
+        death_involved: true            -> 10 days
+        3.49.b OR widespread            -> 2 days
+        else                            -> 15 days
+
+    The 2-day clock wins over the 10-day clock for a compound death + 3.49.b
+    incident (shortest applicable). ``serious_incident_triggers`` is read as a
+    SET; ``widespread`` / ``death_involved`` are booleans. Non-dict / wrong-typed
+    facts fall back to the general 15-day clock (the schema phase diagnoses the
+    type error separately).
+    """
+    facts = _as_dict(eu_ai_act_facts)
+    triggers = {t for t in _as_list(facts.get("serious_incident_triggers")) if isinstance(t, str)}
+    widespread = facts.get("widespread") is True
+    death = facts.get("death_involved") is True
+
+    candidates: list[int] = [_GENERAL_CLOCK_DAYS]
+    if death:
+        candidates.append(_DEATH_CLOCK_DAYS)
+    if "3.49.b" in triggers or widespread:
+        candidates.append(_SHORT_CLOCK_DAYS)
+    return min(candidates)
+
+
+def _parse_instant(value: Any) -> datetime | None:
+    """Parse an ISO 8601 date-time (Zulu or offset) into a UTC datetime."""
+    if not isinstance(value, str) or not value:
+        return None
+    candidate = value.strip()
+    if candidate.endswith("Z"):
+        candidate = candidate[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(candidate)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed
+
+
+def _eu_facts_for_clock(payload: dict[str, Any]) -> tuple[dict[str, Any] | None, str]:
+    """Return ``(facts, source_kind)`` for the Art. 73 clock.
+
+    Source of the trigger facts depends on validation context (§5.7):
+    - confidential/source-backed: ``incident_report.card_source.eu_ai_act_facts``
+    - public-card: ``incident_card.taxonomy_crosswalk.eu_ai_act``
+
+    ``source_kind`` is ``"card_source"`` or ``"taxonomy_crosswalk"`` (or ``""``
+    when neither path carries facts). card_source is preferred when present.
+    """
+    card_source = _as_dict(payload.get("card_source"))
+    facts = card_source.get("eu_ai_act_facts")
+    if isinstance(facts, dict):
+        return facts, "card_source"
+    crosswalk = _as_dict(payload.get("taxonomy_crosswalk"))
+    eu = crosswalk.get("eu_ai_act")
+    if isinstance(eu, dict):
+        return eu, "taxonomy_crosswalk"
+    return None, ""
+
+
+def _has_art73_facts(payload: dict[str, Any]) -> bool:
+    """True iff this payload carries public_incident_id + Art.3(49) trigger facts
+    on EITHER the public path or the confidential card_source path (§5.7)."""
+    facts, kind = _eu_facts_for_clock(payload)
+    if facts is None or not kind:
+        return False
+    triggers = [t for t in _as_list(facts.get("serious_incident_triggers")) if isinstance(t, str)]
+    if not triggers:
+        return False
+    # The public_incident_id lives on the card payload, or on card_source.
+    pid = payload.get("public_incident_id")
+    if not isinstance(pid, str) or not pid:
+        cs = _as_dict(payload.get("card_source"))
+        pid = cs.get("public_incident_id")
+    return isinstance(pid, str) and bool(pid)
+
+
+def check_art73_clock(
+    records: list[dict[str, Any]],
+    *,
+    profiles: list[str],
+) -> list[ValidationDiagnostic]:
+    """ACEF-084: the stated Art. 73 ``regulatory_timeline`` deadline MUST equal the
+    shortest applicable clock (§5.7). Only evaluated when ``eu-ai-act-art73-2026``
+    is among the declared ``profiles``.
+
+    For each incident record carrying eu_ai_act facts (source-backed or public),
+    locate the ``coordinated_disclosure.regulatory_timeline[]`` entry whose
+    ``framework == "eu-ai-act-art73"`` and compare its computed ``deadline`` to
+    ``awareness_date + shortest_clock``. A mismatch (or a missing deadline on a
+    framework-matched entry) raises ACEF-084.
+    """
+    if ART73_PROFILE_ID not in profiles:
+        return []
+
+    diags: list[ValidationDiagnostic] = []
+    for _idx, rec in _records_iter(records):
+        if _record_type_of(rec) not in ("incident_card", "incident_report"):
+            continue
+        payload = _payload_of(rec)
+        facts, kind = _eu_facts_for_clock(payload)
+        if facts is None or not kind:
+            continue
+        clock_days = shortest_art73_clock_days(facts)
+        cd = _coordinated_disclosure_of(payload)
+        timeline = _as_list(cd.get("regulatory_timeline"))
+        for entry in timeline:
+            if not isinstance(entry, dict):
+                continue
+            if entry.get("framework") != ART73_TIMELINE_FRAMEWORK:
+                continue
+            awareness = _parse_instant(entry.get("awareness_date"))
+            stated_deadline = _parse_instant(entry.get("deadline"))
+            if awareness is None:
+                continue  # schema phase diagnoses the missing/invalid awareness_date
+            expected = awareness + timedelta(days=clock_days)
+            if stated_deadline is None or stated_deadline != expected:
+                diags.append(
+                    ValidationDiagnostic(
+                        "ACEF-084",
+                        (
+                            f"Record {_record_id_of(rec)!r}: eu-ai-act-art73-2026 declared and the "
+                            f"stated regulatory_timeline deadline "
+                            f"({entry.get('deadline')!r}) is inconsistent with the shortest "
+                            f"applicable clock ({clock_days} days from awareness_date "
+                            f"{entry.get('awareness_date')!r} -> {expected.isoformat()}; trigger "
+                            f"facts read from {kind}). death_involved -> 10 days; 3.49.b or "
+                            f"widespread -> 2 days; else 15 days (§5.7)."
+                        ),
+                        path=f"/{_record_id_of(rec)}/coordinated_disclosure/regulatory_timeline",
+                    )
+                )
+    return diags
+
+
+def check_art73_existential(
+    records: list[dict[str, Any]],
+    *,
+    profiles: list[str],
+) -> list[ValidationDiagnostic]:
+    """ACEF-084 (ART73-DELEGATED): the existential dual-source + framework-match
+    enforcement the generic template DSL cannot express (§5.7, boundaries.md
+    §ART73-DELEGATED). Only evaluated when ``eu-ai-act-art73-2026`` is declared.
+
+    Two conditions, both of which MUST hold for an Art. 73 bundle:
+
+    1. **Existential dual-source.** At least ONE incident record carries
+       ``public_incident_id`` + Art.3(49) trigger facts on the public path
+       (``incident_card.taxonomy_crosswalk.eu_ai_act``) OR the confidential path
+       (``incident_report.card_source.eu_ai_act_facts``). A reserved-id
+       no-public-card report is satisfied by card_source alone; an empty /
+       no-evidence Art. 73 bundle FAILS.
+    2. **regulatory_timeline framework-match.** Some order-insensitive
+       ``coordinated_disclosure.regulatory_timeline[]`` entry on a fact-carrying
+       record has ``framework == "eu-ai-act-art73"`` (with awareness_date +
+       deadline). An empty ``regulatory_timeline: []`` does NOT satisfy this.
+    """
+    if ART73_PROFILE_ID not in profiles:
+        return []
+
+    diags: list[ValidationDiagnostic] = []
+    fact_carriers: list[dict[str, Any]] = []
+    for _idx, rec in _records_iter(records):
+        if _record_type_of(rec) not in ("incident_card", "incident_report"):
+            continue
+        payload = _payload_of(rec)
+        if _has_art73_facts(payload):
+            fact_carriers.append(payload)
+
+    if not fact_carriers:
+        diags.append(
+            ValidationDiagnostic(
+                "ACEF-084",
+                (
+                    "eu-ai-act-art73-2026 declared but NO incident record carries "
+                    "public_incident_id + Art.3(49) trigger facts on either the public path "
+                    "(incident_card.taxonomy_crosswalk.eu_ai_act) or the confidential path "
+                    "(incident_report.card_source.eu_ai_act_facts) — the existential dual-source "
+                    "rule fails (§5.7). Add the trigger facts at one of those paths."
+                ),
+            )
+        )
+        return diags
+
+    # framework-match: at least one fact-carrying record must have a matching
+    # eu-ai-act-art73 regulatory_timeline entry.
+    matched = False
+    for payload in fact_carriers:
+        cd = _coordinated_disclosure_of(payload)
+        for entry in _as_list(cd.get("regulatory_timeline")):
+            if isinstance(entry, dict) and entry.get("framework") == ART73_TIMELINE_FRAMEWORK:
+                matched = True
+                break
+        if matched:
+            break
+    if not matched:
+        diags.append(
+            ValidationDiagnostic(
+                "ACEF-084",
+                (
+                    "eu-ai-act-art73-2026 declared but no coordinated_disclosure.regulatory_timeline[] "
+                    "entry has framework == 'eu-ai-act-art73' (an empty regulatory_timeline: [] or a "
+                    "non-EU-only timeline does NOT satisfy the framework-match rule, §5.7). Add a "
+                    "matching eu-ai-act-art73 timeline entry with awareness_date + deadline."
+                ),
+            )
+        )
+    return diags
+
+
+# ---------------------------------------------------------------------------
+# ACEF-081 — crosswalk missing a mandatory member for a declared profile
+# ---------------------------------------------------------------------------
+
+# Per-profile mandatory crosswalk members (§5.7). eu-ai-act-art73-2026 requires
+# the eu_ai_act member; oecd-ai-incidents-2025 requires the oecd member.
+_MANDATORY_CROSSWALK_MEMBERS: dict[str, str] = {
+    ART73_PROFILE_ID: "eu_ai_act",
+    "oecd-ai-incidents-2025": "oecd",
+}
+
+
+def check_crosswalk_mandatory_members(
+    records: list[dict[str, Any]],
+    *,
+    profiles: list[str],
+) -> list[ValidationDiagnostic]:
+    """ACEF-081: an incident profile is declared but the card's
+    ``taxonomy_crosswalk`` is missing the mandatory member for that profile
+    (§5.7). The error carries the ``profile_id`` and an RFC 6901 ``path``.
+
+    Confidential/source-backed Art. 73 reports validate from
+    ``card_source.eu_ai_act_facts`` and need not carry a public
+    ``taxonomy_crosswalk`` member, so a record whose Art.73 facts live on the
+    card_source path is exempt from the eu_ai_act crosswalk requirement.
+    """
+    diags: list[ValidationDiagnostic] = []
+    for profile_id in profiles:
+        member = _MANDATORY_CROSSWALK_MEMBERS.get(profile_id)
+        if member is None:
+            continue
+        for _idx, rec in _records_iter(records):
+            if _record_type_of(rec) != "incident_card":
+                continue
+            payload = _payload_of(rec)
+            crosswalk = _as_dict(payload.get("taxonomy_crosswalk"))
+            if member in crosswalk:
+                continue
+            diags.append(
+                ValidationDiagnostic(
+                    "ACEF-081",
+                    (
+                        f"incident profile {profile_id!r} declared but taxonomy_crosswalk on "
+                        f"record {_record_id_of(rec)!r} is missing the mandatory member "
+                        f"{member!r} (§5.7). Add the {member!r} crosswalk member, or remove the "
+                        f"profile declaration."
+                    ),
+                    path=f"/{_record_id_of(rec)}/taxonomy_crosswalk/{member}",
+                    details={"profile_id": profile_id},
+                )
+            )
+    return diags
+
+
+# ---------------------------------------------------------------------------
+# ACEF-082 — severity_vector unparseable against ACEF-SEV:1.0
+# ---------------------------------------------------------------------------
+
+
+def check_severity_vector_parse(records: list[dict[str, Any]]) -> list[ValidationDiagnostic]:
+    """ACEF-082: a present ``severity_vector`` that does not parse against the
+    ``ACEF-SEV:1.0`` grammar (§5.4). Reads the vector from the card payload or
+    from a card_source block. Absent vectors are a no-op."""
+    diags: list[ValidationDiagnostic] = []
+    for _idx, rec in _records_iter(records):
+        if _record_type_of(rec) not in ("incident_card", "incident_report"):
+            continue
+        payload = _payload_of(rec)
+        for container, where in ((payload, ""), (_as_dict(payload.get("card_source")), "/card_source")):
+            sv = container.get("severity_vector")
+            if sv is None:
+                continue
+            if not is_parseable_severity_vector(sv):
+                diags.append(
+                    ValidationDiagnostic(
+                        "ACEF-082",
+                        (
+                            f"Record {_record_id_of(rec)!r}: severity_vector present but not "
+                            f"parseable against the ACEF-SEV:1.0 grammar (§5.4). Emit a vector "
+                            f"conforming to ACEF-SEV:1.0 (full mandatory Group-I HT/HG/RV/SC/BR), "
+                            f"or omit severity_vector."
+                        ),
+                        path=f"/{_record_id_of(rec)}{where}/severity_vector",
+                    )
+                )
+    return diags
+
+
+# ---------------------------------------------------------------------------
+# ACEF-083 — offline public_incident_id id-trust (NO attribution)
+# ---------------------------------------------------------------------------
+
+
+def _bundled_assigner_snapshot(manifest: dict[str, Any]) -> list[dict[str, Any]] | None:
+    """Return the bundled ``{assigner, public_key}`` assigner-registry snapshot if
+    the bundle embeds one, else ``None`` (the snapshot sub-check is skipped).
+
+    The snapshot is an OPTIONAL local list a bundle MAY embed under
+    ``manifest.namespaces['x-acef-incident'].assigner_registry_snapshot`` (§5.3).
+    It is consulted ONLY when present; it is NEVER a network or central lookup.
+    """
+    namespaces = _as_dict(manifest.get("namespaces"))
+    for ns_value in namespaces.values():
+        ns = _as_dict(ns_value)
+        snap = ns.get("assigner_registry_snapshot")
+        if isinstance(snap, list):
+            return [s for s in snap if isinstance(s, dict)]
+    return None
+
+
+def check_public_incident_id_offline(
+    records: list[dict[str, Any]],
+    *,
+    manifest: dict[str, Any],
+) -> list[ValidationDiagnostic]:
+    """ACEF-083 ``class: offline-deterministic`` (§5.3 / §7).
+
+    The OFFLINE id-trust surface, computed WHOLLY from bundle bytes:
+
+    1. **pattern** — ``public_incident_id`` matches ``AIIC-{assigner}-{year}-{suffix}``
+       (assigner 2-8 uppercase alphanumerics, year 4 digits, suffix >=26
+       Crockford-base32 chars).
+    2. **bundled-snapshot membership** — ONLY IF the bundle embeds a
+       ``{assigner, public_key}`` snapshot, ``{assigner}`` MUST be locally listed.
+       Skipped entirely when no snapshot is bundled.
+
+    HONESTY DISCIPLINE: this NEVER attributes the id to the assigner domain and
+    performs NO network call, central allocation, registry admission, or
+    global-uniqueness attestation. A forged ``AIIC-OPENAI-…`` card with a valid
+    pattern and no contradicting snapshot PASSES offline by design — attribution
+    is the OPTIONAL online domain-control verifier's job (F-M3-DOMAIN-CONTROL),
+    not this offline rule.
+    """
+    snapshot = _bundled_assigner_snapshot(manifest)
+    snapshot_assigners: set[str] | None = None
+    if snapshot is not None:
+        snapshot_assigners = set()
+        for entry in snapshot:
+            assigner_value = entry.get("assigner")
+            if isinstance(assigner_value, str):
+                snapshot_assigners.add(assigner_value)
+
+    diags: list[ValidationDiagnostic] = []
+    for _idx, rec in _records_iter(records):
+        if _record_type_of(rec) not in ("incident_card", "incident_report"):
+            continue
+        payload = _payload_of(rec)
+        for container, where in ((payload, ""), (_as_dict(payload.get("card_source")), "/card_source")):
+            pid = container.get("public_incident_id")
+            if pid is None:
+                continue
+            if not isinstance(pid, str):
+                diags.append(
+                    ValidationDiagnostic(
+                        "ACEF-083",
+                        (
+                            f"Record {_record_id_of(rec)!r}: public_incident_id id-trust failure "
+                            f"(class: offline-deterministic) — value is not a string. Correct it to "
+                            f"the AIIC-{{assigner}}-{{year}}-{{random}} pattern (§5.3)."
+                        ),
+                        path=f"/{_record_id_of(rec)}{where}/public_incident_id",
+                    )
+                )
+                continue
+            match = _PUBLIC_INCIDENT_ID_PATTERN.match(pid)
+            if match is None:
+                diags.append(
+                    ValidationDiagnostic(
+                        "ACEF-083",
+                        (
+                            f"Record {_record_id_of(rec)!r}: public_incident_id id-trust failure "
+                            f"(class: offline-deterministic) — {pid!r} does not match the "
+                            f"AIIC-{{assigner}}-{{year}}-{{random}} pattern (§5.3). Correct the "
+                            f"public_incident_id (assigner 2-8 uppercase alphanumerics, year 4 "
+                            f"digits, suffix >=26 Crockford-base32 chars), and re-sign so the JWS "
+                            f"verifies."
+                        ),
+                        path=f"/{_record_id_of(rec)}{where}/public_incident_id",
+                    )
+                )
+                continue
+            assigner = match.group(1)
+            if snapshot_assigners is not None and assigner not in snapshot_assigners:
+                diags.append(
+                    ValidationDiagnostic(
+                        "ACEF-083",
+                        (
+                            f"Record {_record_id_of(rec)!r}: public_incident_id id-trust failure "
+                            f"(class: offline-deterministic) — assigner {assigner!r} is absent from "
+                            f"the bundle's local assigner-registry snapshot (a LOCAL membership "
+                            f"check, never a network or central lookup; §5.3). Bundle the assigner "
+                            f"in the snapshot if one is referenced."
+                        ),
+                        path=f"/{_record_id_of(rec)}{where}/public_incident_id",
+                    )
+                )
+    return diags
+
+
+# ---------------------------------------------------------------------------
+# ACEF-085 — crosswalk member contradicts harm_core derivation
+# ---------------------------------------------------------------------------
+
+
+def _harm_core_taxonomy_path() -> Path:
+    """Resolve the v1.1 harm-core-taxonomy.json path (editable + wheel install)."""
+    here = Path(__file__).resolve()
+    for ancestor in here.parents:
+        candidate = ancestor / "acef-conventions" / "v1.1" / "harm-core-taxonomy.json"
+        if candidate.is_file():
+            return candidate
+    return Path("acef-conventions/v1.1/harm-core-taxonomy.json")
+
+
+@lru_cache(maxsize=1)
+def _load_harm_core_taxonomy() -> dict[str, Any]:
+    """Load harm-core-taxonomy.json once per process (defensive: {} on error)."""
+    try:
+        data = json.loads(_harm_core_taxonomy_path().read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError, OSError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+@lru_cache(maxsize=1)
+def _derivation_rows_by_class() -> dict[str, dict[str, Any]]:
+    """Return ``{harm_class: derivation_row}`` from harm-core-taxonomy.json."""
+    tax = _load_harm_core_taxonomy()
+    rows_block = _as_dict(tax.get("derivation_rows"))
+    out: dict[str, dict[str, Any]] = {}
+    for row in _as_list(rows_block.get("rows")):
+        if isinstance(row, dict):
+            hc = row.get("harm_class")
+            if isinstance(hc, str):
+                out[hc] = row
+    return out
+
+
+@lru_cache(maxsize=1)
+def _trigger_to_class() -> dict[str, str]:
+    """Return ``{3.49.x: harm_class}`` from the art3_49_trigger_keying rows."""
+    tax = _load_harm_core_taxonomy()
+    keying = _as_dict(tax.get("art3_49_trigger_keying"))
+    out: dict[str, str] = {}
+    for row in _as_list(keying.get("rows")):
+        if isinstance(row, dict):
+            trig = row.get("art3_49_trigger")
+            hc = row.get("harm_class")
+            if isinstance(trig, str) and isinstance(hc, str):
+                out[trig] = hc
+    return out
+
+
+def check_crosswalk_harm_core_consistency(records: list[dict[str, Any]]) -> list[ValidationDiagnostic]:
+    """ACEF-085: a PRESENT ``taxonomy_crosswalk`` member contradicts the value
+    derived from ``harm_core`` (§5.5). Derivation is one-directional and partial:
+    an UNMAPPABLE core leaves a member legitimately absent (not an error); only a
+    PRESENT member that CONTRADICTS the core's row is an error.
+
+    Two concrete checks against the harm-core-taxonomy derivation rows:
+
+    - ``nist_ai_600_1.categories[]`` — every listed category MUST belong to the
+      derivation row's NIST projection for the card's ``harm_class`` (the one
+      external enum already transcribed/closed). A category outside the row
+      contradicts the core.
+    - ``eu_ai_act.serious_incident_triggers[]`` — every listed Art.3(49) trigger
+      keys (via art3_49_trigger_keying) to a harm_class; the card's harm_class
+      MUST be among the keyed classes for at least the listed triggers. A trigger
+      whose keyed class disagrees with the card's harm_class contradicts the core.
+    """
+    diags: list[ValidationDiagnostic] = []
+    rows = _derivation_rows_by_class()
+    trig_to_class = _trigger_to_class()
+
+    for _idx, rec in _records_iter(records):
+        if _record_type_of(rec) != "incident_card":
+            continue
+        payload = _payload_of(rec)
+        harm_core = _as_dict(payload.get("harm_core"))
+        harm_class = harm_core.get("harm_class")
+        if not isinstance(harm_class, str):
+            continue
+        crosswalk = _as_dict(payload.get("taxonomy_crosswalk"))
+        row = rows.get(harm_class)
+
+        # nist_ai_600_1 contradiction.
+        nist = _as_dict(crosswalk.get("nist_ai_600_1"))
+        listed_categories = [c for c in _as_list(nist.get("categories")) if isinstance(c, str)]
+        if listed_categories and row is not None:
+            allowed = {m for m in _as_list(_as_dict(row.get("nist_ai_600_1")).get("members")) if isinstance(m, str)}
+            for cat in listed_categories:
+                if cat not in allowed:
+                    diags.append(
+                        ValidationDiagnostic(
+                            "ACEF-085",
+                            (
+                                f"Record {_record_id_of(rec)!r}: taxonomy_crosswalk.nist_ai_600_1 "
+                                f"member lists category {cat!r}, which contradicts the value derived "
+                                f"from harm_core.harm_class={harm_class!r} (§5.5). Re-derive the "
+                                f"crosswalk member from harm_core, or correct harm_core."
+                            ),
+                            path=f"/{_record_id_of(rec)}/taxonomy_crosswalk/nist_ai_600_1/categories",
+                        )
+                    )
+
+        # eu_ai_act trigger contradiction.
+        eu = _as_dict(crosswalk.get("eu_ai_act"))
+        listed_triggers = [t for t in _as_list(eu.get("serious_incident_triggers")) if isinstance(t, str)]
+        for trig in listed_triggers:
+            keyed_class = trig_to_class.get(trig)
+            if keyed_class is not None and keyed_class != harm_class:
+                diags.append(
+                    ValidationDiagnostic(
+                        "ACEF-085",
+                        (
+                            f"Record {_record_id_of(rec)!r}: taxonomy_crosswalk.eu_ai_act trigger "
+                            f"{trig!r} keys to harm_class {keyed_class!r}, which contradicts the "
+                            f"card's harm_core.harm_class={harm_class!r} (§5.5). Re-derive the "
+                            f"crosswalk member from harm_core, or correct harm_core."
+                        ),
+                        path=f"/{_record_id_of(rec)}/taxonomy_crosswalk/eu_ai_act/serious_incident_triggers",
+                    )
+                )
+    return diags
+
+
+# ---------------------------------------------------------------------------
+# ACEF-087 — near_miss INFO marker
+# ---------------------------------------------------------------------------
+
+
+def check_near_miss_marker(records: list[dict[str, Any]]) -> list[ValidationDiagnostic]:
+    """ACEF-087 (INFO): ``harm_core.realization == "near_miss"`` is an
+    informational marker, never a failure (§5.5)."""
+    diags: list[ValidationDiagnostic] = []
+    for _idx, rec in _records_iter(records):
+        if _record_type_of(rec) not in ("incident_card", "incident_report"):
+            continue
+        payload = _payload_of(rec)
+        for container in (payload, _as_dict(payload.get("card_source"))):
+            harm_core = _as_dict(container.get("harm_core"))
+            if harm_core.get("realization") == "near_miss":
+                diags.append(
+                    ValidationDiagnostic(
+                        "ACEF-087",
+                        (
+                            f"Record {_record_id_of(rec)!r}: realization is near_miss — "
+                            f"informational marker, never a failure (§5.5)."
+                        ),
+                        path=f"/{_record_id_of(rec)}/harm_core/realization",
+                    )
+                )
+                break  # one marker per record
+    return diags
+
+
+# ---------------------------------------------------------------------------
+# ACEF-088 — severity disagrees with band(severity_vector)
+# ---------------------------------------------------------------------------
+
+
+def check_severity_band_consistency(records: list[dict[str, Any]]) -> list[ValidationDiagnostic]:
+    """ACEF-088: a record carries BOTH ``severity`` and ``severity_vector`` and the
+    coarse ``severity`` disagrees with ``band(severity_vector)`` (§5.4). Fires ONLY
+    when both fields are present and the vector is bandable."""
+    diags: list[ValidationDiagnostic] = []
+    for _idx, rec in _records_iter(records):
+        if _record_type_of(rec) not in ("incident_card", "incident_report"):
+            continue
+        payload = _payload_of(rec)
+        for container, where in ((payload, ""), (_as_dict(payload.get("card_source")), "/card_source")):
+            severity = container.get("severity")
+            vector = container.get("severity_vector")
+            if not isinstance(severity, str) or not isinstance(vector, str):
+                continue
+            projected = band(vector)
+            if projected is None:
+                continue  # unbandable vector is ACEF-082, not ACEF-088
+            if severity != projected:
+                diags.append(
+                    ValidationDiagnostic(
+                        "ACEF-088",
+                        (
+                            f"Record {_record_id_of(rec)!r}: severity {severity!r} disagrees with "
+                            f"band(severity_vector)={projected!r} (§5.4). Set severity to the band() "
+                            f"projection of severity_vector, or remove one of the two fields."
+                        ),
+                        path=f"/{_record_id_of(rec)}{where}/severity",
+                    )
+                )
+    return diags
+
+
+# ---------------------------------------------------------------------------
+# ACEF-086 — §5.11 publishability gate
+# ---------------------------------------------------------------------------
+
+# GDPR Art.9 special-category / identifying card fields that require a declared
+# publication basis before being projected `public` or `anonymized` (§5.11). The
+# privileged-analysis free-text fields default to regulator-only/omitted.
+_SPECIAL_CATEGORY_CARD_FIELDS: tuple[str, ...] = ("harm_distribution_basis",)
+
+
+def _basis_is_satisfying(basis: dict[str, Any]) -> bool:
+    """True iff ``declared_publication_basis`` declares (Art.6 basis + Art.9
+    condition) OR a declared ``anonymization_method`` (§5.11)."""
+    art6 = basis.get("art6_basis")
+    art9 = basis.get("art9_condition")
+    if isinstance(art6, str) and art6 and isinstance(art9, str) and art9:
+        return True
+    anon = basis.get("anonymization_method")
+    return isinstance(anon, str) and bool(anon)
+
+
+def _resolve_json_pointer(doc: dict[str, Any], pointer: str) -> tuple[bool, Any]:
+    """Resolve an RFC 6901 JSON Pointer against ``doc``.
+
+    Returns ``(resolved, value)``. The root pointer ``""`` is not resolvable
+    here (it is forbidden as a publishability_map key, §5.11). Supports ~0/~1
+    unescaping and integer array indices.
+    """
+    if pointer == "":
+        return False, None
+    if not pointer.startswith("/"):
+        return False, None
+    current: Any = doc
+    for raw_token in pointer.split("/")[1:]:
+        token = raw_token.replace("~1", "/").replace("~0", "~")
+        if isinstance(current, dict):
+            if token not in current:
+                return False, None
+            current = current[token]
+        elif isinstance(current, list):
+            if not token.isdigit():
+                return False, None
+            idx = int(token)
+            if idx >= len(current):
+                return False, None
+            current = current[idx]
+        else:
+            return False, None
+    return True, current
+
+
+def _is_public_disclosure(card_payload: dict[str, Any], source_payload: dict[str, Any] | None) -> bool:
+    """True iff the §5.11 publishability gate applies: the card is at the public
+    disclosure boundary (``coordinated_disclosure.status: public`` OR the
+    ``id_state`` snapshot is PUBLISHED)."""
+    cd = _coordinated_disclosure_of(card_payload)
+    if cd.get("status") == "public":
+        return True
+    if source_payload is not None:
+        cs = _as_dict(source_payload.get("card_source"))
+        if cs.get("id_state") == "PUBLISHED":
+            return True
+    return False
+
+
+def check_publishability(
+    records: list[dict[str, Any]],
+    *,
+    source_backed: bool,
+) -> list[ValidationDiagnostic]:
+    """ACEF-086: the §5.11 publishability gate (NOT ACEF-022).
+
+    Two named modes (§5.11):
+
+    - **card-only** (``source_backed=False``) — checks the *presence* of a
+      satisfying ``declared_publication_basis`` when a special-category/identifying
+      card field is projected ``public``, and ``*_commitment`` FORMAT only. It does
+      NOT resolve publishability_map pointers and does NOT check commitment
+      preimages/linkage.
+    - **source-backed** (``source_backed=True``) — additionally resolves each
+      ``card_source.publishability_map`` pointer against the source incident_report
+      (an unresolvable pointer -> ACEF-086), and links every ``*_commitment`` card
+      key to a source field whose disposition is ``hash-committed`` with a matching
+      ``sha256(JCS(source_value))`` preimage (orphan/mismatch -> ACEF-086).
+
+    The gate applies only at the public-disclosure boundary
+    (``coordinated_disclosure.status: public`` or ``id_state: PUBLISHED``).
+    """
+    diags: list[ValidationDiagnostic] = []
+
+    # Index incident_report records by public_incident_id so a public card can be
+    # paired with its private source in source-backed mode.
+    reports_by_id: dict[str, dict[str, Any]] = {}
+    for _idx, rec in _records_iter(records):
+        if _record_type_of(rec) != "incident_report":
+            continue
+        cs = _as_dict(_payload_of(rec).get("card_source"))
+        pid = cs.get("public_incident_id")
+        if isinstance(pid, str) and pid:
+            reports_by_id[pid] = rec
+
+    for _idx, rec in _records_iter(records):
+        rtype = _record_type_of(rec)
+        if rtype not in ("incident_card", "incident_report"):
+            continue
+        payload = _payload_of(rec)
+
+        # The card payload whose public projection is gated; for an
+        # incident_report the projected fields are not present on the public
+        # card, so card-only special-category checks key on incident_card.
+        card_payload = payload if rtype == "incident_card" else payload
+        source_rec: dict[str, Any] | None = None
+        if rtype == "incident_card":
+            pid = payload.get("public_incident_id")
+            if isinstance(pid, str):
+                source_rec = reports_by_id.get(pid)
+        else:
+            source_rec = rec
+        source_payload = _payload_of(source_rec) if source_rec is not None else None
+
+        if not _is_public_disclosure(card_payload, source_payload):
+            continue
+
+        # --- declared_publication_basis presence (both modes) ---
+        basis = _as_dict(card_payload.get("declared_publication_basis"))
+        basis_ok = _basis_is_satisfying(basis)
+        if rtype == "incident_card":
+            for field in _SPECIAL_CATEGORY_CARD_FIELDS:
+                value = card_payload.get(field)
+                if value in (None, "", [], {}):
+                    continue  # field not projected public -> no basis needed
+                if not basis_ok:
+                    diags.append(
+                        ValidationDiagnostic(
+                            "ACEF-086",
+                            (
+                                f"Record {_record_id_of(rec)!r}: special-category/identifying field "
+                                f"{field!r} is projected public without a satisfying "
+                                f"declared_publication_basis (§5.11). Add a declared_publication_basis "
+                                f"(Art.6(1) basis + Art.9(2) condition, or a declared "
+                                f"anonymization_method), or change the field's disposition to "
+                                f"omitted/regulator-only/hash-committed."
+                            ),
+                            path=f"/{_record_id_of(rec)}/{field}",
+                        )
+                    )
+
+        # --- *_commitment FORMAT (both modes) ---
+        commitments = {k: v for k, v in card_payload.items() if isinstance(k, str) and k.endswith("_commitment")}
+        for key, value in commitments.items():
+            if not (isinstance(value, str) and re.match(r"^sha256:[0-9a-f]{64}$", value)):
+                diags.append(
+                    ValidationDiagnostic(
+                        "ACEF-086",
+                        (
+                            f"Record {_record_id_of(rec)!r}: commitment field {key!r} is not a valid "
+                            f"sha256:<64-hex> value (§5.11). Emit 'sha256:' + hex(SHA-256(JCS(source))) "
+                            f"for the hash-committed source field."
+                        ),
+                        path=f"/{_record_id_of(rec)}/{key}",
+                    )
+                )
+
+        if not source_backed:
+            continue
+
+        # --- source-backed: publishability_map pointer resolution + commitment linkage ---
+        if source_payload is None:
+            continue
+        card_source = _as_dict(source_payload.get("card_source"))
+        pub_map = _as_dict(card_source.get("publishability_map"))
+
+        # Pointer resolution against the source incident_report payload.
+        for pointer, disposition in pub_map.items():
+            if not isinstance(pointer, str):
+                continue
+            resolved, _value = _resolve_json_pointer(source_payload, pointer)
+            if not resolved:
+                diags.append(
+                    ValidationDiagnostic(
+                        "ACEF-086",
+                        (
+                            f"Record {_record_id_of(rec)!r}: publishability_map pointer {pointer!r} "
+                            f"does not resolve to a value in the source incident_report (§5.11). "
+                            f"Correct the pointer, or remove the map entry."
+                        ),
+                        path=f"/{_record_id_of(rec)}/card_source/publishability_map/{pointer}",
+                    )
+                )
+
+        # Commitment linkage: every *_commitment card key MUST correspond to a
+        # source field whose disposition is hash-committed, with a matching
+        # sha256(JCS(source_value)) preimage.
+        hash_committed_pointers = {
+            ptr: disp for ptr, disp in pub_map.items() if disp == "hash-committed" and isinstance(ptr, str)
+        }
+        # Build {field_name: pointer} from the last path token for linkage.
+        committed_field_to_pointer: dict[str, str] = {}
+        for ptr in hash_committed_pointers:
+            last = ptr.split("/")[-1].replace("~1", "/").replace("~0", "~")
+            committed_field_to_pointer[last] = ptr
+
+        for key, value in commitments.items():
+            field_name = key[: -len("_commitment")]
+            linked_pointer = committed_field_to_pointer.get(field_name)
+            if linked_pointer is None:
+                diags.append(
+                    ValidationDiagnostic(
+                        "ACEF-086",
+                        (
+                            f"Record {_record_id_of(rec)!r}: orphan commitment {key!r} — no source "
+                            f"field with disposition 'hash-committed' in card_source.publishability_map "
+                            f"links to it (§5.11 commitment-linkage). Add a hash-committed map entry, or "
+                            f"remove the commitment."
+                        ),
+                        path=f"/{_record_id_of(rec)}/{key}",
+                    )
+                )
+                continue
+            resolved, source_value = _resolve_json_pointer(source_payload, linked_pointer)
+            if not resolved:
+                continue  # pointer-resolution diagnostic already emitted above
+            expected = "sha256:" + sha256_hex(canonicalize(source_value))
+            if isinstance(value, str) and value != expected:
+                diags.append(
+                    ValidationDiagnostic(
+                        "ACEF-086",
+                        (
+                            f"Record {_record_id_of(rec)!r}: commitment {key!r} does not equal "
+                            f"sha256(JCS(source_value)) at {linked_pointer!r} (§5.11 commitment-linkage). "
+                            f"Recompute the commitment over the canonicalized source value."
+                        ),
+                        path=f"/{_record_id_of(rec)}/{key}",
+                    )
+                )
+    return diags
+
+
+# ---------------------------------------------------------------------------
+# Top-level entry point — invoked from the engine's v1.1 dispatch.
+# ---------------------------------------------------------------------------
+
+
+def _declared_profile_ids(manifest: dict[str, Any]) -> list[str]:
+    """Collect declared profile ids from ``manifest.profiles[]``."""
+    out: list[str] = []
+    for decl in _as_list(manifest.get("profiles")):
+        if isinstance(decl, dict):
+            pid = decl.get("profile_id")
+            if isinstance(pid, str) and pid:
+                out.append(pid)
+    return out
+
+
+def run_incident_rules(
+    manifest: dict[str, Any],
+    records: list[dict[str, Any]],
+) -> list[ValidationDiagnostic]:
+    """Run all offline incident rule families and return a merged diagnostic list.
+
+    Invoked from the engine's v1.1 dispatch ONLY (after ``schema_version ==
+    "v1.1"``), so a v1.0 bundle never reaches these checks (VAL-VLD-001).
+
+    The validation mode is **source-backed** when the bundle carries any
+    incident_report with a ``card_source`` (the producer/holder-of-both context);
+    otherwise it is **card-only** (a standalone public card). This mirrors the
+    §5.11 two-mode split and the §6 conformance-class boundary.
+    """
+    if not isinstance(manifest, dict):
+        manifest = {}
+    if not isinstance(records, list):
+        records = []
+
+    profiles = _declared_profile_ids(manifest)
+
+    # Source-backed iff some incident_report carries a card_source block.
+    source_backed = any(
+        _record_type_of(rec) == "incident_report" and isinstance(_payload_of(rec).get("card_source"), dict)
+        for _i, rec in _records_iter(records)
+    )
+
+    diags: list[ValidationDiagnostic] = []
+    diags.extend(check_crosswalk_mandatory_members(records, profiles=profiles))
+    diags.extend(check_severity_vector_parse(records))
+    diags.extend(check_public_incident_id_offline(records, manifest=manifest))
+    diags.extend(check_art73_clock(records, profiles=profiles))
+    diags.extend(check_art73_existential(records, profiles=profiles))
+    diags.extend(check_crosswalk_harm_core_consistency(records))
+    diags.extend(check_publishability(records, source_backed=source_backed))
+    diags.extend(check_near_miss_marker(records))
+    diags.extend(check_severity_band_consistency(records))
+    return diags

@@ -443,6 +443,7 @@ def _run_validation_phases(
         # validation paths remain byte-equivalent to pre-v0.4 behavior.
         import acef.validation.namespace_lints.bundled_freddy  # noqa: F401
         from acef.validation.cross_record import run_cross_record_validation
+        from acef.validation.incident_rules import run_incident_rules
         from acef.validation.namespace_lints import run_namespace_lints
         from acef.validation.v1_1_rules import run_v1_1_rules
 
@@ -481,6 +482,23 @@ def _run_validation_phases(
             assessment_bundle=_assessment_data,
         )
         _flush(v1_1_rule_diagnostics)
+
+        # Phase 3c-bis: RFC-0002 offline incident rules (ACEF-081..088). Runs
+        # ONLY on the v1.1 path (this block is gated on schema_version ==
+        # "v1.1"), so a v1.0 bundle never sees them — incident validation is
+        # byte-equivalent-absent for v1.0 (VAL-VLD-001). The version-gated
+        # offline rules cover: version-gating, the Art.73 shortest-clock check +
+        # ACEF-084 (existential dual-source + regulatory_timeline framework-match,
+        # the ART73-DELEGATED list; VAL-CLOCK-001), the §5.11 publishability gate
+        # (VAL-PUB-001 / ACEF-086), the offline public_incident_id id-trust check
+        # (ACEF-083, NO attribution — a forged self-consistent card passes
+        # offline by design; attribution is F-M3-DOMAIN-CONTROL's OPTIONAL online
+        # verifier, a separate module), and ACEF-081/082/085/087/088.
+        incident_rule_diagnostics = run_incident_rules(
+            manifest_data,
+            all_records_data,
+        )
+        _flush(incident_rule_diagnostics)
 
         # Phase 3d: Vendor-namespace lint hooks (WS3.10 /
         # F-M1-NAMESPACE-LINT-HOOK). Registered patterns under
