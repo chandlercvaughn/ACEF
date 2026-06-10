@@ -12,6 +12,8 @@ This guide walks compliance teams, developers, and auditors through using the AC
 4. [Working with the CLI](#4-working-with-the-cli)
 5. [Advanced Features](#5-advanced-features)
 6. [Error Codes Reference](#6-error-codes-reference)
+7. [v1.1 Agent-Reliability Record Types](#7-v11-agent-reliability-record-types)
+8. [Reporting an AI Incident (EU Art. 73)](#8-reporting-an-ai-incident-eu-art-73)
 
 ---
 
@@ -1320,3 +1322,220 @@ print(attestation_record.payload["state_class"])  # → finding
 - The signature algorithm MUST be `RS256` (RSA-PKCS1-v1_5 over SHA-256)
   or `ES256` (ECDSA over P-256 + SHA-256). Other algorithms emit ACEF-013
   at validation.
+
+---
+
+## 8. Reporting an AI Incident (EU Art. 73)
+
+ACEF RFC-0002 adds the v1.1 incident-reporting profile: a private
+`incident_report` (the regulator-only Art. 73 filing surface) and its public
+`incident_card` projection, a self-asserted `public_incident_id`, an
+`ACEF-SEV:1.0` severity vector, and the Art. 73 reporting clock (death → 10
+days; `3.49.b` or widespread → 2 days; otherwise 15 days — the shortest
+applicable clock). The migration notes in
+[`MIGRATION-v0.4-to-v1.1.md`](MIGRATION-v0.4-to-v1.1.md) cover every new field,
+record type, and error code.
+
+This section is a single copy-paste worked example that runs **mint → build →
+sign → validate** end-to-end. Copy it into a Python file, run it with the ACEF
+SDK installed, and it prints the minted id, the publishable challenge token, and
+a clean incident outcome (no `ACEF-08x` diagnostics). The only entropy is the
+minted id suffix; the validation verdict does not depend on it.
+
+### Identifier honesty (read this first)
+
+The `public_incident_id` (`AIIC-{ASSIGNER}-{year}-{suffix}`) is a **self-asserted
+handle**, not a forgery-resistant credential. `mint_incident_id` stamps every
+v1.1 id with `id_grade: self-asserted`. Offline validation checks only the id
+*pattern* and the JWS signature *self-consistency* — it never attributes the id
+to the assigner domain, so a card minted by anyone with a consistent signature
+passes the offline class by design.
+
+The optional online `verify_domain_control` check proves the registrant controls
+the assigner domain **at check time** — and only when they have actually
+published `minted.challenge_token` at `minted.dns_record_name` (DNS-01 TXT) or
+`minted.well_known_url` (`.well-known`). It returns a tri-valued verdict
+(`verified` / `unverified` / `reject`); a network timeout returns an explicit
+`unverified`, never a silent pass.
+
+### Worked example: mint → build → sign → validate
+
+```python
+import tempfile
+from pathlib import Path
+
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import ec
+
+from acef.domain_control import DomainControlVerdict, verify_domain_control
+from acef.package import Package, band, mint_incident_id
+from acef.redaction import RedactionPolicy
+from acef.validation.engine import validate_bundle
+
+work = Path(tempfile.mkdtemp(prefix="acef-art73-"))
+
+# 1. Generate a throwaway ES256 (P-256) signing key and write it as PEM.
+key = ec.generate_private_key(ec.SECP256R1())
+key_path = work / "signing-key.pem"
+key_path.write_bytes(
+    key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption(),
+    )
+)
+
+# 2. Mint a self-asserted public_incident_id + its domain-control challenge token.
+#    `mint_incident_id` returns everything needed in ONE call: the id (id_grade
+#    "self-asserted", >=128-bit Crockford-base32 suffix), the public JWK, and the
+#    DNS-01 / .well-known challenge token + the exact wire locations to publish it.
+minted = mint_incident_id("openai.com", key, year=2026)
+print("public_incident_id :", minted.public_incident_id)
+print("id_grade           :", minted.id_grade)  # -> self-asserted
+print("challenge_token    :", minted.challenge_token)
+print("publish DNS TXT at :", minted.dns_record_name)
+print("    or .well-known :", minted.well_known_url)
+
+# 3a. Source-backed Art.73 path (the regulatory-filing critical path): a
+#     confidential incident_report carrying card_source.eu_ai_act_facts. It
+#     validates BEFORE any public card exists (a RESERVED id, no projection).
+#     A confidential report is emitted `regulator-only`, so attach a
+#     RedactionPolicy and the SDK auto-populates the X1/X2 redaction-envelope
+#     fields the validator needs.
+pkg = Package(
+    producer={"name": "acef-art73-example", "version": "1.1.0"},
+    redaction_policy=RedactionPolicy(version="1.0.0"),
+)
+pkg.add_subject(
+    "ai_system",
+    name="Demo Assistant",
+    risk_classification="high-risk",
+    modalities=["text"],
+    lifecycle_phase="deployment",
+)
+harm_core = {
+    "realization": "harm_event",
+    "causality": {"entity": "ai", "intent": "unintentional", "timing": "post_deployment"},
+    "harm_class": "physical_health",
+}
+pkg.report_incident(
+    public_incident_id=minted.public_incident_id,
+    harm_core=harm_core,
+    incident_type="operational_failure",
+    description="Confidential Art.73 serious-incident report.",
+    awareness_date="2026-08-01T00:00:00Z",
+    eu_ai_act_facts={
+        "serious_incident_triggers": ["3.49.a"],
+        "widespread": False,
+        "death_involved": True,  # -> 10-day Art.73 clock
+    },
+)
+
+# 4. Sign + export the confidential report bundle.
+pkg.sign(str(key_path))
+report_dir = work / "report.acef"
+pkg.export(str(report_dir))
+
+# 5. Validate against the Art.73 profile and confirm the incident surface is clean.
+assessment = validate_bundle(report_dir, profiles=["eu-ai-act-art73-2026"])
+codes = [e.get("code") for e in assessment.structural_errors]
+incident_codes = [c for c in codes if isinstance(c, str) and c.startswith("ACEF-08")]
+print("\nincident codes (ACEF-08x):", incident_codes or "none")
+assert not incident_codes, f"unexpected incident diagnostics: {incident_codes}"
+assert "ACEF-084" not in codes, "Art.73 clock mismatch (ACEF-084)"
+print("source-backed Art.73 report: incident requirements satisfied (no ACEF-08x).")
+
+# 3b. (Optional) the PUBLIC incident_card projection of the same incident.
+card_pkg = Package(producer={"name": "acef-art73-example", "version": "1.1.0"})
+card_pkg.add_subject(
+    "ai_system",
+    name="Demo Assistant",
+    risk_classification="high-risk",
+    modalities=["text"],
+    lifecycle_phase="deployment",
+)
+sev_vector = "ACEF-SEV:1.0/HT:P/HG:H/RV:A/SC:U/BR:I"
+print("coarse severity band:", band(sev_vector))  # band() projects the vector
+card_pkg.incident_card(
+    public_incident_id=minted.public_incident_id,
+    harm_core=harm_core,
+    severity_vector=sev_vector,
+    awareness_date="2026-08-01T00:00:00Z",
+    eu_ai_act_facts={
+        "serious_incident_triggers": ["3.49.a"],
+        "widespread": False,
+        "death_involved": False,
+    },
+)
+card_pkg.sign(str(key_path))
+card_dir = work / "card.acef"
+card_pkg.export(str(card_dir))
+card_assessment = validate_bundle(card_dir, profiles=["eu-ai-act-art73-2026"])
+card_codes = [e.get("code") for e in card_assessment.structural_errors]
+card_incident_codes = [c for c in card_codes if isinstance(c, str) and c.startswith("ACEF-08")]
+print("public card incident codes (ACEF-08x):", card_incident_codes or "none")
+assert not card_incident_codes, f"unexpected card diagnostics: {card_incident_codes}"
+
+# 6. (Optional, online) prove domain control AT CHECK TIME. The id is only a
+#    SELF-ASSERTED handle offline; the verifier reaches `verified` ONLY when the
+#    registrant actually publishes minted.challenge_token at minted.dns_record_name.
+#    Here we simulate that publication with an injected resolver so the example is
+#    self-contained (no live network).
+def _dns_resolver(name: str) -> list[str]:
+    if name == minted.dns_record_name:
+        return [minted.challenge_token]
+    return []
+
+
+result = verify_domain_control(
+    minted.public_incident_id,
+    minted.jwk,
+    dns_resolver=_dns_resolver,
+)
+print("\ndomain-control verdict:", result.verdict.value)
+assert result.verdict is DomainControlVerdict.VERIFIED
+
+print("\nOK: mint -> build -> sign -> validate completed; incident requirements satisfied.")
+```
+
+Expected output (the id suffix differs on every run):
+
+```text
+public_incident_id : AIIC-OPENAI-2026-1DANY48VT5CKP3FWVFMFXE1MQ0
+id_grade           : self-asserted
+challenge_token    : acef-domain-control=OPENAI:BXRT3eM44rZScHSCyjSNEXqwsKs8vUETSx-BDJrKtyw
+publish DNS TXT at : _acef-incident-challenge.openai.com
+    or .well-known : https://openai.com/.well-known/acef-incident-challenge
+
+incident codes (ACEF-08x): none
+source-backed Art.73 report: incident requirements satisfied (no ACEF-08x).
+coarse severity band: major
+public card incident codes (ACEF-08x): none
+
+domain-control verdict: verified
+
+OK: mint -> build -> sign -> validate completed; incident requirements satisfied.
+```
+
+**Notes:**
+- The example asserts on the **incident** surface (no `ACEF-08x`, no
+  `ACEF-084`) — the requirements RFC-0002 introduces. It does **not** claim
+  "zero structural errors": a vanilla SDK-built package's initial-creation
+  `audit_trail[0].actor_ref` is empty and surfaces a pre-existing structural
+  diagnostic (`ACEF-002` at `/audit_trail/0/actor_ref`) shared by the reference
+  golden bundles. That diagnostic is orthogonal to the incident content and is
+  filtered out of the assertions above; populating the audit trail with a
+  concrete `actor_ref` removes it.
+- `mint_incident_id` requires a domain whose registrable label round-trips
+  through the default `LABEL → "<label>.com"` mapper (e.g. `openai.com`,
+  `api.openai.com`). The v1.1 default mapper has no public-suffix list, so a
+  multi-label public suffix (`co.uk`) or a non-`.com` eTLD (`.ai`) is rejected
+  with a clear `ValueError` rather than emitting a wrong challenge location.
+- The source-backed `report_incident(...)` path is the EU Art. 73
+  regulatory-filing critical path: the confidential report validates from
+  `card_source.eu_ai_act_facts` with a RESERVED id and **no** public card. The
+  `incident_card(...)` projection is the separate publishable surface.
+- To actually reach `verified` against live DNS, publish the printed
+  `challenge_token` as a TXT record at `minted.dns_record_name` (or serve it at
+  `minted.well_known_url`) and call `verify_domain_control` without the injected
+  resolver. Until you do, the verdict is the honest `unverified`.
