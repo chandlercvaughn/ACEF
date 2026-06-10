@@ -1,0 +1,194 @@
+{
+  "template_id": "eu-ai-act-art73-2026",
+  "template_name": "EU AI Act Article 73 — Serious Incident Reporting",
+  "version": "1.0.0",
+  "jurisdiction": "EU",
+  "source_legislation": "Regulation (EU) 2024/1689, Article 73; Article 3(49)",
+  "instrument_type": "law",
+  "legal_force": "binding",
+  "instrument_status": "final",
+  "default_effective_date": "2026-08-02",
+  "superseded_by": null,
+  "applicable_system_types": ["high-risk"],
+  "provisions": [
+    {
+      "provision_id": "article-3-49",
+      "provision_name": "Serious Incident Definition (Triggers)",
+      "normative_text_ref": "EU AI Act Art. 3(49)(a)-(d)",
+      "description": "A 'serious incident' is an incident or malfunctioning of an AI system that directly or indirectly leads to (a) the death of a person or serious harm to a person's health; (b) a serious and irreversible disruption of the management or operation of critical infrastructure; (c) the infringement of obligations under Union law intended to protect fundamental rights; or (d) serious harm to property or the environment. 'Widespread infringement' is a cross-cutting modifier of (c), not a fifth trigger. The triggers form an array because one incident can satisfy several at once (e.g. death and critical-infrastructure disruption).",
+      "effective_date": "2026-08-02",
+      "applicable_to": ["high-risk"],
+      "sub_provisions": [
+        {
+          "provision_id": "article-3-49.a",
+          "normative_text_ref": "EU AI Act Art. 3(49)(a)",
+          "description": "Death of a person OR serious harm to a person's health. The 10-day clock applies to death only (death_involved=true); non-fatal serious-health-harm uses the 15-day default."
+        },
+        {
+          "provision_id": "article-3-49.b",
+          "normative_text_ref": "EU AI Act Art. 3(49)(b)",
+          "description": "Serious and irreversible disruption of the management or operation of critical infrastructure — 2-day clock."
+        },
+        {
+          "provision_id": "article-3-49.c",
+          "normative_text_ref": "EU AI Act Art. 3(49)(c)",
+          "description": "Infringement of Union-law obligations protecting fundamental rights; the 'widespread' modifier of this trigger drives the 2-day clock."
+        },
+        {
+          "provision_id": "article-3-49.d",
+          "normative_text_ref": "EU AI Act Art. 3(49)(d)",
+          "description": "Serious harm to property or the environment — 15-day default clock."
+        }
+      ],
+      "required_evidence_types": ["incident_card"],
+      "minimum_evidence_count": {"incident_card": 1},
+      "evidence_freshness_max_days": null,
+      "retention_years": 10,
+      "evaluation": [
+        {
+          "rule_id": "art3-49-incident-card",
+          "rule": "has_record_type",
+          "params": {"type": "incident_card", "min_count": 1},
+          "severity": "fail",
+          "message": "At least one incident_card record is required — Art. 73 reporting is driven by the normalized incident card"
+        },
+        {
+          "rule_id": "art3-49-trigger-array-present",
+          "rule": "field_present",
+          "params": {"record_type": "incident_card", "field": "/payload/taxonomy_crosswalk/eu_ai_act/serious_incident_triggers"},
+          "severity": "fail",
+          "message": "Every incident_card must carry taxonomy_crosswalk.eu_ai_act.serious_incident_triggers[] — the Art. 3(49) trigger array drives the reporting clock"
+        },
+        {
+          "rule_id": "art3-49-widespread-present",
+          "rule": "field_present",
+          "params": {"record_type": "incident_card", "field": "/payload/taxonomy_crosswalk/eu_ai_act/widespread"},
+          "severity": "fail",
+          "message": "Every incident_card must carry taxonomy_crosswalk.eu_ai_act.widespread (boolean modifier of trigger (c)) — it can shorten the clock to 2 days"
+        },
+        {
+          "rule_id": "art3-49-death-involved-present",
+          "rule": "field_present",
+          "params": {"record_type": "incident_card", "field": "/payload/taxonomy_crosswalk/eu_ai_act/death_involved"},
+          "severity": "fail",
+          "message": "Every incident_card must carry taxonomy_crosswalk.eu_ai_act.death_involved (boolean) — Art. 3(49)(a) covers death OR serious health harm and the 10-day clock is death-only"
+        },
+        {
+          "rule_id": "art3-49-trigger-in-closed-set",
+          "rule": "exists_where",
+          "params": {"record_type": "incident_card", "field": "/payload/taxonomy_crosswalk/eu_ai_act/edition", "op": "eq", "value": "reg-2024-1689", "min_count": 1},
+          "severity": "warning",
+          "message": "The eu_ai_act crosswalk member should pin edition 'reg-2024-1689' so the trigger codes resolve to the enacted Art. 3(49) text"
+        }
+      ],
+      "evaluation_scope": null
+    },
+    {
+      "provision_id": "article-73",
+      "provision_name": "Reporting of Serious Incidents",
+      "normative_text_ref": "EU AI Act Art. 73(1)-(11)",
+      "description": "Providers of high-risk AI systems placed on the Union market shall report any serious incident to the market-surveillance authorities of the Member States where the incident occurred, immediately after establishing a causal link (or its reasonable likelihood) between the AI system and the incident, and in any event no later than the period set by Art. 73(2)-(4). The reporting clock is the SHORTEST applicable clock over the Art. 3(49) trigger array plus the 'widespread' modifier and the 'death_involved' fact: death_involved -> 10 days; 3.49.b (critical infrastructure) OR widespread -> 2 days; otherwise (including non-fatal 3.49.a serious-health-harm) -> 15 days. Per-provision effective dates carry the Digital-Omnibus 'pending-final-adoption' deferral (Annex III 2027-12-02, Annex I 2028-08-02) while the as-enacted in-force date remains 2026-08-02.",
+      "effective_date": "2026-08-02",
+      "applicable_to": ["high-risk"],
+      "sub_provisions": [
+        {
+          "provision_id": "article-73.2",
+          "normative_text_ref": "EU AI Act Art. 73(2)",
+          "description": "General reporting deadline: no later than 15 days after the provider (or, where applicable, the deployer) becomes aware of the serious incident."
+        },
+        {
+          "provision_id": "article-73.3",
+          "normative_text_ref": "EU AI Act Art. 73(3)",
+          "description": "In the event of a widespread infringement or a serious and irreversible disruption of critical infrastructure (Art. 3(49)(b)), the report shall be provided immediately and no later than 2 days after awareness."
+        },
+        {
+          "provision_id": "article-73.4",
+          "normative_text_ref": "EU AI Act Art. 73(4)",
+          "description": "In the event of the death of a person, the report shall be provided immediately and no later than 10 days after the date on which the provider (or deployer) became aware of, or has reason to believe, the causal link to the AI system."
+        }
+      ],
+      "required_evidence_types": ["incident_card"],
+      "minimum_evidence_count": {"incident_card": 1},
+      "evidence_freshness_max_days": null,
+      "retention_years": 10,
+      "evaluation": [
+        {
+          "rule_id": "art73-public-incident-id-present",
+          "rule": "field_present",
+          "params": {"record_type": "incident_card", "field": "/payload/public_incident_id"},
+          "severity": "fail",
+          "message": "Every incident_card must carry a well-formed public_incident_id — Art. 73 reporting hard-requires the identifier (a self-asserted AIIC handle is sufficient; §5.3)"
+        },
+        {
+          "rule_id": "art73-regulatory-timeline-present",
+          "rule": "field_present",
+          "params": {"record_type": "incident_card", "field": "/payload/coordinated_disclosure/regulatory_timeline"},
+          "severity": "fail",
+          "message": "Every incident_card must carry coordinated_disclosure.regulatory_timeline[] — Art. 73 requires at least one regulatory-clock entry whose deadline matches the shortest applicable clock (§5.7)"
+        },
+        {
+          "rule_id": "art73-eu-clock-entry",
+          "rule": "exists_where",
+          "params": {"record_type": "incident_card", "field": "/payload/coordinated_disclosure/regulatory_timeline/0/jurisdiction", "op": "eq", "value": "eu-ai-act-art73", "min_count": 1},
+          "severity": "fail",
+          "message": "At least one regulatory_timeline[] entry must declare jurisdiction 'eu-ai-act-art73' with a deadline consistent with the §5.7 shortest applicable clock (ACEF-084 on mismatch)"
+        },
+        {
+          "rule_id": "art73-notification-timeline-present",
+          "rule": "field_present",
+          "params": {"record_type": "incident_card", "field": "/payload/notification_timeline"},
+          "severity": "fail",
+          "message": "Every incident_card must carry a notification_timeline[] — Art. 73 reporting reconstructs the awareness->report chain from the order-significant notification timeline (§5.10)"
+        },
+        {
+          "rule_id": "art73-card-subject-linked",
+          "rule": "entity_linked",
+          "params": {"record_type": "incident_card", "entity_type": "subject"},
+          "severity": "warning",
+          "message": "Incident cards should link to the subject AI system whose serious incident is being reported"
+        }
+      ],
+      "evaluation_scope": null,
+      "tiered_requirements": {
+        "adoption": {
+          "status": "pending-final-adoption",
+          "as_enacted_effective_date": "2026-08-02",
+          "effective_date": "2027-12-02",
+          "annex_iii_effective_date": "2027-12-02",
+          "annex_i_effective_date": "2028-08-02",
+          "deferral_basis": "Digital Omnibus draft postponement of the EU AI Act high-risk obligations (RFC-0002 §5.7 / Appendix E Q7). Until the amending Regulation is published in the OJ the as-enacted 2026-08-02 in-force date applies."
+        },
+        "reporting_clock": {
+          "scheme": "eu-ai-act-art73",
+          "units": "days",
+          "selection": "shortest-applicable",
+          "default_days": 15,
+          "rules": [
+            {
+              "clock_id": "death",
+              "days": 10,
+              "when": {"death_involved": true},
+              "normative_text_ref": "EU AI Act Art. 73(4)",
+              "description": "Death of a person -> 10 days. Keyed on the death_involved fact, NOT the whole 3.49.a trigger (which also covers non-fatal serious-health-harm)."
+            },
+            {
+              "clock_id": "critical-infrastructure-or-widespread",
+              "days": 2,
+              "when": {"any_trigger": ["3.49.b"], "widespread": true},
+              "normative_text_ref": "EU AI Act Art. 73(3)",
+              "description": "Serious and irreversible disruption of critical infrastructure (3.49.b) OR a widespread infringement -> 2 days."
+            }
+          ],
+          "default_description": "Any other serious incident (including non-fatal 3.49.a serious-health-harm, 3.49.c non-widespread, 3.49.d property/environment) -> 15 days.",
+          "fact_sources": {
+            "confidential": "incident_report.card_source.eu_ai_act_facts",
+            "public": "incident_card.taxonomy_crosswalk.eu_ai_act"
+          },
+          "fact_fields": ["serious_incident_triggers", "widespread", "death_involved"],
+          "error_on_mismatch": "ACEF-084"
+        }
+      }
+    }
+  ],
+  "test_vectors": []
+}
