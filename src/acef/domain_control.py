@@ -382,36 +382,80 @@ class _NoFollowRedirectHandler(_urllib_request.HTTPRedirectHandler):
         )
 
 
+#: Four dot-separated all-numeric labels — a "dotted quad" SHAPE. This matches the
+#: ambiguous IPv4 textual forms that :func:`ipaddress.ip_address` REJECTS (leading-zero
+#: / octal-looking octets like ``127.000.000.001``, out-of-range octets like
+#: ``999.999.999.999``) but that an OS resolver / ``inet_aton`` may still normalize to a
+#: loopback/private IP — the exact gap left by the bare ``ip_address`` check.
+_DOTTED_QUAD_SHAPE = _re.compile(r"^[0-9]+(?:\.[0-9]+){3}$")
+
+#: A single bare integer host — e.g. ``2130706433`` (== 127.0.0.1) or ``2852039166``
+#: (== 169.254.169.254). ``inet_aton`` accepts the 32-bit decimal form of an IPv4
+#: address, so a bare integer is an IP-ish SSRF pivot, never a registrable domain.
+_BARE_INTEGER_SHAPE = _re.compile(r"^[0-9]+$")
+
+
 def _is_allowed_well_known_host(host: str) -> bool:
-    """True iff ``host`` is an allowed registrable-domain host (default deny).
+    """True iff ``host`` is a syntactically plausible DNS hostname (default deny).
 
     The verifier always builds ``https://{registrable-domain}/.well-known/...``, so a
-    legitimate host is a DNS name (e.g. ``openai.com``). An IP-literal host is anomalous
-    and is denied by default (an IP target is a classic SSRF pivot and is never a
-    registrable domain). A profile that needs IP-literal or other hosts supplies its own
-    ``http_fetcher``.
+    legitimate host is a DNS name (e.g. ``openai.com``). An IP-literal host — or, more
+    broadly, ANY *IP-ish* textual form — is anomalous and is denied by default (an IP
+    target is a classic SSRF pivot and is never a registrable domain). A profile that
+    needs IP-literal or other hosts supplies its own ``http_fetcher``.
 
-    SSRF residual (roborev Medium): ``urllib.parse.urlsplit(url).hostname`` STRIPS the
-    ``[...]`` brackets from a bracketed IPv6 authority BEFORE the host reaches this guard,
-    so ``https://[::1]/...`` arrives here as the bare ``"::1"`` and a string ``startswith
-    "["`` test never fired — the bracketed IPv6 (incl. compressed and IPv4-mapped, e.g.
-    ``::ffff:169.254.169.254``) forms bypassed the old check. We instead parse the bare
-    host with :func:`ipaddress.ip_address`: if it parses as ANY IP literal (every IPv4
-    dotted-quad AND every IPv6 form — bracketed, compressed, IPv4-mapped), it is rejected;
-    only a host that is NOT a parseable IP literal (i.e. a DNS hostname) is allowed.
+    The accept rule is therefore "accept ONLY a syntactically plausible DNS hostname".
+    A host is DENIED if ANY of the following hold:
+
+    1. :func:`ipaddress.ip_address` parses it — every clean IPv4 dotted-quad AND every
+       IPv6 form. (``urllib.parse.urlsplit(url).hostname`` STRIPS the ``[...]`` brackets
+       from a bracketed IPv6 authority before the host reaches this guard, so
+       ``https://[::1]/...`` arrives here as the bare ``"::1"``; compressed and
+       IPv4-mapped forms — e.g. ``::ffff:169.254.169.254`` — also parse and are denied.)
+    2. It matches the four-all-numeric-label "dotted quad" SHAPE
+       (:data:`_DOTTED_QUAD_SHAPE`). This closes the AMBIGUOUS IPv4 textual forms that
+       ``ipaddress.ip_address`` REJECTS as a ``ValueError`` — leading-zero / octal-looking
+       octets (``127.000.000.001``) and out-of-range octets (``999.999.999.999``) — which
+       therefore fell through to the old "hostname" allow path even though an OS resolver
+       / ``inet_aton`` may normalize them to loopback/private IPs (roborev SSRF class).
+    3. It is a single bare integer (:data:`_BARE_INTEGER_SHAPE`) — e.g. ``2130706433``
+       (== 127.0.0.1 in 32-bit decimal), which ``inet_aton`` accepts as an IPv4 address.
+    4. Defense-in-depth: its FINAL label (TLD) is all-numeric, OR it contains no
+       alphabetic character at all. A real DNS hostname has at least one dot and a
+       NON-numeric TLD; an all-numeric TLD / alpha-free host (e.g. ``0x7f.0.0.1`` hex-ish
+       octet smuggling, ``1.2.3.4.5``) is never a registrable domain.
+
+    Only an ``https://`` URL ever reaches this guard (the caller rejects ``http://``
+    before calling); this function decides the HOST allow/deny within that.
     """
     if not host:
         return False
-    # Any parseable IP literal — IPv4 dotted-quad OR IPv6 (the brackets are already
+    # (1) Any parseable IP literal — IPv4 dotted-quad OR IPv6 (the brackets are already
     # stripped by urlsplit, so "::1" / "fe80::1" / "::ffff:169.254.169.254" all parse)
-    # — is an SSRF pivot, never a registrable domain → deny. A ValueError means the
-    # host is NOT an IP literal (a DNS hostname), so it continues to the allow path.
+    # — is an SSRF pivot → deny. A ValueError means it is NOT a clean IP literal; we
+    # still must run the IP-ISH checks below before allowing it.
     try:
         ipaddress.ip_address(host)
     except ValueError:
-        pass  # not an IP literal → a DNS hostname, continue the checks below
+        pass  # not a clean IP literal — fall through to the IP-ish / hostname checks
     else:
         return False  # parsed as an IP literal (IPv4 or IPv6) → deny (SSRF guard)
+    # (2) Ambiguous dotted-quad shape (leading-zero / octal-looking / out-of-range
+    # octets) that ip_address rejects but a resolver may normalize to loopback → deny.
+    if _DOTTED_QUAD_SHAPE.match(host):
+        return False
+    # (3) A single bare integer (32-bit decimal IPv4 form, e.g. 2130706433) → deny.
+    if _BARE_INTEGER_SHAPE.match(host):
+        return False
+    # (4) Defense-in-depth: a plausible DNS hostname has at least one dot and a
+    # NON-numeric final label (TLD), and contains at least one alphabetic character.
+    if "." not in host:
+        return False  # no dot → not a registrable domain (and not a bare-int IP, handled above)
+    final_label = host.rsplit(".", 1)[-1]
+    if final_label.isdigit():
+        return False  # all-numeric TLD → never a real hostname (IP-ish smuggling)
+    if not any(ch.isalpha() for ch in host):
+        return False  # no alphabetic char anywhere → not a plausible DNS hostname
     return True
 
 

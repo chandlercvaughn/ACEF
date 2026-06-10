@@ -721,6 +721,99 @@ class TestDefaultFetcherHardening:
         assert _is_allowed_well_known_host("openai.com") is True
         assert _is_allowed_well_known_host("sub.example.co.uk") is True
 
+    @pytest.mark.parametrize(
+        "host",
+        [
+            # Leading-zero dotted quad: ipaddress.ip_address() REJECTS this as a
+            # ValueError (it forbids ambiguous octal-looking octets), so it slipped
+            # past the bare ip_address() check and fell through to the "hostname"
+            # allow path — yet an OS resolver / inet_aton may normalize it to the
+            # loopback 127.0.0.1 (classic SSRF). The new numeric-dotted-quad guard
+            # closes this.
+            "127.000.000.001",
+            "010.000.000.001",
+            # Out-of-range dotted quad — also rejected by ipaddress but is four
+            # all-numeric labels, so a resolver might still interpret it.
+            "999.999.999.999",
+            # Bare integer = 127.0.0.1 in 32-bit decimal form (inet_aton accepts it).
+            "2130706433",
+            # Bare integer = 169.254.169.254 (cloud metadata) in decimal.
+            "2852039166",
+            # Single bare integer zero.
+            "0",
+        ],
+    )
+    def test_ambiguous_ip_ish_host_is_rejected_directly(self, host: str) -> None:
+        """SSRF class (roborev a9ccd0e): an AMBIGUOUS IPv4 textual form that
+        ``ipaddress.ip_address()`` rejects as a ValueError — a leading-zero / octal-
+        looking / out-of-range dotted quad, or a single bare integer (e.g.
+        ``2130706433`` == 127.0.0.1) — MUST still be denied by the host guard, because
+        an OS resolver may normalize it to a loopback/private IP. The guard rejects ALL
+        IP-ish forms (numeric dotted-quad + bare integer), not just clean IP literals."""
+        assert _is_allowed_well_known_host(host) is False, f"ambiguous IP-ish host must be denied: {host!r}"
+
+    @pytest.mark.parametrize(
+        "host",
+        [
+            # Numeric final label (TLD): a real DNS hostname always has a non-numeric
+            # TLD, so an all-numeric last label is never a registrable domain — and is
+            # a common way to smuggle a partly-numeric IP-ish target.
+            "example.123",
+            "127.0.0.999",
+            "1.2.3.4.5",
+            # Hex-ish first label with a numeric tail: inet_aton accepts 0x-prefixed
+            # octets; the host contains no plausible non-numeric TLD.
+            "0x7f.0.0.1",
+        ],
+    )
+    def test_numeric_tld_or_no_alpha_host_is_rejected_directly(self, host: str) -> None:
+        """Defense-in-depth: a host whose FINAL label (TLD) is all-numeric, or that
+        contains no alphabetic character at all, is not a syntactically plausible DNS
+        hostname (a real hostname has a non-numeric TLD). Such forms — including
+        hex-ish octet smuggling like ``0x7f.0.0.1`` — are denied."""
+        assert _is_allowed_well_known_host(host) is False, f"numeric-TLD / no-alpha host must be denied: {host!r}"
+
+    @pytest.mark.parametrize(
+        "host",
+        [
+            "openai.com",
+            "sub.example.co.uk",
+            "a.io",
+            "xn--80ak6aa92e.com",  # punycode A-label — alphabetic chars present, non-numeric TLD
+            "host123.example.org",  # digits in labels are fine; the TLD is alphabetic
+        ],
+    )
+    def test_plausible_dns_hostnames_are_accepted(self, host: str) -> None:
+        """A syntactically plausible DNS hostname — at least one dot, a non-numeric
+        final label, and not flagged by the IP-literal / numeric-dotted-quad / bare-int
+        checks — MUST be accepted (the guard does not over-reject real hostnames)."""
+        assert _is_allowed_well_known_host(host) is True, f"plausible DNS hostname must be allowed: {host!r}"
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            # Leading-zero dotted quad → resolver may normalize to loopback (SSRF).
+            "https://127.000.000.001/.well-known/acef-incident-challenge",
+            # Decimal-integer loopback (inet_aton: 2130706433 == 127.0.0.1).
+            "https://2130706433/.well-known/acef-incident-challenge",
+            # Hex-ish octet smuggling.
+            "https://0x7f.0.0.1/.well-known/acef-incident-challenge",
+        ],
+    )
+    def test_ambiguous_ip_ish_url_is_rejected_without_fetch(self, url: str, monkeypatch: pytest.MonkeyPatch) -> None:
+        """End-to-end through the default fetcher: an ambiguous IP-ish host URL is
+        rejected as not-a-valid-proof (non-200 HttpResponse) WITHOUT performing any
+        open() — the SSRF request is never issued."""
+        import urllib.request
+
+        opener = _CapturingOpener(_StubResponse(200, {"Content-Type": "text/plain"}, b"x"))
+        monkeypatch.setattr(urllib.request, "build_opener", lambda *handlers: opener)
+
+        resp = _default_http_fetcher(url)
+        assert resp.status != 200
+        assert resp.body == ""
+        assert opener.opened == []
+
     def test_normal_hostname_still_passes_guard_and_verifies_end_to_end(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Regression: a normal hostname target is STILL fetched (the guard did not
         over-reject), and a valid challenge body yields a ``verified`` verdict
