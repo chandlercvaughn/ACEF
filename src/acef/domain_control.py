@@ -71,8 +71,12 @@ it without forking the module:
   searched; non-matching records are ignored, not treated as reject).
 * **DNSSEC stance** — not enforced by the default resolver; a profile MAY supply a
   validating resolver.
-* **HTTP-redirect / TLS rules for ``.well-known``** — the default fetcher follows no
-  cross-origin redirect and requires ``status == 200``.
+* **HTTP-redirect / TLS rules for ``.well-known``** — the default fetcher follows NO
+  redirect at all (an off-origin / non-``https`` 3xx is never followed — SSRF guard),
+  requires an ``https://`` URL to a non-IP registrable-domain host (default deny),
+  caps the response at :data:`WELL_KNOWN_MAX_BYTES` with a bounded read (DoS guard),
+  and requires ``status == 200``. A 3xx, an over-limit body, or a disallowed URL is
+  treated as "no valid proof" (non-200 → ``unverified``), never ``verified``.
 * **content-type** — the default requires the challenge document's content-type to
   start with :data:`WELL_KNOWN_CONTENT_TYPE` (``text/plain``).
 * **cache-TTL / clock semantics** — the freshness window a ``verified`` verdict is
@@ -90,6 +94,9 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import urllib.error as _urllib_error
+import urllib.parse as _urllib_parse
+import urllib.request as _urllib_request
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -130,6 +137,16 @@ WELL_KNOWN_PATH = "/.well-known/acef-incident-challenge"
 
 #: Required content-type prefix for the ``.well-known`` challenge document.
 WELL_KNOWN_CONTENT_TYPE = "text/plain"
+
+#: Maximum size (bytes) the default ``.well-known`` fetcher will read from an
+#: input-derived assigner domain. A valid ACME-style ``.well-known`` challenge
+#: document is tiny (a single ``key=value`` token), so 8 KiB is a generous bound.
+#: The fetcher (a) rejects a ``Content-Length`` that exceeds this bound and (b)
+#: does a BOUNDED ``read(WELL_KNOWN_MAX_BYTES + 1)`` and treats an over-limit body
+#: as not-a-valid-proof — it NEVER reads an unbounded body (DoS hardening, roborev
+#: F2). An over-limit document becomes a non-200 :class:`HttpResponse` → ABSENT →
+#: ``unverified`` downstream (never ``verified``, never a crash).
+WELL_KNOWN_MAX_BYTES = 8 * 1024
 
 #: The challenge-token key. The full token is ``"<key>=<thumbprint>"``.
 CHALLENGE_PREFIX = "acef-domain-control"
@@ -323,31 +340,128 @@ def _default_dns_resolver(name: str) -> list[str]:
     raise DomainControlLookupError("no DNS TXT resolver configured — supply dns_resolver= to run the DNS-01 channel")
 
 
-def _default_http_fetcher(url: str) -> HttpResponse:
-    """Default ``.well-known`` HTTP fetcher using stdlib ``urllib``.
+class _NoFollowRedirectHandler(_urllib_request.HTTPRedirectHandler):
+    """A redirect handler that NEVER follows a ``.well-known`` redirect.
 
-    Performs a single GET with a short timeout and NO redirect-following across
-    origins. Any network failure (timeout / connection error / DNS failure) raises
-    a cannot-complete error caught by :func:`verify_domain_control` → ``unverified``.
-    A non-200 status is returned as an :class:`HttpResponse` (a no-proof → unverified
-    case), not raised.
+    The default :class:`urllib.request.HTTPRedirectHandler` silently FOLLOWS 3xx
+    responses, which would let an attacker-controlled assigner domain redirect the
+    verifier to an internal/arbitrary origin (SSRF) and serve off-origin challenge
+    content — directly contradicting this module's "no cross-origin redirect"
+    contract (roborev F1). This subclass instead REJECTS every redirect by
+    re-raising it as an :class:`urllib.error.HTTPError` (its default ``http_error_3xx``
+    handlers surface the raised error to the caller). A rejected 3xx therefore never
+    triggers a follow-up fetch; :func:`_default_http_fetcher` maps the resulting
+    HTTPError to a non-200 :class:`HttpResponse` → ABSENT → ``unverified`` downstream.
+
+    We reject ALL redirects (not only off-origin ones): a valid ``.well-known``
+    challenge is served directly with ``200`` at the registrable-domain origin, so a
+    3xx is, by the profile's default ``.well-known`` rule, "no valid proof". A 3xx to
+    a DIFFERENT origin or a non-``https`` scheme is thus NEVER followed.
     """
-    import urllib.error
-    import urllib.request
 
-    request = urllib.request.Request(url, method="GET")  # noqa: S310 — fixed https URL built below
+    def redirect_request(
+        self,
+        req: Any,
+        fp: Any,
+        code: int,
+        msg: str,
+        headers: Any,
+        newurl: str,
+    ) -> None:
+        # Returning a Request here would make urllib FOLLOW the redirect. We must
+        # never do that for an input-derived domain. Raise so the 3xx surfaces as an
+        # HTTPError the fetcher converts to a non-200 (no valid proof) response.
+        origin = req.get_full_url() if hasattr(req, "get_full_url") else getattr(req, "full_url", "")
+        raise _urllib_error.HTTPError(
+            origin,
+            code,
+            f"redirect not followed for .well-known challenge (off-origin SSRF guard): {origin!r} -> {newurl!r}",
+            headers,
+            fp,
+        )
+
+
+def _is_allowed_well_known_host(host: str) -> bool:
+    """True iff ``host`` is an allowed registrable-domain host (default deny).
+
+    The verifier always builds ``https://{registrable-domain}/.well-known/...``, so a
+    legitimate host is a DNS name (e.g. ``openai.com``). An IP-literal host (IPv4 or
+    bracketed IPv6) is anomalous and is denied by default (an IP target is a classic
+    SSRF pivot and is never a registrable domain). A profile that needs IP-literal or
+    other hosts supplies its own ``http_fetcher``.
+    """
+    if not host:
+        return False
+    # Bracketed IPv6 literal, e.g. "[::1]" or "[fd00::1]".
+    if host.startswith("["):
+        return False
+    # IPv4 dotted-quad literal, e.g. "169.254.169.254".
+    labels = host.split(".")
+    if len(labels) == 4 and all(label.isdigit() for label in labels):
+        return False
+    return True
+
+
+def _default_http_fetcher(url: str, *, max_bytes: int = WELL_KNOWN_MAX_BYTES) -> HttpResponse:
+    """Default ``.well-known`` HTTP fetcher using stdlib ``urllib`` (hardened).
+
+    Performs a single GET with a short timeout and **NO redirect-following** (an
+    off-origin 3xx is never followed — SSRF guard, roborev F1) and a **bounded read**
+    capped at ``max_bytes`` (an unbounded body from an input-derived domain is never
+    loaded — DoS guard, roborev F2). The request MUST be ``https://`` to a non-IP
+    registrable-domain host (default deny); a non-``https``/IP-literal target is
+    treated as "no valid proof" (a non-200 :class:`HttpResponse`) WITHOUT a fetch.
+
+    Verdict mapping (documented choices for the two hardening cases):
+
+    * an off-origin / non-``https`` 3xx redirect → not followed → non-200 response →
+      ABSENT → ``unverified`` (NEVER ``verified`` from an off-origin body);
+    * an over-limit ``Content-Length`` OR an over-limit BODY → non-200 response →
+      ABSENT → ``unverified`` (the body is never fully read).
+
+    Any network failure (timeout / connection error / DNS failure) raises a
+    cannot-complete error caught by :func:`verify_domain_control` → ``unverified``. A
+    non-200 status is RETURNED as an :class:`HttpResponse` (a no-proof case), not raised.
+    """
+    parsed = _urllib_parse.urlsplit(url)
+    if parsed.scheme != "https" or not _is_allowed_well_known_host(parsed.hostname or ""):
+        # Default deny: the verifier only ever constructs https://{registrable-domain}.
+        # A non-https scheme or an IP-literal host is anomalous → no valid proof,
+        # and we do NOT issue the request at all.
+        return HttpResponse(status=0, content_type="", body="")
+
+    # Build a dedicated opener that NEVER follows redirects (SSRF guard). Using a
+    # bespoke opener (not the global urlopen) keeps the no-follow policy local.
+    opener = _urllib_request.build_opener(_NoFollowRedirectHandler())
+    request = _urllib_request.Request(url, method="GET")  # noqa: S310 — https + host validated above
     try:
-        with urllib.request.urlopen(request, timeout=5) as response:  # noqa: S310
+        with opener.open(request, timeout=5) as response:  # noqa: S310
             status = int(getattr(response, "status", 0) or 0)
             content_type = response.headers.get("Content-Type", "")
-            raw = response.read()
+            # F2: reject an advertised Content-Length over the cap BEFORE reading the
+            # body, so a malicious domain cannot make us stream a huge payload.
+            declared = response.headers.get("Content-Length", "")
+            if declared:
+                try:
+                    declared_len = int(declared)
+                except ValueError:
+                    declared_len = -1
+                if declared_len > max_bytes:
+                    return HttpResponse(status=0, content_type="", body="")
+            # F2: BOUNDED read — pull at most max_bytes + 1. If we got more than
+            # max_bytes the body is over-limit → not a valid proof (never the full body).
+            raw = response.read(max_bytes + 1)
+            if isinstance(raw, bytes | bytearray) and len(raw) > max_bytes:
+                return HttpResponse(status=0, content_type="", body="")
             body = raw.decode("utf-8", errors="replace") if isinstance(raw, bytes | bytearray) else str(raw)
             return HttpResponse(status=status, content_type=content_type, body=body)
-    except urllib.error.HTTPError as exc:
-        # An HTTP error status (404, 500, …) is a "no proof here" non-result, not a
-        # cannot-complete: return it as a response so the caller treats it as absence.
-        return HttpResponse(status=int(exc.code), content_type="", body="")
-    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+    except _urllib_error.HTTPError as exc:
+        # An HTTP error status (404, 500, …) OR a rejected redirect (the no-follow
+        # handler raises HTTPError) is a "no proof here" non-result, not a
+        # cannot-complete: return it as a non-200 response so the caller treats it as
+        # absence (→ unverified), never as verified and never as a crash.
+        return HttpResponse(status=int(getattr(exc, "code", 0) or 0), content_type="", body="")
+    except (_urllib_error.URLError, TimeoutError, OSError) as exc:
         raise DomainControlLookupError(f".well-known fetch could not complete: {exc}") from exc
 
 
