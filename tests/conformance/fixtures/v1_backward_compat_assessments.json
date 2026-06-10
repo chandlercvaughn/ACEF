@@ -1,14 +1,324 @@
 {
   "china-cac-labeling": {
-    "provision_outcomes": {
-      "china-cac-labeling-2025::cac-explicit-label": "satisfied",
-      "china-cac-labeling-2025::cac-implicit-metadata": "satisfied",
-      "china-cac-labeling-2025::cac-log-retention": "satisfied",
-      "china-cac-labeling-2025::cac-watermark": "satisfied"
-    },
-    "rule_result_counts": {
-      "passed": 17
-    },
+    "provision_summary": [
+      {
+        "evidence_refs": [
+          "urn:acef:rec:855460ea-7b53-4ce2-981c-875d3dbfa210"
+        ],
+        "fail_count": 0,
+        "outcome": "satisfied",
+        "profile_id": "china-cac-labeling-2025",
+        "provision_id": "cac-explicit-label",
+        "skipped_count": 0,
+        "subject_scope": [
+          "urn:acef:sub:88525167-c0ff-4df6-b4c4-27a93a6c396e"
+        ],
+        "warning_count": 0
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:4617b4e9-e5db-4b40-8f02-005b713e2542",
+          "urn:acef:rec:c51f3889-f83a-4af9-92fc-da71e3cb6b42"
+        ],
+        "fail_count": 0,
+        "outcome": "satisfied",
+        "profile_id": "china-cac-labeling-2025",
+        "provision_id": "cac-implicit-metadata",
+        "skipped_count": 0,
+        "subject_scope": [
+          "urn:acef:sub:88525167-c0ff-4df6-b4c4-27a93a6c396e"
+        ],
+        "warning_count": 0
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:27fb43de-f7a7-4677-9bb3-6fa411c376e7",
+          "urn:acef:rec:60f768e6-53c8-4613-816f-3083fc40c8db",
+          "urn:acef:rec:855460ea-7b53-4ce2-981c-875d3dbfa210",
+          "urn:acef:rec:4617b4e9-e5db-4b40-8f02-005b713e2542",
+          "urn:acef:rec:c51f3889-f83a-4af9-92fc-da71e3cb6b42"
+        ],
+        "fail_count": 0,
+        "outcome": "satisfied",
+        "profile_id": "china-cac-labeling-2025",
+        "provision_id": "cac-log-retention",
+        "skipped_count": 0,
+        "subject_scope": [
+          "urn:acef:sub:88525167-c0ff-4df6-b4c4-27a93a6c396e"
+        ],
+        "warning_count": 0
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:4617b4e9-e5db-4b40-8f02-005b713e2542",
+          "urn:acef:rec:c51f3889-f83a-4af9-92fc-da71e3cb6b42"
+        ],
+        "fail_count": 0,
+        "outcome": "satisfied",
+        "profile_id": "china-cac-labeling-2025",
+        "provision_id": "cac-watermark",
+        "skipped_count": 0,
+        "subject_scope": [
+          "urn:acef:sub:88525167-c0ff-4df6-b4c4-27a93a6c396e"
+        ],
+        "warning_count": 0
+      }
+    ],
+    "results": [
+      {
+        "evidence_refs": [
+          "urn:acef:rec:855460ea-7b53-4ce2-981c-875d3dbfa210"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "china-cac-labeling-2025",
+        "provision_id": "cac-explicit-label",
+        "rule_id": "cac-explicit-disclosure-exists",
+        "severity": "fail",
+        "subject_scope": [
+          "urn:acef:sub:88525167-c0ff-4df6-b4c4-27a93a6c396e"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:855460ea-7b53-4ce2-981c-875d3dbfa210"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "china-cac-labeling-2025",
+        "provision_id": "cac-explicit-label",
+        "rule_id": "cac-explicit-label-type",
+        "severity": "warning",
+        "subject_scope": [
+          "urn:acef:sub:88525167-c0ff-4df6-b4c4-27a93a6c396e"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:855460ea-7b53-4ce2-981c-875d3dbfa210"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "china-cac-labeling-2025",
+        "provision_id": "cac-explicit-label",
+        "rule_id": "cac-explicit-locale",
+        "severity": "warning",
+        "subject_scope": [
+          "urn:acef:sub:88525167-c0ff-4df6-b4c4-27a93a6c396e"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:855460ea-7b53-4ce2-981c-875d3dbfa210"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "china-cac-labeling-2025",
+        "provision_id": "cac-explicit-label",
+        "rule_id": "cac-explicit-presentation",
+        "severity": "fail",
+        "subject_scope": [
+          "urn:acef:sub:88525167-c0ff-4df6-b4c4-27a93a6c396e"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:4617b4e9-e5db-4b40-8f02-005b713e2542",
+          "urn:acef:rec:c51f3889-f83a-4af9-92fc-da71e3cb6b42"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "china-cac-labeling-2025",
+        "provision_id": "cac-implicit-metadata",
+        "rule_id": "cac-implicit-jurisdiction",
+        "severity": "fail",
+        "subject_scope": [
+          "urn:acef:sub:88525167-c0ff-4df6-b4c4-27a93a6c396e"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:4617b4e9-e5db-4b40-8f02-005b713e2542",
+          "urn:acef:rec:c51f3889-f83a-4af9-92fc-da71e3cb6b42"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "china-cac-labeling-2025",
+        "provision_id": "cac-implicit-metadata",
+        "rule_id": "cac-implicit-marking-exists",
+        "severity": "fail",
+        "subject_scope": [
+          "urn:acef:sub:88525167-c0ff-4df6-b4c4-27a93a6c396e"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:4617b4e9-e5db-4b40-8f02-005b713e2542",
+          "urn:acef:rec:c51f3889-f83a-4af9-92fc-da71e3cb6b42"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "china-cac-labeling-2025",
+        "provision_id": "cac-implicit-metadata",
+        "rule_id": "cac-implicit-marking-scheme-id",
+        "severity": "fail",
+        "subject_scope": [
+          "urn:acef:sub:88525167-c0ff-4df6-b4c4-27a93a6c396e"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:4617b4e9-e5db-4b40-8f02-005b713e2542",
+          "urn:acef:rec:c51f3889-f83a-4af9-92fc-da71e3cb6b42"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "china-cac-labeling-2025",
+        "provision_id": "cac-implicit-metadata",
+        "rule_id": "cac-implicit-metadata-container",
+        "severity": "warning",
+        "subject_scope": [
+          "urn:acef:sub:88525167-c0ff-4df6-b4c4-27a93a6c396e"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:4617b4e9-e5db-4b40-8f02-005b713e2542",
+          "urn:acef:rec:c51f3889-f83a-4af9-92fc-da71e3cb6b42"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "china-cac-labeling-2025",
+        "provision_id": "cac-implicit-metadata",
+        "rule_id": "cac-implicit-modality",
+        "severity": "warning",
+        "subject_scope": [
+          "urn:acef:sub:88525167-c0ff-4df6-b4c4-27a93a6c396e"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:27fb43de-f7a7-4677-9bb3-6fa411c376e7",
+          "urn:acef:rec:60f768e6-53c8-4613-816f-3083fc40c8db"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "china-cac-labeling-2025",
+        "provision_id": "cac-log-retention",
+        "rule_id": "cac-event-log-exists",
+        "severity": "fail",
+        "subject_scope": [
+          "urn:acef:sub:88525167-c0ff-4df6-b4c4-27a93a6c396e"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:27fb43de-f7a7-4677-9bb3-6fa411c376e7",
+          "urn:acef:rec:60f768e6-53c8-4613-816f-3083fc40c8db"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "china-cac-labeling-2025",
+        "provision_id": "cac-log-retention",
+        "rule_id": "cac-log-correlation-id",
+        "severity": "warning",
+        "subject_scope": [
+          "urn:acef:sub:88525167-c0ff-4df6-b4c4-27a93a6c396e"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:27fb43de-f7a7-4677-9bb3-6fa411c376e7",
+          "urn:acef:rec:60f768e6-53c8-4613-816f-3083fc40c8db"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "china-cac-labeling-2025",
+        "provision_id": "cac-log-retention",
+        "rule_id": "cac-log-event-type",
+        "severity": "fail",
+        "subject_scope": [
+          "urn:acef:sub:88525167-c0ff-4df6-b4c4-27a93a6c396e"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:855460ea-7b53-4ce2-981c-875d3dbfa210",
+          "urn:acef:rec:27fb43de-f7a7-4677-9bb3-6fa411c376e7",
+          "urn:acef:rec:60f768e6-53c8-4613-816f-3083fc40c8db",
+          "urn:acef:rec:4617b4e9-e5db-4b40-8f02-005b713e2542",
+          "urn:acef:rec:c51f3889-f83a-4af9-92fc-da71e3cb6b42"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "china-cac-labeling-2025",
+        "provision_id": "cac-log-retention",
+        "rule_id": "cac-log-freshness",
+        "severity": "fail",
+        "subject_scope": [
+          "urn:acef:sub:88525167-c0ff-4df6-b4c4-27a93a6c396e"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:60f768e6-53c8-4613-816f-3083fc40c8db"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "china-cac-labeling-2025",
+        "provision_id": "cac-log-retention",
+        "rule_id": "cac-log-label-exception",
+        "severity": "info",
+        "subject_scope": [
+          "urn:acef:sub:88525167-c0ff-4df6-b4c4-27a93a6c396e"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:4617b4e9-e5db-4b40-8f02-005b713e2542",
+          "urn:acef:rec:c51f3889-f83a-4af9-92fc-da71e3cb6b42"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "china-cac-labeling-2025",
+        "provision_id": "cac-watermark",
+        "rule_id": "cac-watermark-applied",
+        "severity": "warning",
+        "subject_scope": [
+          "urn:acef:sub:88525167-c0ff-4df6-b4c4-27a93a6c396e"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:4617b4e9-e5db-4b40-8f02-005b713e2542",
+          "urn:acef:rec:c51f3889-f83a-4af9-92fc-da71e3cb6b42"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "china-cac-labeling-2025",
+        "provision_id": "cac-watermark",
+        "rule_id": "cac-watermark-family",
+        "severity": "info",
+        "subject_scope": [
+          "urn:acef:sub:88525167-c0ff-4df6-b4c4-27a93a6c396e"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:4617b4e9-e5db-4b40-8f02-005b713e2542",
+          "urn:acef:rec:c51f3889-f83a-4af9-92fc-da71e3cb6b42"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "china-cac-labeling-2025",
+        "provision_id": "cac-watermark",
+        "rule_id": "cac-watermark-verification",
+        "severity": "info",
+        "subject_scope": [
+          "urn:acef:sub:88525167-c0ff-4df6-b4c4-27a93a6c396e"
+        ]
+      }
+    ],
     "structural_diagnostics": [
       {
         "category": "schema",
@@ -20,19 +330,500 @@
     ]
   },
   "eu-high-risk-core": {
-    "provision_outcomes": {
-      "eu-ai-act-2024::article-10": "satisfied",
-      "eu-ai-act-2024::article-11": "satisfied",
-      "eu-ai-act-2024::article-12": "satisfied",
-      "eu-ai-act-2024::article-13": "satisfied",
-      "eu-ai-act-2024::article-14": "satisfied",
-      "eu-ai-act-2024::article-15": "satisfied",
-      "eu-ai-act-2024::article-17": "satisfied",
-      "eu-ai-act-2024::article-9": "satisfied"
-    },
-    "rule_result_counts": {
-      "passed": 25
-    },
+    "provision_summary": [
+      {
+        "evidence_refs": [
+          "urn:acef:rec:804e6e6a-5080-49ef-b109-1d717dd95698",
+          "urn:acef:rec:9a4939af-6f51-47dc-b720-991cb3fcfef4"
+        ],
+        "fail_count": 0,
+        "outcome": "satisfied",
+        "profile_id": "eu-ai-act-2024",
+        "provision_id": "article-10",
+        "skipped_count": 0,
+        "subject_scope": [
+          "urn:acef:sub:c3a13a9c-ada1-4ef6-bca0-377f65afbd18"
+        ],
+        "warning_count": 0
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:3d621167-8506-4a28-98bc-054969747b2b"
+        ],
+        "fail_count": 0,
+        "outcome": "satisfied",
+        "profile_id": "eu-ai-act-2024",
+        "provision_id": "article-11",
+        "skipped_count": 0,
+        "subject_scope": [
+          "urn:acef:sub:c3a13a9c-ada1-4ef6-bca0-377f65afbd18"
+        ],
+        "warning_count": 0
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:52e798dd-5b7f-4cbf-a319-3ec7cde997e0",
+          "urn:acef:rec:86bee24a-6eef-4089-9c8c-c8e5258f7835"
+        ],
+        "fail_count": 0,
+        "outcome": "satisfied",
+        "profile_id": "eu-ai-act-2024",
+        "provision_id": "article-12",
+        "skipped_count": 0,
+        "subject_scope": [
+          "urn:acef:sub:c3a13a9c-ada1-4ef6-bca0-377f65afbd18"
+        ],
+        "warning_count": 0
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:f1962d08-6353-4ed8-ab6b-b3463ce4a551"
+        ],
+        "fail_count": 0,
+        "outcome": "satisfied",
+        "profile_id": "eu-ai-act-2024",
+        "provision_id": "article-13",
+        "skipped_count": 0,
+        "subject_scope": [
+          "urn:acef:sub:c3a13a9c-ada1-4ef6-bca0-377f65afbd18"
+        ],
+        "warning_count": 0
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:df927ca2-fd06-4dfe-82c6-2e421d8e5106"
+        ],
+        "fail_count": 0,
+        "outcome": "satisfied",
+        "profile_id": "eu-ai-act-2024",
+        "provision_id": "article-14",
+        "skipped_count": 0,
+        "subject_scope": [
+          "urn:acef:sub:c3a13a9c-ada1-4ef6-bca0-377f65afbd18"
+        ],
+        "warning_count": 0
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:3d621167-8506-4a28-98bc-054969747b2b"
+        ],
+        "fail_count": 0,
+        "outcome": "satisfied",
+        "profile_id": "eu-ai-act-2024",
+        "provision_id": "article-15",
+        "skipped_count": 0,
+        "subject_scope": [
+          "urn:acef:sub:c3a13a9c-ada1-4ef6-bca0-377f65afbd18"
+        ],
+        "warning_count": 0
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:a204affe-7d86-4dde-93ce-df2ff059dd04"
+        ],
+        "fail_count": 0,
+        "outcome": "satisfied",
+        "profile_id": "eu-ai-act-2024",
+        "provision_id": "article-17",
+        "skipped_count": 0,
+        "subject_scope": [
+          "urn:acef:sub:c3a13a9c-ada1-4ef6-bca0-377f65afbd18"
+        ],
+        "warning_count": 0
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:8935c655-5956-4564-9f2b-796b8d25904e",
+          "urn:acef:rec:b6a206bd-5823-431b-a797-6990c6317aab",
+          "urn:acef:rec:962db5e0-fc2f-4cfc-8e9a-981836a25ae9",
+          "urn:acef:rec:804e6e6a-5080-49ef-b109-1d717dd95698",
+          "urn:acef:rec:9a4939af-6f51-47dc-b720-991cb3fcfef4",
+          "urn:acef:rec:3d621167-8506-4a28-98bc-054969747b2b",
+          "urn:acef:rec:52e798dd-5b7f-4cbf-a319-3ec7cde997e0",
+          "urn:acef:rec:86bee24a-6eef-4089-9c8c-c8e5258f7835",
+          "urn:acef:rec:a204affe-7d86-4dde-93ce-df2ff059dd04",
+          "urn:acef:rec:df927ca2-fd06-4dfe-82c6-2e421d8e5106",
+          "urn:acef:rec:f1962d08-6353-4ed8-ab6b-b3463ce4a551"
+        ],
+        "fail_count": 0,
+        "outcome": "satisfied",
+        "profile_id": "eu-ai-act-2024",
+        "provision_id": "article-9",
+        "skipped_count": 0,
+        "subject_scope": [
+          "urn:acef:sub:c3a13a9c-ada1-4ef6-bca0-377f65afbd18"
+        ],
+        "warning_count": 0
+      }
+    ],
+    "results": [
+      {
+        "evidence_refs": [
+          "urn:acef:rec:804e6e6a-5080-49ef-b109-1d717dd95698"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "eu-ai-act-2024",
+        "provision_id": "article-10",
+        "rule_id": "art10-data-provenance",
+        "severity": "fail",
+        "subject_scope": [
+          "urn:acef:sub:c3a13a9c-ada1-4ef6-bca0-377f65afbd18"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:9a4939af-6f51-47dc-b720-991cb3fcfef4"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "eu-ai-act-2024",
+        "provision_id": "article-10",
+        "rule_id": "art10-dataset-card",
+        "severity": "fail",
+        "subject_scope": [
+          "urn:acef:sub:c3a13a9c-ada1-4ef6-bca0-377f65afbd18"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:9a4939af-6f51-47dc-b720-991cb3fcfef4"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "eu-ai-act-2024",
+        "provision_id": "article-10",
+        "rule_id": "art10-dataset-entity-linked",
+        "severity": "fail",
+        "subject_scope": [
+          "urn:acef:sub:c3a13a9c-ada1-4ef6-bca0-377f65afbd18"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:804e6e6a-5080-49ef-b109-1d717dd95698"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "eu-ai-act-2024",
+        "provision_id": "article-10",
+        "rule_id": "art10-provenance-source",
+        "severity": "fail",
+        "subject_scope": [
+          "urn:acef:sub:c3a13a9c-ada1-4ef6-bca0-377f65afbd18"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:3d621167-8506-4a28-98bc-054969747b2b"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "eu-ai-act-2024",
+        "provision_id": "article-11",
+        "rule_id": "art11-evaluation-report",
+        "severity": "fail",
+        "subject_scope": [
+          "urn:acef:sub:c3a13a9c-ada1-4ef6-bca0-377f65afbd18"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:3d621167-8506-4a28-98bc-054969747b2b"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "eu-ai-act-2024",
+        "provision_id": "article-11",
+        "rule_id": "art11-report-methodology",
+        "severity": "warning",
+        "subject_scope": [
+          "urn:acef:sub:c3a13a9c-ada1-4ef6-bca0-377f65afbd18"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:52e798dd-5b7f-4cbf-a319-3ec7cde997e0",
+          "urn:acef:rec:86bee24a-6eef-4089-9c8c-c8e5258f7835"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "eu-ai-act-2024",
+        "provision_id": "article-12",
+        "rule_id": "art12-correlation-id-present",
+        "severity": "fail",
+        "subject_scope": [
+          "urn:acef:sub:c3a13a9c-ada1-4ef6-bca0-377f65afbd18"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:52e798dd-5b7f-4cbf-a319-3ec7cde997e0",
+          "urn:acef:rec:86bee24a-6eef-4089-9c8c-c8e5258f7835"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "eu-ai-act-2024",
+        "provision_id": "article-12",
+        "rule_id": "art12-entity-linked",
+        "severity": "warning",
+        "subject_scope": [
+          "urn:acef:sub:c3a13a9c-ada1-4ef6-bca0-377f65afbd18"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:52e798dd-5b7f-4cbf-a319-3ec7cde997e0",
+          "urn:acef:rec:86bee24a-6eef-4089-9c8c-c8e5258f7835"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "eu-ai-act-2024",
+        "provision_id": "article-12",
+        "rule_id": "art12-event-log",
+        "severity": "fail",
+        "subject_scope": [
+          "urn:acef:sub:c3a13a9c-ada1-4ef6-bca0-377f65afbd18"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:52e798dd-5b7f-4cbf-a319-3ec7cde997e0",
+          "urn:acef:rec:86bee24a-6eef-4089-9c8c-c8e5258f7835"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "eu-ai-act-2024",
+        "provision_id": "article-12",
+        "rule_id": "art12-event-type-present",
+        "severity": "fail",
+        "subject_scope": [
+          "urn:acef:sub:c3a13a9c-ada1-4ef6-bca0-377f65afbd18"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:52e798dd-5b7f-4cbf-a319-3ec7cde997e0"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "eu-ai-act-2024",
+        "provision_id": "article-12",
+        "rule_id": "art12-logging-spec",
+        "severity": "warning",
+        "subject_scope": [
+          "urn:acef:sub:c3a13a9c-ada1-4ef6-bca0-377f65afbd18"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:f1962d08-6353-4ed8-ab6b-b3463ce4a551"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "eu-ai-act-2024",
+        "provision_id": "article-13",
+        "rule_id": "art13-subject-linked",
+        "severity": "warning",
+        "subject_scope": [
+          "urn:acef:sub:c3a13a9c-ada1-4ef6-bca0-377f65afbd18"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:f1962d08-6353-4ed8-ab6b-b3463ce4a551"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "eu-ai-act-2024",
+        "provision_id": "article-13",
+        "rule_id": "art13-transparency-disclosure",
+        "severity": "fail",
+        "subject_scope": [
+          "urn:acef:sub:c3a13a9c-ada1-4ef6-bca0-377f65afbd18"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:df927ca2-fd06-4dfe-82c6-2e421d8e5106"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "eu-ai-act-2024",
+        "provision_id": "article-14",
+        "rule_id": "art14-human-oversight",
+        "severity": "fail",
+        "subject_scope": [
+          "urn:acef:sub:c3a13a9c-ada1-4ef6-bca0-377f65afbd18"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:df927ca2-fd06-4dfe-82c6-2e421d8e5106"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "eu-ai-act-2024",
+        "provision_id": "article-14",
+        "rule_id": "art14-oversight-entity-linked",
+        "severity": "warning",
+        "subject_scope": [
+          "urn:acef:sub:c3a13a9c-ada1-4ef6-bca0-377f65afbd18"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:3d621167-8506-4a28-98bc-054969747b2b"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "eu-ai-act-2024",
+        "provision_id": "article-15",
+        "rule_id": "art15-accuracy-metrics",
+        "severity": "warning",
+        "subject_scope": [
+          "urn:acef:sub:c3a13a9c-ada1-4ef6-bca0-377f65afbd18"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:3d621167-8506-4a28-98bc-054969747b2b"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "eu-ai-act-2024",
+        "provision_id": "article-15",
+        "rule_id": "art15-evaluation-report",
+        "severity": "fail",
+        "subject_scope": [
+          "urn:acef:sub:c3a13a9c-ada1-4ef6-bca0-377f65afbd18"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:a204affe-7d86-4dde-93ce-df2ff059dd04"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "eu-ai-act-2024",
+        "provision_id": "article-17",
+        "rule_id": "art17-governance-policy",
+        "severity": "fail",
+        "subject_scope": [
+          "urn:acef:sub:c3a13a9c-ada1-4ef6-bca0-377f65afbd18"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:a204affe-7d86-4dde-93ce-df2ff059dd04"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "eu-ai-act-2024",
+        "provision_id": "article-17",
+        "rule_id": "art17-qms-attachment",
+        "severity": "warning",
+        "subject_scope": [
+          "urn:acef:sub:c3a13a9c-ada1-4ef6-bca0-377f65afbd18"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:8935c655-5956-4564-9f2b-796b8d25904e",
+          "urn:acef:rec:b6a206bd-5823-431b-a797-6990c6317aab"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "eu-ai-act-2024",
+        "provision_id": "article-9",
+        "rule_id": "art9-entity-linked",
+        "severity": "fail",
+        "subject_scope": [
+          "urn:acef:sub:c3a13a9c-ada1-4ef6-bca0-377f65afbd18"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:804e6e6a-5080-49ef-b109-1d717dd95698",
+          "urn:acef:rec:9a4939af-6f51-47dc-b720-991cb3fcfef4",
+          "urn:acef:rec:3d621167-8506-4a28-98bc-054969747b2b",
+          "urn:acef:rec:52e798dd-5b7f-4cbf-a319-3ec7cde997e0",
+          "urn:acef:rec:86bee24a-6eef-4089-9c8c-c8e5258f7835",
+          "urn:acef:rec:a204affe-7d86-4dde-93ce-df2ff059dd04",
+          "urn:acef:rec:df927ca2-fd06-4dfe-82c6-2e421d8e5106",
+          "urn:acef:rec:8935c655-5956-4564-9f2b-796b8d25904e",
+          "urn:acef:rec:b6a206bd-5823-431b-a797-6990c6317aab",
+          "urn:acef:rec:962db5e0-fc2f-4cfc-8e9a-981836a25ae9",
+          "urn:acef:rec:f1962d08-6353-4ed8-ab6b-b3463ce4a551"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "eu-ai-act-2024",
+        "provision_id": "article-9",
+        "rule_id": "art9-freshness",
+        "severity": "warning",
+        "subject_scope": [
+          "urn:acef:sub:c3a13a9c-ada1-4ef6-bca0-377f65afbd18"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:b6a206bd-5823-431b-a797-6990c6317aab"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "eu-ai-act-2024",
+        "provision_id": "article-9",
+        "rule_id": "art9-management-review",
+        "severity": "fail",
+        "subject_scope": [
+          "urn:acef:sub:c3a13a9c-ada1-4ef6-bca0-377f65afbd18"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:b6a206bd-5823-431b-a797-6990c6317aab"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "eu-ai-act-2024",
+        "provision_id": "article-9",
+        "rule_id": "art9-post-market-monitoring",
+        "severity": "warning",
+        "subject_scope": [
+          "urn:acef:sub:c3a13a9c-ada1-4ef6-bca0-377f65afbd18"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:8935c655-5956-4564-9f2b-796b8d25904e",
+          "urn:acef:rec:b6a206bd-5823-431b-a797-6990c6317aab"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "eu-ai-act-2024",
+        "provision_id": "article-9",
+        "rule_id": "art9-risk-register",
+        "severity": "fail",
+        "subject_scope": [
+          "urn:acef:sub:c3a13a9c-ada1-4ef6-bca0-377f65afbd18"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:962db5e0-fc2f-4cfc-8e9a-981836a25ae9"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "eu-ai-act-2024",
+        "provision_id": "article-9",
+        "rule_id": "art9-risk-treatment",
+        "severity": "fail",
+        "subject_scope": [
+          "urn:acef:sub:c3a13a9c-ada1-4ef6-bca0-377f65afbd18"
+        ]
+      }
+    ],
     "structural_diagnostics": [
       {
         "category": "schema",
@@ -44,12 +835,82 @@
     ]
   },
   "gpai-provider-annex-xi-xii": {
-    "provision_outcomes": {
-      "eu-ai-act-2024::article-53": "satisfied"
-    },
-    "rule_result_counts": {
-      "passed": 4
-    },
+    "provision_summary": [
+      {
+        "evidence_refs": [
+          "urn:acef:rec:17cd1346-09a2-4f55-bcf5-08fb1b6f38a9",
+          "urn:acef:rec:d5d8c1bf-f24f-4357-a082-a7409033343b",
+          "urn:acef:rec:244c326e-7d12-4e05-8369-7ad05a2fa9d5"
+        ],
+        "fail_count": 0,
+        "outcome": "satisfied",
+        "profile_id": "eu-ai-act-2024",
+        "provision_id": "article-53",
+        "skipped_count": 0,
+        "subject_scope": [
+          "urn:acef:sub:25417616-c36a-4d69-8e72-29c79df668ea"
+        ],
+        "warning_count": 0
+      }
+    ],
+    "results": [
+      {
+        "evidence_refs": [
+          "urn:acef:rec:244c326e-7d12-4e05-8369-7ad05a2fa9d5"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "eu-ai-act-2024",
+        "provision_id": "article-53",
+        "rule_id": "art53-annex-xi-doc",
+        "severity": "warning",
+        "subject_scope": [
+          "urn:acef:sub:25417616-c36a-4d69-8e72-29c79df668ea"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:d5d8c1bf-f24f-4357-a082-a7409033343b"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "eu-ai-act-2024",
+        "provision_id": "article-53",
+        "rule_id": "art53-copyright",
+        "severity": "fail",
+        "subject_scope": [
+          "urn:acef:sub:25417616-c36a-4d69-8e72-29c79df668ea"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:17cd1346-09a2-4f55-bcf5-08fb1b6f38a9"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "eu-ai-act-2024",
+        "provision_id": "article-53",
+        "rule_id": "art53-data-provenance",
+        "severity": "fail",
+        "subject_scope": [
+          "urn:acef:sub:25417616-c36a-4d69-8e72-29c79df668ea"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:17cd1346-09a2-4f55-bcf5-08fb1b6f38a9"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "eu-ai-act-2024",
+        "provision_id": "article-53",
+        "rule_id": "art53-provenance-source-type",
+        "severity": "fail",
+        "subject_scope": [
+          "urn:acef:sub:25417616-c36a-4d69-8e72-29c79df668ea"
+        ]
+      }
+    ],
     "structural_diagnostics": [
       {
         "category": "schema",
@@ -61,20 +922,672 @@
     ]
   },
   "multi-subject-composed": {
-    "provision_outcomes": {
-      "eu-ai-act-2024::article-10": "satisfied",
-      "eu-ai-act-2024::article-11": "satisfied",
-      "eu-ai-act-2024::article-13": "satisfied",
-      "eu-ai-act-2024::article-53": "partially-satisfied",
-      "eu-ai-act-2024::article-9": "satisfied",
-      "nist-ai-rmf-1.0::govern-1": "partially-satisfied",
-      "nist-ai-rmf-1.0::map-1": "partially-satisfied",
-      "nist-ai-rmf-1.0::measure-1": "satisfied"
-    },
-    "rule_result_counts": {
-      "failed": 5,
-      "passed": 31
-    },
+    "provision_summary": [
+      {
+        "evidence_refs": [
+          "urn:acef:rec:a805c374-9c3f-4389-8da4-05dadb98a94a",
+          "urn:acef:rec:e97ee37a-c44d-4818-b718-e825dd3e7a14"
+        ],
+        "fail_count": 0,
+        "outcome": "satisfied",
+        "profile_id": "eu-ai-act-2024",
+        "provision_id": "article-10",
+        "skipped_count": 0,
+        "subject_scope": [
+          "urn:acef:sub:b4bf5f13-c1bf-4acc-b5de-93a025ae3a57"
+        ],
+        "warning_count": 0
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:83248bdb-7d49-49a3-9e57-215414ec2299"
+        ],
+        "fail_count": 0,
+        "outcome": "satisfied",
+        "profile_id": "eu-ai-act-2024",
+        "provision_id": "article-11",
+        "skipped_count": 0,
+        "subject_scope": [
+          "urn:acef:sub:b4bf5f13-c1bf-4acc-b5de-93a025ae3a57"
+        ],
+        "warning_count": 0
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:bc3421bb-06a4-4b88-b72c-ab3c66394dc1"
+        ],
+        "fail_count": 0,
+        "outcome": "satisfied",
+        "profile_id": "eu-ai-act-2024",
+        "provision_id": "article-13",
+        "skipped_count": 0,
+        "subject_scope": [
+          "urn:acef:sub:b4bf5f13-c1bf-4acc-b5de-93a025ae3a57"
+        ],
+        "warning_count": 0
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:a805c374-9c3f-4389-8da4-05dadb98a94a",
+          "urn:acef:rec:4f89d40e-ab0c-4455-b60d-49eb45a4450e"
+        ],
+        "fail_count": 0,
+        "outcome": "partially-satisfied",
+        "profile_id": "eu-ai-act-2024",
+        "provision_id": "article-53",
+        "skipped_count": 0,
+        "subject_scope": [
+          "urn:acef:sub:89ff8b73-8cb4-45d0-a569-140e07cfafd0"
+        ],
+        "warning_count": 1
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:2d0ff685-040d-41fe-b784-85cacb2ba251",
+          "urn:acef:rec:39baee65-2172-4947-ac40-708a3c7ac4ff",
+          "urn:acef:rec:a805c374-9c3f-4389-8da4-05dadb98a94a",
+          "urn:acef:rec:e97ee37a-c44d-4818-b718-e825dd3e7a14",
+          "urn:acef:rec:83248bdb-7d49-49a3-9e57-215414ec2299",
+          "urn:acef:rec:47e5102d-0595-41cc-b9d2-d48a51838c46",
+          "urn:acef:rec:bc3421bb-06a4-4b88-b72c-ab3c66394dc1"
+        ],
+        "fail_count": 0,
+        "outcome": "satisfied",
+        "profile_id": "eu-ai-act-2024",
+        "provision_id": "article-9",
+        "skipped_count": 0,
+        "subject_scope": [
+          "urn:acef:sub:b4bf5f13-c1bf-4acc-b5de-93a025ae3a57"
+        ],
+        "warning_count": 0
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:47e5102d-0595-41cc-b9d2-d48a51838c46"
+        ],
+        "fail_count": 0,
+        "outcome": "partially-satisfied",
+        "profile_id": "nist-ai-rmf-1.0",
+        "provision_id": "govern-1",
+        "skipped_count": 0,
+        "subject_scope": [
+          "urn:acef:sub:89ff8b73-8cb4-45d0-a569-140e07cfafd0"
+        ],
+        "warning_count": 1
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:47e5102d-0595-41cc-b9d2-d48a51838c46"
+        ],
+        "fail_count": 0,
+        "outcome": "partially-satisfied",
+        "profile_id": "nist-ai-rmf-1.0",
+        "provision_id": "govern-1",
+        "skipped_count": 0,
+        "subject_scope": [
+          "urn:acef:sub:b4bf5f13-c1bf-4acc-b5de-93a025ae3a57"
+        ],
+        "warning_count": 1
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:2d0ff685-040d-41fe-b784-85cacb2ba251"
+        ],
+        "fail_count": 0,
+        "outcome": "partially-satisfied",
+        "profile_id": "nist-ai-rmf-1.0",
+        "provision_id": "map-1",
+        "skipped_count": 0,
+        "subject_scope": [
+          "urn:acef:sub:89ff8b73-8cb4-45d0-a569-140e07cfafd0"
+        ],
+        "warning_count": 1
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:2d0ff685-040d-41fe-b784-85cacb2ba251"
+        ],
+        "fail_count": 0,
+        "outcome": "partially-satisfied",
+        "profile_id": "nist-ai-rmf-1.0",
+        "provision_id": "map-1",
+        "skipped_count": 0,
+        "subject_scope": [
+          "urn:acef:sub:b4bf5f13-c1bf-4acc-b5de-93a025ae3a57"
+        ],
+        "warning_count": 1
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:83248bdb-7d49-49a3-9e57-215414ec2299"
+        ],
+        "fail_count": 0,
+        "outcome": "satisfied",
+        "profile_id": "nist-ai-rmf-1.0",
+        "provision_id": "measure-1",
+        "skipped_count": 0,
+        "subject_scope": [
+          "urn:acef:sub:89ff8b73-8cb4-45d0-a569-140e07cfafd0"
+        ],
+        "warning_count": 0
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:83248bdb-7d49-49a3-9e57-215414ec2299"
+        ],
+        "fail_count": 0,
+        "outcome": "satisfied",
+        "profile_id": "nist-ai-rmf-1.0",
+        "provision_id": "measure-1",
+        "skipped_count": 0,
+        "subject_scope": [
+          "urn:acef:sub:b4bf5f13-c1bf-4acc-b5de-93a025ae3a57"
+        ],
+        "warning_count": 0
+      }
+    ],
+    "results": [
+      {
+        "evidence_refs": [
+          "urn:acef:rec:a805c374-9c3f-4389-8da4-05dadb98a94a"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "eu-ai-act-2024",
+        "provision_id": "article-10",
+        "rule_id": "art10-data-provenance",
+        "severity": "fail",
+        "subject_scope": [
+          "urn:acef:sub:b4bf5f13-c1bf-4acc-b5de-93a025ae3a57"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:e97ee37a-c44d-4818-b718-e825dd3e7a14"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "eu-ai-act-2024",
+        "provision_id": "article-10",
+        "rule_id": "art10-dataset-card",
+        "severity": "fail",
+        "subject_scope": [
+          "urn:acef:sub:b4bf5f13-c1bf-4acc-b5de-93a025ae3a57"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:e97ee37a-c44d-4818-b718-e825dd3e7a14"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "eu-ai-act-2024",
+        "provision_id": "article-10",
+        "rule_id": "art10-dataset-entity-linked",
+        "severity": "fail",
+        "subject_scope": [
+          "urn:acef:sub:b4bf5f13-c1bf-4acc-b5de-93a025ae3a57"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:a805c374-9c3f-4389-8da4-05dadb98a94a"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "eu-ai-act-2024",
+        "provision_id": "article-10",
+        "rule_id": "art10-provenance-source",
+        "severity": "fail",
+        "subject_scope": [
+          "urn:acef:sub:b4bf5f13-c1bf-4acc-b5de-93a025ae3a57"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:83248bdb-7d49-49a3-9e57-215414ec2299"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "eu-ai-act-2024",
+        "provision_id": "article-11",
+        "rule_id": "art11-evaluation-report",
+        "severity": "fail",
+        "subject_scope": [
+          "urn:acef:sub:b4bf5f13-c1bf-4acc-b5de-93a025ae3a57"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:83248bdb-7d49-49a3-9e57-215414ec2299"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "eu-ai-act-2024",
+        "provision_id": "article-11",
+        "rule_id": "art11-report-methodology",
+        "severity": "warning",
+        "subject_scope": [
+          "urn:acef:sub:b4bf5f13-c1bf-4acc-b5de-93a025ae3a57"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:bc3421bb-06a4-4b88-b72c-ab3c66394dc1"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "eu-ai-act-2024",
+        "provision_id": "article-13",
+        "rule_id": "art13-subject-linked",
+        "severity": "warning",
+        "subject_scope": [
+          "urn:acef:sub:b4bf5f13-c1bf-4acc-b5de-93a025ae3a57"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:bc3421bb-06a4-4b88-b72c-ab3c66394dc1"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "eu-ai-act-2024",
+        "provision_id": "article-13",
+        "rule_id": "art13-transparency-disclosure",
+        "severity": "fail",
+        "subject_scope": [
+          "urn:acef:sub:b4bf5f13-c1bf-4acc-b5de-93a025ae3a57"
+        ]
+      },
+      {
+        "evidence_refs": [],
+        "message": "A gpai_annex_xi_model_doc variant evaluation_report is recommended — Annex XI requires structured technical documentation including model architecture, training data characteristics, and compute resources",
+        "outcome": "failed",
+        "profile_id": "eu-ai-act-2024",
+        "provision_id": "article-53",
+        "rule_id": "art53-annex-xi-doc",
+        "severity": "warning",
+        "subject_scope": [
+          "urn:acef:sub:89ff8b73-8cb4-45d0-a569-140e07cfafd0"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:4f89d40e-ab0c-4455-b60d-49eb45a4450e"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "eu-ai-act-2024",
+        "provision_id": "article-53",
+        "rule_id": "art53-copyright",
+        "severity": "fail",
+        "subject_scope": [
+          "urn:acef:sub:89ff8b73-8cb4-45d0-a569-140e07cfafd0"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:a805c374-9c3f-4389-8da4-05dadb98a94a"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "eu-ai-act-2024",
+        "provision_id": "article-53",
+        "rule_id": "art53-data-provenance",
+        "severity": "fail",
+        "subject_scope": [
+          "urn:acef:sub:89ff8b73-8cb4-45d0-a569-140e07cfafd0"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:a805c374-9c3f-4389-8da4-05dadb98a94a"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "eu-ai-act-2024",
+        "provision_id": "article-53",
+        "rule_id": "art53-provenance-source-type",
+        "severity": "fail",
+        "subject_scope": [
+          "urn:acef:sub:89ff8b73-8cb4-45d0-a569-140e07cfafd0"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:2d0ff685-040d-41fe-b784-85cacb2ba251"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "eu-ai-act-2024",
+        "provision_id": "article-9",
+        "rule_id": "art9-entity-linked",
+        "severity": "fail",
+        "subject_scope": [
+          "urn:acef:sub:b4bf5f13-c1bf-4acc-b5de-93a025ae3a57"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:a805c374-9c3f-4389-8da4-05dadb98a94a",
+          "urn:acef:rec:e97ee37a-c44d-4818-b718-e825dd3e7a14",
+          "urn:acef:rec:83248bdb-7d49-49a3-9e57-215414ec2299",
+          "urn:acef:rec:47e5102d-0595-41cc-b9d2-d48a51838c46",
+          "urn:acef:rec:2d0ff685-040d-41fe-b784-85cacb2ba251",
+          "urn:acef:rec:39baee65-2172-4947-ac40-708a3c7ac4ff",
+          "urn:acef:rec:bc3421bb-06a4-4b88-b72c-ab3c66394dc1"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "eu-ai-act-2024",
+        "provision_id": "article-9",
+        "rule_id": "art9-freshness",
+        "severity": "warning",
+        "subject_scope": [
+          "urn:acef:sub:b4bf5f13-c1bf-4acc-b5de-93a025ae3a57"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:2d0ff685-040d-41fe-b784-85cacb2ba251"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "eu-ai-act-2024",
+        "provision_id": "article-9",
+        "rule_id": "art9-management-review",
+        "severity": "fail",
+        "subject_scope": [
+          "urn:acef:sub:b4bf5f13-c1bf-4acc-b5de-93a025ae3a57"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:2d0ff685-040d-41fe-b784-85cacb2ba251"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "eu-ai-act-2024",
+        "provision_id": "article-9",
+        "rule_id": "art9-post-market-monitoring",
+        "severity": "warning",
+        "subject_scope": [
+          "urn:acef:sub:b4bf5f13-c1bf-4acc-b5de-93a025ae3a57"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:2d0ff685-040d-41fe-b784-85cacb2ba251"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "eu-ai-act-2024",
+        "provision_id": "article-9",
+        "rule_id": "art9-risk-register",
+        "severity": "fail",
+        "subject_scope": [
+          "urn:acef:sub:b4bf5f13-c1bf-4acc-b5de-93a025ae3a57"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:39baee65-2172-4947-ac40-708a3c7ac4ff"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "eu-ai-act-2024",
+        "provision_id": "article-9",
+        "rule_id": "art9-risk-treatment",
+        "severity": "fail",
+        "subject_scope": [
+          "urn:acef:sub:b4bf5f13-c1bf-4acc-b5de-93a025ae3a57"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:47e5102d-0595-41cc-b9d2-d48a51838c46"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "nist-ai-rmf-1.0",
+        "provision_id": "govern-1",
+        "rule_id": "govern1-governance-policy",
+        "severity": "fail",
+        "subject_scope": [
+          "urn:acef:sub:89ff8b73-8cb4-45d0-a569-140e07cfafd0"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:47e5102d-0595-41cc-b9d2-d48a51838c46"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "nist-ai-rmf-1.0",
+        "provision_id": "govern-1",
+        "rule_id": "govern1-governance-policy",
+        "severity": "fail",
+        "subject_scope": [
+          "urn:acef:sub:b4bf5f13-c1bf-4acc-b5de-93a025ae3a57"
+        ]
+      },
+      {
+        "evidence_refs": [],
+        "message": "Governance policy records should include attached policy documents demonstrating established organizational AI governance",
+        "outcome": "failed",
+        "profile_id": "nist-ai-rmf-1.0",
+        "provision_id": "govern-1",
+        "rule_id": "govern1-policy-attachment",
+        "severity": "warning",
+        "subject_scope": [
+          "urn:acef:sub:89ff8b73-8cb4-45d0-a569-140e07cfafd0"
+        ]
+      },
+      {
+        "evidence_refs": [],
+        "message": "Governance policy records should include attached policy documents demonstrating established organizational AI governance",
+        "outcome": "failed",
+        "profile_id": "nist-ai-rmf-1.0",
+        "provision_id": "govern-1",
+        "rule_id": "govern1-policy-attachment",
+        "severity": "warning",
+        "subject_scope": [
+          "urn:acef:sub:b4bf5f13-c1bf-4acc-b5de-93a025ae3a57"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:47e5102d-0595-41cc-b9d2-d48a51838c46"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "nist-ai-rmf-1.0",
+        "provision_id": "govern-1",
+        "rule_id": "govern1-policy-entity-linked",
+        "severity": "warning",
+        "subject_scope": [
+          "urn:acef:sub:89ff8b73-8cb4-45d0-a569-140e07cfafd0"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:47e5102d-0595-41cc-b9d2-d48a51838c46"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "nist-ai-rmf-1.0",
+        "provision_id": "govern-1",
+        "rule_id": "govern1-policy-entity-linked",
+        "severity": "warning",
+        "subject_scope": [
+          "urn:acef:sub:b4bf5f13-c1bf-4acc-b5de-93a025ae3a57"
+        ]
+      },
+      {
+        "evidence_refs": [],
+        "message": "Risk register records should categorize risks per NIST trustworthiness characteristics (validity, reliability, safety, security, accountability, transparency, explainability, privacy, fairness)",
+        "outcome": "failed",
+        "profile_id": "nist-ai-rmf-1.0",
+        "provision_id": "map-1",
+        "rule_id": "map1-risk-category",
+        "severity": "warning",
+        "subject_scope": [
+          "urn:acef:sub:89ff8b73-8cb4-45d0-a569-140e07cfafd0"
+        ]
+      },
+      {
+        "evidence_refs": [],
+        "message": "Risk register records should categorize risks per NIST trustworthiness characteristics (validity, reliability, safety, security, accountability, transparency, explainability, privacy, fairness)",
+        "outcome": "failed",
+        "profile_id": "nist-ai-rmf-1.0",
+        "provision_id": "map-1",
+        "rule_id": "map1-risk-category",
+        "severity": "warning",
+        "subject_scope": [
+          "urn:acef:sub:b4bf5f13-c1bf-4acc-b5de-93a025ae3a57"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:2d0ff685-040d-41fe-b784-85cacb2ba251"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "nist-ai-rmf-1.0",
+        "provision_id": "map-1",
+        "rule_id": "map1-risk-entity-linked",
+        "severity": "warning",
+        "subject_scope": [
+          "urn:acef:sub:89ff8b73-8cb4-45d0-a569-140e07cfafd0"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:2d0ff685-040d-41fe-b784-85cacb2ba251"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "nist-ai-rmf-1.0",
+        "provision_id": "map-1",
+        "rule_id": "map1-risk-entity-linked",
+        "severity": "warning",
+        "subject_scope": [
+          "urn:acef:sub:b4bf5f13-c1bf-4acc-b5de-93a025ae3a57"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:2d0ff685-040d-41fe-b784-85cacb2ba251"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "nist-ai-rmf-1.0",
+        "provision_id": "map-1",
+        "rule_id": "map1-risk-register",
+        "severity": "fail",
+        "subject_scope": [
+          "urn:acef:sub:89ff8b73-8cb4-45d0-a569-140e07cfafd0"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:2d0ff685-040d-41fe-b784-85cacb2ba251"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "nist-ai-rmf-1.0",
+        "provision_id": "map-1",
+        "rule_id": "map1-risk-register",
+        "severity": "fail",
+        "subject_scope": [
+          "urn:acef:sub:b4bf5f13-c1bf-4acc-b5de-93a025ae3a57"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:83248bdb-7d49-49a3-9e57-215414ec2299"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "nist-ai-rmf-1.0",
+        "provision_id": "measure-1",
+        "rule_id": "measure1-evaluation-report",
+        "severity": "fail",
+        "subject_scope": [
+          "urn:acef:sub:89ff8b73-8cb4-45d0-a569-140e07cfafd0"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:83248bdb-7d49-49a3-9e57-215414ec2299"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "nist-ai-rmf-1.0",
+        "provision_id": "measure-1",
+        "rule_id": "measure1-evaluation-report",
+        "severity": "fail",
+        "subject_scope": [
+          "urn:acef:sub:b4bf5f13-c1bf-4acc-b5de-93a025ae3a57"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:83248bdb-7d49-49a3-9e57-215414ec2299"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "nist-ai-rmf-1.0",
+        "provision_id": "measure-1",
+        "rule_id": "measure1-methodology-present",
+        "severity": "warning",
+        "subject_scope": [
+          "urn:acef:sub:89ff8b73-8cb4-45d0-a569-140e07cfafd0"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:83248bdb-7d49-49a3-9e57-215414ec2299"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "nist-ai-rmf-1.0",
+        "provision_id": "measure-1",
+        "rule_id": "measure1-methodology-present",
+        "severity": "warning",
+        "subject_scope": [
+          "urn:acef:sub:b4bf5f13-c1bf-4acc-b5de-93a025ae3a57"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:83248bdb-7d49-49a3-9e57-215414ec2299"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "nist-ai-rmf-1.0",
+        "provision_id": "measure-1",
+        "rule_id": "measure1-metrics-present",
+        "severity": "warning",
+        "subject_scope": [
+          "urn:acef:sub:89ff8b73-8cb4-45d0-a569-140e07cfafd0"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:83248bdb-7d49-49a3-9e57-215414ec2299"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "nist-ai-rmf-1.0",
+        "provision_id": "measure-1",
+        "rule_id": "measure1-metrics-present",
+        "severity": "warning",
+        "subject_scope": [
+          "urn:acef:sub:b4bf5f13-c1bf-4acc-b5de-93a025ae3a57"
+        ]
+      }
+    ],
     "structural_diagnostics": [
       {
         "category": "schema",
@@ -86,12 +1599,85 @@
     ]
   },
   "synthetic-content-marking": {
-    "provision_outcomes": {
-      "eu-ai-act-2024::article-50.2": "satisfied"
-    },
-    "rule_result_counts": {
-      "passed": 4
-    },
+    "provision_summary": [
+      {
+        "evidence_refs": [
+          "urn:acef:rec:a77c6741-755b-4390-b37c-3e7000f9f377",
+          "urn:acef:rec:d02b86ed-ab44-41fb-b46e-87120fb0ca1f"
+        ],
+        "fail_count": 0,
+        "outcome": "satisfied",
+        "profile_id": "eu-ai-act-2024",
+        "provision_id": "article-50.2",
+        "skipped_count": 0,
+        "subject_scope": [
+          "urn:acef:sub:b51b04f1-066e-480f-9a76-dd6805d8e980"
+        ],
+        "warning_count": 0
+      }
+    ],
+    "results": [
+      {
+        "evidence_refs": [
+          "urn:acef:rec:a77c6741-755b-4390-b37c-3e7000f9f377",
+          "urn:acef:rec:d02b86ed-ab44-41fb-b46e-87120fb0ca1f"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "eu-ai-act-2024",
+        "provision_id": "article-50.2",
+        "rule_id": "art50-marking-exists",
+        "severity": "fail",
+        "subject_scope": [
+          "urn:acef:sub:b51b04f1-066e-480f-9a76-dd6805d8e980"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:a77c6741-755b-4390-b37c-3e7000f9f377",
+          "urn:acef:rec:d02b86ed-ab44-41fb-b46e-87120fb0ca1f"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "eu-ai-act-2024",
+        "provision_id": "article-50.2",
+        "rule_id": "art50-marking-scheme-id",
+        "severity": "fail",
+        "subject_scope": [
+          "urn:acef:sub:b51b04f1-066e-480f-9a76-dd6805d8e980"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:a77c6741-755b-4390-b37c-3e7000f9f377",
+          "urn:acef:rec:d02b86ed-ab44-41fb-b46e-87120fb0ca1f"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "eu-ai-act-2024",
+        "provision_id": "article-50.2",
+        "rule_id": "art50-marking-technique",
+        "severity": "warning",
+        "subject_scope": [
+          "urn:acef:sub:b51b04f1-066e-480f-9a76-dd6805d8e980"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:a77c6741-755b-4390-b37c-3e7000f9f377",
+          "urn:acef:rec:d02b86ed-ab44-41fb-b46e-87120fb0ca1f"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "eu-ai-act-2024",
+        "provision_id": "article-50.2",
+        "rule_id": "art50-modality",
+        "severity": "fail",
+        "subject_scope": [
+          "urn:acef:sub:b51b04f1-066e-480f-9a76-dd6805d8e980"
+        ]
+      }
+    ],
     "structural_diagnostics": [
       {
         "category": "schema",
@@ -103,15 +1689,237 @@
     ]
   },
   "us-federal-governance": {
-    "provision_outcomes": {
-      "nist-ai-rmf-1.0::govern-1": "satisfied",
-      "nist-ai-rmf-1.0::manage-1": "satisfied",
-      "nist-ai-rmf-1.0::map-1": "satisfied",
-      "nist-ai-rmf-1.0::measure-1": "satisfied"
-    },
-    "rule_result_counts": {
-      "passed": 12
-    },
+    "provision_summary": [
+      {
+        "evidence_refs": [
+          "urn:acef:rec:a7a8bbe7-9954-4685-9068-6106a4b885fd",
+          "urn:acef:rec:f8d7f96c-5358-4acd-af6a-a1754ae7bdc0"
+        ],
+        "fail_count": 0,
+        "outcome": "satisfied",
+        "profile_id": "nist-ai-rmf-1.0",
+        "provision_id": "govern-1",
+        "skipped_count": 0,
+        "subject_scope": [
+          "urn:acef:sub:ce4c5016-6bdf-47d2-bb83-a20229686fb4"
+        ],
+        "warning_count": 0
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:61e77222-cd1b-49a7-9798-ee56980d5efa"
+        ],
+        "fail_count": 0,
+        "outcome": "satisfied",
+        "profile_id": "nist-ai-rmf-1.0",
+        "provision_id": "manage-1",
+        "skipped_count": 0,
+        "subject_scope": [
+          "urn:acef:sub:ce4c5016-6bdf-47d2-bb83-a20229686fb4"
+        ],
+        "warning_count": 0
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:41d17d4c-3f0c-4324-a9a1-003fbd477a0d"
+        ],
+        "fail_count": 0,
+        "outcome": "satisfied",
+        "profile_id": "nist-ai-rmf-1.0",
+        "provision_id": "map-1",
+        "skipped_count": 0,
+        "subject_scope": [
+          "urn:acef:sub:ce4c5016-6bdf-47d2-bb83-a20229686fb4"
+        ],
+        "warning_count": 0
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:54b99c94-b53e-420c-8361-689132621755"
+        ],
+        "fail_count": 0,
+        "outcome": "satisfied",
+        "profile_id": "nist-ai-rmf-1.0",
+        "provision_id": "measure-1",
+        "skipped_count": 0,
+        "subject_scope": [
+          "urn:acef:sub:ce4c5016-6bdf-47d2-bb83-a20229686fb4"
+        ],
+        "warning_count": 0
+      }
+    ],
+    "results": [
+      {
+        "evidence_refs": [
+          "urn:acef:rec:a7a8bbe7-9954-4685-9068-6106a4b885fd",
+          "urn:acef:rec:f8d7f96c-5358-4acd-af6a-a1754ae7bdc0"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "nist-ai-rmf-1.0",
+        "provision_id": "govern-1",
+        "rule_id": "govern1-governance-policy",
+        "severity": "fail",
+        "subject_scope": [
+          "urn:acef:sub:ce4c5016-6bdf-47d2-bb83-a20229686fb4"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:f8d7f96c-5358-4acd-af6a-a1754ae7bdc0"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "nist-ai-rmf-1.0",
+        "provision_id": "govern-1",
+        "rule_id": "govern1-policy-attachment",
+        "severity": "warning",
+        "subject_scope": [
+          "urn:acef:sub:ce4c5016-6bdf-47d2-bb83-a20229686fb4"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:a7a8bbe7-9954-4685-9068-6106a4b885fd",
+          "urn:acef:rec:f8d7f96c-5358-4acd-af6a-a1754ae7bdc0"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "nist-ai-rmf-1.0",
+        "provision_id": "govern-1",
+        "rule_id": "govern1-policy-entity-linked",
+        "severity": "warning",
+        "subject_scope": [
+          "urn:acef:sub:ce4c5016-6bdf-47d2-bb83-a20229686fb4"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:61e77222-cd1b-49a7-9798-ee56980d5efa"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "nist-ai-rmf-1.0",
+        "provision_id": "manage-1",
+        "rule_id": "manage1-risk-treatment",
+        "severity": "fail",
+        "subject_scope": [
+          "urn:acef:sub:ce4c5016-6bdf-47d2-bb83-a20229686fb4"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:61e77222-cd1b-49a7-9798-ee56980d5efa"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "nist-ai-rmf-1.0",
+        "provision_id": "manage-1",
+        "rule_id": "manage1-treatment-entity-linked",
+        "severity": "warning",
+        "subject_scope": [
+          "urn:acef:sub:ce4c5016-6bdf-47d2-bb83-a20229686fb4"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:61e77222-cd1b-49a7-9798-ee56980d5efa"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "nist-ai-rmf-1.0",
+        "provision_id": "manage-1",
+        "rule_id": "manage1-treatment-type",
+        "severity": "warning",
+        "subject_scope": [
+          "urn:acef:sub:ce4c5016-6bdf-47d2-bb83-a20229686fb4"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:41d17d4c-3f0c-4324-a9a1-003fbd477a0d"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "nist-ai-rmf-1.0",
+        "provision_id": "map-1",
+        "rule_id": "map1-risk-category",
+        "severity": "warning",
+        "subject_scope": [
+          "urn:acef:sub:ce4c5016-6bdf-47d2-bb83-a20229686fb4"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:41d17d4c-3f0c-4324-a9a1-003fbd477a0d"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "nist-ai-rmf-1.0",
+        "provision_id": "map-1",
+        "rule_id": "map1-risk-entity-linked",
+        "severity": "warning",
+        "subject_scope": [
+          "urn:acef:sub:ce4c5016-6bdf-47d2-bb83-a20229686fb4"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:41d17d4c-3f0c-4324-a9a1-003fbd477a0d"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "nist-ai-rmf-1.0",
+        "provision_id": "map-1",
+        "rule_id": "map1-risk-register",
+        "severity": "fail",
+        "subject_scope": [
+          "urn:acef:sub:ce4c5016-6bdf-47d2-bb83-a20229686fb4"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:54b99c94-b53e-420c-8361-689132621755"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "nist-ai-rmf-1.0",
+        "provision_id": "measure-1",
+        "rule_id": "measure1-evaluation-report",
+        "severity": "fail",
+        "subject_scope": [
+          "urn:acef:sub:ce4c5016-6bdf-47d2-bb83-a20229686fb4"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:54b99c94-b53e-420c-8361-689132621755"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "nist-ai-rmf-1.0",
+        "provision_id": "measure-1",
+        "rule_id": "measure1-methodology-present",
+        "severity": "warning",
+        "subject_scope": [
+          "urn:acef:sub:ce4c5016-6bdf-47d2-bb83-a20229686fb4"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:54b99c94-b53e-420c-8361-689132621755"
+        ],
+        "message": "",
+        "outcome": "passed",
+        "profile_id": "nist-ai-rmf-1.0",
+        "provision_id": "measure-1",
+        "rule_id": "measure1-metrics-present",
+        "severity": "warning",
+        "subject_scope": [
+          "urn:acef:sub:ce4c5016-6bdf-47d2-bb83-a20229686fb4"
+        ]
+      }
+    ],
     "structural_diagnostics": [
       {
         "category": "schema",

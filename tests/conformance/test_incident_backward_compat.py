@@ -23,18 +23,39 @@ rebased trees):
 1.  **No new incident code fires.** Running ``validate_bundle`` on each v1.0
     golden produces ZERO diagnostics in the reserved RFC-0002 band
     (ACEF-081..088). A v1.0 bundle must never see an incident rule.
-2.  **The full backward-compat assessment surface is byte-stable.** For each
-    v1.0 golden we run ``validate_bundle`` NOW, deterministically serialize the
-    *compatibility-relevant* assessment surface — the structural diagnostics
-    (code, severity, category, path, message) plus the provision outcomes and
-    the per-outcome rule-result counts — and compare it byte-for-byte against a
-    COMMITTED snapshot (``fixtures/v1_backward_compat_assessments.json``). Since
-    the operation preserves v1.0 behavior, that committed snapshot IS the v1.0
-    baseline: any FUTURE regression (a changed severity / category / path /
-    message, an added or removed diagnostic, a drifted outcome or count) fails
-    this test. (This is strictly stronger than the previous "compare error
-    CODES only" surface, which let severity / category / path / message changes
-    and added/removed diagnostics pass silently.)
+2.  **The full backward-compat assessment surface is byte-stable AND LOSSLESS.**
+    For each v1.0 golden we run ``validate_bundle`` NOW, deterministically
+    serialize the *complete* compatibility-relevant assessment surface, and
+    compare it byte-for-byte against a COMMITTED snapshot
+    (``fixtures/v1_backward_compat_assessments.json``). The surface is three
+    CANONICAL SORTED LISTS that preserve full identity — NOT reduced dicts or
+    counts:
+
+    * ``structural_diagnostics`` — every structural diagnostic projected onto
+      (code, severity, category, path, message).
+    * ``provision_summary`` — one entry PER provision summary, carrying its full
+      identity: ``profile_id``, ``provision_id``, ``subject_scope`` (so the
+      ``multi-subject-composed`` golden's repeated NIST provisions for DIFFERENT
+      subjects stay distinct, never collapsed), ``outcome``, and the roll-up
+      counts (``fail_count`` / ``warning_count`` / ``skipped_count``) and
+      ``evidence_refs``. Keyed list, NOT a ``{profile::provision -> outcome}``
+      dict (which collapsed subject-scoped duplicates and let one be
+      dropped/mutated silently).
+    * ``results`` — one entry PER rule result, carrying its full identity:
+      ``rule_id``, ``provision_id``, ``profile_id``, ``severity``, ``outcome``,
+      ``subject_scope``, ``message``, and ``evidence_refs``. A SORTED LIST, NOT
+      an ``{outcome -> count}`` reduction (which let a changed rule_id / scope /
+      severity / message pass as long as the counts were preserved).
+
+    Since the operation preserves v1.0 behavior, that committed snapshot IS the
+    v1.0 baseline: any FUTURE regression — a changed severity / category / path /
+    message on a diagnostic, an added/removed/mutated provision summary
+    (including a per-subject_scope duplicate), or a changed rule_id / scope /
+    severity / message / outcome on any single rule result — flips at least one
+    entry and fails this test. (This is strictly stronger than BOTH the original
+    "compare error CODES only" surface AND the intermediate "outcome dict +
+    per-outcome counts" surface, both of which let subject-scoped duplicates and
+    per-rule identity changes pass silently.)
 3.  **The frozen paths are byte-unchanged.** A COMMITTED checksum manifest
     (``fixtures/v1_frozen_checksums.json``) maps every file under
     ``acef-conventions/v1/`` and ``tests/conformance/golden-bundles/`` to its
@@ -75,10 +96,12 @@ every serialized surface are sorted. No wall-clock, no randomness — the fixtur
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
 import re
 import subprocess
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -250,23 +273,135 @@ def _normalize_diagnostic(diag: dict[str, Any]) -> dict[str, str]:
     }
 
 
+def _normalize_provision_summary(ps: Any) -> dict[str, Any]:
+    """Project a provision summary onto its FULL identity surface (lossless).
+
+    The compatibility surface for a provision summary is every field that
+    distinguishes one v1.0 roll-up from another:
+
+    * ``profile_id`` / ``provision_id`` — which provision,
+    * ``subject_scope`` — WHICH subject(s); a multi-subject golden carries the
+      SAME provision repeated for different subjects, so this field is what keeps
+      those entries distinct (the prior ``profile::provision -> outcome`` dict
+      collapsed them, letting one be silently dropped or mutated),
+    * ``outcome`` — the rolled-up provision outcome,
+    * ``fail_count`` / ``warning_count`` / ``skipped_count`` — the roll-up tallies
+      that drive the outcome,
+    * ``evidence_refs`` — the evidence that backs the roll-up.
+
+    ``subject_scope`` and ``evidence_refs`` are emitted as plain lists (model
+    order preserved — the engine produces them deterministically). A change to
+    ANY field flips this projection and fails the byte compare.
+    """
+    return {
+        "profile_id": str(ps.profile_id),
+        "provision_id": str(ps.provision_id),
+        "subject_scope": [str(s) for s in ps.subject_scope],
+        "outcome": ps.provision_outcome.value,
+        "fail_count": int(ps.fail_count),
+        "warning_count": int(ps.warning_count),
+        "skipped_count": int(ps.skipped_count),
+        "evidence_refs": [str(e) for e in ps.evidence_refs],
+    }
+
+
+def _provision_summary_sort_key(entry: dict[str, Any]) -> tuple[Any, ...]:
+    """Stable composite sort key over a normalized provision-summary entry.
+
+    Includes ``subject_scope`` (as a tuple) so per-subject duplicates of the
+    same provision sort deterministically and distinctly — never collapse.
+    """
+    return (
+        entry["profile_id"],
+        entry["provision_id"],
+        tuple(entry["subject_scope"]),
+        entry["outcome"],
+        entry["fail_count"],
+        entry["warning_count"],
+        entry["skipped_count"],
+        tuple(entry["evidence_refs"]),
+    )
+
+
+def _normalize_rule_result(r: Any) -> dict[str, Any]:
+    """Project a single rule result onto its FULL identity surface (lossless).
+
+    The compatibility surface for a rule result is every field that
+    distinguishes one v1.0 rule evaluation from another:
+
+    * ``rule_id`` / ``provision_id`` / ``profile_id`` — which rule, under which
+      provision and profile,
+    * ``severity`` — the rule's declared severity (``fail`` / ``warning`` /
+      ``info``),
+    * ``outcome`` — the evaluation result (``passed`` / ``failed`` / ``skipped``
+      / ``error``),
+    * ``subject_scope`` — WHICH subject(s) this evaluation applies to (the same
+      rule fires once per subject in a multi-subject bundle),
+    * ``message`` — the human-readable result message (``None`` normalized to
+      ``""``),
+    * ``evidence_refs`` — the evidence the rule matched.
+
+    This REPLACES the prior ``{outcome -> count}`` reduction, which let a changed
+    ``rule_id`` / ``subject_scope`` / ``severity`` / ``message`` pass silently as
+    long as the per-outcome counts were preserved.
+    """
+    return {
+        "rule_id": str(r.rule_id),
+        "provision_id": str(r.provision_id),
+        "profile_id": str(r.profile_id),
+        "severity": r.rule_severity.value,
+        "outcome": r.outcome.value,
+        "subject_scope": [str(s) for s in r.subject_scope],
+        "message": str(r.message) if r.message is not None else "",
+        "evidence_refs": [str(e) for e in r.evidence_refs],
+    }
+
+
+def _rule_result_sort_key(entry: dict[str, Any]) -> tuple[Any, ...]:
+    """Stable composite sort key over a normalized rule-result entry.
+
+    Includes ``subject_scope`` (as a tuple) plus every identity field so that
+    two results differing in ONLY one field still sort deterministically — the
+    full per-rule identity is preserved, never reduced.
+    """
+    return (
+        entry["profile_id"],
+        entry["provision_id"],
+        entry["rule_id"],
+        tuple(entry["subject_scope"]),
+        entry["outcome"],
+        entry["severity"],
+        entry["message"],
+        tuple(entry["evidence_refs"]),
+    )
+
+
 def _compute_compat_surface(bundle_name: str) -> dict[str, Any]:
-    """Deterministically serialize the full backward-compat assessment surface.
+    """Deterministically serialize the full, LOSSLESS backward-compat surface.
 
     For ``bundle_name`` (a v1.0 golden), run ``validate_bundle`` at the
     fixture's ``evaluation_instant`` and return a JSON-serializable, sorted
-    structure capturing everything a backward-compat regression must pin:
+    structure capturing everything a backward-compat regression must pin — as
+    three CANONICAL SORTED LISTS, never reduced dicts or counts:
 
     * ``structural_diagnostics`` — every structural diagnostic projected onto
       (code, severity, category, path, message), sorted for determinism.
-    * ``provision_outcomes`` — ``{profile_id}::{provision_id} -> outcome`` for
-      every provision, sorted by key.
-    * ``rule_result_counts`` — ``outcome -> count`` over all rule results,
-      sorted by key.
+    * ``provision_summary`` — one entry PER provision summary carrying its full
+      identity (``profile_id``, ``provision_id``, ``subject_scope``, ``outcome``,
+      the ``fail_count`` / ``warning_count`` / ``skipped_count`` tallies, and
+      ``evidence_refs``), sorted by a stable composite key that INCLUDES
+      ``subject_scope`` so per-subject duplicates of the same provision stay
+      distinct (never collapsed into a single ``profile::provision`` outcome).
+    * ``results`` — one entry PER rule result carrying its full identity
+      (``rule_id``, ``provision_id``, ``profile_id``, ``severity``, ``outcome``,
+      ``subject_scope``, ``message``, ``evidence_refs``), sorted by a stable
+      composite key — NOT reduced to per-outcome counts.
 
     This is strictly the runtime surface (not the goldens' own committed
-    ``.acef-assessment.json``), so a perturbation of the v1.0 validation path
-    by future work flips at least one of these and fails the snapshot compare.
+    ``.acef-assessment.json``), so a perturbation of the v1.0 validation path by
+    future work — a dropped/mutated subject-scoped provision summary or a changed
+    rule_id / scope / severity / message on any single rule result — flips at
+    least one list entry and fails the snapshot compare.
     """
     bundle_dir = GOLDEN_BUNDLES_DIR / bundle_name
     fixture = _load_fixture(bundle_name)
@@ -283,19 +418,19 @@ def _compute_compat_surface(bundle_name: str) -> dict[str, Any]:
     # Sort by the full projected tuple so ordering is content-driven and stable.
     diagnostics.sort(key=lambda d: (d["code"], d["severity"], d["category"], d["path"], d["message"]))
 
-    provision_outcomes: dict[str, str] = {}
-    for ps in assessment.provision_summary:
-        provision_outcomes[f"{ps.profile_id}::{ps.provision_id}"] = ps.provision_outcome.value
+    # Lossless: one entry per provision summary, with subject_scope in the sort
+    # key so a multi-subject golden's per-subject duplicates remain distinct.
+    provision_summary = [_normalize_provision_summary(ps) for ps in assessment.provision_summary]
+    provision_summary.sort(key=_provision_summary_sort_key)
 
-    rule_result_counts: dict[str, int] = {}
-    for r in assessment.results:
-        outcome = r.outcome.value
-        rule_result_counts[outcome] = rule_result_counts.get(outcome, 0) + 1
+    # Lossless: one entry per rule result, full per-rule identity (not counts).
+    rule_results = [_normalize_rule_result(r) for r in assessment.results]
+    rule_results.sort(key=_rule_result_sort_key)
 
     return {
         "structural_diagnostics": diagnostics,
-        "provision_outcomes": dict(sorted(provision_outcomes.items())),
-        "rule_result_counts": dict(sorted(rule_result_counts.items())),
+        "provision_summary": provision_summary,
+        "results": rule_results,
     }
 
 
@@ -496,11 +631,16 @@ class TestBackwardCompatAssessmentSnapshot:
     The committed ``v1_backward_compat_assessments.json`` snapshot is the
     byte-identical-compat baseline for the runtime: it pins, per v1.0 golden,
     the full structural-diagnostic surface (code, severity, category, path,
-    message), the provision outcomes, and the per-outcome rule-result counts.
+    message), the LOSSLESS ``provision_summary`` list (one entry per provision
+    summary, with ``subject_scope`` so per-subject duplicates stay distinct),
+    and the LOSSLESS ``results`` list (one entry per rule result with full
+    identity — rule_id, scope, severity, outcome, message, evidence_refs).
     Because the operation preserves v1.0 behavior, this snapshot == the v1.0
     baseline; committing it makes ANY future regression — a changed severity /
-    category / path / message, an added or removed diagnostic, a drifted
-    outcome or count — fail this test.
+    category / path / message on a diagnostic, an added / removed / mutated
+    provision summary (including a per-subject_scope duplicate), or a changed
+    rule_id / scope / severity / message / outcome on any single rule result —
+    fail this test.
     """
 
     def test_snapshot_fixture_exists(self) -> None:
@@ -531,7 +671,11 @@ class TestBackwardCompatAssessmentSnapshot:
         Byte-for-byte over the canonically-serialized per-bundle surface — far
         stronger than comparing only error codes (which let severity /
         category / path / message changes and added/removed diagnostics pass
-        silently).
+        silently) AND than the intermediate outcome-dict + per-outcome-count
+        surface (which let subject-scoped provision duplicates and per-rule
+        identity changes pass silently). The surface is now LOSSLESS: a sorted
+        ``provision_summary`` list (subject_scope-distinct) and a sorted
+        ``results`` list (full per-rule identity), not reduced dicts or counts.
         """
         snapshot = json.loads(COMPAT_ASSESSMENTS_FIXTURE.read_text(encoding="utf-8"))
         assert bundle_name in snapshot, f"[{bundle_name}] not present in committed snapshot — regenerate the fixture"
@@ -544,7 +688,9 @@ class TestBackwardCompatAssessmentSnapshot:
         assert runtime_blob == expected_blob, (
             f"[{bundle_name}] backward-compat assessment surface drifted vs the committed "
             f"byte-identical baseline. A severity/category/path/message change, an "
-            f"added/removed diagnostic, or a drifted outcome/count regressed v1.0 behavior.\n"
+            f"added/removed diagnostic, an added/removed/mutated provision summary (incl. a "
+            f"per-subject_scope duplicate), or a changed rule_id/scope/severity/message/outcome "
+            f"on any single rule result regressed v1.0 behavior.\n"
             f"--- runtime ---\n{runtime_blob}\n--- expected ---\n{expected_blob}"
         )
 
@@ -557,6 +703,182 @@ class TestBackwardCompatAssessmentSnapshot:
         assert not incident_codes, (
             f"[{bundle_name}] committed snapshot contains RFC-0002 incident-band code(s) "
             f"on a v1.0 bundle: {incident_codes}"
+        )
+
+    @pytest.mark.parametrize("bundle_name", V1_0_GOLDEN_BUNDLE_NAMES)
+    def test_surface_shape_is_lossless_lists_not_reduced(self, bundle_name: str) -> None:
+        """The snapshot surface is three LISTS (lossless), never the old reduced dicts.
+
+        Guards against silently reverting to the lossy
+        ``provision_outcomes: {profile::provision -> outcome}`` dict or the
+        ``rule_result_counts: {outcome -> count}`` reduction. The surface MUST
+        carry a ``provision_summary`` list and a ``results`` list, and MUST NOT
+        carry the reduced keys.
+        """
+        snapshot = json.loads(COMPAT_ASSESSMENTS_FIXTURE.read_text(encoding="utf-8"))
+        surface = snapshot[bundle_name]
+
+        assert isinstance(surface.get("provision_summary"), list), (
+            f"[{bundle_name}] surface must carry a LOSSLESS 'provision_summary' list"
+        )
+        assert isinstance(surface.get("results"), list), (
+            f"[{bundle_name}] surface must carry a LOSSLESS 'results' rule list (not counts)"
+        )
+        # The old lossy reductions must be GONE.
+        assert "provision_outcomes" not in surface, (
+            f"[{bundle_name}] surface still carries the lossy 'provision_outcomes' dict "
+            "(collapsed subject-scoped duplicates) — regenerate the lossless fixture"
+        )
+        assert "rule_result_counts" not in surface, (
+            f"[{bundle_name}] surface still carries the lossy 'rule_result_counts' reduction "
+            "(per-rule identity erased) — regenerate the lossless fixture"
+        )
+
+        # Every provision-summary entry carries its full identity, incl. subject_scope.
+        for entry in surface["provision_summary"]:
+            for key in ("profile_id", "provision_id", "subject_scope", "outcome"):
+                assert key in entry, f"[{bundle_name}] provision_summary entry missing identity field {key!r}: {entry}"
+            assert isinstance(entry["subject_scope"], list), (
+                f"[{bundle_name}] provision_summary subject_scope must be a list: {entry}"
+            )
+
+        # Every rule-result entry carries its full per-rule identity.
+        for entry in surface["results"]:
+            for key in ("rule_id", "provision_id", "profile_id", "severity", "outcome", "subject_scope", "message"):
+                assert key in entry, f"[{bundle_name}] results entry missing identity field {key!r}: {entry}"
+
+    def test_multi_subject_provision_summaries_are_subject_scope_distinct(self) -> None:
+        """The multi-subject golden's per-subject NIST provisions stay DISTINCT.
+
+        Proves the lossy collapse is fixed: ``multi-subject-composed`` carries
+        the SAME NIST provisions (govern-1, map-1, measure-1) once PER subject.
+        The old ``profile::provision -> outcome`` dict collapsed those to a
+        single key per provision (8 distinct keys); the lossless list keeps every
+        subject-scoped entry (11 entries, strictly MORE than the collapsed 8).
+        A dropped or mutated subject-scoped summary would therefore change the
+        snapshot and be CAUGHT.
+        """
+        bundle_name = "multi-subject-composed"
+        snapshot = json.loads(COMPAT_ASSESSMENTS_FIXTURE.read_text(encoding="utf-8"))
+        assert bundle_name in snapshot, f"{bundle_name} missing from the committed snapshot"
+        provision_summary = snapshot[bundle_name]["provision_summary"]
+
+        # The collapsed count is the number of distinct (profile_id, provision_id) pairs.
+        collapsed_keys = {(e["profile_id"], e["provision_id"]) for e in provision_summary}
+        assert len(provision_summary) > len(collapsed_keys), (
+            f"{bundle_name}: lossless provision_summary ({len(provision_summary)} entries) is NOT richer "
+            f"than the collapsed (profile,provision) key set ({len(collapsed_keys)}) — the per-subject "
+            "duplicates were collapsed (LOSSY)"
+        )
+
+        # The three NIST provisions must each appear once per subject (>1 entry).
+        nist_counts = Counter(
+            (e["profile_id"], e["provision_id"]) for e in provision_summary if e["profile_id"] == "nist-ai-rmf-1.0"
+        )
+        duplicated = {k: c for k, c in nist_counts.items() if c > 1}
+        assert duplicated, (
+            f"{bundle_name}: expected the NIST provisions to appear once per subject (>1 entry each), "
+            f"but none are duplicated — subject-scoped entries were collapsed. NIST counts: {dict(nist_counts)}"
+        )
+        # Each duplicate pair carries DISTINCT subject_scope values (true per-subject rows).
+        for profile_id, provision_id in duplicated:
+            scopes = [
+                tuple(e["subject_scope"])
+                for e in provision_summary
+                if (e["profile_id"], e["provision_id"]) == (profile_id, provision_id)
+            ]
+            assert len(set(scopes)) == len(scopes), (
+                f"{bundle_name}: {profile_id}::{provision_id} has non-distinct subject_scope across its "
+                f"duplicate entries — these are not genuine per-subject rows: {scopes}"
+            )
+
+    @pytest.mark.parametrize("bundle_name", V1_0_GOLDEN_BUNDLE_NAMES)
+    def test_snapshot_would_catch_a_mutated_provision_summary(self, bundle_name: str) -> None:
+        """A one-field mutation of ONE provision summary makes the surface differ.
+
+        Structurally proves the lossless snapshot is SENSITIVE: take the runtime
+        surface, mutate exactly one provision-summary entry's ``outcome`` in a
+        COPY, and assert the serialized copy no longer matches the committed
+        snapshot — i.e. such a regression WOULD be caught. (We never edit the
+        real validator; we perturb a captured copy.)
+        """
+        snapshot = json.loads(COMPAT_ASSESSMENTS_FIXTURE.read_text(encoding="utf-8"))
+        baseline_blob = _serialize_fixture(snapshot[bundle_name])
+
+        surface = _compute_compat_surface(bundle_name)
+        # Sanity: the unmutated runtime surface DOES match the snapshot.
+        assert _serialize_fixture(surface) == baseline_blob, (
+            f"[{bundle_name}] precondition: unmutated runtime surface must match the snapshot"
+        )
+        if not surface["provision_summary"]:
+            pytest.skip(f"[{bundle_name}] has no provision summaries to mutate")
+
+        mutated = copy.deepcopy(surface)
+        # Flip exactly one provision summary's outcome to a sentinel.
+        mutated["provision_summary"][0]["outcome"] = "MUTATED-OUTCOME-SENTINEL"
+        assert _serialize_fixture(mutated) != baseline_blob, (
+            f"[{bundle_name}] mutating one provision summary's outcome did NOT change the surface — "
+            "the snapshot is LOSSY and would not catch this regression"
+        )
+
+    @pytest.mark.parametrize("bundle_name", V1_0_GOLDEN_BUNDLE_NAMES)
+    def test_snapshot_would_catch_a_mutated_rule_result(self, bundle_name: str) -> None:
+        """A one-field mutation of ONE rule result makes the surface differ.
+
+        Structurally proves per-rule identity is pinned: mutate exactly one rule
+        result's ``severity`` (and separately its ``message``) in a COPY and
+        assert the serialized copy no longer matches the committed snapshot.
+        Under the old ``{outcome -> count}`` reduction this mutation preserved
+        the counts and passed silently; under the lossless list it is CAUGHT.
+        """
+        snapshot = json.loads(COMPAT_ASSESSMENTS_FIXTURE.read_text(encoding="utf-8"))
+        baseline_blob = _serialize_fixture(snapshot[bundle_name])
+
+        surface = _compute_compat_surface(bundle_name)
+        assert _serialize_fixture(surface) == baseline_blob, (
+            f"[{bundle_name}] precondition: unmutated runtime surface must match the snapshot"
+        )
+        if not surface["results"]:
+            pytest.skip(f"[{bundle_name}] has no rule results to mutate")
+
+        # Mutating severity must change the surface (count-preserving change).
+        mutated_sev = copy.deepcopy(surface)
+        mutated_sev["results"][0]["severity"] = "MUTATED-SEVERITY-SENTINEL"
+        assert _serialize_fixture(mutated_sev) != baseline_blob, (
+            f"[{bundle_name}] mutating one rule result's severity did NOT change the surface — "
+            "the snapshot is LOSSY (count-reduced) and would not catch this regression"
+        )
+
+        # Mutating message must also change the surface.
+        mutated_msg = copy.deepcopy(surface)
+        mutated_msg["results"][0]["message"] = "MUTATED-MESSAGE-SENTINEL"
+        assert _serialize_fixture(mutated_msg) != baseline_blob, (
+            f"[{bundle_name}] mutating one rule result's message did NOT change the surface — "
+            "the snapshot does not pin rule-result messages"
+        )
+
+    @pytest.mark.parametrize("bundle_name", V1_0_GOLDEN_BUNDLE_NAMES)
+    def test_results_list_is_one_entry_per_rule_result_not_counts(self, bundle_name: str) -> None:
+        """The ``results`` list has one entry per rule result (lossless), not a count map.
+
+        Re-running the live validator yields N rule results; the snapshot's
+        ``results`` list MUST have exactly N entries (a count reduction would
+        have at most one entry per distinct outcome).
+        """
+        snapshot = json.loads(COMPAT_ASSESSMENTS_FIXTURE.read_text(encoding="utf-8"))
+        snapshot_results = snapshot[bundle_name]["results"]
+
+        bundle_dir = GOLDEN_BUNDLES_DIR / bundle_name
+        fixture = _load_fixture(bundle_name)
+        assessment = validate_bundle(
+            bundle_dir,
+            profiles=_bundle_profiles(bundle_name),
+            evaluation_instant=fixture["evaluation_instant"],
+        )
+        assert len(snapshot_results) == len(assessment.results), (
+            f"[{bundle_name}] snapshot 'results' has {len(snapshot_results)} entries but the live "
+            f"validator produced {len(assessment.results)} rule results — the surface is reduced (LOSSY), "
+            "not one-entry-per-result"
         )
 
     @pytest.mark.parametrize("bundle_name", V1_0_GOLDEN_BUNDLE_NAMES)
