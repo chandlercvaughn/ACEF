@@ -1,22 +1,37 @@
-"""Regression tests for the v1.1 ``card_source`` projection-source overlay.
+"""Regression tests for the v1.1 ``card_source`` overlay and ``incident_report``.
 
-Covers the schema authored under F-M2-SCHEMA-SOURCE:
+Covers the two schemas authored under F-M2-SCHEMA-SOURCE:
 
-- ``acef-conventions/v1.1/card_source.schema.json``
+- ``acef-conventions/v1.1/incident_report.card_source.schema.json`` (the closed
+  ``card_source`` projection-source BLOCK; canonical ``$id`` per RFC-0002
+  Appendix B line 599),
+- ``acef-conventions/v1.1/incident_report.schema.json`` (the v1.1
+  ``incident_report`` OVERLAY = the frozen v1.0 incident_report shape PLUS an
+  optional, now-validated ``card_source`` property that ``$ref``s the
+  card_source block).
 
 Assertion exercised:
 
 - VAL-SRC-001: the closed ``card_source`` overlay validates a CONFORMING
   confidential/embargoed Art.73 projection source (a RESERVED, self-asserted
   ``public_incident_id``; a valid ``harm_core``; a ``publishability_map``; and
-  the structured ``eu_ai_act_facts`` carrying ``edition`` + a trigger array +
-  ``widespread`` + ``death_involved``) BEFORE any public ``incident_card``
-  exists, and REJECTS: an empty ``{}`` source (all requireds missing); a source
-  missing ``eu_ai_act_facts`` (the VAL-SRC-001 addition to the Appendix B
-  required set); an ``eu_ai_act_facts`` missing ``death_involved``; an
+  the structured ``eu_ai_act_facts`` carrying ``edition`` + a NON-EMPTY, unique
+  trigger array + ``widespread`` + ``death_involved``) BEFORE any public
+  ``incident_card`` exists, and REJECTS: an empty ``{}`` source (all requireds
+  missing); a source missing ``eu_ai_act_facts`` (the VAL-SRC-001 addition to
+  the Appendix B required set); an ``eu_ai_act_facts`` missing ``death_involved``;
+  an EMPTY ``serious_incident_triggers: []`` (minItems: 1 — no actual Art.3(49)
+  trigger fact); a DUPLICATE ``["3.49.a", "3.49.a"]`` (uniqueItems: true); an
   out-of-enum serious-incident trigger (``3.49.e``); and an
   ``id_grade: registry-canonical`` (the v1.2-only grade rejected on the v1.1
   surface).
+
+  The v1.1 ``incident_report`` OVERLAY is a faithful additive superset of the
+  frozen ``v1/`` payload: a v1.0-style incident_report (NO ``card_source``)
+  validates UNCHANGED; an incident_report carrying a VALID ``card_source``
+  validates THROUGH the ``$ref``; and an incident_report carrying an EMPTY
+  ``card_source: {}`` is now REJECTED (the prior frozen-``v1/`` fallback with
+  ``additionalProperties: true`` silently accepted it).
 
 The ``card_source`` schema ``$ref``s companion v1.1 schemas:
 
@@ -49,11 +64,21 @@ from referencing import Registry, Resource
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _V1_1_DIR = _PROJECT_ROOT / "acef-conventions" / "v1.1"
-_CARD_SOURCE_PATH = _V1_1_DIR / "card_source.schema.json"
+# Canonical filename per RFC-0002 Appendix B line 599 (renamed from the prior
+# card_source.schema.json under the roborev Fix-1 correction).
+_CARD_SOURCE_PATH = _V1_1_DIR / "incident_report.card_source.schema.json"
+# The v1.1 incident_report OVERLAY (frozen v1.0 shape + optional card_source).
+_INCIDENT_REPORT_OVERLAY_PATH = _V1_1_DIR / "incident_report.schema.json"
+_V1_INCIDENT_REPORT_PATH = _PROJECT_ROOT / "acef-conventions" / "v1" / "incident_report.schema.json"
 _INCIDENT_CARD_PATH = _V1_1_DIR / "incident_card.schema.json"
 _HARM_CORE_TAXONOMY_PATH = _V1_1_DIR / "harm-core-taxonomy.json"
 _COORDINATED_DISCLOSURE_PATH = _V1_1_DIR / "coordinated_disclosure.schema.json"
 _SEVERITY_VECTOR_PATH = _V1_1_DIR / "severity_vector.schema.json"
+
+# The canonical $id the renamed card_source block carries and the exact relative
+# $ref string the incident_report overlay uses to reach it.
+_CARD_SOURCE_ID = "https://acef.ai/schemas/v1.1/incident_report.card_source.schema.json"
+_CARD_SOURCE_REF = "incident_report.card_source.schema.json"
 
 # The exact relative $ref strings card_source uses to reach its companions. Pins
 # the contract so a rename of a companion file or its sub-pointer can never
@@ -160,7 +185,7 @@ def test_card_source_check_schema(card_source_schema: dict[str, Any]) -> None:
 def test_card_source_id_and_closure(card_source_schema: dict[str, Any]) -> None:
     """The overlay declares the documented ``$id``, is closed, and pins the
     VAL-SRC-001 required set including ``eu_ai_act_facts`` (VAL-SRC-001)."""
-    assert card_source_schema["$id"] == "https://acef.ai/schemas/v1.1/card_source.schema.json"
+    assert card_source_schema["$id"] == _CARD_SOURCE_ID
     assert card_source_schema["additionalProperties"] is False
     assert set(card_source_schema["required"]) == {
         "public_incident_id",
@@ -296,6 +321,18 @@ def test_card_source_rejects_severity_vector_through_ref(
             id="eu_facts-trigger-out-of-enum",
         ),
         pytest.param(
+            lambda s: s["eu_ai_act_facts"].__setitem__("serious_incident_triggers", []),
+            "empty serious_incident_triggers [] rejected (minItems: 1 — a confidential "
+            "Art.73 source cannot validate with no Art.3(49) trigger fact)",
+            id="eu_facts-triggers-empty",
+        ),
+        pytest.param(
+            lambda s: s["eu_ai_act_facts"].__setitem__("serious_incident_triggers", ["3.49.a", "3.49.a"]),
+            "duplicate serious_incident_triggers ['3.49.a','3.49.a'] rejected "
+            "(uniqueItems: true — the trigger codes are a SET)",
+            id="eu_facts-triggers-duplicate",
+        ),
+        pytest.param(
             lambda s: s["eu_ai_act_facts"].__setitem__("edition", "reg-9999-0000"),
             "wrong edition pin rejected (const reg-2024-1689)",
             id="eu_facts-wrong-edition",
@@ -428,3 +465,143 @@ def test_card_source_rejects_malformed_x_namespace(
     source = _valid_card_source()
     source[key] = value
     assert not card_source_validator.is_valid(source), reason
+
+
+# --------------------------------------------------------------------------- #
+# incident_report.schema.json (the v1.1 OVERLAY)                              #
+# --------------------------------------------------------------------------- #
+
+
+@pytest.fixture(scope="module")
+def incident_report_overlay_schema() -> dict[str, Any]:
+    return _load(_INCIDENT_REPORT_OVERLAY_PATH)
+
+
+@pytest.fixture(scope="module")
+def incident_report_validator(
+    incident_report_overlay_schema: dict[str, Any],
+    card_source_schema: dict[str, Any],
+) -> Draft202012Validator:
+    """Validator for the v1.1 incident_report OVERLAY.
+
+    Registers the same companion graph as ``card_source_validator`` PLUS the
+    overlay itself, so the overlay's ``card_source.$ref ->
+    incident_report.card_source.schema.json`` resolves and, transitively, the
+    card_source block's own ``$ref``s into incident_card / harm-core-taxonomy /
+    coordinated_disclosure / severity_vector resolve. Mirrors the resolver graph
+    F-M2-SCHEMA-GATING must wire in production.
+    """
+    resources = [
+        Resource.from_contents(incident_report_overlay_schema),
+        Resource.from_contents(card_source_schema),
+        Resource.from_contents(_load(_INCIDENT_CARD_PATH)),
+        Resource.from_contents(_load(_HARM_CORE_TAXONOMY_PATH)),
+        Resource.from_contents(_load(_COORDINATED_DISCLOSURE_PATH)),
+        Resource.from_contents(_load(_SEVERITY_VECTOR_PATH)),
+    ]
+    registry = Registry().with_resources([(r.id(), r) for r in resources])
+    return Draft202012Validator(incident_report_overlay_schema, registry=registry)
+
+
+def _valid_v1_0_incident_report() -> dict[str, Any]:
+    """A v1.0-style incident_report (the frozen-v1/ required trio, NO card_source)."""
+    return {
+        "incident_type": "safety",
+        "severity": "major",
+        "description": "Model produced unsafe output under a documented prompt class.",
+    }
+
+
+def test_incident_report_overlay_check_schema(
+    incident_report_overlay_schema: dict[str, Any],
+) -> None:
+    """The v1.1 incident_report overlay is itself a valid Draft 2020-12 schema
+    (VAL-SRC-001)."""
+    Draft202012Validator.check_schema(incident_report_overlay_schema)
+
+
+def test_incident_report_overlay_id_and_card_source_ref(
+    incident_report_overlay_schema: dict[str, Any],
+) -> None:
+    """The overlay declares the documented ``$id`` and reaches the card_source
+    block via exactly the canonical relative ``$ref`` (VAL-SRC-001)."""
+    assert incident_report_overlay_schema["$id"] == "https://acef.ai/schemas/v1.1/incident_report.schema.json"
+    assert incident_report_overlay_schema["properties"]["card_source"]["$ref"] == _CARD_SOURCE_REF
+
+
+def test_incident_report_overlay_is_faithful_v1_0_superset(
+    incident_report_overlay_schema: dict[str, Any],
+) -> None:
+    """The overlay is an ADDITIVE superset of the frozen v1.0 incident_report
+    payload (VAL-SRC-001).
+
+    The v1.0 required set is unchanged, ``additionalProperties`` stays the v1.0
+    stance (true), every v1.0 property is preserved verbatim, and the ONLY new
+    property is ``card_source``. This is the guarantee that v1.0 reports validate
+    unchanged.
+    """
+    v1_0 = _load(_V1_INCIDENT_REPORT_PATH)
+    # Required set unchanged.
+    assert incident_report_overlay_schema["required"] == v1_0["required"]
+    # additionalProperties stance preserved (v1.0 is true; overlay stays true).
+    assert incident_report_overlay_schema["additionalProperties"] is True
+    assert v1_0["additionalProperties"] is True
+    # Every v1.0 property is preserved BYTE-FOR-BYTE; the only delta is the new
+    # card_source key.
+    overlay_props = incident_report_overlay_schema["properties"]
+    for name, subschema in v1_0["properties"].items():
+        assert name in overlay_props, f"v1.0 property {name} dropped by the overlay"
+        assert overlay_props[name] == subschema, f"v1.0 property {name} altered"
+    new_keys = set(overlay_props) - set(v1_0["properties"])
+    assert new_keys == {"card_source"}, new_keys
+
+
+def test_incident_report_overlay_accepts_v1_0_report(
+    incident_report_validator: Draft202012Validator,
+) -> None:
+    """A v1.0-style incident_report (NO card_source) validates UNCHANGED under
+    the v1.1 overlay (VAL-SRC-001) — the additive-superset guarantee."""
+    errors = list(incident_report_validator.iter_errors(_valid_v1_0_incident_report()))
+    assert errors == [], [e.message for e in errors]
+
+
+def test_incident_report_overlay_accepts_valid_card_source(
+    incident_report_validator: Draft202012Validator,
+) -> None:
+    """An incident_report carrying a VALID card_source validates THROUGH the
+    overlay's ``$ref`` into the card_source block (VAL-SRC-001)."""
+    report = _valid_v1_0_incident_report()
+    report["card_source"] = _valid_card_source()
+    errors = list(incident_report_validator.iter_errors(report))
+    assert errors == [], [e.message for e in errors]
+
+
+def test_incident_report_overlay_rejects_empty_card_source(
+    incident_report_validator: Draft202012Validator,
+) -> None:
+    """An incident_report carrying an EMPTY ``card_source: {}`` is REJECTED by the
+    v1.1 overlay (VAL-SRC-001).
+
+    This is the roborev Fix-3 guarantee: before the overlay existed, v1.1
+    incident_report validation fell back to the frozen ``v1/`` schema
+    (``additionalProperties: true``), so ``payload.card_source: {}`` was silently
+    accepted and NEVER checked. The overlay's ``card_source.$ref`` now validates
+    the block, so an empty card_source fails its six requireds.
+    """
+    report = _valid_v1_0_incident_report()
+    report["card_source"] = {}
+    errors = list(incident_report_validator.iter_errors(report))
+    assert errors != [], "empty card_source:{} must be rejected by the v1.1 overlay"
+
+
+def test_incident_report_overlay_rejects_invalid_card_source(
+    incident_report_validator: Draft202012Validator,
+) -> None:
+    """A malformed card_source (an empty trigger array) is rejected THROUGH the
+    overlay's ``$ref`` (VAL-SRC-001) — the overlay enforces the card_source
+    grammar end-to-end, not merely its presence."""
+    report = _valid_v1_0_incident_report()
+    bad_source = _valid_card_source()
+    bad_source["eu_ai_act_facts"]["serious_incident_triggers"] = []
+    report["card_source"] = bad_source
+    assert not incident_report_validator.is_valid(report)

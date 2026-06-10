@@ -1,0 +1,153 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://acef.ai/schemas/v1.1/incident_report.schema.json",
+  "title": "ACEF Incident Report Payload (v1.1 overlay)",
+  "description": "The v1.1 incident_report payload overlay (RFC-0002 §5.1; Appendix E Revision-3 note: 'the v1.1 incident_report overlay adds ONLY the private card_source block'). This is a FAITHFUL ADDITIVE SUPERSET of the frozen acef-conventions/v1/incident_report.schema.json payload: every v1.0 incident_report field is preserved verbatim, the v1.0 required set ([incident_type, severity, description]) is unchanged, and additionalProperties stays true — so a v1.0-valid incident_report (with NO card_source) validates UNCHANGED under this overlay. The ONLY addition is the optional, now-VALIDATED card_source property, which $refs the v1.1 incident_report.card_source.schema.json closed projection-source block. Before this overlay existed, v1.1 incident_report validation fell back to the frozen v1/ schema (additionalProperties: true), so a payload.card_source of {} was silently accepted and NEVER checked; under the overlay, when card_source is present it is validated against incident_report.card_source.schema.json, so an empty card_source ({}) is REJECTED (its requireds public_incident_id/id_grade/id_state/harm_core/publishability_map/eu_ai_act_facts fail). Gated on manifest.versioning.core_version 1.1.0; the frozen v1/ payload is byte-unchanged. The privileged-analysis fields (root_cause_analysis, lessons_learned, corrective_actions, impact_assessment) remain on incident_report and are NEVER part of card_source's public projection (§5.11). Production resolver/record-type wiring (registry.py, validate_record_payload) is F-M2-SCHEMA-GATING's scope; this file authors the overlay schema only.",
+  "type": "object",
+  "required": ["incident_type", "severity", "description"],
+  "properties": {
+    "incident_type": {
+      "type": "string",
+      "description": "Type of incident.",
+      "enum": [
+        "safety",
+        "security",
+        "privacy",
+        "bias",
+        "misuse",
+        "operational_failure",
+        "model_degradation",
+        "adversarial_attack",
+        "data_breach",
+        "other"
+      ]
+    },
+    "severity": {
+      "type": "string",
+      "description": "Severity classification of the incident.",
+      "enum": ["critical", "major", "minor", "informational"]
+    },
+    "description": {
+      "type": "string",
+      "description": "Detailed description of the incident."
+    },
+    "incident_id": {
+      "type": "string",
+      "description": "Organization-internal incident identifier."
+    },
+    "detection_date": {
+      "type": "string",
+      "description": "Date the incident was detected (ISO 8601).",
+      "format": "date-time"
+    },
+    "occurrence_date": {
+      "type": "string",
+      "description": "Date the incident occurred (ISO 8601), if different from detection.",
+      "format": "date-time"
+    },
+    "resolution_date": {
+      "type": ["string", "null"],
+      "description": "Date the incident was resolved (ISO 8601). Null if unresolved.",
+      "format": "date-time"
+    },
+    "root_cause_analysis": {
+      "type": "string",
+      "description": "Root cause analysis of the incident."
+    },
+    "corrective_actions": {
+      "type": "array",
+      "description": "Corrective actions taken or planned.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "description": "Description of the corrective action."
+          },
+          "status": {
+            "type": "string",
+            "description": "Status of the corrective action.",
+            "enum": ["planned", "in_progress", "completed", "verified"]
+          },
+          "responsible_party": {
+            "type": "string",
+            "description": "Person or team responsible for the action."
+          },
+          "target_date": {
+            "type": "string",
+            "format": "date",
+            "description": "Target completion date."
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "affected_systems": {
+      "type": "array",
+      "description": "Systems affected by the incident.",
+      "items": {
+        "type": "string"
+      }
+    },
+    "affected_users_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Number of users affected by the incident."
+    },
+    "notification_timeline": {
+      "type": "array",
+      "description": "Timeline of regulatory and stakeholder notifications (GPAI Art. 55 requires 2-15 day notification).",
+      "items": {
+        "type": "object",
+        "properties": {
+          "recipient": {
+            "type": "string",
+            "description": "Who was notified (e.g., 'AI Office', 'national authority', 'affected users')."
+          },
+          "notification_date": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Date of notification (ISO 8601)."
+          },
+          "method": {
+            "type": "string",
+            "description": "Notification method (e.g., 'formal_letter', 'portal_submission', 'email')."
+          },
+          "reference_number": {
+            "type": "string",
+            "description": "Reference number for the notification."
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "ai_office_reference": {
+      "type": "string",
+      "description": "AI Office reference number for the incident report."
+    },
+    "preventive_measures": {
+      "type": "array",
+      "description": "Preventive measures implemented to avoid recurrence.",
+      "items": {
+        "type": "string"
+      }
+    },
+    "impact_assessment": {
+      "type": "string",
+      "description": "Assessment of the impact of the incident on health, safety, or fundamental rights."
+    },
+    "regulatory_compliance_impact": {
+      "type": "string",
+      "description": "Assessment of how the incident affects regulatory compliance status."
+    },
+    "lessons_learned": {
+      "type": "string",
+      "description": "Lessons learned from the incident."
+    },
+    "card_source": {
+      "$ref": "incident_report.card_source.schema.json",
+      "description": "OPTIONAL v1.1 addition (§5.1): the private projection-source block from which a public incident_card is generated. When present it is validated against the closed incident_report.card_source.schema.json overlay, so an empty card_source ({}) is REJECTED (its six requireds fail). Absent on a v1.0-style report, which validates unchanged. The CONFIDENTIAL/embargoed Art.73 critical path (§5.7) runs entirely source-backed through card_source.eu_ai_act_facts and produces no public card."
+    }
+  },
+  "additionalProperties": true
+}
