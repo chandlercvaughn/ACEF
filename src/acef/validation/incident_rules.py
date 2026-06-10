@@ -48,8 +48,9 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from acef.errors import ValidationDiagnostic
+from acef.errors import ACEFProfileError, Severity, ValidationDiagnostic
 from acef.integrity import canonicalize, sha256_hex
+from acef.templates.registry import load_template
 
 # ---------------------------------------------------------------------------
 # Constants — RFC-0002 §5.7 Art. 73 profile id and clock days.
@@ -465,6 +466,48 @@ _MANDATORY_CROSSWALK_MEMBERS: dict[str, str] = {
     "oecd-ai-incidents-2025": "oecd",
 }
 
+# legal_force values that make a profile's diagnostics ADVISORY (non-binding):
+# an unmet criterion surfaces a warning, never an error that blocks conformance.
+_ADVISORY_LEGAL_FORCES: frozenset[str] = frozenset({"voluntary", "advisory"})
+
+
+@lru_cache(maxsize=32)
+def _profile_legal_force(profile_id: str) -> str:
+    """Return the declared ``legal_force`` of a profile's crosswalk template.
+
+    Loads the template through the registry (the single source of truth) and
+    reads its ``legal_force`` field (``binding`` | ``voluntary`` | ``advisory``).
+    A profile with NO template on disk (an unknown id), or a template that omits
+    ``legal_force``, defaults to ``"binding"`` — the STRICT behavior — so an
+    unknown or unmarked profile is never silently downgraded to advisory. Only a
+    template that explicitly declares ``voluntary`` / ``advisory`` relaxes a
+    diagnostic to advisory severity (Finding 1).
+    """
+    try:
+        template = load_template(profile_id)
+    except ACEFProfileError:
+        return "binding"
+    force = getattr(template, "legal_force", "") or ""
+    return force if isinstance(force, str) and force else "binding"
+
+
+def _is_advisory_profile(profile_id: str) -> bool:
+    """True iff the profile's template is voluntary/advisory (non-binding)."""
+    return _profile_legal_force(profile_id) in _ADVISORY_LEGAL_FORCES
+
+
+def _advisory_severity(diag: ValidationDiagnostic) -> ValidationDiagnostic:
+    """Downgrade a diagnostic to WARNING severity in place and return it.
+
+    The error CODE stays within the reserved incident band (ACEF-081..088); only
+    the SEVERITY is relaxed from ERROR to WARNING so a voluntary/advisory profile's
+    finding is non-binding (it does not block conformance) while remaining visible.
+    ``ValidationDiagnostic`` resolves severity from the code at construction; this
+    overrides that resolution for the context-dependent (legal_force-aware) case.
+    """
+    diag.severity = Severity.WARNING
+    return diag
+
 
 def check_crosswalk_mandatory_members(
     records: list[dict[str, Any]],
@@ -473,7 +516,21 @@ def check_crosswalk_mandatory_members(
 ) -> list[ValidationDiagnostic]:
     """ACEF-081: an incident profile is declared but the card's
     ``taxonomy_crosswalk`` is missing the mandatory member for that profile
-    (§5.7). The error carries the ``profile_id`` and an RFC 6901 ``path``.
+    (§5.7). The diagnostic carries the ``profile_id`` and an RFC 6901 ``path``.
+
+    **legal_force-aware (Finding 1).** The diagnostic's binding-ness follows the
+    declared profile's template ``legal_force`` (looked up via the registry):
+
+    - a **binding** profile (e.g. ``eu-ai-act-art73-2026``) keeps ACEF-081 at its
+      registered ERROR severity — a missing mandatory member blocks conformance;
+    - a **voluntary/advisory** profile (e.g. ``oecd-ai-incidents-2025``) surfaces
+      the same gap as an ADVISORY (WARNING) ACEF-081 — visible but non-binding,
+      consistent with the template's ``legal_force: voluntary`` marking. Encoding
+      a voluntary benchmark's unmet member as a binding error would misrepresent
+      it as conformance-blocking law.
+
+    An unknown / unmarked profile defaults to binding (strict) — see
+    :func:`_profile_legal_force`.
 
     Confidential/source-backed Art. 73 reports validate from
     ``card_source.eu_ai_act_facts`` and need not carry a public
@@ -485,6 +542,7 @@ def check_crosswalk_mandatory_members(
         member = _MANDATORY_CROSSWALK_MEMBERS.get(profile_id)
         if member is None:
             continue
+        advisory = _is_advisory_profile(profile_id)
         for _idx, rec in _records_iter(records):
             if _record_type_of(rec) != "incident_card":
                 continue
@@ -492,19 +550,157 @@ def check_crosswalk_mandatory_members(
             crosswalk = _as_dict(payload.get("taxonomy_crosswalk"))
             if member in crosswalk:
                 continue
-            diags.append(
-                ValidationDiagnostic(
-                    "ACEF-081",
-                    (
-                        f"incident profile {profile_id!r} declared but taxonomy_crosswalk on "
-                        f"record {_record_id_of(rec)!r} is missing the mandatory member "
-                        f"{member!r} (§5.7). Add the {member!r} crosswalk member, or remove the "
-                        f"profile declaration."
-                    ),
-                    path=f"/{_record_id_of(rec)}/taxonomy_crosswalk/{member}",
-                    details={"profile_id": profile_id},
+            force = _profile_legal_force(profile_id)
+            if advisory:
+                tail = (
+                    f"This profile is legal_force={force!r}, so the gap is ADVISORY "
+                    f"(non-binding): add the {member!r} crosswalk member to align with the "
+                    f"framework, or remove the profile declaration."
                 )
+            else:
+                tail = f"Add the {member!r} crosswalk member, or remove the profile declaration."
+            diag = ValidationDiagnostic(
+                "ACEF-081",
+                (
+                    f"incident profile {profile_id!r} declared but taxonomy_crosswalk on "
+                    f"record {_record_id_of(rec)!r} is missing the mandatory member "
+                    f"{member!r} (§5.7). {tail}"
+                ),
+                path=f"/{_record_id_of(rec)}/taxonomy_crosswalk/{member}",
+                details={"profile_id": profile_id, "legal_force": force},
             )
+            diags.append(_advisory_severity(diag) if advisory else diag)
+    return diags
+
+
+# ---------------------------------------------------------------------------
+# OECD mandatory-core completeness — advisory (Finding 2)
+# ---------------------------------------------------------------------------
+
+OECD_PROFILE_ID = "oecd-ai-incidents-2025"
+_OECD_EDITION = "oecd-crf-2025"
+
+
+def _oecd_template_path() -> Path:
+    """Resolve the OECD template JSON path (editable + wheel install)."""
+    here = Path(__file__).resolve()
+    for ancestor in here.parents:
+        candidate = ancestor / "acef" / "templates" / f"{OECD_PROFILE_ID}.json"
+        if candidate.is_file():
+            return candidate
+        candidate = ancestor / "src" / "acef" / "templates" / f"{OECD_PROFILE_ID}.json"
+        if candidate.is_file():
+            return candidate
+    return Path("src/acef/templates") / f"{OECD_PROFILE_ID}.json"
+
+
+@lru_cache(maxsize=1)
+def _oecd_mandatory_ordinals() -> tuple[int, ...]:
+    """Return the 7 OECD mandatory criterion ordinals, read from the OECD template.
+
+    SINGLE SOURCE OF TRUTH: the ordinals come from
+    ``oecd_framework.mandatory_criteria_ordinals`` in the OECD template JSON (the
+    same template that documents the framework), so the completeness check and the
+    template never diverge. Returns an empty tuple if the template is unreadable
+    (defensive — the completeness check then becomes a no-op rather than crashing).
+    """
+    try:
+        data = json.loads(_oecd_template_path().read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError, OSError):
+        return ()
+    framework = data.get("oecd_framework") if isinstance(data, dict) else None
+    if not isinstance(framework, dict):
+        return ()
+    ordinals = framework.get("mandatory_criteria_ordinals")
+    if not isinstance(ordinals, list):
+        return ()
+    return tuple(o for o in ordinals if isinstance(o, int))
+
+
+def _oecd_criterion_id(ordinal: int) -> str:
+    """The ACEF-local OECD criterion id for an ordinal (``oecd-crf-2025/<n>``, §5.5)."""
+    return f"{_OECD_EDITION}/{ordinal}"
+
+
+def _present_oecd_criterion_ids(oecd_member: dict[str, Any]) -> set[str]:
+    """Collect the set of ``criteria[].id`` strings present on an OECD crosswalk
+    member, order-insensitive (§5.10). Non-dict / id-less entries are ignored."""
+    present: set[str] = set()
+    for entry in _as_list(oecd_member.get("criteria")):
+        if isinstance(entry, dict):
+            cid = entry.get("id")
+            if isinstance(cid, str) and cid:
+                present.add(cid)
+    return present
+
+
+def check_oecd_mandatory_core_completeness(
+    records: list[dict[str, Any]],
+    *,
+    profiles: list[str],
+) -> list[ValidationDiagnostic]:
+    """Advisory OECD mandatory-core completeness (Finding 2).
+
+    Only evaluated when ``oecd-ai-incidents-2025`` is among the declared
+    ``profiles``. For each ``incident_card`` whose ``taxonomy_crosswalk.oecd``
+    member is PRESENT, scan ``criteria[].id`` (order-insensitive) for the 7
+    mandatory OECD ordinals (#1,#2,#3,#4,#7,#10,#11 — read from the OECD template
+    metadata, the single source of truth). Any missing mandatory id surfaces an
+    ADVISORY (WARNING) diagnostic listing the gaps.
+
+    DISCIPLINE:
+
+    - This is the per-ordinal array-scan completeness the generic template DSL
+      cannot express (``criteria[]`` is an order-insensitive array; ``exists_where``
+      resolves a single RFC-6901 pointer and jsonpointer has no array-wildcard), so
+      it is correctly delegated to this validator (per the template's
+      ``validator_delegated_enforcement`` block).
+    - It is NEVER binding. The OECD framework is ``legal_force: voluntary``; a
+      missing mandatory criterion is the framework's own completeness gap, not an
+      ACEF conformance fail. The diagnostic carries WARNING severity within the
+      reserved ACEF-081 band.
+    - When the ``oecd`` member is ABSENT, this is a no-op (the missing-member case
+      is handled by the legal_force-aware ACEF-081 advisory in
+      :func:`check_crosswalk_mandatory_members`).
+    """
+    if OECD_PROFILE_ID not in profiles:
+        return []
+    mandatory = _oecd_mandatory_ordinals()
+    if not mandatory:
+        return []
+
+    diags: list[ValidationDiagnostic] = []
+    for _idx, rec in _records_iter(records):
+        if _record_type_of(rec) != "incident_card":
+            continue
+        payload = _payload_of(rec)
+        crosswalk = _as_dict(payload.get("taxonomy_crosswalk"))
+        oecd_member = crosswalk.get("oecd")
+        if not isinstance(oecd_member, dict):
+            continue  # missing-member case handled by ACEF-081 (advisory)
+        present = _present_oecd_criterion_ids(oecd_member)
+        missing = [_oecd_criterion_id(o) for o in mandatory if _oecd_criterion_id(o) not in present]
+        if not missing:
+            continue
+        missing_list = ", ".join(missing)
+        diag = ValidationDiagnostic(
+            "ACEF-081",
+            (
+                f"ADVISORY (voluntary, non-binding): record {_record_id_of(rec)!r} declares an OECD "
+                f"taxonomy_crosswalk.oecd member but is MISSING {len(missing)} of the 7 mandatory OECD "
+                f"core criteria — {missing_list}. The OECD common reporting framework is "
+                f"legal_force=voluntary, so this completeness gap surfaces advisory (warning), never a "
+                f"binding fail. Add criteria[] entries for the missing mandatory ordinals to complete "
+                f"the OECD mandatory core (§5.5)."
+            ),
+            path=f"/{_record_id_of(rec)}/taxonomy_crosswalk/oecd/criteria",
+            details={
+                "profile_id": OECD_PROFILE_ID,
+                "legal_force": "voluntary",
+                "missing_mandatory_criteria": missing,
+            },
+        )
+        diags.append(_advisory_severity(diag))
     return diags
 
 
@@ -1230,6 +1426,7 @@ def run_incident_rules(
 
     diags: list[ValidationDiagnostic] = []
     diags.extend(check_crosswalk_mandatory_members(records, profiles=profiles))
+    diags.extend(check_oecd_mandatory_core_completeness(records, profiles=profiles))
     diags.extend(check_severity_vector_parse(records))
     diags.extend(check_public_incident_id_offline(records, manifest=manifest))
     diags.extend(check_art73_clock(records, profiles=profiles))

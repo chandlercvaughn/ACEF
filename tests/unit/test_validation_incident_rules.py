@@ -634,19 +634,24 @@ class TestACEF086PublishabilityGate:
 # ---------------------------------------------------------------------------
 
 
+def _bare_card_no_crosswalk_member() -> dict[str, Any]:
+    return {
+        "record_id": "rec-card-1",
+        "record_type": "incident_card",
+        "payload": {
+            "public_incident_id": _VALID_ID,
+            "id_grade": "self-asserted",
+            "harm_core": dict(_VALID_HARM_CORE),
+            "taxonomy_crosswalk": {"nist_ai_600_1": {"edition": "2024-07-final", "categories": []}},
+        },
+    }
+
+
 class TestACEF081:
     def test_art73_profile_without_eu_ai_act_member_raises_081(self) -> None:
-        card = {
-            "record_id": "rec-card-1",
-            "record_type": "incident_card",
-            "payload": {
-                "public_incident_id": _VALID_ID,
-                "id_grade": "self-asserted",
-                "harm_core": dict(_VALID_HARM_CORE),
-                "taxonomy_crosswalk": {"nist_ai_600_1": {"edition": "2024-07-final", "categories": []}},
-            },
-        }
-        diags = ir.check_crosswalk_mandatory_members([card], profiles=["eu-ai-act-art73-2026"])
+        diags = ir.check_crosswalk_mandatory_members(
+            [_bare_card_no_crosswalk_member()], profiles=["eu-ai-act-art73-2026"]
+        )
         assert "ACEF-081" in _codes(diags)
 
     def test_art73_profile_with_eu_ai_act_member_passes(self) -> None:
@@ -664,6 +669,141 @@ class TestACEF081:
         }
         diags = ir.check_crosswalk_mandatory_members([card], profiles=["eu-ai-act-art73-2026"])
         assert "ACEF-081" not in _codes(diags)
+
+
+class TestACEF081LegalForceAware:
+    """Finding 1: the ACEF-081 missing-crosswalk-member check is legal_force-aware.
+
+    A BINDING profile (eu-ai-act-art73-2026) keeps ACEF-081 at ERROR severity.
+    A VOLUNTARY/advisory profile (oecd-ai-incidents-2025) must NOT emit a binding
+    ACEF-081 error — the missing member surfaces as an ADVISORY (warning/info)
+    diagnostic that does not block conformance, consistent with the template's
+    legal_force=voluntary marking.
+    """
+
+    def test_binding_profile_missing_member_is_error_severity(self) -> None:
+        diags = ir.check_crosswalk_mandatory_members(
+            [_bare_card_no_crosswalk_member()], profiles=["eu-ai-act-art73-2026"]
+        )
+        d081 = [d for d in diags if d.code == "ACEF-081"]
+        assert d081, "binding Art.73 profile must still raise ACEF-081 for a missing member"
+        assert all(d.severity.value == "error" for d in d081), (
+            "a BINDING profile's missing mandatory crosswalk member must remain ERROR severity"
+        )
+
+    def test_voluntary_oecd_profile_missing_member_is_advisory_not_binding(self) -> None:
+        # OECD profile declared but the card has no taxonomy_crosswalk.oecd member.
+        # The diagnostic MUST NOT be a binding ACEF-081 error; it surfaces advisory.
+        diags = ir.check_crosswalk_mandatory_members(
+            [_bare_card_no_crosswalk_member()], profiles=["oecd-ai-incidents-2025"]
+        )
+        # No binding (error-severity) ACEF-081 may be emitted for a voluntary profile.
+        binding = [d for d in diags if d.code == "ACEF-081" and d.severity.value == "error"]
+        assert not binding, (
+            "a VOLUNTARY OECD profile produced a BINDING ACEF-081 error; voluntary "
+            "missing-member must be advisory (warning/info), never error"
+        )
+        # An advisory diagnostic SHOULD still be surfaced (warning/info) so the gap
+        # is visible without blocking conformance.
+        advisory = [d for d in diags if d.severity.value in {"warning", "info"}]
+        assert advisory, "the voluntary missing-member gap should surface an advisory diagnostic"
+
+    def test_unknown_profile_defaults_to_strict_error(self) -> None:
+        # An unknown profile (no template) must default to the strict ERROR
+        # behavior — never silently downgrade to advisory.
+        diags = ir.check_crosswalk_mandatory_members(
+            [_bare_card_no_crosswalk_member()], profiles=["eu-ai-act-art73-2026"]
+        )
+        assert any(d.code == "ACEF-081" and d.severity.value == "error" for d in diags)
+
+
+# ---------------------------------------------------------------------------
+# OECD mandatory-core completeness — advisory (Finding 2)
+# ---------------------------------------------------------------------------
+
+# The 7 mandatory OECD ordinals (#1,2,3,4,7,10,11) — read from the template in
+# the source under test; mirrored here for the assertions.
+_OECD_MANDATORY = [1, 2, 3, 4, 7, 10, 11]
+_OECD_PROFILE = "oecd-ai-incidents-2025"
+
+
+def _oecd_crit_id(n: int) -> str:
+    return f"oecd-crf-2025/{n}"
+
+
+def _oecd_card(criteria_ordinals: list[int]) -> dict[str, Any]:
+    return {
+        "record_id": "rec-oecd-1",
+        "record_type": "incident_card",
+        "payload": {
+            "public_incident_id": _VALID_ID,
+            "id_grade": "self-asserted",
+            "harm_core": dict(_VALID_HARM_CORE),
+            "taxonomy_crosswalk": {
+                "oecd": {
+                    "edition": "oecd-crf-2025",
+                    "criteria": [{"id": _oecd_crit_id(n), "value": f"v-{n}"} for n in criteria_ordinals],
+                }
+            },
+        },
+    }
+
+
+class TestOECDMandatoryCoreCompleteness:
+    """Finding 2: a REAL advisory OECD mandatory-core completeness check.
+
+    When the OECD profile is declared and a taxonomy_crosswalk.oecd member is
+    present, the validator scans criteria[].id (order-insensitive) for the 7
+    mandatory OECD ordinals and emits an ADVISORY (warning/info) diagnostic
+    listing any missing mandatory ids. It is NEVER a binding error.
+    """
+
+    def test_missing_mandatory_criteria_surfaces_advisory_listing_gaps(self) -> None:
+        # Present: edition + only #1; missing #2,3,4,7,10,11.
+        card = _oecd_card([1])
+        diags = ir.check_oecd_mandatory_core_completeness([card], profiles=[_OECD_PROFILE])
+        assert diags, "a card with an OECD member but missing mandatory criteria must surface a completeness advisory"
+        # Advisory only — never error/fatal severity (voluntary profile).
+        assert all(d.severity.value in {"warning", "info"} for d in diags), (
+            "the OECD completeness diagnostic must be advisory (warning/info), never binding"
+        )
+        # The diagnostic enumerates each missing mandatory ordinal id (structured
+        # details list is the precise surface; the message text mirrors it).
+        listed_missing: set[str] = set()
+        for d in diags:
+            listed_missing.update(d.details.get("missing_mandatory_criteria", []))
+        for n in (2, 3, 4, 7, 10, 11):
+            assert _oecd_crit_id(n) in listed_missing, (
+                f"missing mandatory {_oecd_crit_id(n)} not listed in the advisory"
+            )
+        # Present criterion #1 must NOT be reported as missing (exact-id, not a
+        # substring of e.g. oecd-crf-2025/10).
+        assert _oecd_crit_id(1) not in listed_missing, "present criterion #1 must NOT be listed as missing"
+
+    def test_all_seven_mandatory_present_no_advisory(self) -> None:
+        card = _oecd_card(_OECD_MANDATORY)
+        diags = ir.check_oecd_mandatory_core_completeness([card], profiles=[_OECD_PROFILE])
+        assert diags == [], "a card carrying all 7 mandatory OECD criteria must produce no completeness advisory"
+
+    def test_no_oecd_member_no_completeness_advisory(self) -> None:
+        # No oecd crosswalk member at all -> the completeness check is a no-op here
+        # (the missing-member case is the legal_force-aware ACEF-081 advisory, not
+        # this per-ordinal completeness scan).
+        card = _bare_card_no_crosswalk_member()
+        diags = ir.check_oecd_mandatory_core_completeness([card], profiles=[_OECD_PROFILE])
+        assert diags == []
+
+    def test_check_is_skipped_when_oecd_profile_not_declared(self) -> None:
+        card = _oecd_card([1])  # missing mandatory criteria, but OECD not declared
+        diags = ir.check_oecd_mandatory_core_completeness([card], profiles=["eu-ai-act-art73-2026"])
+        assert diags == []
+
+    def test_completeness_is_order_insensitive(self) -> None:
+        # criteria[] supplied in a scrambled order -> still complete, no advisory.
+        scrambled = list(reversed(_OECD_MANDATORY))
+        card = _oecd_card(scrambled)
+        diags = ir.check_oecd_mandatory_core_completeness([card], profiles=[_OECD_PROFILE])
+        assert diags == []
 
 
 # ---------------------------------------------------------------------------

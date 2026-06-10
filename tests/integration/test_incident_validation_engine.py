@@ -49,6 +49,10 @@ def _codes(assessment: Any) -> list[str]:
     return [e.get("code") for e in assessment.structural_errors]
 
 
+def _errors_for(assessment: Any, code: str) -> list[dict[str, Any]]:
+    return [e for e in assessment.structural_errors if e.get("code") == code]
+
+
 def _write_jsonl(path: Path, records: list[dict[str, Any]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as fh:
@@ -401,3 +405,89 @@ class TestOfflineId083Engine:
         bundle = _build_incident_bundle(tmp_path, core_version="1.1.0", record_type="incident_card", payload=payload)
         assessment = validate_bundle(bundle)
         assert "ACEF-083" not in _codes(assessment)
+
+
+# ---------------------------------------------------------------------------
+# OECD voluntary profile: legal_force-aware ACEF-081 + advisory completeness
+# (roborev Findings 1 & 2 — surfaced by the OECD profile, fixed in incident_rules)
+# ---------------------------------------------------------------------------
+
+
+def _oecd_crit_id(n: int) -> str:
+    return f"oecd-crf-2025/{n}"
+
+
+_OECD_MANDATORY = [1, 2, 3, 4, 7, 10, 11]
+
+
+class TestOECDVoluntaryProfileEngine:
+    def test_voluntary_oecd_missing_crosswalk_is_not_binding_error(self, tmp_path: Path) -> None:
+        # Finding 1: an incident_card lacking taxonomy_crosswalk.oecd, validated
+        # against the VOLUNTARY oecd profile, must NOT emit a binding ACEF-081
+        # error (legal_force=voluntary). Any ACEF-081 emitted is advisory.
+        payload = {
+            "public_incident_id": _VALID_ID,
+            "id_grade": "self-asserted",
+            "harm_core": dict(_VALID_HARM_CORE),
+        }
+        bundle = _build_incident_bundle(tmp_path, core_version="1.1.0", record_type="incident_card", payload=payload)
+        assessment = validate_bundle(bundle, profiles=["oecd-ai-incidents-2025"])
+        binding_081 = [e for e in _errors_for(assessment, "ACEF-081") if e.get("severity") == "error"]
+        assert not binding_081, "voluntary OECD profile produced a binding ACEF-081 error"
+
+    def test_binding_art73_missing_crosswalk_still_errors(self, tmp_path: Path) -> None:
+        # Regression: the SAME structural gap on the BINDING Art.73 profile still
+        # raises ACEF-081 at ERROR severity.
+        payload = {
+            "public_incident_id": _VALID_ID,
+            "id_grade": "self-asserted",
+            "harm_core": dict(_VALID_HARM_CORE),
+            "taxonomy_crosswalk": {"nist_ai_600_1": {"edition": "2024-07-final", "categories": []}},
+        }
+        bundle = _build_incident_bundle(tmp_path, core_version="1.1.0", record_type="incident_card", payload=payload)
+        assessment = validate_bundle(bundle, profiles=["eu-ai-act-art73-2026"])
+        error_081 = [e for e in _errors_for(assessment, "ACEF-081") if e.get("severity") == "error"]
+        assert error_081, "binding Art.73 profile must still raise ACEF-081 at error severity"
+
+    def test_oecd_member_missing_mandatory_criteria_surfaces_advisory(self, tmp_path: Path) -> None:
+        # Finding 2: an OECD member present with edition but only criterion #1 ->
+        # an advisory completeness diagnostic listing the missing mandatory ids,
+        # never a binding error.
+        payload = {
+            "public_incident_id": _VALID_ID,
+            "id_grade": "self-asserted",
+            "harm_core": dict(_VALID_HARM_CORE),
+            "taxonomy_crosswalk": {
+                "oecd": {"edition": "oecd-crf-2025", "criteria": [{"id": _oecd_crit_id(1), "value": "x"}]}
+            },
+        }
+        bundle = _build_incident_bundle(tmp_path, core_version="1.1.0", record_type="incident_card", payload=payload)
+        assessment = validate_bundle(bundle, profiles=["oecd-ai-incidents-2025"])
+        # Some advisory (warning/info) diagnostic listing the missing mandatory ids.
+        advisory = [
+            e
+            for e in assessment.structural_errors
+            if e.get("severity") in {"warning", "info"} and "oecd-crf-2025/10" in str(e.get("message", ""))
+        ]
+        assert advisory, "missing OECD mandatory criteria must surface an advisory completeness diagnostic"
+        # And NO binding error code was raised for the voluntary completeness gap.
+        assert all(e.get("severity") != "error" for e in advisory)
+
+    def test_oecd_member_with_all_mandatory_no_advisory(self, tmp_path: Path) -> None:
+        payload = {
+            "public_incident_id": _VALID_ID,
+            "id_grade": "self-asserted",
+            "harm_core": dict(_VALID_HARM_CORE),
+            "taxonomy_crosswalk": {
+                "oecd": {
+                    "edition": "oecd-crf-2025",
+                    "criteria": [{"id": _oecd_crit_id(n), "value": f"v-{n}"} for n in _OECD_MANDATORY],
+                }
+            },
+        }
+        bundle = _build_incident_bundle(tmp_path, core_version="1.1.0", record_type="incident_card", payload=payload)
+        assessment = validate_bundle(bundle, profiles=["oecd-ai-incidents-2025"])
+        completeness = [
+            e for e in assessment.structural_errors if e.get("details", {}).get("missing_mandatory_criteria")
+        ]
+        assert completeness == [], "a complete OECD member must not surface a completeness advisory"
