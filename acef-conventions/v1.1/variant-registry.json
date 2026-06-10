@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://acef.ai/schemas/v1.1/variant-registry.json",
   "title": "ACEF v1.1 Payload Variant Registry (additions)",
-  "description": "Additive variant entries for ACEF Core v1.1, corresponding 1:1 with brief §4.1-§4.5. Resolved as a UNION with v1.0's variant-registry.json by acef.schemas.registry.load_variant_registry('v1.1') — v1.1 adds artifact names without removing v1.0 entries (per VAL-VARIANT-002 and the v1.x-minor freeze rule in Spec §3.1.4). The five entries are: V1 human_oversight_kill_switch (parent: human_oversight_action, discriminator /payload/oversight_subtype = 'kill_switch'); V2 regression_definition (parent: risk_treatment, discriminator /payload/treatment_subtype = 'regression_definition'); V3 disposition_record (parent: risk_treatment, discriminator /payload/treatment_subtype = 'external_disposition'); V4 badge_state (parent: transparency_disclosure, discriminator /payload/variant = 'verification_badge'); V5 evidence_freshness_window (parent: evidence_gap, discriminator /payload/gap_subtype = 'freshness_window'). Of these, V4 (badge_state) and V5 (evidence_freshness_window) are accompanied by oneOf payload-shape enforcement on their parent record-type schemas (transparency_disclosure.schema.json, evidence_gap.schema.json) in this same v1.1 directory, satisfying VAL-VARIANT-003's 'at least 2 of 5' threshold for branch enforcement. oneOf enforcement for V1, V2, V3 (which would require new v1.1 overlay schemas for human_oversight_action and risk_treatment) is deferred to a follow-up feature; the variant-registry entries are sufficient to satisfy VAL-VARIANT-001 and VAL-VARIANT-002.",
+  "description": "Additive variant entries for ACEF Core v1.1, corresponding 1:1 with brief §4.1-§4.5. Resolved as a UNION with v1.0's variant-registry.json by acef.schemas.registry.load_variant_registry('v1.1') — v1.1 adds artifact names without removing v1.0 entries (per VAL-VARIANT-002 and the v1.x-minor freeze rule in Spec §3.1.4). The five `variants` entries are: V1 human_oversight_kill_switch (parent: human_oversight_action, discriminator /payload/oversight_subtype = 'kill_switch'); V2 regression_definition (parent: risk_treatment, discriminator /payload/treatment_subtype = 'regression_definition'); V3 disposition_record (parent: risk_treatment, discriminator /payload/treatment_subtype = 'external_disposition'); V4 badge_state (parent: transparency_disclosure, discriminator /payload/variant = 'verification_badge'); V5 evidence_freshness_window (parent: evidence_gap, discriminator /payload/gap_subtype = 'freshness_window'). Of these, V4 (badge_state) and V5 (evidence_freshness_window) are accompanied by oneOf payload-shape enforcement on their parent record-type schemas (transparency_disclosure.schema.json, evidence_gap.schema.json) in this same v1.1 directory, satisfying VAL-VARIANT-003's 'at least 2 of 5' threshold for branch enforcement. oneOf enforcement for V1, V2, V3 (which would require new v1.1 overlay schemas for human_oversight_action and risk_treatment) is deferred to a follow-up feature; the variant-registry entries are sufficient to satisfy VAL-VARIANT-001 and VAL-VARIANT-002. The RFC-0002 incident reporting profile (core_version 1.1.0) adds NO payload-discriminator variants — its additions are whole record types and $ref'd companion sub-schemas — so the `variants` array stays at exactly five (VAL-VARIANT-001). Instead the separate `incident_profile` block carries the core_version 1.1.0 record-type ALLOWLIST: `record_types` are the independently claimable incident record types (incident_card, incident_report), and `companion_subschemas` are the $ref'd projection building blocks (harm-core-taxonomy, taxonomy_crosswalk, severity_vector, coordinated_disclosure, incident_report.card_source) that are NOT record types (resolving the 'companion looks like a record type' finding; VAL-SCH-001). The SDK record-type allowlist (acef.schemas.registry.list_record_type_schemas + acef.models.enums.RECORD_TYPES) mirrors this split. The block is gated on core_version 1.1.0 so a v1.0 (1.0.0) bundle never claims the incident additions and the frozen acef-conventions/v1/ incident_report behavior is preserved.",
   "variants": [
     {
       "artifact_name": "human_oversight_kill_switch",
@@ -34,5 +34,19 @@
       "discriminator_field": "/payload/gap_subtype",
       "discriminator_value": "freshness_window"
     }
-  ]
+  ],
+  "incident_profile": {
+    "core_version": "1.1.0",
+    "record_types": [
+      "incident_card",
+      "incident_report"
+    ],
+    "companion_subschemas": [
+      "coordinated_disclosure",
+      "harm-core-taxonomy",
+      "incident_report.card_source",
+      "severity_vector",
+      "taxonomy_crosswalk"
+    ]
+  }
 }

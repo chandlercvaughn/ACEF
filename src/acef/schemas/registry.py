@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from jsonschema import Draft202012Validator, ValidationError
+from referencing import Registry, Resource
 
 from acef.errors import ACEFSchemaError
 
@@ -36,6 +37,25 @@ _VERSION_FALLBACK: dict[str, tuple[str, ...]] = {
     "v1": ("v1",),
     "v1.1": ("v1.1", "v1"),
 }
+
+# Companion sub-schemas that ship as *.schema.json files under a version
+# directory but are NOT independently claimable record types. They are
+# projection building blocks referenced by $ref from the incident record types
+# (RFC-0002 §5.2/§5.4/§5.5/§5.6) and from the card_source overlay block.
+# Without this exclusion they would leak into list_record_type_schemas() and be
+# treated as record types (the "companion looks like a record type" finding).
+# Note: harm-core-taxonomy.json has no .schema.json suffix and is therefore
+# already excluded by the *.schema.json glob; it is named here for clarity and
+# for the SDK record-type inventory guard.
+_COMPANION_SUBSCHEMAS: frozenset[str] = frozenset(
+    {
+        "harm-core-taxonomy",
+        "taxonomy_crosswalk",
+        "severity_vector",
+        "coordinated_disclosure",
+        "incident_report.card_source",
+    }
+)
 
 
 def schema_version_for_core_version(core_version: str | None) -> str:
@@ -157,12 +177,74 @@ def load_schema(schema_name: str, version: str = "v1") -> dict[str, Any]:
     )
 
 
+@lru_cache(maxsize=8)
+def build_schema_registry(version: str = "v1") -> Registry[Any]:
+    """Build a ``referencing.Registry`` of every schema in a version's chain.
+
+    Every ``*.schema.json`` and ``*.json`` resource carrying a ``$id`` under the
+    version's fallback-chain directories is registered by its ``$id``. This lets
+    the production :class:`~jsonschema.Draft202012Validator` resolve relative
+    ``$ref``\\s (e.g. ``harm-core-taxonomy.json#/$defs/harm_class``,
+    ``coordinated_disclosure.schema.json``, ``severity_vector.schema.json``,
+    ``taxonomy_crosswalk.schema.json``, ``incident_report.card_source.schema.json``)
+    against each schema's ``$id`` base — instead of the validator attempting a
+    network fetch of ``https://acef.ai/...`` and crashing with ``Unresolvable``
+    / ``Unretrievable`` (the v1.1 incident ``$ref`` graph). Both the higher
+    (leftmost) and fallback directories are scanned; on a duplicate ``$id`` the
+    higher-priority version wins (matching :data:`_VERSION_FALLBACK` semantics).
+
+    The registry is the resolution backbone for the v1.1 incident schemas
+    (F-M2-SCHEMA-GATING / VAL-SCH-001). A ``referencing.Registry`` is immutable
+    and hashable on its contents, so it is safe to cache and reuse across
+    validations.
+
+    Args:
+        version: Schema-dir token ("v1" or "v1.1"). The returned registry covers
+            the full fallback chain for that token.
+
+    Returns:
+        An immutable :class:`referencing.Registry` keyed by schema ``$id``.
+    """
+    chain = _VERSION_FALLBACK.get(version, (version,))
+
+    # Walk the chain in reverse so the higher-priority (leftmost) version's
+    # resources are registered last and override any earlier $id collision.
+    resources_by_id: dict[str, Resource[Any]] = {}
+    for candidate_version in reversed(chain):
+        try:
+            schema_dir = _find_schema_dir(candidate_version)
+        except ACEFSchemaError:
+            continue
+
+        for schema_file in sorted(schema_dir.glob("*.json")):
+            try:
+                contents = json.loads(schema_file.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                # A malformed schema file is surfaced by load_schema /
+                # validate_schemas.py, not here; skip it for registry purposes.
+                continue
+            if not isinstance(contents, dict):
+                continue
+            schema_id = contents.get("$id")
+            if not isinstance(schema_id, str) or not schema_id:
+                continue
+            resources_by_id[schema_id] = Resource.from_contents(contents)
+
+    return Registry().with_resources([(rid, res) for rid, res in resources_by_id.items()])
+
+
 def validate_against_schema(
     data: dict[str, Any],
     schema_name: str,
     version: str = "v1",
 ) -> list[ValidationError]:
     """Validate data against a named JSON Schema.
+
+    For schemas whose ``$ref``\\s point at sibling companion schemas (notably the
+    v1.1 incident graph), the validator is constructed with a
+    :func:`build_schema_registry` registry so every relative ``$ref`` resolves
+    locally against its schema's ``$id`` base instead of being fetched over the
+    network.
 
     Args:
         data: The data to validate.
@@ -177,7 +259,7 @@ def validate_against_schema(
     except ACEFSchemaError:
         return [ValidationError(f"Schema {schema_name} not found")]
 
-    validator = Draft202012Validator(schema)
+    validator = Draft202012Validator(schema, registry=build_schema_registry(version))
     return list(validator.iter_errors(data))
 
 
@@ -276,7 +358,11 @@ def list_record_type_schemas(version: str = "v1") -> list[str]:
         Sorted list of record type names that have schemas available in
         the selected version's fallback chain.
     """
-    excluded = {"manifest", "record-envelope", "assessment-bundle", "template"}
+    # Structural schemas + companion sub-schemas are not record types. The
+    # companions (severity_vector, taxonomy_crosswalk, coordinated_disclosure,
+    # incident_report.card_source, harm-core-taxonomy) are $ref'd projection
+    # building blocks, NOT independently claimable record_type values.
+    excluded = {"manifest", "record-envelope", "assessment-bundle", "template"} | set(_COMPANION_SUBSCHEMAS)
     chain = _VERSION_FALLBACK.get(version, (version,))
 
     names: set[str] = set()

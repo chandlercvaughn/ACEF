@@ -239,6 +239,15 @@ RECORD_TYPES = frozenset(
         "delivery_verdict",
         "coverage_cell",
         "harness_attestation",
+        # v1.1 — RFC-0002 incident reporting (core_version 1.1.0). incident_card
+        # is the public projection record type; incident_report is the v1.0 type
+        # carried forward under the v1.1 overlay (adds the private card_source
+        # block). card_source / severity_vector / taxonomy_crosswalk /
+        # coordinated_disclosure / harm-core-taxonomy are COMPANION sub-schemas
+        # ($ref'd projection building blocks), NOT top-level record types, and
+        # are deliberately NOT registered here (see
+        # acef.schemas.registry._COMPANION_SUBSCHEMAS).
+        "incident_card",
     }
 )
 

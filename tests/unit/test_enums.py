@@ -153,13 +153,22 @@ class TestRecordTypes:
             "harness_attestation",
         }
     )
+    # The RFC-0002 incident reporting record-type addition (core_version 1.1.0,
+    # VAL-SCH-001). incident_card is the public-projection record type;
+    # incident_report is already in V1_0_RECORD_TYPES (carried forward under the
+    # v1.1 overlay). The card_source / severity_vector / taxonomy_crosswalk /
+    # coordinated_disclosure / harm-core-taxonomy companions are $ref'd
+    # sub-schemas, NOT record types, and are deliberately absent here.
+    V1_1_INCIDENT_RECORD_TYPES = frozenset({"incident_card"})
 
     def test_is_frozenset(self):
         assert isinstance(RECORD_TYPES, frozenset)
 
-    def test_contains_22_types(self):
-        # 16 v1.0 + 6 v1.1 = 22. Per VAL-MODEL-001.
-        assert len(RECORD_TYPES) == 22
+    def test_contains_23_types(self):
+        # 16 v1.0 + 6 v1.1 agent-reliability + 1 RFC-0002 incident (incident_card)
+        # = 23. incident_report is already counted in the v1.0 set. Per
+        # VAL-MODEL-001 + VAL-SCH-001.
+        assert len(RECORD_TYPES) == 23
 
     def test_v1_0_types_preserved(self):
         """The 16 v1.0 types must remain a subset (no removals, no renames)."""
@@ -169,8 +178,13 @@ class TestRecordTypes:
         """The 6 v1.1 agent-reliability primitives must be present."""
         assert self.V1_1_RECORD_TYPES.issubset(RECORD_TYPES)
 
+    def test_v1_1_incident_types_added(self):
+        """The RFC-0002 incident record-type addition (incident_card) is present
+        (VAL-SCH-001)."""
+        assert self.V1_1_INCIDENT_RECORD_TYPES.issubset(RECORD_TYPES)
+
     def test_all_expected_types_present(self):
-        expected = self.V1_0_RECORD_TYPES | self.V1_1_RECORD_TYPES
+        expected = self.V1_0_RECORD_TYPES | self.V1_1_RECORD_TYPES | self.V1_1_INCIDENT_RECORD_TYPES
         assert RECORD_TYPES == expected
 
     def test_mandatory_subset(self):
