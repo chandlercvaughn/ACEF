@@ -82,8 +82,7 @@ def _ts_canonicalize(value: Any) -> bytes:
     """Run the TS jcs-cli subprocess and capture raw bytes from stdout."""
     if not TS_CLI.exists():
         pytest.skip(
-            f"TS jcs-cli not built (run `cd packages/sdk-typescript && npm run build:test`). "
-            f"Looked for {TS_CLI}",
+            f"TS jcs-cli not built (run `cd packages/sdk-typescript && npm run build:test`). Looked for {TS_CLI}",
         )
     result = subprocess.run(
         ["node", str(TS_CLI)],
@@ -101,8 +100,4 @@ def test_cross_lang_jcs_byte_equal(vector_id: str, value: Any) -> None:
     """VAL-TS-005: TS RFC 8785 output is byte-equal to Python's for every vector."""
     py_bytes = canonicalize(value)
     ts_bytes = _ts_canonicalize(value)
-    assert py_bytes == ts_bytes, (
-        f"Vector {vector_id!r} differs:\n"
-        f"  Python: {py_bytes!r}\n"
-        f"  TS    : {ts_bytes!r}"
-    )
+    assert py_bytes == ts_bytes, f"Vector {vector_id!r} differs:\n  Python: {py_bytes!r}\n  TS    : {ts_bytes!r}"

@@ -3,12 +3,8 @@ gzip OS byte, modalities scope, ACEF-027, chain(), sign()/verify()."""
 
 from __future__ import annotations
 
-import gzip
 import json
-import tempfile
 from pathlib import Path
-
-import pytest
 
 import acef
 from acef.models.assessment import AssessmentBundle, AssessmentVersioning
@@ -41,7 +37,6 @@ class TestEvaluationScopePackage:
 
     def test_package_scope_evaluated_once(self, tmp_dir: Path) -> None:
         """A package-scoped provision produces one summary entry, not one per subject."""
-        from acef.templates.models import EvaluationRule, Provision, Template
         from acef.templates.registry import _get_template_dir
 
         # Create a temporary template with a package-scoped provision
@@ -66,11 +61,11 @@ class TestEvaluationScopePackage:
                             "rule": "has_record_type",
                             "params": {"type": "governance_policy", "min_count": 1},
                             "severity": "fail",
-                            "message": "Governance policy required"
+                            "message": "Governance policy required",
                         }
-                    ]
+                    ],
                 }
-            ]
+            ],
         }
 
         # Write temp template
@@ -81,18 +76,15 @@ class TestEvaluationScopePackage:
         try:
             # Create package with 2 subjects + governance_policy record
             pkg = Package(producer={"name": "test", "version": "1.0"})
-            s1 = pkg.add_subject("ai_system", name="System A")
-            s2 = pkg.add_subject("ai_model", name="Model B")
+            pkg.add_subject("ai_system", name="System A")
+            pkg.add_subject("ai_model", name="Model B")
             pkg.add_profile("test-pkg-scope")
             pkg.record("governance_policy", payload={"policy_type": "ai_governance"})
 
             assessment = acef.validate(pkg, profiles=["test-pkg-scope"])
 
             # Package-scoped provision should produce exactly 1 summary, not 2
-            pkg_summaries = [
-                ps for ps in assessment.provision_summary
-                if ps.provision_id == "pkg-gov"
-            ]
+            pkg_summaries = [ps for ps in assessment.provision_summary if ps.provision_id == "pkg-gov"]
             assert len(pkg_summaries) == 1
             # Should have empty subject_scope (package-level)
             assert pkg_summaries[0].subject_scope == []
@@ -100,6 +92,7 @@ class TestEvaluationScopePackage:
             template_file.unlink(missing_ok=True)
             # Clear template cache
             from acef.templates.registry import load_template
+
             load_template.cache_clear()
 
 
@@ -165,7 +158,8 @@ class TestModalitiesScopeFilter:
         from acef.validation.rule_engine import _matches_scope
 
         record = RecordEnvelope(
-            record_type="risk_register", payload={},
+            record_type="risk_register",
+            payload={},
             obligation_role=ObligationRole.PROVIDER,
         )
         scope = {"obligation_roles": ["provider"]}
@@ -200,10 +194,12 @@ class TestTopLevelSignVerify:
 
     def test_sign_is_sign_bundle(self) -> None:
         from acef.signing import sign_bundle
+
         assert acef.sign is sign_bundle
 
     def test_verify_is_verify_detached_jws(self) -> None:
         from acef.signing import verify_detached_jws
+
         assert acef.verify is verify_detached_jws
 
 
@@ -223,8 +219,5 @@ class TestACEF032Emission:
         )
 
         # Should have ACEF-032 info diagnostics
-        acef032_errors = [
-            e for e in assessment.structural_errors
-            if e.get("code") == "ACEF-032"
-        ]
+        acef032_errors = [e for e in assessment.structural_errors if e.get("code") == "ACEF-032"]
         assert len(acef032_errors) > 0

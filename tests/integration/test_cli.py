@@ -33,12 +33,19 @@ class TestCLI:
 
     def test_init_with_subject(self, runner: CliRunner, tmp_dir: Path) -> None:
         bundle_path = str(tmp_dir / "with-subject.acef")
-        result = runner.invoke(cli, [
-            "init", bundle_path,
-            "--subject-name", "Test System",
-            "--subject-type", "ai_system",
-            "--risk-classification", "high-risk",
-        ])
+        result = runner.invoke(
+            cli,
+            [
+                "init",
+                bundle_path,
+                "--subject-name",
+                "Test System",
+                "--subject-type",
+                "ai_system",
+                "--risk-classification",
+                "high-risk",
+            ],
+        )
         assert result.exit_code == 0
 
     def test_inspect_bundle(self, runner: CliRunner, minimal_package: Package, tmp_dir: Path) -> None:

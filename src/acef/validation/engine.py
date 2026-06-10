@@ -9,7 +9,7 @@ Phase 4: Rule evaluation (DSL rules -> provision rollup)
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -91,7 +91,7 @@ def validate_bundle(
         # wall-clock for the structural-error stub only. The assessment
         # short-circuits below.
         if evaluation_instant is None:
-            evaluation_instant = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            evaluation_instant = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
         assessment = AssessmentBundle(evaluation_instant=evaluation_instant)
         assessment.structural_errors.append(ValidationDiagnostic("ACEF-002", "acef-manifest.json not found").to_dict())
         return assessment
@@ -102,7 +102,7 @@ def validate_bundle(
         # A malformed manifest must produce a structured diagnostic, not
         # crash the validator before any other phase runs.
         if evaluation_instant is None:
-            evaluation_instant = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            evaluation_instant = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
         assessment = AssessmentBundle(evaluation_instant=evaluation_instant)
         assessment.structural_errors.append(
             ValidationDiagnostic(
@@ -114,7 +114,7 @@ def validate_bundle(
         return assessment
     if not isinstance(manifest_data, dict):
         if evaluation_instant is None:
-            evaluation_instant = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            evaluation_instant = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
         assessment = AssessmentBundle(evaluation_instant=evaluation_instant)
         assessment.structural_errors.append(
             ValidationDiagnostic(
@@ -137,7 +137,7 @@ def validate_bundle(
         else:
             # Last resort — should be unreachable for spec-valid bundles
             # because metadata.timestamp is required at the schema level.
-            evaluation_instant = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            evaluation_instant = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     # ACEF-001: Check module version compatibility. Use defensive type
     # coercion so a schema-invalid manifest (e.g. "versioning":[]) does
@@ -210,7 +210,7 @@ def validate_bundle(
         rf_path = bundle_path / rf_path_str
         if rf_path.exists():
             try:
-                file_lines = open(rf_path, "r", encoding="utf-8").readlines()
+                file_lines = open(rf_path, encoding="utf-8").readlines()
             except (OSError, UnicodeDecodeError) as exc:
                 early_load_diagnostics.append(
                     ValidationDiagnostic(
@@ -480,9 +480,9 @@ def _collect_results(
         # GAP_ACKNOWLEDGED so consumers can see at-a-glance which
         # provisions are passing only because an evidence_gap record
         # acknowledges the missing evidence (spec §3.7 step 4).
-        from acef.models.enums import ProvisionOutcome as _PO
+        from acef.models.enums import ProvisionOutcome
 
-        if summary.provision_outcome == _PO.GAP_ACKNOWLEDGED:
+        if summary.provision_outcome == ProvisionOutcome.GAP_ACKNOWLEDGED:
             assessment.structural_errors.append(
                 ValidationDiagnostic(
                     "ACEF-042",
@@ -493,10 +493,14 @@ def _collect_results(
         # ACEF-041: emit warning diagnostic when an evidence_freshness
         # rule (severity=warning) failed for this provision. Spec §3.6
         # ACEF-041 is the canonical code for stale evidence.
-        from acef.models.enums import RuleOutcome as _RO, RuleSeverity as _RS
+        from acef.models.enums import RuleOutcome, RuleSeverity
 
         for r in prov_results:
-            if r.outcome == _RO.FAILED and r.rule_severity == _RS.WARNING and "freshness" in (r.rule_id or "").lower():
+            if (
+                r.outcome == RuleOutcome.FAILED
+                and r.rule_severity == RuleSeverity.WARNING
+                and "freshness" in (r.rule_id or "").lower()
+            ):
                 assessment.structural_errors.append(
                     ValidationDiagnostic(
                         "ACEF-041",
@@ -527,7 +531,7 @@ def _parse_iso_instant(value: str) -> datetime | None:
     except ValueError:
         return None
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
+        parsed = parsed.replace(tzinfo=UTC)
     return parsed
 
 
@@ -688,7 +692,7 @@ def _evaluate_profiles(
                             rule_id=rule.rule_id,
                             provision_id=prov.provision_id,
                             profile_id=profile_id,
-                            rule_severity=rule.severity,
+                            rule_severity=RuleSeverity(rule.severity),
                             outcome=RuleOutcome.SKIPPED,
                             message=(
                                 f"Provision not yet effective "

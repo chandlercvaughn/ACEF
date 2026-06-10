@@ -10,7 +10,6 @@ import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec, rsa
 
-from acef.models.enums import ObligationRole
 from acef.package import Package
 
 
@@ -118,7 +117,6 @@ def build_minimal_package(
     if with_attachment:
         pkg.add_attachment("eval-report.pdf", b"PDF CONTENT FOR TESTING")
         # Add a record referencing the attachment
-        from acef.models.records import AttachmentRef
 
         pkg.record(
             "evaluation_report",

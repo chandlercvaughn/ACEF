@@ -44,19 +44,13 @@ def validate_cmd(path: str, profile: tuple[str, ...], output: str | None, fmt: s
         click.echo(f"Assessment written to: {output}", err=True)
 
     # Exit code based on results
-    has_fatal = any(
-        e.get("severity") == "fatal"
-        for e in assessment.structural_errors
-    )
+    has_fatal = any(e.get("severity") == "fatal" for e in assessment.structural_errors)
     has_not_satisfied = any(
-        ps.provision_outcome == ProvisionOutcome.NOT_SATISFIED
-        for ps in assessment.provision_summary
+        ps.provision_outcome == ProvisionOutcome.NOT_SATISFIED for ps in assessment.provision_summary
     )
     # Rule ERROR outcomes indicate the evaluator could not finish — surface
     # them via non-zero exit so CI does not report green on broken engines.
-    has_rule_error = any(
-        r.outcome == RuleOutcome.ERROR for r in assessment.results
-    )
+    has_rule_error = any(r.outcome == RuleOutcome.ERROR for r in assessment.results)
 
     if has_fatal:
         sys.exit(2)

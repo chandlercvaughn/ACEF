@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 import tarfile
 from pathlib import Path
 
@@ -11,7 +10,7 @@ import pytest
 
 from acef.errors import ACEFFormatError
 from acef.export import export_archive, export_directory
-from acef.integrity import canonicalize, compute_content_hashes, sha256_file
+from acef.integrity import canonicalize, compute_content_hashes
 from acef.loader import load
 from acef.package import Package
 
@@ -59,16 +58,16 @@ class TestExportDirectory:
     def test_records_sorted_by_timestamp_then_id(self, tmp_dir: Path):
         pkg = Package()
         # Add records with different timestamps
-        r1 = pkg.record("risk_register", payload={"n": 1}, timestamp="2025-01-02T00:00:00Z")
-        r2 = pkg.record("risk_register", payload={"n": 2}, timestamp="2025-01-01T00:00:00Z")
-        r3 = pkg.record("risk_register", payload={"n": 3}, timestamp="2025-01-01T00:00:00Z")
+        pkg.record("risk_register", payload={"n": 1}, timestamp="2025-01-02T00:00:00Z")
+        pkg.record("risk_register", payload={"n": 2}, timestamp="2025-01-01T00:00:00Z")
+        pkg.record("risk_register", payload={"n": 3}, timestamp="2025-01-01T00:00:00Z")
 
         bundle_dir = tmp_dir / "bundle.acef"
         export_directory(pkg, str(bundle_dir))
 
         jsonl_path = bundle_dir / "records" / "risk_register.jsonl"
         records = []
-        with open(jsonl_path, "r", encoding="utf-8") as f:
+        with open(jsonl_path, encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 if line:
@@ -84,9 +83,7 @@ class TestExportDirectory:
         bundle_dir = tmp_dir / "bundle.acef"
         export_directory(minimal_package, str(bundle_dir))
 
-        stored_hashes = json.loads(
-            (bundle_dir / "hashes" / "content-hashes.json").read_text(encoding="utf-8")
-        )
+        stored_hashes = json.loads((bundle_dir / "hashes" / "content-hashes.json").read_text(encoding="utf-8"))
         computed_hashes = compute_content_hashes(bundle_dir)
         assert stored_hashes == computed_hashes
 
@@ -169,6 +166,7 @@ class TestArchiveExport:
 
         # Both archives should load to identical packages
         from acef.loader import load
+
         pkg1 = load(str(archive1))
         pkg2 = load(str(archive2))
         assert len(pkg1.records) == len(pkg2.records)
@@ -179,6 +177,7 @@ class TestArchiveExport:
         pkg1.export(str(dir1))
         pkg2.export(str(dir2))
         import json
+
         h1 = json.loads((dir1 / "hashes" / "content-hashes.json").read_text())
         h2 = json.loads((dir2 / "hashes" / "content-hashes.json").read_text())
         assert h1 == h2

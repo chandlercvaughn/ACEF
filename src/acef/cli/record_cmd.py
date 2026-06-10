@@ -46,7 +46,7 @@ def record_cmd(
         if payload.startswith("@"):
             payload_path = payload[1:]
             try:
-                with open(payload_path, "r", encoding="utf-8") as f:
+                with open(payload_path, encoding="utf-8") as f:
                     payload_data = json.load(f)
             except FileNotFoundError as exc:
                 click.echo(f"Error: Payload file not found: {payload_path}", err=True)

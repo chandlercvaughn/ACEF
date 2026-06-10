@@ -8,26 +8,18 @@ M-VERIFY-5: Variant registry conformance tests
 
 from __future__ import annotations
 
-import io
-import json
 import tarfile
 from pathlib import Path
 from typing import Any
 
-import pytest
-
-from acef.export import export_archive, export_directory
-from acef.integrity import compute_content_hashes
-from acef.loader import load
+from acef.export import export_archive
 from acef.models.records import RecordEnvelope
 from acef.package import Package
 from acef.records_util import compute_shard_boundaries, sort_records
 from acef.schemas.registry import load_variant_registry, resolve_variant
 from acef.validation.operators import op_exists_where
 from acef.validation.schema_validator import validate_record_schemas
-
 from tests.conformance.conftest import build_minimal_package
-
 
 # --- M-VERIFY-2: Shard boundary tests ------------------------------------
 
@@ -193,13 +185,8 @@ class TestNegativePayloadSchemaValidation:
         record = self._make_record("event_log", {"description": "missing event_type"})
         diagnostics = validate_record_schemas([record])
         # Filter to payload-level ACEF-004 (not envelope-level)
-        payload_004 = [
-            d for d in diagnostics
-            if d.code == "ACEF-004" and "payload" in d.message.lower()
-        ]
-        assert len(payload_004) > 0, (
-            "event_log without event_type must produce payload ACEF-004"
-        )
+        payload_004 = [d for d in diagnostics if d.code == "ACEF-004" and "payload" in d.message.lower()]
+        assert len(payload_004) > 0, "event_log without event_type must produce payload ACEF-004"
 
     def test_transparency_marking_without_modality_fails_acef_004(self) -> None:
         """transparency_marking payload without 'modality' must produce ACEF-004."""
@@ -214,13 +201,8 @@ class TestNegativePayloadSchemaValidation:
             },
         )
         diagnostics = validate_record_schemas([record])
-        payload_004 = [
-            d for d in diagnostics
-            if d.code == "ACEF-004" and "payload" in d.message.lower()
-        ]
-        assert len(payload_004) > 0, (
-            "transparency_marking without modality must produce payload ACEF-004"
-        )
+        payload_004 = [d for d in diagnostics if d.code == "ACEF-004" and "payload" in d.message.lower()]
+        assert len(payload_004) > 0, "transparency_marking without modality must produce payload ACEF-004"
 
     def test_transparency_marking_without_marking_scheme_id_fails_acef_004(self) -> None:
         """transparency_marking without 'marking_scheme_id' must produce ACEF-004."""
@@ -235,13 +217,8 @@ class TestNegativePayloadSchemaValidation:
             },
         )
         diagnostics = validate_record_schemas([record])
-        payload_004 = [
-            d for d in diagnostics
-            if d.code == "ACEF-004" and "payload" in d.message.lower()
-        ]
-        assert len(payload_004) > 0, (
-            "transparency_marking without marking_scheme_id must produce payload ACEF-004"
-        )
+        payload_004 = [d for d in diagnostics if d.code == "ACEF-004" and "payload" in d.message.lower()]
+        assert len(payload_004) > 0, "transparency_marking without marking_scheme_id must produce payload ACEF-004"
 
     def test_disclosure_labeling_without_disclosure_subtype_fails_acef_004(self) -> None:
         """disclosure_labeling without 'disclosure_subtype' must produce ACEF-004."""
@@ -257,25 +234,22 @@ class TestNegativePayloadSchemaValidation:
             },
         )
         diagnostics = validate_record_schemas([record])
-        payload_004 = [
-            d for d in diagnostics
-            if d.code == "ACEF-004" and "payload" in d.message.lower()
-        ]
-        assert len(payload_004) > 0, (
-            "disclosure_labeling without disclosure_subtype must produce payload ACEF-004"
-        )
+        payload_004 = [d for d in diagnostics if d.code == "ACEF-004" and "payload" in d.message.lower()]
+        assert len(payload_004) > 0, "disclosure_labeling without disclosure_subtype must produce payload ACEF-004"
 
     def test_valid_event_log_passes(self) -> None:
         """A valid event_log record should not produce any ACEF-004."""
-        record = self._make_record("event_log", {
-            "event_type": "inference",
-            "description": "Test event",
-        })
+        record = self._make_record(
+            "event_log",
+            {
+                "event_type": "inference",
+                "description": "Test event",
+            },
+        )
         diagnostics = validate_record_schemas([record])
         acef_004 = [d for d in diagnostics if d.code == "ACEF-004"]
         assert len(acef_004) == 0, (
-            f"Valid event_log should not produce ACEF-004, got: "
-            f"{[(d.code, d.message) for d in acef_004]}"
+            f"Valid event_log should not produce ACEF-004, got: {[(d.code, d.message) for d in acef_004]}"
         )
 
 
@@ -305,10 +279,7 @@ class TestVariantRegistryConformance:
         variants = load_variant_registry("v1")
         for entry in variants:
             rt = entry["record_type"]
-            assert rt in RECORD_TYPES, (
-                f"Variant {entry['artifact_name']!r} references unknown "
-                f"record_type {rt!r}"
-            )
+            assert rt in RECORD_TYPES, f"Variant {entry['artifact_name']!r} references unknown record_type {rt!r}"
 
     def test_variant_discriminator_fields_are_json_pointers(self) -> None:
         """Every discriminator_field must be a valid JSON Pointer (starts with /)."""
@@ -316,8 +287,7 @@ class TestVariantRegistryConformance:
         for entry in variants:
             field = entry["discriminator_field"]
             assert field.startswith("/"), (
-                f"Variant {entry['artifact_name']!r} discriminator_field "
-                f"{field!r} is not a valid JSON Pointer"
+                f"Variant {entry['artifact_name']!r} discriminator_field {field!r} is not a valid JSON Pointer"
             )
 
     def test_exists_where_matches_variant_discriminator(self) -> None:
@@ -388,7 +358,5 @@ class TestVariantRegistryConformance:
         variants = load_variant_registry("v1")
         for entry in variants:
             resolved = resolve_variant(entry["artifact_name"], "v1")
-            assert resolved is not None, (
-                f"Variant {entry['artifact_name']!r} failed to resolve"
-            )
+            assert resolved is not None, f"Variant {entry['artifact_name']!r} failed to resolve"
             assert resolved["record_type"] == entry["record_type"]

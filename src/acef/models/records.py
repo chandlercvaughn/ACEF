@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from pydantic import Field, ValidationError
@@ -64,7 +64,7 @@ class RecordEnvelope(ACEFBaseModel):
     record_id: str = Field(default_factory=lambda: generate_urn(URNType.RECORD))
     record_type: str
     provisions_addressed: list[str] = Field(default_factory=list)
-    timestamp: str = Field(default_factory=lambda: datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))
+    timestamp: str = Field(default_factory=lambda: datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"))
     lifecycle_phase: LifecyclePhase | None = None
     collector: CollectorInfo | dict[str, str] | None = None
     obligation_role: ObligationRole | None = None

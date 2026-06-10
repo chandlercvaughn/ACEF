@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from acef.integrity import canonicalize, sha256_hex
-from acef.models.enums import Confidentiality, ObligationRole
-from acef.models.records import EntityRefs, RecordEnvelope
+from acef.models.enums import Confidentiality
+from acef.models.records import RecordEnvelope
 from acef.package import Package
 from acef.redaction import redact_package, redact_record, verify_redaction
 

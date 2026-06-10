@@ -5,8 +5,9 @@ from __future__ import annotations
 import pytest
 
 from acef.errors import ACEFSchemaError
-from acef.models.entities import Component, Dataset, Actor, Relationship
+from acef.models.entities import Actor, Component, Dataset, Relationship
 from acef.models.enums import (
+    RECORD_TYPES,
     ActorRole,
     ComponentType,
     Confidentiality,
@@ -14,14 +15,13 @@ from acef.models.enums import (
     DatasetSourceType,
     LifecyclePhase,
     ObligationRole,
-    RECORD_TYPES,
     RelationshipType,
     RiskClassification,
     SubjectType,
     TrustLevel,
 )
 from acef.models.manifest import Manifest, ProfileEntry
-from acef.models.records import EntityRefs, RecordEnvelope
+from acef.models.records import RecordEnvelope
 from acef.models.subjects import Subject
 from acef.models.urns import validate_urn
 from acef.package import Package

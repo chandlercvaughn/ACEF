@@ -4,12 +4,10 @@ from __future__ import annotations
 
 from acef.models.assessment import (
     AssessmentBundle,
-    Assessor,
-    EvidenceBundleRef,
     ProvisionSummary,
     RuleResult,
 )
-from acef.models.entities import Actor, Component, Dataset, DatasetSize, EntitiesBlock, Relationship
+from acef.models.entities import Actor, Component, Dataset, DatasetSize
 from acef.models.enums import (
     ActorRole,
     ComponentType,
@@ -19,16 +17,15 @@ from acef.models.enums import (
     LifecyclePhase,
     ObligationRole,
     ProvisionOutcome,
-    RelationshipType,
     RiskClassification,
     RuleOutcome,
     RuleSeverity,
     SubjectType,
     TrustLevel,
 )
-from acef.models.manifest import AuditTrailEntry, Manifest, ProfileEntry, RecordFileEntry
-from acef.models.metadata import PackageMetadata, ProducerInfo, RetentionPolicy, Versioning
-from acef.models.records import AttachmentRef, Attestation, CollectorInfo, EntityRefs, RecordEnvelope
+from acef.models.manifest import Manifest, RecordFileEntry
+from acef.models.metadata import PackageMetadata, ProducerInfo, RetentionPolicy
+from acef.models.records import EntityRefs, RecordEnvelope
 from acef.models.subjects import LifecycleEntry, Subject
 from acef.models.urns import validate_urn
 
@@ -193,8 +190,7 @@ class TestManifest:
         m = Manifest(
             metadata=pm,
             subjects=[Subject(subject_type=SubjectType.AI_SYSTEM, name="Test")],
-            record_files=[RecordFileEntry(path="records/risk_register.jsonl",
-                                          record_type="risk_register", count=1)],
+            record_files=[RecordFileEntry(path="records/risk_register.jsonl", record_type="risk_register", count=1)],
         )
         d = m.to_dict()
         assert "metadata" in d
@@ -229,15 +225,18 @@ class TestAssessmentBundle:
         ab = AssessmentBundle(
             provision_summary=[
                 ProvisionSummary(
-                    provision_id="art-9", profile_id="eu-ai-act",
+                    provision_id="art-9",
+                    profile_id="eu-ai-act",
                     provision_outcome=ProvisionOutcome.SATISFIED,
                 ),
                 ProvisionSummary(
-                    provision_id="art-10", profile_id="eu-ai-act",
+                    provision_id="art-10",
+                    profile_id="eu-ai-act",
                     provision_outcome=ProvisionOutcome.NOT_SATISFIED,
                 ),
                 ProvisionSummary(
-                    provision_id="art-11", profile_id="eu-ai-act",
+                    provision_id="art-11",
+                    profile_id="eu-ai-act",
                     provision_outcome=ProvisionOutcome.GAP_ACKNOWLEDGED,
                 ),
             ],
@@ -252,13 +251,17 @@ class TestAssessmentBundle:
             structural_errors=[{"code": "ACEF-002", "message": "Schema fail"}],
             results=[
                 RuleResult(
-                    rule_id="r1", provision_id="p1", profile_id="pr1",
+                    rule_id="r1",
+                    provision_id="p1",
+                    profile_id="pr1",
                     rule_severity=RuleSeverity.FAIL,
                     outcome=RuleOutcome.FAILED,
                     message="Missing evidence",
                 ),
                 RuleResult(
-                    rule_id="r2", provision_id="p1", profile_id="pr1",
+                    rule_id="r2",
+                    provision_id="p1",
+                    profile_id="pr1",
                     rule_severity=RuleSeverity.WARNING,
                     outcome=RuleOutcome.PASSED,
                 ),

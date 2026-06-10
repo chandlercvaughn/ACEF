@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import json
 import threading
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -101,9 +101,7 @@ class TestLoaderMissingRecordFile:
             "subjects": [],
             "entities": {"components": [], "datasets": [], "actors": [], "relationships": []},
             "profiles": [],
-            "record_files": [
-                {"path": "records/risk_register.jsonl", "record_type": "risk_register", "count": 1}
-            ],
+            "record_files": [{"path": "records/risk_register.jsonl", "record_type": "risk_register", "count": 1}],
             "audit_trail": [],
         }
         (bundle / "acef-manifest.json").write_text(json.dumps(manifest))
@@ -182,10 +180,12 @@ class TestModelExports:
 
     def test_actor_role_importable(self) -> None:
         from acef.models import ActorRole
+
         assert hasattr(ActorRole, "PROVIDER")
 
     def test_audit_event_type_importable(self) -> None:
         from acef.models import AuditEventType
+
         assert hasattr(AuditEventType, "CREATED")
 
 
@@ -240,26 +240,39 @@ class TestTimestampValidationInRecord:
     def test_valid_timestamps_accepted(self) -> None:
         pkg = Package()
         # Valid ISO 8601 timestamps
-        pkg.record("risk_register", payload={"description": "t", "likelihood": "low", "severity": "low"},
-                    timestamp="2025-06-01T00:00:00Z")
-        pkg.record("risk_register", payload={"description": "t", "likelihood": "low", "severity": "low"},
-                    timestamp="2025-06-01T12:30:00+05:30")
-        pkg.record("risk_register", payload={"description": "t", "likelihood": "low", "severity": "low"},
-                    timestamp="2025-06-01T00:00:00+00:00")
+        pkg.record(
+            "risk_register",
+            payload={"description": "t", "likelihood": "low", "severity": "low"},
+            timestamp="2025-06-01T00:00:00Z",
+        )
+        pkg.record(
+            "risk_register",
+            payload={"description": "t", "likelihood": "low", "severity": "low"},
+            timestamp="2025-06-01T12:30:00+05:30",
+        )
+        pkg.record(
+            "risk_register",
+            payload={"description": "t", "likelihood": "low", "severity": "low"},
+            timestamp="2025-06-01T00:00:00+00:00",
+        )
         assert len(pkg.records) == 3
 
     def test_invalid_timestamp_rejected(self) -> None:
         pkg = Package()
         with pytest.raises(ACEFError) as exc_info:
-            pkg.record("risk_register", payload={"description": "t", "likelihood": "low", "severity": "low"},
-                        timestamp="not-an-iso-timestamp")
+            pkg.record(
+                "risk_register",
+                payload={"description": "t", "likelihood": "low", "severity": "low"},
+                timestamp="not-an-iso-timestamp",
+            )
         assert exc_info.value.code == "ACEF-050"
 
     def test_garbage_timestamp_rejected(self) -> None:
         pkg = Package()
         with pytest.raises(ACEFError) as exc_info:
-            pkg.record("risk_register", payload={"description": "t", "likelihood": "low", "severity": "low"},
-                        timestamp="zzz")
+            pkg.record(
+                "risk_register", payload={"description": "t", "likelihood": "low", "severity": "low"}, timestamp="zzz"
+            )
         assert exc_info.value.code == "ACEF-050"
 
     def test_no_timestamp_uses_default(self) -> None:

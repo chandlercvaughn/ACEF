@@ -5,10 +5,8 @@ Generates Markdown and console-formatted compliance reports from Assessment Bund
 
 from __future__ import annotations
 
-
 from acef.models.assessment import AssessmentBundle
 from acef.models.enums import ProvisionOutcome, RuleOutcome
-
 
 # Outcome display mapping
 _OUTCOME_SYMBOLS = {

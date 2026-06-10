@@ -267,9 +267,9 @@ def export_archive(package: Package, output_path: str) -> Path:
                 #   [4:8]=mtime, [8]=xfl, [9]=OS
                 # Python sets OS to platform default; deterministic archives
                 # MUST use 0xFF.
-                with open(str(staging), "r+b") as f:
-                    f.seek(9)
-                    f.write(b"\xff")
+                with open(str(staging), "r+b") as gz:
+                    gz.seek(9)
+                    gz.write(b"\xff")
 
                 # os.replace is atomic on POSIX and Windows when source and
                 # destination are on the same filesystem (which they are

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from pydantic import Field
@@ -75,10 +75,8 @@ class AssessmentBundle(ACEFBaseModel):
 
     versioning: AssessmentVersioning = Field(default_factory=AssessmentVersioning)
     assessment_id: str = Field(default_factory=lambda: generate_urn(URNType.ASSESSMENT))
-    timestamp: str = Field(default_factory=lambda: datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))
-    evaluation_instant: str = Field(
-        default_factory=lambda: datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    )
+    timestamp: str = Field(default_factory=lambda: datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"))
+    evaluation_instant: str = Field(default_factory=lambda: datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"))
     assessor: Assessor = Field(default_factory=Assessor)
     evidence_bundle_ref: EvidenceBundleRef = Field(default_factory=EvidenceBundleRef)
     profiles_evaluated: list[str] = Field(default_factory=list)
@@ -115,11 +113,13 @@ class AssessmentBundle(ACEFBaseModel):
         result: list[dict[str, Any]] = list(self.structural_errors)
         for r in self.results:
             if r.outcome == RuleOutcome.FAILED:
-                result.append({
-                    "rule_id": r.rule_id,
-                    "provision_id": r.provision_id,
-                    "severity": r.rule_severity.value,
-                    "outcome": r.outcome.value,
-                    "message": r.message,
-                })
+                result.append(
+                    {
+                        "rule_id": r.rule_id,
+                        "provision_id": r.provision_id,
+                        "severity": r.rule_severity.value,
+                        "outcome": r.outcome.value,
+                        "message": r.message,
+                    }
+                )
         return result

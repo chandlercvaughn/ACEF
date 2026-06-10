@@ -260,7 +260,7 @@ def _parse_jsonl(path: Path) -> list[dict[str, Any]]:
         ACEFFormatError: If a line is not valid JSON.
     """
     records: list[dict[str, Any]] = []
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         for line_num, line in enumerate(f, 1):
             line = line.strip()
             if not line:
@@ -379,9 +379,15 @@ def _load_directory(bundle_dir: Path) -> Package:
 
     # Parse subjects
     subjects: list[Subject] = []
-    _SUBJECT_KNOWN = {
-        "subject_id", "subject_type", "name", "version", "provider",
-        "risk_classification", "modalities", "lifecycle_phase",
+    subject_known = {
+        "subject_id",
+        "subject_type",
+        "name",
+        "version",
+        "provider",
+        "risk_classification",
+        "modalities",
+        "lifecycle_phase",
         "lifecycle_timeline",
     }
     for sub_data in manifest_data.get("subjects", []):
@@ -396,7 +402,7 @@ def _load_directory(bundle_dir: Path) -> Package:
             modalities=sub_data.get("modalities", []),
             lifecycle_phase=sub_data.get("lifecycle_phase", "development"),
             lifecycle_timeline=timeline,
-            **_extras(sub_data, _SUBJECT_KNOWN),
+            **_extras(sub_data, subject_known),
         )
         subjects.append(subject)
 
@@ -404,7 +410,7 @@ def _load_directory(bundle_dir: Path) -> Package:
     entities_raw = manifest_data.get("entities", {})
     entities = EntitiesBlock()
 
-    _COMPONENT_KNOWN = {"component_id", "name", "type", "version", "subject_refs", "provider"}
+    component_known = {"component_id", "name", "type", "version", "subject_refs", "provider"}
     for comp_data in entities_raw.get("components", []):
         comp = Component(
             component_id=comp_data.get("component_id", ""),
@@ -413,11 +419,11 @@ def _load_directory(bundle_dir: Path) -> Package:
             version=comp_data.get("version", "1.0.0"),
             subject_refs=comp_data.get("subject_refs", []),
             provider=comp_data.get("provider", ""),
-            **_extras(comp_data, _COMPONENT_KNOWN),
+            **_extras(comp_data, component_known),
         )
         entities.components.append(comp)
 
-    _DATASET_KNOWN = {"dataset_id", "name", "version", "source_type", "modality", "size", "subject_refs"}
+    dataset_known = {"dataset_id", "name", "version", "source_type", "modality", "size", "subject_refs"}
     for ds_data in entities_raw.get("datasets", []):
         ds = Dataset(
             dataset_id=ds_data.get("dataset_id", ""),
@@ -427,29 +433,29 @@ def _load_directory(bundle_dir: Path) -> Package:
             modality=ds_data.get("modality", "text"),
             size=ds_data.get("size", {"records": 0, "size_gb": 0.0}),
             subject_refs=ds_data.get("subject_refs", []),
-            **_extras(ds_data, _DATASET_KNOWN),
+            **_extras(ds_data, dataset_known),
         )
         entities.datasets.append(ds)
 
-    _ACTOR_KNOWN = {"actor_id", "role", "name", "organization"}
+    actor_known = {"actor_id", "role", "name", "organization"}
     for act_data in entities_raw.get("actors", []):
         actor = Actor(
             actor_id=act_data.get("actor_id", ""),
             role=act_data.get("role", "provider"),
             name=act_data.get("name", ""),
             organization=act_data.get("organization", ""),
-            **_extras(act_data, _ACTOR_KNOWN),
+            **_extras(act_data, actor_known),
         )
         entities.actors.append(actor)
 
-    _REL_KNOWN = {"source_ref", "target_ref", "relationship_type", "description"}
+    rel_known = {"source_ref", "target_ref", "relationship_type", "description"}
     for rel_data in entities_raw.get("relationships", []):
         rel = Relationship(
             source_ref=rel_data.get("source_ref", ""),
             target_ref=rel_data.get("target_ref", ""),
             relationship_type=rel_data.get("relationship_type", "calls"),
             description=rel_data.get("description", ""),
-            **_extras(rel_data, _REL_KNOWN),
+            **_extras(rel_data, rel_known),
         )
         entities.relationships.append(rel)
 
@@ -526,12 +532,11 @@ def _load_directory(bundle_dir: Path) -> Package:
                 cumulative_artifact_size += file_size
                 if cumulative_artifact_size > _MAX_TOTAL_ARTIFACT_SIZE:
                     raise ACEFFormatError(
-                        f"Cumulative artifact size exceeds 10 GB limit: "
-                        f"{cumulative_artifact_size} bytes",
+                        f"Cumulative artifact size exceeds 10 GB limit: {cumulative_artifact_size} bytes",
                         code="ACEF-050",
                     )
-                rel = file_path.relative_to(bundle_dir).as_posix()
-                attachments[rel] = file_path.read_bytes()
+                rel_path = file_path.relative_to(bundle_dir).as_posix()
+                attachments[rel_path] = file_path.read_bytes()
 
     # Construct Package via the public classmethod (M-ARCH-1)
     return Package._init_from_parts(

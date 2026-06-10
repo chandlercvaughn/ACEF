@@ -8,14 +8,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from acef.integrity import canonicalize, sha256_hex
 from acef.loader import load
 from acef.models.enums import Confidentiality
-from acef.package import Package
 from acef.redaction import redact_package, redact_record, verify_redaction
-
 from tests.conformance.conftest import build_minimal_package
 
 
@@ -44,9 +40,7 @@ class TestRedaction:
         redacted = redact_record(original)
 
         commitment = redacted.payload.get("_commitment", "")
-        assert commitment.startswith("sha256:"), (
-            f"Commitment must start with 'sha256:', got: {commitment}"
-        )
+        assert commitment.startswith("sha256:"), f"Commitment must start with 'sha256:', got: {commitment}"
 
         # Verify the hash matches
         payload_canonical = canonicalize(original.payload)
@@ -97,19 +91,13 @@ class TestRedaction:
         assert len(rr_records) > 0
 
         for rr in rr_records:
-            assert rr.payload.get("_redacted") is True, (
-                "Redacted record must have _redacted=True after round-trip"
-            )
+            assert rr.payload.get("_redacted") is True, "Redacted record must have _redacted=True after round-trip"
             # Verify commitment still valid against original
             original_pl = original_payloads.get(rr.record_id)
             if original_pl:
-                assert verify_redaction(rr, original_pl) is True, (
-                    "Hash commitment must still verify after round-trip"
-                )
+                assert verify_redaction(rr, original_pl) is True, "Hash commitment must still verify after round-trip"
 
         # Non-redacted records should be unmodified
         eval_records = [r for r in loaded.records if r.record_type == "evaluation_report"]
         for er in eval_records:
-            assert er.payload.get("_redacted") is not True, (
-                "Non-redacted records must not have _redacted flag"
-            )
+            assert er.payload.get("_redacted") is not True, "Non-redacted records must not have _redacted flag"

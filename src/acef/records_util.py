@@ -61,9 +61,8 @@ def compute_shard_boundaries(records: list[RecordEnvelope]) -> list[list[RecordE
         data = rec.to_jsonl_dict()
         rec_size = len(canonicalize_record(data)) + 1
 
-        should_split = (
-            len(current_shard) >= _SHARD_RECORD_LIMIT
-            or (current_size + rec_size > _SHARD_SIZE_LIMIT and current_shard)
+        should_split = len(current_shard) >= _SHARD_RECORD_LIMIT or (
+            current_size + rec_size > _SHARD_SIZE_LIMIT and current_shard
         )
 
         if should_split:

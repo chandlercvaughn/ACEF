@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from pydantic import Field
 
@@ -35,7 +35,7 @@ class PackageMetadata(ACEFBaseModel):
     """Package-level metadata for an ACEF Evidence Bundle."""
 
     package_id: str = Field(default_factory=lambda: generate_urn(URNType.PACKAGE))
-    timestamp: str = Field(default_factory=lambda: datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))
+    timestamp: str = Field(default_factory=lambda: datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"))
     producer: ProducerInfo
     prior_package_ref: str | None = None
     retention_policy: RetentionPolicy | None = None

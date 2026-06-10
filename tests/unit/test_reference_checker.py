@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 from acef.validation.reference_checker import check_references
@@ -37,32 +36,36 @@ class TestDanglingEntityRefs:
         manifest = _make_manifest(
             subjects=[{"subject_id": "urn:acef:sub:00000000-0000-0000-0000-000000000001"}],
         )
-        records = [{
-            "record_id": "urn:acef:rec:00000000-0000-0000-0000-000000000001",
-            "record_type": "risk_register",
-            "entity_refs": {
-                "subject_refs": ["urn:acef:sub:00000000-0000-0000-0000-000000000001"],
-                "component_refs": [],
-                "dataset_refs": [],
-                "actor_refs": [],
-            },
-        }]
+        records = [
+            {
+                "record_id": "urn:acef:rec:00000000-0000-0000-0000-000000000001",
+                "record_type": "risk_register",
+                "entity_refs": {
+                    "subject_refs": ["urn:acef:sub:00000000-0000-0000-0000-000000000001"],
+                    "component_refs": [],
+                    "dataset_refs": [],
+                    "actor_refs": [],
+                },
+            }
+        ]
         diags = check_references(manifest, records)
         acef_020 = [d for d in diags if d.code == "ACEF-020"]
         assert len(acef_020) == 0
 
     def test_dangling_subject_ref(self):
         manifest = _make_manifest()
-        records = [{
-            "record_id": "urn:acef:rec:00000000-0000-0000-0000-000000000001",
-            "record_type": "risk_register",
-            "entity_refs": {
-                "subject_refs": ["urn:acef:sub:99999999-9999-9999-9999-999999999999"],
-                "component_refs": [],
-                "dataset_refs": [],
-                "actor_refs": [],
-            },
-        }]
+        records = [
+            {
+                "record_id": "urn:acef:rec:00000000-0000-0000-0000-000000000001",
+                "record_type": "risk_register",
+                "entity_refs": {
+                    "subject_refs": ["urn:acef:sub:99999999-9999-9999-9999-999999999999"],
+                    "component_refs": [],
+                    "dataset_refs": [],
+                    "actor_refs": [],
+                },
+            }
+        ]
         diags = check_references(manifest, records)
         acef_020 = [d for d in diags if d.code == "ACEF-020"]
         assert len(acef_020) >= 1
@@ -70,11 +73,13 @@ class TestDanglingEntityRefs:
     def test_dangling_relationship_ref(self):
         manifest = _make_manifest(
             subjects=[{"subject_id": "urn:acef:sub:00000000-0000-0000-0000-000000000001"}],
-            relationships=[{
-                "source_ref": "urn:acef:sub:00000000-0000-0000-0000-000000000001",
-                "target_ref": "urn:acef:sub:99999999-9999-9999-9999-999999999999",
-                "relationship_type": "wraps",
-            }],
+            relationships=[
+                {
+                    "source_ref": "urn:acef:sub:00000000-0000-0000-0000-000000000001",
+                    "target_ref": "urn:acef:sub:99999999-9999-9999-9999-999999999999",
+                    "relationship_type": "wraps",
+                }
+            ],
         )
         diags = check_references(manifest, [])
         acef_020 = [d for d in diags if d.code == "ACEF-020"]
@@ -113,11 +118,13 @@ class TestMissingRecordFiles:
 
     def test_missing_record_file(self, tmp_dir: Path):
         manifest = _make_manifest(
-            record_files=[{
-                "path": "records/risk_register.jsonl",
-                "record_type": "risk_register",
-                "count": 1,
-            }],
+            record_files=[
+                {
+                    "path": "records/risk_register.jsonl",
+                    "record_type": "risk_register",
+                    "count": 1,
+                }
+            ],
         )
         # Don't create the file
         diags = check_references(manifest, [], bundle_dir=tmp_dir)
@@ -130,11 +137,13 @@ class TestMissingRecordFiles:
         (records_dir / "risk_register.jsonl").write_text("{}\n", encoding="utf-8")
 
         manifest = _make_manifest(
-            record_files=[{
-                "path": "records/risk_register.jsonl",
-                "record_type": "risk_register",
-                "count": 1,
-            }],
+            record_files=[
+                {
+                    "path": "records/risk_register.jsonl",
+                    "record_type": "risk_register",
+                    "count": 1,
+                }
+            ],
         )
         diags = check_references(manifest, [{"record_type": "risk_register"}], bundle_dir=tmp_dir)
         acef_022 = [d for d in diags if d.code == "ACEF-022"]
@@ -158,10 +167,16 @@ class TestDuplicateRecordIDs:
     def test_unique_record_ids(self):
         manifest = _make_manifest()
         records = [
-            {"record_id": "urn:acef:rec:00000000-0000-0000-0000-000000000001",
-             "record_type": "risk_register", "entity_refs": {}},
-            {"record_id": "urn:acef:rec:00000000-0000-0000-0000-000000000002",
-             "record_type": "risk_register", "entity_refs": {}},
+            {
+                "record_id": "urn:acef:rec:00000000-0000-0000-0000-000000000001",
+                "record_type": "risk_register",
+                "entity_refs": {},
+            },
+            {
+                "record_id": "urn:acef:rec:00000000-0000-0000-0000-000000000002",
+                "record_type": "risk_register",
+                "entity_refs": {},
+            },
         ]
         diags = check_references(manifest, records)
         acef_026 = [d for d in diags if d.code == "ACEF-026"]
@@ -173,32 +188,30 @@ class TestRecordCountMismatches:
 
     def test_count_mismatch(self):
         manifest = _make_manifest(
-            record_files=[{
-                "path": "records/risk_register.jsonl",
-                "record_type": "risk_register",
-                "count": 5,
-            }],
+            record_files=[
+                {
+                    "path": "records/risk_register.jsonl",
+                    "record_type": "risk_register",
+                    "count": 5,
+                }
+            ],
         )
-        records = [
-            {"record_type": "risk_register", "record_id": f"rec-{i}", "entity_refs": {}}
-            for i in range(3)
-        ]
+        records = [{"record_type": "risk_register", "record_id": f"rec-{i}", "entity_refs": {}} for i in range(3)]
         diags = check_references(manifest, records)
         acef_025 = [d for d in diags if d.code == "ACEF-025"]
         assert len(acef_025) >= 1
 
     def test_count_matches(self):
         manifest = _make_manifest(
-            record_files=[{
-                "path": "records/risk_register.jsonl",
-                "record_type": "risk_register",
-                "count": 2,
-            }],
+            record_files=[
+                {
+                    "path": "records/risk_register.jsonl",
+                    "record_type": "risk_register",
+                    "count": 2,
+                }
+            ],
         )
-        records = [
-            {"record_type": "risk_register", "record_id": f"rec-{i}", "entity_refs": {}}
-            for i in range(2)
-        ]
+        records = [{"record_type": "risk_register", "record_id": f"rec-{i}", "entity_refs": {}} for i in range(2)]
         diags = check_references(manifest, records)
         acef_025 = [d for d in diags if d.code == "ACEF-025"]
         assert len(acef_025) == 0
@@ -209,12 +222,14 @@ class TestComponentSubjectRefs:
 
     def test_dangling_component_subject_ref(self):
         manifest = _make_manifest(
-            components=[{
-                "component_id": "urn:acef:cmp:00000000-0000-0000-0000-000000000001",
-                "name": "Model",
-                "type": "model",
-                "subject_refs": ["urn:acef:sub:99999999-9999-9999-9999-999999999999"],
-            }],
+            components=[
+                {
+                    "component_id": "urn:acef:cmp:00000000-0000-0000-0000-000000000001",
+                    "name": "Model",
+                    "type": "model",
+                    "subject_refs": ["urn:acef:sub:99999999-9999-9999-9999-999999999999"],
+                }
+            ],
         )
         diags = check_references(manifest, [])
         acef_020 = [d for d in diags if d.code == "ACEF-020"]

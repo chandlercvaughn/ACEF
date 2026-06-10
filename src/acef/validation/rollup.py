@@ -45,10 +45,7 @@ def compute_provision_outcome(
     # standard ACEF conformance. Pull such rules out of the rollup —
     # they remain visible in assessment.results[] for informational
     # purposes but cannot drive provision_outcome.
-    provision_results = [
-        r for r in rule_results
-        if r.provision_id == provision_id and not r.rule_id.startswith("x-")
-    ]
+    provision_results = [r for r in rule_results if r.provision_id == provision_id and not r.rule_id.startswith("x-")]
 
     # Count by outcome and severity
     fail_count = 0

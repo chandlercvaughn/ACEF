@@ -15,8 +15,7 @@ from acef.loader import load
     "fmt",
     default=None,
     type=click.Choice(["directory", "archive"]),
-    help="Output format. If omitted, inferred from output_path suffix "
-    "(.tar.gz → archive, anything else → directory).",
+    help="Output format. If omitted, inferred from output_path suffix (.tar.gz → archive, anything else → directory).",
 )
 @click.option("--sign", "key_path", default=None, help="Path to PEM private key for signing")
 def export_cmd(input_path: str, output_path: str, fmt: str | None, key_path: str | None) -> None:

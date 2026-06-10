@@ -7,15 +7,10 @@ on round-trip and don't affect conformance outcomes.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
-
-import pytest
 
 from acef.loader import load
-from acef.models.enums import ProvisionOutcome
 from acef.package import Package
 from acef.validation.engine import validate_bundle
-
 from tests.conformance.conftest import build_minimal_package
 
 
@@ -43,8 +38,10 @@ class TestExtensionHandling:
         # Build package WITH extension record
         pkg_ext = Package(producer={"name": "test", "version": "1.0.0"})
         system = pkg_ext.add_subject(
-            "ai_system", name="Test Sys",
-            risk_classification="high-risk", modalities=["text"],
+            "ai_system",
+            name="Test Sys",
+            risk_classification="high-risk",
+            modalities=["text"],
         )
         pkg_ext.add_profile("eu-ai-act-2024", provisions=["article-9"])
         pkg_ext.record(
@@ -71,8 +68,10 @@ class TestExtensionHandling:
         pkg_no_ext = Package(producer={"name": "test", "version": "1.0.0"})
         # Need to match timestamps and IDs for fair comparison
         system2 = pkg_no_ext.add_subject(
-            "ai_system", name="Test Sys",
-            risk_classification="high-risk", modalities=["text"],
+            "ai_system",
+            name="Test Sys",
+            risk_classification="high-risk",
+            modalities=["text"],
         )
         pkg_no_ext.add_profile("eu-ai-act-2024", provisions=["article-9"])
         pkg_no_ext.record(
@@ -94,22 +93,12 @@ class TestExtensionHandling:
         pkg_no_ext.export(str(dir_no_ext))
 
         eval_instant = "2027-01-01T00:00:00Z"
-        assessment_ext = validate_bundle(
-            dir_ext, profiles=["eu-ai-act-2024"], evaluation_instant=eval_instant
-        )
-        assessment_no_ext = validate_bundle(
-            dir_no_ext, profiles=["eu-ai-act-2024"], evaluation_instant=eval_instant
-        )
+        assessment_ext = validate_bundle(dir_ext, profiles=["eu-ai-act-2024"], evaluation_instant=eval_instant)
+        assessment_no_ext = validate_bundle(dir_no_ext, profiles=["eu-ai-act-2024"], evaluation_instant=eval_instant)
 
         # The provision outcomes for article-9 should be the same
-        ext_outcomes = {
-            s.provision_id: s.provision_outcome
-            for s in assessment_ext.provision_summary
-        }
-        no_ext_outcomes = {
-            s.provision_id: s.provision_outcome
-            for s in assessment_no_ext.provision_summary
-        }
+        ext_outcomes = {s.provision_id: s.provision_outcome for s in assessment_ext.provision_summary}
+        no_ext_outcomes = {s.provision_id: s.provision_outcome for s in assessment_no_ext.provision_summary}
 
         for prov_id in no_ext_outcomes:
             if prov_id in ext_outcomes:
@@ -138,9 +127,7 @@ class TestExtensionHandling:
         pkg.export(str(bundle_dir))
         loaded = load(str(bundle_dir))
 
-        ext_record = next(
-            (r for r in loaded.records if r.record_type == "risk_register"), None
-        )
+        ext_record = next((r for r in loaded.records if r.record_type == "risk_register"), None)
         assert ext_record is not None
         assert ext_record.payload.get("x-vendor-rating") == "AAA"
         assert ext_record.payload.get("x-internal-notes") == "This is a vendor extension field"
@@ -165,7 +152,5 @@ class TestExtensionHandling:
         pkg.export(str(bundle_dir))
         loaded = load(str(bundle_dir))
 
-        ext_types = sorted(
-            r.record_type for r in loaded.records if r.record_type.startswith("x-")
-        )
+        ext_types = sorted(r.record_type for r in loaded.records if r.record_type.startswith("x-"))
         assert ext_types == ["x-audit-log", "x-custom-check", "x-vendor-score"]

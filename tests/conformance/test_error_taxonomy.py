@@ -13,15 +13,10 @@ from typing import Any
 import pytest
 
 from acef.errors import (
-    ACEFError,
-    ACEFEvaluationError,
     ACEFFormatError,
-    ACEFIntegrityError,
     ACEFMergeError,
-    ACEFProfileError,
     ACEFSchemaError,
     ACEFSigningError,
-    ERROR_REGISTRY,
 )
 from acef.integrity import canonicalize
 from acef.loader import load
@@ -30,7 +25,6 @@ from acef.validation.engine import validate_bundle
 from acef.validation.integrity_checker import check_integrity
 from acef.validation.reference_checker import check_references
 from acef.validation.schema_validator import validate_manifest_schema, validate_record_schemas
-
 from tests.conformance.conftest import build_minimal_package
 
 
@@ -63,8 +57,7 @@ class TestACEF003UnknownRecordType:
             "provisions_addressed": [],
             "confidentiality": "public",
             "trust_level": "self-attested",
-            "entity_refs": {"subject_refs": [], "component_refs": [],
-                            "dataset_refs": [], "actor_refs": []},
+            "entity_refs": {"subject_refs": [], "component_refs": [], "dataset_refs": [], "actor_refs": []},
             "payload": {"foo": "bar"},
         }
         diagnostics = validate_record_schemas([record])
@@ -90,8 +83,7 @@ class TestACEF004PayloadSchemaViolation:
             "provisions_addressed": ["article-9"],
             "confidentiality": "public",
             "trust_level": "self-attested",
-            "entity_refs": {"subject_refs": [], "component_refs": [],
-                            "dataset_refs": [], "actor_refs": []},
+            "entity_refs": {"subject_refs": [], "component_refs": [], "dataset_refs": [], "actor_refs": []},
             "payload": {},  # Missing required fields
         }
         diagnostics = validate_record_schemas([record])
@@ -176,10 +168,10 @@ class TestACEF013UnsupportedAlgorithm:
 
     def test_signing_module_rejects_unsupported_key_type(self) -> None:
         """The signing module raises ACEF-013 for unsupported key types."""
-        from acef.signing import _detect_algorithm
-
         # EdDSA key (Ed25519) is not RS256/ES256
         from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+        from acef.signing import _detect_algorithm
 
         ed_key = Ed25519PrivateKey.generate()
         with pytest.raises(ACEFSigningError) as exc_info:
@@ -222,9 +214,7 @@ class TestACEF020DanglingRef:
         bundle_dir = tmp_dir / "acef020"
         pkg.export(str(bundle_dir))
 
-        manifest_data = json.loads(
-            (bundle_dir / "acef-manifest.json").read_text(encoding="utf-8")
-        )
+        manifest_data = json.loads((bundle_dir / "acef-manifest.json").read_text(encoding="utf-8"))
         # Inject a record with a dangling ref
         records_data: list[dict[str, Any]] = []
         for rf in manifest_data.get("record_files", []):
@@ -235,19 +225,21 @@ class TestACEF020DanglingRef:
                         records_data.append(json.loads(line))
 
         # Add a fake record with dangling ref
-        records_data.append({
-            "record_id": "urn:acef:rec:99999999-9999-9999-9999-999999999999",
-            "record_type": "risk_register",
-            "timestamp": "2025-06-01T00:00:00Z",
-            "provisions_addressed": [],
-            "entity_refs": {
-                "subject_refs": ["urn:acef:sub:NONEXISTENT-0000-0000-0000-000000000000"],
-                "component_refs": [],
-                "dataset_refs": [],
-                "actor_refs": [],
-            },
-            "payload": {"description": "dangling"},
-        })
+        records_data.append(
+            {
+                "record_id": "urn:acef:rec:99999999-9999-9999-9999-999999999999",
+                "record_type": "risk_register",
+                "timestamp": "2025-06-01T00:00:00Z",
+                "provisions_addressed": [],
+                "entity_refs": {
+                    "subject_refs": ["urn:acef:sub:NONEXISTENT-0000-0000-0000-000000000000"],
+                    "component_refs": [],
+                    "dataset_refs": [],
+                    "actor_refs": [],
+                },
+                "payload": {"description": "dangling"},
+            }
+        )
 
         diagnostics = check_references(manifest_data, records_data, bundle_dir)
         codes = [d.code for d in diagnostics]
@@ -262,9 +254,7 @@ class TestACEF021DuplicateURN:
         bundle_dir = tmp_dir / "acef021"
         pkg.export(str(bundle_dir))
 
-        manifest_data = json.loads(
-            (bundle_dir / "acef-manifest.json").read_text(encoding="utf-8")
-        )
+        manifest_data = json.loads((bundle_dir / "acef-manifest.json").read_text(encoding="utf-8"))
         # Duplicate a subject URN
         if manifest_data.get("subjects"):
             dup = dict(manifest_data["subjects"][0])
@@ -291,9 +281,7 @@ class TestACEF022MissingRecordFile:
         bundle_dir = tmp_dir / "acef022"
         pkg.export(str(bundle_dir))
 
-        manifest_data = json.loads(
-            (bundle_dir / "acef-manifest.json").read_text(encoding="utf-8")
-        )
+        manifest_data = json.loads((bundle_dir / "acef-manifest.json").read_text(encoding="utf-8"))
         # Delete the actual record file
         for rf in manifest_data.get("record_files", []):
             rf_path = bundle_dir / rf["path"]
@@ -319,9 +307,7 @@ class TestACEF023MissingAttachment:
         if att_file.exists():
             att_file.unlink()
 
-        manifest_data = json.loads(
-            (bundle_dir / "acef-manifest.json").read_text(encoding="utf-8")
-        )
+        manifest_data = json.loads((bundle_dir / "acef-manifest.json").read_text(encoding="utf-8"))
         records_data: list[dict[str, Any]] = []
         for rf in manifest_data.get("record_files", []):
             rf_path = bundle_dir / rf["path"]
@@ -343,9 +329,7 @@ class TestACEF025RecordCountMismatch:
         bundle_dir = tmp_dir / "acef025"
         pkg.export(str(bundle_dir))
 
-        manifest_data = json.loads(
-            (bundle_dir / "acef-manifest.json").read_text(encoding="utf-8")
-        )
+        manifest_data = json.loads((bundle_dir / "acef-manifest.json").read_text(encoding="utf-8"))
         # Inflate the expected count
         if manifest_data.get("record_files"):
             manifest_data["record_files"][0]["count"] = 999
@@ -371,9 +355,7 @@ class TestACEF026DuplicateRecordId:
         bundle_dir = tmp_dir / "acef026"
         pkg.export(str(bundle_dir))
 
-        manifest_data = json.loads(
-            (bundle_dir / "acef-manifest.json").read_text(encoding="utf-8")
-        )
+        manifest_data = json.loads((bundle_dir / "acef-manifest.json").read_text(encoding="utf-8"))
         records_data: list[dict[str, Any]] = []
         for rf in manifest_data.get("record_files", []):
             rf_path = bundle_dir / rf["path"]
@@ -404,11 +386,7 @@ class TestACEF027AttachmentHashMismatch:
         pkg.export(str(bundle_dir))
 
         # Read the manifest and content-hashes
-        manifest_data = json.loads(
-            (bundle_dir / "acef-manifest.json").read_text(encoding="utf-8")
-        )
-        content_hashes_path = bundle_dir / "hashes" / "content-hashes.json"
-        content_hashes = json.loads(content_hashes_path.read_text(encoding="utf-8"))
+        manifest_data = json.loads((bundle_dir / "acef-manifest.json").read_text(encoding="utf-8"))
 
         # Read existing records
         records_data: list[dict[str, Any]] = []
@@ -437,9 +415,7 @@ class TestACEF027AttachmentHashMismatch:
 
         diagnostics = check_references(manifest_data, records_data, bundle_dir)
         codes = [d.code for d in diagnostics]
-        assert "ACEF-027" in codes, (
-            f"Expected ACEF-027 for hash mismatch, got codes: {codes}"
-        )
+        assert "ACEF-027" in codes, f"Expected ACEF-027 for hash mismatch, got codes: {codes}"
 
 
 class TestACEF030TemplateNotFound:
@@ -461,9 +437,7 @@ class TestACEF030TemplateNotFound:
         )
 
         structural_codes = [e.get("code", "") for e in assessment.structural_errors]
-        assert "ACEF-030" in structural_codes, (
-            f"Expected ACEF-030 for missing template, got codes: {structural_codes}"
-        )
+        assert "ACEF-030" in structural_codes, f"Expected ACEF-030 for missing template, got codes: {structural_codes}"
 
 
 class TestACEF044DuplicateRuleIds:
@@ -474,7 +448,6 @@ class TestACEF044DuplicateRuleIds:
 
     def test_duplicate_rule_ids_produces_acef_044(self, tmp_dir: Path) -> None:
         """A template with duplicate rule_ids produces ACEF-044 diagnostic."""
-        import tempfile
 
         from acef.templates.models import EvaluationRule, Provision, Template
 
@@ -512,10 +485,7 @@ class TestACEF044DuplicateRuleIds:
         )
 
         # Write template to templates directory temporarily
-        template_path = (
-            Path(__file__).parent.parent.parent
-            / "src" / "acef" / "templates" / "test-dup-rules.json"
-        )
+        template_path = Path(__file__).parent.parent.parent / "src" / "acef" / "templates" / "test-dup-rules.json"
         template_path.write_text(template.model_dump_json(indent=2), encoding="utf-8")
 
         try:
@@ -556,9 +526,7 @@ class TestACEF060MergeDuplicateSubjects:
 
         assert result.has_conflicts
         conflict_codes = [c.code for c in result.conflicts]
-        assert "ACEF-060" in conflict_codes, (
-            f"Expected ACEF-060 for duplicate subjects, got codes: {conflict_codes}"
-        )
+        assert "ACEF-060" in conflict_codes, f"Expected ACEF-060 for duplicate subjects, got codes: {conflict_codes}"
 
     def test_merge_fail_strategy_raises_acef_060(self) -> None:
         """Merging with fail strategy raises ACEFMergeError(ACEF-060) on duplicate subjects."""

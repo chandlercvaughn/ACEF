@@ -9,20 +9,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
-
 from acef.integrity import (
-    build_merkle_tree,
     canonicalize,
-    compute_content_hashes,
-    sha256_hex,
     verify_content_hashes,
-    verify_merkle_root,
 )
-from acef.loader import load
 from acef.validation.engine import validate_bundle
 from acef.validation.integrity_checker import check_integrity
-
 from tests.conformance.conftest import build_minimal_package
 
 
@@ -38,8 +30,7 @@ class TestIntegrity:
         diagnostics = check_integrity(bundle_dir)
         integrity_errors = [d for d in diagnostics if d.code in ("ACEF-010", "ACEF-011", "ACEF-014")]
         assert len(integrity_errors) == 0, (
-            f"Valid bundle should have no integrity errors, got: "
-            f"{[(d.code, d.message) for d in integrity_errors]}"
+            f"Valid bundle should have no integrity errors, got: {[(d.code, d.message) for d in integrity_errors]}"
         )
 
     def test_tampered_manifest_produces_acef_010(self, tmp_dir: Path) -> None:
@@ -94,9 +85,7 @@ class TestIntegrity:
 
         diagnostics = check_integrity(bundle_dir)
         acef_014_errors = [d for d in diagnostics if d.code == "ACEF-014"]
-        assert len(acef_014_errors) > 0, (
-            "Missing file listed in content-hashes.json must produce ACEF-014"
-        )
+        assert len(acef_014_errors) > 0, "Missing file listed in content-hashes.json must produce ACEF-014"
 
     def test_extra_file_not_in_content_hashes_produces_acef_014(self, tmp_dir: Path) -> None:
         """Adding a file to the hash domain without updating content-hashes.json triggers ACEF-014."""
@@ -132,31 +121,23 @@ class TestIntegrity:
 
     def test_content_hashes_cover_manifest_and_records(self, tmp_dir: Path) -> None:
         """content-hashes.json must include entries for manifest and all record files."""
-        pkg = build_minimal_package(
-            record_types=["risk_register", "risk_treatment", "evaluation_report"]
-        )
+        pkg = build_minimal_package(record_types=["risk_register", "risk_treatment", "evaluation_report"])
         bundle_dir = tmp_dir / "hash_coverage"
         pkg.export(str(bundle_dir))
 
         ch_path = bundle_dir / "hashes" / "content-hashes.json"
         content_hashes = json.loads(ch_path.read_text(encoding="utf-8"))
 
-        assert "acef-manifest.json" in content_hashes, (
-            "content-hashes.json must include acef-manifest.json"
-        )
+        assert "acef-manifest.json" in content_hashes, "content-hashes.json must include acef-manifest.json"
 
         record_files = list((bundle_dir / "records").rglob("*.jsonl"))
         for rf in record_files:
             rel = rf.relative_to(bundle_dir).as_posix()
-            assert rel in content_hashes, (
-                f"content-hashes.json must include record file {rel}"
-            )
+            assert rel in content_hashes, f"content-hashes.json must include record file {rel}"
 
     def test_merkle_tree_structure_valid(self, tmp_dir: Path) -> None:
         """Merkle tree has correct structure with leaves and root."""
-        pkg = build_minimal_package(
-            record_types=["risk_register", "risk_treatment"]
-        )
+        pkg = build_minimal_package(record_types=["risk_register", "risk_treatment"])
         bundle_dir = tmp_dir / "merkle_structure"
         pkg.export(str(bundle_dir))
 
@@ -191,10 +172,7 @@ class TestIntegrity:
         pkg.export(str(bundle_dir))
 
         assessment = validate_bundle(bundle_dir)
-        integrity_errors = [
-            e for e in assessment.structural_errors
-            if e.get("code", "").startswith("ACEF-01")
-        ]
+        integrity_errors = [e for e in assessment.structural_errors if e.get("code", "").startswith("ACEF-01")]
         assert len(integrity_errors) == 0, (
             f"Valid bundle should have no integrity structural errors, got: {integrity_errors}"
         )

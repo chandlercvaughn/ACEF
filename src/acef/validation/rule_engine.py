@@ -7,8 +7,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from acef.models.enums import RuleOutcome, RuleSeverity
 from acef.models.assessment import RuleResult
+from acef.models.enums import RuleOutcome, RuleSeverity
 from acef.models.records import RecordEnvelope
 from acef.templates.models import EvaluationRule, Provision
 from acef.validation.operators import OPERATOR_REGISTRY
@@ -117,6 +117,7 @@ def evaluate_rules_for_subject(
         provision_effective = True
         if provision.effective_date and evaluation_instant:
             from acef.validation.engine import _is_before
+
             provision_effective = not _is_before(evaluation_instant, provision.effective_date)
 
         # Expand required_evidence_types to has_record_type rules if no evaluation rules exist
@@ -207,10 +208,7 @@ def _evaluate_single_rule(
                 subject_scope=[subject_id] if subject_id else [],
             )
 
-    filtered_records = [
-        r for r in records
-        if _matches_scope(r, scope_dict, subject_modalities=subject_modalities)
-    ]
+    filtered_records = [r for r in records if _matches_scope(r, scope_dict, subject_modalities=subject_modalities)]
 
     # If subject_id is specified, further filter to records that explicitly
     # reference THIS subject. Spec §3.7 evaluates per-subject by default;
@@ -221,8 +219,7 @@ def _evaluate_single_rule(
     # intended for the whole package.
     if subject_id:
         filtered_records = [
-            r for r in filtered_records
-            if r.entity_refs.subject_refs and subject_id in r.entity_refs.subject_refs
+            r for r in filtered_records if r.entity_refs.subject_refs and subject_id in r.entity_refs.subject_refs
         ]
 
     # Look up operator

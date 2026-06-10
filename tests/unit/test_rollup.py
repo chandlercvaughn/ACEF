@@ -101,11 +101,15 @@ class TestProvisionRollup:
         """Evidence refs from all rules are collected and deduplicated."""
         results = [
             _rule_result(
-                RuleOutcome.PASSED, RuleSeverity.FAIL, rule_id="r1",
+                RuleOutcome.PASSED,
+                RuleSeverity.FAIL,
+                rule_id="r1",
                 evidence_refs=["rec-1", "rec-2"],
             ),
             _rule_result(
-                RuleOutcome.PASSED, RuleSeverity.FAIL, rule_id="r2",
+                RuleOutcome.PASSED,
+                RuleSeverity.FAIL,
+                rule_id="r2",
                 evidence_refs=["rec-2", "rec-3"],
             ),
         ]
@@ -116,7 +120,10 @@ class TestProvisionRollup:
         """Subject scope is passed through to the summary."""
         results = [_rule_result(RuleOutcome.PASSED)]
         summary = compute_provision_outcome(
-            "prov-1", "test-profile", results, [],
+            "prov-1",
+            "test-profile",
+            results,
+            [],
             subject_scope=["urn:acef:sub:00000000-0000-0000-0000-000000000001"],
         )
         assert summary.subject_scope == ["urn:acef:sub:00000000-0000-0000-0000-000000000001"]

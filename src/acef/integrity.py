@@ -17,7 +17,6 @@ from typing import Any
 
 import rfc8785
 
-
 # Chunk size for streaming binary file hashing (64 KB)
 _HASH_CHUNK_SIZE = 65536
 
@@ -206,22 +205,19 @@ def sha256_jsonl_file(path: Path) -> str:
             )
         if line != line.strip():
             raise ACEFCanonicalizationError(
-                f"JSONL line {line_number} has leading or trailing whitespace "
-                f"(forbidden by spec §3.1.3 #2): {path}",
+                f"JSONL line {line_number} has leading or trailing whitespace (forbidden by spec §3.1.3 #2): {path}",
                 path=path,
             )
         if unicodedata.normalize("NFC", line) != line:
             raise ACEFCanonicalizationError(
-                f"JSONL line {line_number} is not UTF-8 NFC normalized "
-                f"(spec §3.1.3 #1): {path}",
+                f"JSONL line {line_number} is not UTF-8 NFC normalized (spec §3.1.3 #1): {path}",
                 path=path,
             )
         try:
             data = json.loads(line)
         except json.JSONDecodeError as exc:
             raise ACEFCanonicalizationError(
-                f"JSONL line {line_number} is not valid JSON (spec §3.1.3 #2): "
-                f"{path}: {exc}",
+                f"JSONL line {line_number} is not valid JSON (spec §3.1.3 #2): {path}: {exc}",
                 path=path,
             ) from exc
         canonical = canonicalize(data)
@@ -263,8 +259,7 @@ def compute_content_hashes(bundle_dir: Path) -> dict[str, str]:
         """
         if file_path.is_symlink():
             raise ACEFCanonicalizationError(
-                f"Symlink in bundle hash domain (forbidden by spec §3.1.1): "
-                f"{file_path}",
+                f"Symlink in bundle hash domain (forbidden by spec §3.1.1): {file_path}",
                 path=file_path,
             )
         if not file_path.is_file():
@@ -408,7 +403,7 @@ def verify_merkle_root(content_hashes: dict[str, str], expected_root: str) -> bo
         True if the Merkle root matches.
     """
     tree = build_merkle_tree(content_hashes)
-    return tree["root"] == expected_root
+    return bool(tree["root"] == expected_root)
 
 
 def compute_bundle_digest(content_hashes: dict[str, str]) -> str:

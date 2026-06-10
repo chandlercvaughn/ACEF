@@ -3,10 +3,7 @@
 from __future__ import annotations
 
 import json
-import tempfile
 from pathlib import Path
-
-import pytest
 
 import acef
 from acef.integrity import compute_bundle_digest, compute_content_hashes
@@ -73,7 +70,7 @@ class TestEndToEndBundleFlow:
     def test_multiple_record_types(self, tmp_dir: Path) -> None:
         """Bundle with multiple record types exports correctly."""
         pkg = Package(producer={"name": "test", "version": "1.0"})
-        system = pkg.add_subject("ai_system", name="Test")
+        pkg.add_subject("ai_system", name="Test")
 
         pkg.record("risk_register", payload={"description": "R1"})
         pkg.record("risk_treatment", payload={"treatment_type": "mitigate"})
@@ -104,11 +101,13 @@ class TestEndToEndBundleFlow:
         pkg.record(
             "evaluation_report",
             payload={"methodology": "test"},
-            attachments=[{
-                "path": "artifacts/eval-report.pdf",
-                "media_type": "application/pdf",
-                "description": "Test report",
-            }],
+            attachments=[
+                {
+                    "path": "artifacts/eval-report.pdf",
+                    "media_type": "application/pdf",
+                    "description": "Test report",
+                }
+            ],
         )
 
         bundle_dir = tmp_dir / "with_attachments.acef"
@@ -222,11 +221,15 @@ class TestMerge:
         """Merge two packages into one."""
         pkg1 = Package(producer={"name": "tool1", "version": "1.0"})
         s1 = pkg1.add_subject("ai_system", name="System A")
-        pkg1.record("risk_register", provisions=["article-9"], payload={"desc": "R1"}, entity_refs={"subject_refs": [s1.id]})
+        pkg1.record(
+            "risk_register", provisions=["article-9"], payload={"desc": "R1"}, entity_refs={"subject_refs": [s1.id]}
+        )
 
         pkg2 = Package(producer={"name": "tool2", "version": "1.0"})
         s2 = pkg2.add_subject("ai_model", name="Model B")
-        pkg2.record("dataset_card", provisions=["article-10"], payload={"name": "DS"}, entity_refs={"subject_refs": [s2.id]})
+        pkg2.record(
+            "dataset_card", provisions=["article-10"], payload={"name": "DS"}, entity_refs={"subject_refs": [s2.id]}
+        )
 
         result = acef.merge_packages([pkg1, pkg2])
         assert not result.has_conflicts
@@ -262,4 +265,5 @@ class TestRedaction:
 
         # Verify hash commitment
         from acef.redaction import verify_redaction
+
         assert verify_redaction(redacted_rec, original_payload)

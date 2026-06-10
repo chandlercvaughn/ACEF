@@ -4,13 +4,17 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 import click
 
 from acef.templates.registry import list_templates, load_template
 
+if TYPE_CHECKING:
+    from acef.templates.models import Template
 
-def _scaffold_to_dict(template: "Template") -> dict:  # type: ignore[name-defined]
+
+def _scaffold_to_dict(template: Template) -> dict[str, Any]:
     """Build a machine-readable scaffold of a template's provisions."""
     return {
         "template_id": template.template_id,

@@ -13,23 +13,13 @@ from __future__ import annotations
 
 import tempfile
 from pathlib import Path
-from typing import Any
 
 import pytest
 
-from acef.models.entities import Actor, Component, Dataset, EntitiesBlock
 from acef.models.enums import (
-    ActorRole,
-    ComponentType,
-    DatasetModality,
-    DatasetSourceType,
-    LifecyclePhase,
     ObligationRole,
-    RiskClassification,
-    SubjectType,
 )
 from acef.models.records import EntityRefs, RecordEnvelope
-from acef.models.subjects import Subject
 from acef.package import Package
 
 
@@ -95,7 +85,7 @@ def full_package() -> Package:
         version="3.1.0",
         subject_refs=[system.id],
     )
-    guardrail = pkg.add_component(
+    pkg.add_component(
         name="Safety Filter",
         type="guardrail",
         version="1.4.0",
@@ -112,7 +102,7 @@ def full_package() -> Package:
     )
 
     # Actors
-    actor = pkg.add_actor(name="Jane Smith", role="provider", organization="Acme AI Corp")
+    pkg.add_actor(name="Jane Smith", role="provider", organization="Acme AI Corp")
 
     # Relationships
     pkg.add_relationship(system.id, model.id, "wraps")

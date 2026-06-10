@@ -40,6 +40,7 @@ dev = [
     "hypothesis>=6.100",
     "mypy>=1.8",
     "ruff>=0.3",
+    "types-jsonschema>=4.21",
 ]
 
 [project.scripts]
@@ -79,6 +80,13 @@ line-length = 120
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "N", "UP"]
+# UP042 suggests rewriting `class X(str, Enum)` as `class X(StrEnum)`. That is a
+# BEHAVIOR change, not a style fix: `str(SomeEnum.MEMBER)` and `f"{SomeEnum.MEMBER}"`
+# yield "X.MEMBER" under `(str, Enum)` but the bare value under `StrEnum`. ACEF's
+# enums deliberately use `(str, Enum)` for JSON value-equality while retaining the
+# qualified repr in diagnostics; converting them would alter serialized/error output
+# and break byte-determinism against the frozen golden bundles. Keep it ignored.
+ignore = ["UP042"]
 
 [tool.mypy]
 python_version = "3.11"

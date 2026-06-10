@@ -28,7 +28,6 @@ from acef.loader import load
 from acef.validation.authority_matrix import all_cells
 from acef.validation.engine import validate_bundle
 
-
 # ---------------------------------------------------------------------------
 # Bundle construction helpers (self-contained; mirrors the unit-test helpers
 # so the conformance suite is not coupled to the unit suite).

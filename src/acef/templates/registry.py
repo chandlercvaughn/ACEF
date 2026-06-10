@@ -37,7 +37,7 @@ def _load_template_cached(template_id: str) -> Template:
         )
 
     try:
-        with open(template_file, "r", encoding="utf-8") as f:
+        with open(template_file, encoding="utf-8") as f:
             data = json.load(f)
     except json.JSONDecodeError as e:
         raise ACEFProfileError(

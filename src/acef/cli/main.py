@@ -44,15 +44,18 @@ def cli() -> None:
     pass
 
 
-# Import and register subcommands
-from acef.cli.init_cmd import init_cmd
-from acef.cli.validate_cmd import validate_cmd
-from acef.cli.verify_cmd import verify_cmd
-from acef.cli.export_cmd import export_cmd
-from acef.cli.inspect_cmd import inspect_cmd
-from acef.cli.record_cmd import record_cmd
-from acef.cli.scaffold_cmd import scaffold_cmd
-from acef.cli.doctor_cmd import doctor_cmd
+# Import and register subcommands. These imports are intentionally placed after
+# _force_utf8_streams() runs (above) so that any module-level console/encoding
+# setup in the subcommand modules observes the reconfigured UTF-8 streams.
+# E402 is suppressed for this deliberate ordering (spec §3.1.1 UTF-8 NFC output).
+from acef.cli.doctor_cmd import doctor_cmd  # noqa: E402
+from acef.cli.export_cmd import export_cmd  # noqa: E402
+from acef.cli.init_cmd import init_cmd  # noqa: E402
+from acef.cli.inspect_cmd import inspect_cmd  # noqa: E402
+from acef.cli.record_cmd import record_cmd  # noqa: E402
+from acef.cli.scaffold_cmd import scaffold_cmd  # noqa: E402
+from acef.cli.validate_cmd import validate_cmd  # noqa: E402
+from acef.cli.verify_cmd import verify_cmd  # noqa: E402
 
 cli.add_command(init_cmd, "init")
 cli.add_command(validate_cmd, "validate")

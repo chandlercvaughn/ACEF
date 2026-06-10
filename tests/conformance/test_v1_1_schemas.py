@@ -119,9 +119,7 @@ def test_delivery_verdict_verified_delivered_triple_requirement() -> None:
 def test_harness_attestation_verifier_class_excludes_persona_and_llm() -> None:
     """VAL-SCHEMA-005: verifier.verifier_class enum forbids 'persona' and 'llm'."""
     schema = _load("harness_attestation")
-    verifier_class_enum = (
-        schema["properties"]["verifier"]["properties"]["verifier_class"]["enum"]
-    )
+    verifier_class_enum = schema["properties"]["verifier"]["properties"]["verifier_class"]["enum"]
     assert "persona" not in verifier_class_enum
     assert "llm" not in verifier_class_enum
     assert "contract_gate" in verifier_class_enum
@@ -144,6 +142,4 @@ def test_assessment_bundle_v1_1_has_coverage_cell() -> None:
 def test_no_standalone_coverage_cell_schema_file() -> None:
     """VAL-SCHEMA-006: coverage_cell MUST NOT exist as a standalone record schema in v1.1/."""
     standalone = V1_1_DIR / "coverage_cell.schema.json"
-    assert not standalone.exists(), (
-        "coverage_cell must be defined inside assessment-bundle, not as standalone record"
-    )
+    assert not standalone.exists(), "coverage_cell must be defined inside assessment-bundle, not as standalone record"

@@ -18,7 +18,6 @@ part of the conformance tier.
 from __future__ import annotations
 
 import subprocess
-import tempfile
 from pathlib import Path
 
 import pytest
@@ -34,8 +33,7 @@ TS_CLI = REPO_ROOT / "packages" / "sdk-typescript" / "dist-test" / "test" / "jws
 def _skip_if_no_ts() -> None:
     if not TS_CLI.exists():
         pytest.skip(
-            f"TS jws-cli not built (run `cd packages/sdk-typescript && npm run build:test`). "
-            f"Looked for {TS_CLI}",
+            f"TS jws-cli not built (run `cd packages/sdk-typescript && npm run build:test`). Looked for {TS_CLI}",
         )
 
 

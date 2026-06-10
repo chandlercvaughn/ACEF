@@ -10,17 +10,11 @@ import json
 from pathlib import Path
 from typing import Any
 
-import pytest
-
 from acef.schemas.registry import (
-    validate_against_schema,
-    validate_manifest,
     validate_record_envelope,
-    validate_record_payload,
 )
 from acef.validation.engine import validate_bundle
 from acef.validation.schema_validator import validate_manifest_schema, validate_record_schemas
-
 from tests.conformance.conftest import build_minimal_package
 
 
@@ -102,8 +96,7 @@ class TestSchemaConformance:
         manifest = _build_schema_valid_manifest()
         diagnostics = validate_manifest_schema(manifest)
         assert len(diagnostics) == 0, (
-            f"Valid manifest should pass schema, got: "
-            f"{[(d.code, d.message) for d in diagnostics]}"
+            f"Valid manifest should pass schema, got: {[(d.code, d.message) for d in diagnostics]}"
         )
 
     def test_valid_record_payloads_pass_schema(self) -> None:
@@ -112,8 +105,7 @@ class TestSchemaConformance:
         diagnostics = validate_record_schemas([record])
         schema_errors = [d for d in diagnostics if d.code in ("ACEF-003", "ACEF-004")]
         assert len(schema_errors) == 0, (
-            f"Valid record should pass schema, got: "
-            f"{[(d.code, d.message) for d in schema_errors]}"
+            f"Valid record should pass schema, got: {[(d.code, d.message) for d in schema_errors]}"
         )
 
     def test_invalid_payload_fails_with_acef_004(self) -> None:
@@ -128,10 +120,7 @@ class TestSchemaConformance:
 
         diagnostics = validate_record_schemas([invalid_record])
         has_004 = any(d.code == "ACEF-004" for d in diagnostics)
-        assert has_004, (
-            "Payload missing required fields (risk_id, description, category) "
-            "should produce ACEF-004"
-        )
+        assert has_004, "Payload missing required fields (risk_id, description, category) should produce ACEF-004"
 
     def test_unknown_record_type_produces_acef_003(self) -> None:
         """A record with an unknown record_type (not x- extension) produces ACEF-003."""
@@ -148,9 +137,7 @@ class TestSchemaConformance:
 
         diagnostics = validate_manifest_schema(bad_manifest)
         has_002 = any(d.code == "ACEF-002" for d in diagnostics)
-        assert has_002, (
-            "Manifest missing required fields must produce ACEF-002"
-        )
+        assert has_002, "Manifest missing required fields must produce ACEF-002"
 
     def test_manifest_missing_metadata_produces_acef_002(self) -> None:
         """Manifest without metadata block produces ACEF-002."""
@@ -159,17 +146,13 @@ class TestSchemaConformance:
 
         diagnostics = validate_manifest_schema(bad_manifest)
         has_002 = any(d.code == "ACEF-002" for d in diagnostics)
-        assert has_002, (
-            "Manifest without metadata block must produce ACEF-002"
-        )
+        assert has_002, "Manifest without metadata block must produce ACEF-002"
 
     def test_valid_record_envelope_passes_schema(self) -> None:
         """A well-formed record envelope passes envelope schema validation."""
         valid_record = _build_schema_valid_record()
         errors = validate_record_envelope(valid_record)
-        assert len(errors) == 0, (
-            f"Valid record envelope should pass schema, got: {[str(e) for e in errors]}"
-        )
+        assert len(errors) == 0, f"Valid record envelope should pass schema, got: {[str(e) for e in errors]}"
 
     def test_full_validation_reports_schema_errors(self, tmp_dir: Path) -> None:
         """validate_bundle reports schema-related structural errors when manifest is invalid."""
@@ -184,10 +167,5 @@ class TestSchemaConformance:
         manifest_path.write_text(json.dumps(manifest_data), encoding="utf-8")
 
         assessment = validate_bundle(bundle_dir)
-        schema_errors = [
-            e for e in assessment.structural_errors
-            if e.get("code") == "ACEF-002"
-        ]
-        assert len(schema_errors) > 0, (
-            "Corrupted manifest should produce ACEF-002 in structural_errors"
-        )
+        schema_errors = [e for e in assessment.structural_errors if e.get("code") == "ACEF-002"]
+        assert len(schema_errors) > 0, "Corrupted manifest should produce ACEF-002 in structural_errors"

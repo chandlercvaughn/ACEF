@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from acef.models.enums import (
+    MANDATORY_RECORD_TYPES,
+    RECORD_TYPES,
     ActorRole,
     AuditEventType,
     ComponentType,
@@ -11,10 +13,8 @@ from acef.models.enums import (
     DatasetSourceType,
     EventType,
     LifecyclePhase,
-    MANDATORY_RECORD_TYPES,
     ObligationRole,
     ProvisionOutcome,
-    RECORD_TYPES,
     RelationshipType,
     RiskClassification,
     RuleOutcome,

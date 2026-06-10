@@ -6,14 +6,9 @@ using REAL exported bundles. Also verifies empty-set semantics.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
-from typing import Any
-
-import pytest
 
 from acef.loader import load
-from acef.models.enums import ObligationRole
 from acef.models.records import AttachmentRef, Attestation, RecordEnvelope
 from acef.package import Package
 from acef.validation.operators import (
@@ -29,7 +24,6 @@ from acef.validation.operators import (
     op_has_record_type,
     op_record_attested,
 )
-
 from tests.conformance.conftest import build_minimal_package
 
 
@@ -69,9 +63,7 @@ class TestFieldPresent:
     def test_pass_when_field_present(self, tmp_dir: Path) -> None:
         pkg = build_minimal_package(record_types=["risk_register"])
         records = _export_and_load_records(pkg, tmp_dir, "fp_pass")
-        passed, refs = op_field_present(
-            {"record_type": "risk_register", "field": "/payload/description"}, records
-        )
+        passed, refs = op_field_present({"record_type": "risk_register", "field": "/payload/description"}, records)
         assert passed is True
 
     def test_fail_when_field_missing(self, tmp_dir: Path) -> None:
@@ -84,9 +76,7 @@ class TestFieldPresent:
 
     def test_vacuous_pass_on_empty_set(self) -> None:
         """Universal operator on zero matching records must PASS (vacuous truth)."""
-        passed, refs = op_field_present(
-            {"record_type": "nonexistent_type", "field": "/payload/description"}, []
-        )
+        passed, refs = op_field_present({"record_type": "nonexistent_type", "field": "/payload/description"}, [])
         assert passed is True
         assert refs == []
 
@@ -170,17 +160,13 @@ class TestAttachmentExists:
     def test_pass_when_attachment_present(self, tmp_dir: Path) -> None:
         pkg = build_minimal_package(with_attachment=True)
         records = _export_and_load_records(pkg, tmp_dir, "ae_pass")
-        passed, refs = op_attachment_exists(
-            {"record_type": "evaluation_report"}, records
-        )
+        passed, refs = op_attachment_exists({"record_type": "evaluation_report"}, records)
         assert passed is True
 
     def test_fail_when_no_attachment(self, tmp_dir: Path) -> None:
         pkg = build_minimal_package(record_types=["risk_register"])
         records = _export_and_load_records(pkg, tmp_dir, "ae_fail")
-        passed, refs = op_attachment_exists(
-            {"record_type": "risk_register"}, records
-        )
+        passed, refs = op_attachment_exists({"record_type": "risk_register"}, records)
         assert passed is False
 
 
@@ -190,9 +176,7 @@ class TestEntityLinked:
     def test_pass_when_entity_linked(self, tmp_dir: Path) -> None:
         pkg = build_minimal_package(record_types=["risk_register"])
         records = _export_and_load_records(pkg, tmp_dir, "el_pass")
-        passed, refs = op_entity_linked(
-            {"record_type": "risk_register", "entity_type": "subject"}, records
-        )
+        passed, refs = op_entity_linked({"record_type": "risk_register", "entity_type": "subject"}, records)
         assert passed is True
 
     def test_fail_when_entity_not_linked(self, tmp_dir: Path) -> None:
@@ -206,15 +190,11 @@ class TestEntityLinked:
             # No entity_refs
         )
         records = _export_and_load_records(pkg, tmp_dir, "el_fail")
-        passed, refs = op_entity_linked(
-            {"record_type": "risk_register", "entity_type": "dataset"}, records
-        )
+        passed, refs = op_entity_linked({"record_type": "risk_register", "entity_type": "dataset"}, records)
         assert passed is False
 
     def test_vacuous_pass_on_empty_set(self) -> None:
-        passed, refs = op_entity_linked(
-            {"record_type": "nonexistent", "entity_type": "subject"}, []
-        )
+        passed, refs = op_entity_linked({"record_type": "nonexistent", "entity_type": "subject"}, [])
         assert passed is True
 
 
@@ -340,17 +320,13 @@ class TestRecordAttested:
                 signature="eyJhbGciOiJSUzI1NiJ9..fake",
             ),
         )
-        passed, refs = op_record_attested(
-            {"record_type": "conformity_declaration", "min_count": 1}, [record]
-        )
+        passed, refs = op_record_attested({"record_type": "conformity_declaration", "min_count": 1}, [record])
         assert passed is True
 
     def test_fail_when_not_attested(self, tmp_dir: Path) -> None:
         pkg = build_minimal_package(record_types=["risk_register"])
         records = _export_and_load_records(pkg, tmp_dir, "ra_fail")
-        passed, refs = op_record_attested(
-            {"record_type": "risk_register", "min_count": 1}, records
-        )
+        passed, refs = op_record_attested({"record_type": "risk_register", "min_count": 1}, records)
         assert passed is False
 
 

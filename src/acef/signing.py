@@ -14,9 +14,9 @@ from __future__ import annotations
 import base64
 import json
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from cryptography.exceptions import InvalidSignature, UnsupportedAlgorithm
 from cryptography.hazmat.primitives import hashes, serialization
@@ -150,8 +150,8 @@ def _cert_validity_covers(cert: Certificate, instant: datetime) -> tuple[bool, s
         not_after = cert.not_valid_after_utc
     except AttributeError:
         # Older cryptography versions exposed naive UTC datetimes.
-        not_before = cert.not_valid_before.replace(tzinfo=timezone.utc)
-        not_after = cert.not_valid_after.replace(tzinfo=timezone.utc)
+        not_before = cert.not_valid_before.replace(tzinfo=UTC)
+        not_after = cert.not_valid_after.replace(tzinfo=UTC)
     if instant < not_before:
         return False, f"certificate not yet valid (not_before={not_before.isoformat()})"
     if instant > not_after:
@@ -162,6 +162,11 @@ def _cert_validity_covers(cert: Certificate, instant: datetime) -> tuple[bool, s
 def _verify_cert_signed_by(child: Certificate, parent: Certificate) -> bool:
     """Verify ``child`` was signed by ``parent``'s public key."""
     parent_public_key = parent.public_key()
+    hash_algorithm = child.signature_hash_algorithm
+    if hash_algorithm is None:
+        # Certificates signed with algorithms that lack a hash (e.g. Ed25519)
+        # are not part of ACEF's RS256/ES256 chain model; treat as unverifiable.
+        return False
     try:
         # cryptography exposes algorithm-specific verify on each public key.
         if isinstance(parent_public_key, rsa.RSAPublicKey):
@@ -169,13 +174,13 @@ def _verify_cert_signed_by(child: Certificate, parent: Certificate) -> bool:
                 child.signature,
                 child.tbs_certificate_bytes,
                 padding.PKCS1v15(),
-                child.signature_hash_algorithm,
+                hash_algorithm,
             )
         elif isinstance(parent_public_key, ec.EllipticCurvePublicKey):
             parent_public_key.verify(
                 child.signature,
                 child.tbs_certificate_bytes,
-                ec.ECDSA(child.signature_hash_algorithm),
+                ec.ECDSA(hash_algorithm),
             )
         else:
             return False
@@ -247,7 +252,7 @@ def verify_x5c_chain(
                 code="ACEF-012",
             ) from exc
         if instant.tzinfo is None:
-            instant = instant.replace(tzinfo=timezone.utc)
+            instant = instant.replace(tzinfo=UTC)
         for idx, cert in enumerate(chain):
             ok, reason = _cert_validity_covers(cert, instant)
             if not ok:
@@ -336,10 +341,10 @@ def _derive_jwk(private_key: PrivateKeyTypes) -> dict[str, str]:
             "e": _base64url_encode(e_bytes),
         }
     elif isinstance(public_key, ec.EllipticCurvePublicKey):
-        public_numbers = public_key.public_numbers()
+        ec_public_numbers = public_key.public_numbers()
         # For P-256, coordinates are 32 bytes each
-        x_bytes = public_numbers.x.to_bytes(32, byteorder="big")
-        y_bytes = public_numbers.y.to_bytes(32, byteorder="big")
+        x_bytes = ec_public_numbers.x.to_bytes(32, byteorder="big")
+        y_bytes = ec_public_numbers.y.to_bytes(32, byteorder="big")
         return {
             "kty": "EC",
             "crv": "P-256",
@@ -402,8 +407,8 @@ def _load_public_key_from_jwk(jwk: dict[str, Any]) -> PublicKeyTypes:
         y_bytes = _base64url_decode(y_b64)
         x = int.from_bytes(x_bytes, byteorder="big")
         y = int.from_bytes(y_bytes, byteorder="big")
-        public_numbers = ec.EllipticCurvePublicNumbers(x=x, y=y, curve=ec.SECP256R1())
-        return public_numbers.public_key()
+        ec_public_numbers = ec.EllipticCurvePublicNumbers(x=x, y=y, curve=ec.SECP256R1())
+        return ec_public_numbers.public_key()
 
     else:
         raise ACEFSigningError(
@@ -519,9 +524,11 @@ def verify_detached_jws(
     header_b64 = parts[0]
     sig_b64 = parts[2]
 
-    # Decode header
+    # Decode header. json.loads is typed to return Any; a JWS protected header
+    # is a JSON object, so we narrow the type with cast (no runtime change — the
+    # subsequent dict access preserves the pre-existing behavior for any input).
     try:
-        header = json.loads(_base64url_decode(header_b64))
+        header = cast("dict[str, Any]", json.loads(_base64url_decode(header_b64)))
     except (json.JSONDecodeError, ValueError, UnicodeDecodeError) as e:
         raise ACEFSigningError(f"Invalid JWS header: {e}", code="ACEF-012") from e
 

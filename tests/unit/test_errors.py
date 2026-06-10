@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from acef.errors import (
+    ERROR_REGISTRY,
     ACEFError,
     ACEFEvaluationError,
     ACEFExportError,
@@ -15,7 +16,6 @@ from acef.errors import (
     ACEFReferenceError,
     ACEFSchemaError,
     ACEFSigningError,
-    ERROR_REGISTRY,
     ErrorCategory,
     Severity,
     ValidationDiagnostic,

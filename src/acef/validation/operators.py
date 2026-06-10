@@ -12,10 +12,11 @@ import re
 import signal
 import sys
 import threading
+from collections.abc import Callable
 from datetime import datetime, timedelta
-from typing import Any, Callable
+from typing import Any
 
-import jsonpointer
+import jsonpointer  # type: ignore[import-untyped]  # no published stubs / py.typed (no types-jsonpointer on PyPI)
 
 from acef.errors import ACEFEvaluationError
 from acef.models.records import RecordEnvelope
@@ -52,7 +53,10 @@ _NON_ECMA262_CONSTRUCTS = (
     # Python-only named backreference
     (re.compile(r"\(\?P="), "Python-only named-backreference (?P=name) — ECMA-262 uses \\k<name>"),
     # Inline flags / scoped flags — ECMA-262 has no in-pattern flag syntax
-    (re.compile(r"\(\?[aiLmsux]+(?:-[aiLmsux]+)?[:\)]"), "Python-only inline flag syntax — ECMA-262 has no in-pattern flags"),
+    (
+        re.compile(r"\(\?[aiLmsux]+(?:-[aiLmsux]+)?[:\)]"),
+        "Python-only inline flag syntax — ECMA-262 has no in-pattern flags",
+    ),
     # Comment groups
     (re.compile(r"\(\?#"), "Python-only comment group (?#...) — not part of ECMA-262"),
     # Possessive quantifiers added in Python 3.11 are NOT in ECMA-262
@@ -77,8 +81,7 @@ def _validate_ecma262_compatible(pattern: str) -> None:
     for compiled_check, message in _NON_ECMA262_CONSTRUCTS:
         if compiled_check.search(pattern):
             raise ACEFEvaluationError(
-                f"Regex pattern is not valid ECMA-262: {message}. "
-                f"Pattern: {pattern!r}",
+                f"Regex pattern is not valid ECMA-262: {message}. Pattern: {pattern!r}",
                 code="ACEF-045",
             )
 
@@ -112,17 +115,14 @@ def _safe_regex_search(pattern: str, text: str) -> bool:
 
     if len(text) > _MAX_REGEX_INPUT_LENGTH:
         raise ACEFEvaluationError(
-            f"Input string exceeds maximum length for regex matching "
-            f"({len(text)} > {_MAX_REGEX_INPUT_LENGTH})",
+            f"Input string exceeds maximum length for regex matching ({len(text)} > {_MAX_REGEX_INPUT_LENGTH})",
             code="ACEF-045",
         )
 
     # On Unix, use SIGALRM for timeout protection against catastrophic backtracking.
     # M-SCOUT-1: SIGALRM only works in the main thread of the main interpreter.
     use_alarm = (
-        hasattr(signal, "SIGALRM")
-        and sys.platform != "win32"
-        and threading.current_thread() is threading.main_thread()
+        hasattr(signal, "SIGALRM") and sys.platform != "win32" and threading.current_thread() is threading.main_thread()
     )
 
     if use_alarm:
@@ -212,27 +212,27 @@ def _compare(actual: Any, op: str, expected: Any) -> bool:
         return op == "ne"
 
     if op == "eq":
-        return actual == expected
+        return bool(actual == expected)
     elif op == "ne":
-        return actual != expected
+        return bool(actual != expected)
     elif op == "gt":
         try:
-            return actual > expected
+            return bool(actual > expected)
         except TypeError:
             return False
     elif op == "gte":
         try:
-            return actual >= expected
+            return bool(actual >= expected)
         except TypeError:
             return False
     elif op == "lt":
         try:
-            return actual < expected
+            return bool(actual < expected)
         except TypeError:
             return False
     elif op == "lte":
         try:
-            return actual <= expected
+            return bool(actual <= expected)
         except TypeError:
             return False
     elif op == "in":
@@ -257,8 +257,6 @@ def _compare(actual: Any, op: str, expected: Any) -> bool:
 def _filter_by_type(records: list[RecordEnvelope], record_type: str) -> list[RecordEnvelope]:
     """Filter records by record_type."""
     return [r for r in records if r.record_type == record_type]
-
-
 
 
 # --- Operator implementations ---

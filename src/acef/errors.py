@@ -238,7 +238,7 @@ class ACEFSigningError(ACEFError):
     code = "ACEF-012"
 
 
-class LoadRejection(ACEFError):
+class LoadRejection(ACEFError):  # noqa: N818  # public API name: a load-time "rejection" verdict, not an *Error-suffixed exception (VAL-LOAD-001..005; referenced widely)
     """Bundle rejected at load time per VAL-LOAD-001..004.
 
     Carries the ACEF-NNN code that names the rule violated. The caller MUST

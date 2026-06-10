@@ -139,7 +139,7 @@ def load_schema(schema_name: str, version: str = "v1") -> dict[str, Any]:
             continue
 
         try:
-            with open(schema_file, "r", encoding="utf-8") as f:
+            with open(schema_file, encoding="utf-8") as f:
                 return json.load(f)  # type: ignore[no-any-return]
         except json.JSONDecodeError as e:
             raise ACEFSchemaError(
@@ -228,7 +228,7 @@ def load_variant_registry(version: str = "v1") -> list[dict[str, str]]:
         if not registry_file.exists():
             continue
 
-        with open(registry_file, "r", encoding="utf-8") as f:
+        with open(registry_file, encoding="utf-8") as f:
             data = json.load(f)
 
         for entry in data.get("variants", []):

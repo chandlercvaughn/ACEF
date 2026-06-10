@@ -16,6 +16,8 @@ Usage:
     pkg2 = acef.load("output.acef/")
 """
 
+from typing import Any
+
 from acef._version import __version__
 from acef.assessment_builder import export_assessment, validate
 from acef.loader import load
@@ -31,7 +33,7 @@ from acef.signing import (
 )
 
 
-def chain(prior_bundle_path: str, **kwargs) -> Package:
+def chain(prior_bundle_path: str, **kwargs: Any) -> Package:
     """Create a new package chained to a prior Evidence Bundle.
 
     Computes the bundle digest of the prior bundle and sets it as

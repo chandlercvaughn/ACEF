@@ -29,7 +29,6 @@ from acef.errors import LoadRejection
 from acef.loader import load
 from acef.validation.authority_matrix import all_cells
 
-
 # ---------------------------------------------------------------------------
 # Bundle construction helpers (self-contained — do not import from
 # tests/conformance/_v1_1_bundle_helpers.py to keep this unit module

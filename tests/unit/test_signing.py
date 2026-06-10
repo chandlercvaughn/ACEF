@@ -5,9 +5,8 @@ from __future__ import annotations
 import json
 
 import pytest
-
-from cryptography.hazmat.primitives.asymmetric import ec, rsa
 from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import ec, rsa
 
 from acef.errors import ACEFSigningError
 from acef.signing import (
@@ -68,12 +67,14 @@ class TestDetectAlgorithm:
 
     def test_unsupported_key_raises(self):
         from cryptography.hazmat.primitives.asymmetric import ed25519
+
         ed_key = ed25519.Ed25519PrivateKey.generate()
         with pytest.raises(ACEFSigningError, match="Unsupported key type"):
             _detect_algorithm(ed_key)
 
     def test_unsupported_key_code(self):
         from cryptography.hazmat.primitives.asymmetric import ed25519
+
         ed_key = ed25519.Ed25519PrivateKey.generate()
         with pytest.raises(ACEFSigningError) as exc_info:
             _detect_algorithm(ed_key)
@@ -106,6 +107,7 @@ class TestCreateDetachedJWS:
         private_key, _ = rsa_key_pair
         jws = create_detached_jws(b"data", private_key, kid="test-key")
         import base64
+
         header_b64 = jws.split(".")[0]
         header_b64_padded = header_b64 + "=" * (4 - len(header_b64) % 4)
         header = json.loads(base64.urlsafe_b64decode(header_b64_padded))
@@ -115,6 +117,7 @@ class TestCreateDetachedJWS:
         private_key, _ = rsa_key_pair
         jws = create_detached_jws(b"data", private_key, kid="test-key-1")
         import base64
+
         header_b64 = jws.split(".")[0]
         header_b64_padded = header_b64 + "=" * (4 - len(header_b64) % 4)
         header = json.loads(base64.urlsafe_b64decode(header_b64_padded))
@@ -179,6 +182,7 @@ class TestRejectNonAllowedAlgorithms:
 
     def test_reject_hs256_in_header(self, rsa_key_pair):
         import base64
+
         # Forge a JWS with HS256 header
         header = base64.urlsafe_b64encode(b'{"alg":"HS256"}').rstrip(b"=").decode()
         sig = base64.urlsafe_b64encode(b"fake_sig").rstrip(b"=").decode()
@@ -191,6 +195,7 @@ class TestRejectNonAllowedAlgorithms:
 
     def test_reject_none_algorithm(self, rsa_key_pair):
         import base64
+
         header = base64.urlsafe_b64encode(b'{"alg":"none"}').rstrip(b"=").decode()
         jws = f"{header}..abc"
 

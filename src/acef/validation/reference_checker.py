@@ -120,9 +120,7 @@ def check_references(
                 # Filter out non-string values (e.g., {"a.txt": ["bad"]})
                 # so verify_merkle_root / hash compare paths don't crash on
                 # .encode() against a non-string value.
-                content_hashes = {
-                    k: v for k, v in _loaded.items() if isinstance(v, str)
-                }
+                content_hashes = {k: v for k, v in _loaded.items() if isinstance(v, str)}
 
     # Check record entity refs
     record_ids: set[str] = set()
@@ -184,7 +182,6 @@ def check_references(
                     full_path = bundle_dir / att_path
                     try:
                         resolved = full_path.resolve()
-                        artifacts_root = (bundle_dir / "artifacts").resolve()
                         # Attachments live anywhere in the bundle (artifacts/
                         # is most common, but spec allows any relative path).
                         # Enforce containment to bundle_dir at minimum.
@@ -213,8 +210,7 @@ def check_references(
                             diagnostics.append(
                                 ValidationDiagnostic(
                                     "ACEF-027",
-                                    f"Attachment hash field does not match content-hashes.json "
-                                    f"for {att_path!r}",
+                                    f"Attachment hash field does not match content-hashes.json for {att_path!r}",
                                     path=f"/records/{i}/attachments/{j}/hash",
                                 )
                             )

@@ -189,9 +189,7 @@ class TestComputeContentHashes:
         (tmp_dir / "acef-manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
         records_dir = tmp_dir / "records"
         records_dir.mkdir()
-        (records_dir / "risk_register.jsonl").write_text(
-            '{"record_type":"risk_register"}\n', encoding="utf-8"
-        )
+        (records_dir / "risk_register.jsonl").write_text('{"record_type":"risk_register"}\n', encoding="utf-8")
 
         hashes = compute_content_hashes(tmp_dir)
         assert "acef-manifest.json" in hashes
@@ -233,9 +231,7 @@ class TestBuildMerkleTree:
         assert len(tree["leaves"]) == 1
         assert tree["leaves"][0]["path"] == "file.json"
         # Root should be the single leaf hash
-        leaf_hash = hashlib.sha256(
-            b"file.json" + b"\x00" + ("abcd1234" * 8).encode("utf-8")
-        ).hexdigest()
+        leaf_hash = hashlib.sha256(b"file.json" + b"\x00" + ("abcd1234" * 8).encode("utf-8")).hexdigest()
         assert tree["root"] == leaf_hash
 
     def test_two_entries(self):
@@ -263,8 +259,10 @@ class TestBuildMerkleTree:
 
     def test_four_entries_even(self):
         hashes = {
-            "a.json": "a" * 64, "b.json": "b" * 64,
-            "c.json": "c" * 64, "d.json": "d" * 64,
+            "a.json": "a" * 64,
+            "b.json": "b" * 64,
+            "c.json": "c" * 64,
+            "d.json": "d" * 64,
         }
         tree = build_merkle_tree(hashes)
         assert len(tree["leaves"]) == 4

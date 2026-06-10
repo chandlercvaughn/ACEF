@@ -6,16 +6,10 @@ byte-identical content-hashes.json and preserves all data.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
-import pytest
-
-from acef.export import export_directory
-from acef.integrity import compute_content_hashes, sha256_hex, canonicalize
 from acef.loader import load
 from acef.package import Package
-
 from tests.conformance.conftest import build_minimal_package
 
 
@@ -79,16 +73,25 @@ class TestRoundTrip:
         """Round-trip preserves subject definitions including type, name, version."""
         pkg = Package(producer={"name": "test", "version": "1.0.0"})
         sys1 = pkg.add_subject(
-            "ai_system", name="System A", version="1.0.0",
-            risk_classification="high-risk", modalities=["text"],
+            "ai_system",
+            name="System A",
+            version="1.0.0",
+            risk_classification="high-risk",
+            modalities=["text"],
         )
-        model1 = pkg.add_subject(
-            "ai_model", name="Model B", version="2.0.0",
-            risk_classification="gpai", modalities=["text", "image"],
+        pkg.add_subject(
+            "ai_model",
+            name="Model B",
+            version="2.0.0",
+            risk_classification="gpai",
+            modalities=["text", "image"],
         )
-        pkg.record("risk_register", provisions=["article-9"],
-                    payload={"description": "test", "likelihood": "low", "severity": "low"},
-                    entity_refs={"subject_refs": [sys1.id]})
+        pkg.record(
+            "risk_register",
+            provisions=["article-9"],
+            payload={"description": "test", "likelihood": "low", "severity": "low"},
+            entity_refs={"subject_refs": [sys1.id]},
+        )
 
         bundle_dir = tmp_dir / "subjects_rt"
         pkg.export(str(bundle_dir))
@@ -108,13 +111,15 @@ class TestRoundTrip:
         pkg = Package(producer={"name": "test", "version": "1.0.0"})
         system = pkg.add_subject("ai_system", name="Test Sys")
         comp = pkg.add_component("Retriever", type="retriever", subject_refs=[system.id])
-        ds = pkg.add_dataset("Training Data", source_type="licensed", modality="text",
-                             subject_refs=[system.id])
-        actor = pkg.add_actor(name="Jane", role="provider", organization="ACME")
+        pkg.add_dataset("Training Data", source_type="licensed", modality="text", subject_refs=[system.id])
+        pkg.add_actor(name="Jane", role="provider", organization="ACME")
         pkg.add_relationship(system.id, comp.id, "calls")
-        pkg.record("risk_register", provisions=["article-9"],
-                    payload={"description": "test", "likelihood": "low", "severity": "low"},
-                    entity_refs={"subject_refs": [system.id]})
+        pkg.record(
+            "risk_register",
+            provisions=["article-9"],
+            payload={"description": "test", "likelihood": "low", "severity": "low"},
+            entity_refs={"subject_refs": [system.id]},
+        )
 
         bundle_dir = tmp_dir / "entities_rt"
         pkg.export(str(bundle_dir))
@@ -145,9 +150,7 @@ class TestRoundTrip:
         assert orig_types == loaded_types
 
         for orig_rec in pkg.records:
-            loaded_rec = next(
-                (r for r in loaded.records if r.record_id == orig_rec.record_id), None
-            )
+            loaded_rec = next((r for r in loaded.records if r.record_id == orig_rec.record_id), None)
             assert loaded_rec is not None, f"Record {orig_rec.record_id} not found after round-trip"
             assert loaded_rec.record_type == orig_rec.record_type
             assert loaded_rec.payload == orig_rec.payload
@@ -161,7 +164,7 @@ class TestRoundTrip:
         # Add records with explicit timestamps for deterministic ordering
         ts_base = "2025-06-01T00:00:0"
         for i in range(5):
-            r = pkg.record(
+            pkg.record(
                 "risk_register",
                 provisions=["article-9"],
                 payload={"description": f"Risk {i}", "likelihood": "low", "severity": "low"},
@@ -216,9 +219,7 @@ class TestRoundTrip:
 
         hashes_orig = (dir_orig / "hashes" / "content-hashes.json").read_bytes()
         hashes_reexported = (dir_out / "hashes" / "content-hashes.json").read_bytes()
-        assert hashes_orig == hashes_reexported, (
-            "Archive round-trip must produce identical content-hashes.json"
-        )
+        assert hashes_orig == hashes_reexported, "Archive round-trip must produce identical content-hashes.json"
 
     def test_roundtrip_with_attachments(self, tmp_dir: Path) -> None:
         """Bundle with attachments round-trips correctly, preserving file content."""

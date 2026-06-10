@@ -15,10 +15,12 @@ from acef.package import Package
 @click.option("--producer-version", default="0.1.0", help="Producer tool version")
 @click.option("--subject-name", default=None, help="Initial subject name")
 @click.option("--subject-type", default="ai_system", type=click.Choice(["ai_system", "ai_model"]))
-@click.option("--risk-classification", default="minimal-risk",
-              type=click.Choice(["high-risk", "gpai", "gpai-systemic", "limited-risk", "minimal-risk"]))
-@click.option("--force", is_flag=True, default=False,
-              help="Overwrite a non-empty existing directory at PATH")
+@click.option(
+    "--risk-classification",
+    default="minimal-risk",
+    type=click.Choice(["high-risk", "gpai", "gpai-systemic", "limited-risk", "minimal-risk"]),
+)
+@click.option("--force", is_flag=True, default=False, help="Overwrite a non-empty existing directory at PATH")
 def init_cmd(
     path: str,
     producer_name: str,

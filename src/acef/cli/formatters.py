@@ -35,12 +35,14 @@ def print_assessment(assessment: AssessmentBundle) -> None:
     """Print a pretty-formatted assessment to console."""
     # Header
     console.print()
-    console.print(Panel.fit(
-        f"[bold]ACEF Compliance Assessment[/bold]\n"
-        f"Bundle: {assessment.evidence_bundle_ref.package_id}\n"
-        f"Evaluated: {assessment.evaluation_instant}",
-        border_style="blue",
-    ))
+    console.print(
+        Panel.fit(
+            f"[bold]ACEF Compliance Assessment[/bold]\n"
+            f"Bundle: {assessment.evidence_bundle_ref.package_id}\n"
+            f"Evaluated: {assessment.evaluation_instant}",
+            border_style="blue",
+        )
+    )
 
     # Summary
     console.print(f"\n[bold]{assessment.summary()}[/bold]\n")
@@ -55,9 +57,7 @@ def print_assessment(assessment: AssessmentBundle) -> None:
         table.add_column("Warnings", justify="right")
 
         for ps in assessment.provision_summary:
-            label, style = _OUTCOME_STYLES.get(
-                ps.provision_outcome, ("?", "white")
-            )
+            label, style = _OUTCOME_STYLES.get(ps.provision_outcome, ("?", "white"))
             table.add_row(
                 ps.provision_id,
                 ps.profile_id,
@@ -95,14 +95,16 @@ def print_bundle_info(manifest_data: dict[str, Any]) -> None:
     metadata = manifest_data.get("metadata", {})
 
     console.print()
-    console.print(Panel.fit(
-        f"[bold]ACEF Evidence Bundle[/bold]\n"
-        f"Package ID: {metadata.get('package_id', 'N/A')}\n"
-        f"Timestamp: {metadata.get('timestamp', 'N/A')}\n"
-        f"Producer: {metadata.get('producer', {}).get('name', 'N/A')} "
-        f"v{metadata.get('producer', {}).get('version', 'N/A')}",
-        border_style="blue",
-    ))
+    console.print(
+        Panel.fit(
+            f"[bold]ACEF Evidence Bundle[/bold]\n"
+            f"Package ID: {metadata.get('package_id', 'N/A')}\n"
+            f"Timestamp: {metadata.get('timestamp', 'N/A')}\n"
+            f"Producer: {metadata.get('producer', {}).get('name', 'N/A')} "
+            f"v{metadata.get('producer', {}).get('version', 'N/A')}",
+            border_style="blue",
+        )
+    )
 
     # Subjects
     subjects = manifest_data.get("subjects", [])
@@ -124,11 +126,13 @@ def print_bundle_info(manifest_data: dict[str, Any]) -> None:
 
     # Entity counts
     entities = manifest_data.get("entities", {})
-    console.print(f"\nEntities: "
-                  f"{len(entities.get('components', []))} components, "
-                  f"{len(entities.get('datasets', []))} datasets, "
-                  f"{len(entities.get('actors', []))} actors, "
-                  f"{len(entities.get('relationships', []))} relationships")
+    console.print(
+        f"\nEntities: "
+        f"{len(entities.get('components', []))} components, "
+        f"{len(entities.get('datasets', []))} datasets, "
+        f"{len(entities.get('actors', []))} actors, "
+        f"{len(entities.get('relationships', []))} relationships"
+    )
 
     # Record files
     record_files = manifest_data.get("record_files", [])

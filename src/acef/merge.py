@@ -94,8 +94,7 @@ def merge_packages(
     valid_strategies = {"keep_latest", "keep_all", "fail"}
     if conflict_strategy not in valid_strategies:
         raise ACEFMergeError(
-            f"Unknown conflict_strategy: {conflict_strategy!r}. "
-            f"Must be one of: {', '.join(sorted(valid_strategies))}",
+            f"Unknown conflict_strategy: {conflict_strategy!r}. Must be one of: {', '.join(sorted(valid_strategies))}",
             code="ACEF-060",
         )
 
@@ -105,9 +104,7 @@ def merge_packages(
     conflicts: list[ValidationDiagnostic] = []
 
     # Pre-build a lookup for package timestamps (N-R2-3: avoid O(n) scan per duplicate)
-    pkg_timestamps: dict[str, str] = {
-        pkg.metadata.package_id: pkg.metadata.timestamp for pkg in packages
-    }
+    pkg_timestamps: dict[str, str] = {pkg.metadata.package_id: pkg.metadata.timestamp for pkg in packages}
 
     # Accumulate all data in local collections
     merged_subjects: list[Subject] = []
@@ -134,8 +131,7 @@ def merge_packages(
                 conflicts.append(
                     ValidationDiagnostic(
                         "ACEF-060",
-                        f"Duplicate subject {key!r} from packages "
-                        f"{seen_subjects[key][0]} and {pkg_id}",
+                        f"Duplicate subject {key!r} from packages {seen_subjects[key][0]} and {pkg_id}",
                     )
                 )
                 if conflict_strategy == "fail":
@@ -147,9 +143,9 @@ def merge_packages(
                     if _timestamp_is_newer_or_equal(new_pkg_ts, old_pkg_ts):
                         # New package is same age or newer — replace
                         merged_subjects = [
-                            s for s in merged_subjects
-                            if not (s.name == subject.name
-                                    and s.subject_type == subject.subject_type)
+                            s
+                            for s in merged_subjects
+                            if not (s.name == subject.name and s.subject_type == subject.subject_type)
                         ]
                         seen_subjects[key] = (pkg_id, subject)
                         merged_subjects.append(subject.model_copy(deep=True))
@@ -181,9 +177,7 @@ def merge_packages(
             # source packages declaring the same edge collapse to a single
             # entry in the merged graph (P2 from structural review).
             rel_type = (
-                rel.relationship_type.value
-                if hasattr(rel.relationship_type, "value")
-                else str(rel.relationship_type)
+                rel.relationship_type.value if hasattr(rel.relationship_type, "value") else str(rel.relationship_type)
             )
             rel_key = (rel.source_ref, rel.target_ref, rel_type)
             if rel_key not in seen_relationships:
@@ -215,10 +209,7 @@ def merge_packages(
                     old_pkg_id, old_record = seen_records[record.record_id]
                     if _timestamp_is_newer_or_equal(record.timestamp, old_record.timestamp):
                         # New record is same age or newer — replace
-                        merged_records = [
-                            r for r in merged_records
-                            if r.record_id != record.record_id
-                        ]
+                        merged_records = [r for r in merged_records if r.record_id != record.record_id]
                         seen_records[record.record_id] = (pkg_id, record)
                         merged_records.append(record.model_copy(deep=True))
                     # else: old record is newer, keep it

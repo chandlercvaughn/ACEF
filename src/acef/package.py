@@ -280,7 +280,7 @@ class Package:
 
         timeline = []
         if lifecycle_timeline:
-            timeline = [LifecycleEntry(**entry) for entry in lifecycle_timeline]
+            timeline = [LifecycleEntry.model_validate(entry) for entry in lifecycle_timeline]
 
         subject = Subject(
             subject_id=self._urn_generator(URNType.SUBJECT),

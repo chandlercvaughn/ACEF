@@ -20,9 +20,6 @@ import pytest
 from acef.templates.models import (
     EvaluationRule,
     Provision,
-    RuleCondition,
-    RuleScope,
-    SubProvision,
     Template,
 )
 from acef.templates.registry import (
@@ -49,9 +46,7 @@ VALID_OPERATORS = frozenset(
 
 VALID_SEVERITIES = frozenset({"fail", "warning", "info"})
 
-VALID_INSTRUMENT_TYPES = frozenset(
-    {"law", "standard", "code_of_practice", "guidance", "parliamentary_report"}
-)
+VALID_INSTRUMENT_TYPES = frozenset({"law", "standard", "code_of_practice", "guidance", "parliamentary_report"})
 
 VALID_LEGAL_FORCES = frozenset({"binding", "voluntary", "advisory"})
 
@@ -159,9 +154,7 @@ class TestTemplateStructure:
     def test_all_provisions_have_evaluation_rules(self, template_id: str) -> None:
         template = load_template(template_id)
         for prov in template.provisions:
-            assert len(prov.evaluation) > 0, (
-                f"Provision {prov.provision_id} has no evaluation rules"
-            )
+            assert len(prov.evaluation) > 0, f"Provision {prov.provision_id} has no evaluation rules"
 
     @pytest.mark.parametrize("template_id", TEMPLATE_IDS)
     def test_provision_ids_unique(self, template_id: str) -> None:
@@ -182,8 +175,7 @@ class TestRuleValidation:
         for prov in template.provisions:
             for rule in prov.evaluation:
                 assert rule.rule in VALID_OPERATORS, (
-                    f"Invalid operator '{rule.rule}' in rule '{rule.rule_id}' "
-                    f"of provision '{prov.provision_id}'"
+                    f"Invalid operator '{rule.rule}' in rule '{rule.rule_id}' of provision '{prov.provision_id}'"
                 )
 
     @pytest.mark.parametrize("template_id", TEMPLATE_IDS)
@@ -191,19 +183,14 @@ class TestRuleValidation:
         template = load_template(template_id)
         for prov in template.provisions:
             for rule in prov.evaluation:
-                assert rule.severity in VALID_SEVERITIES, (
-                    f"Invalid severity '{rule.severity}' in rule '{rule.rule_id}'"
-                )
+                assert rule.severity in VALID_SEVERITIES, f"Invalid severity '{rule.severity}' in rule '{rule.rule_id}'"
 
     @pytest.mark.parametrize("template_id", TEMPLATE_IDS)
     def test_all_rules_have_messages(self, template_id: str) -> None:
         template = load_template(template_id)
         for prov in template.provisions:
             for rule in prov.evaluation:
-                assert rule.message, (
-                    f"Rule '{rule.rule_id}' in provision "
-                    f"'{prov.provision_id}' has empty message"
-                )
+                assert rule.message, f"Rule '{rule.rule_id}' in provision '{prov.provision_id}' has empty message"
 
     @pytest.mark.parametrize("template_id", TEMPLATE_IDS)
     def test_rule_ids_globally_unique(self, template_id: str) -> None:
@@ -213,8 +200,7 @@ class TestRuleValidation:
             for rule in prov.evaluation:
                 all_ids.append(rule.rule_id)
         assert len(all_ids) == len(set(all_ids)), (
-            f"Duplicate rule IDs in {template_id}: "
-            f"{[x for x in all_ids if all_ids.count(x) > 1]}"
+            f"Duplicate rule IDs in {template_id}: {[x for x in all_ids if all_ids.count(x) > 1]}"
         )
 
     @pytest.mark.parametrize("template_id", TEMPLATE_IDS)
@@ -223,27 +209,19 @@ class TestRuleValidation:
         for prov in template.provisions:
             for rule in prov.evaluation:
                 if rule.rule == "has_record_type":
-                    assert "type" in rule.params, (
-                        f"has_record_type rule '{rule.rule_id}' missing 'type' param"
-                    )
+                    assert "type" in rule.params, f"has_record_type rule '{rule.rule_id}' missing 'type' param"
                     assert "min_count" in rule.params, (
                         f"has_record_type rule '{rule.rule_id}' missing 'min_count' param"
                     )
 
     @pytest.mark.parametrize("template_id", TEMPLATE_IDS)
-    def test_field_present_rules_have_required_params(
-        self, template_id: str
-    ) -> None:
+    def test_field_present_rules_have_required_params(self, template_id: str) -> None:
         template = load_template(template_id)
         for prov in template.provisions:
             for rule in prov.evaluation:
                 if rule.rule == "field_present":
-                    assert "record_type" in rule.params, (
-                        f"field_present rule '{rule.rule_id}' missing 'record_type'"
-                    )
-                    assert "field" in rule.params, (
-                        f"field_present rule '{rule.rule_id}' missing 'field'"
-                    )
+                    assert "record_type" in rule.params, f"field_present rule '{rule.rule_id}' missing 'record_type'"
+                    assert "field" in rule.params, f"field_present rule '{rule.rule_id}' missing 'field'"
                     # Spec mandates JSON Pointer format (starts with /)
                     assert rule.params["field"].startswith("/"), (
                         f"field_present rule '{rule.rule_id}' field "
@@ -251,9 +229,7 @@ class TestRuleValidation:
                     )
 
     @pytest.mark.parametrize("template_id", TEMPLATE_IDS)
-    def test_field_value_rules_have_required_params(
-        self, template_id: str
-    ) -> None:
+    def test_field_value_rules_have_required_params(self, template_id: str) -> None:
         template = load_template(template_id)
         valid_ops = {"eq", "ne", "gt", "gte", "lt", "lte", "in", "regex"}
         for prov in template.provisions:
@@ -264,15 +240,12 @@ class TestRuleValidation:
                     assert "op" in rule.params
                     assert "value" in rule.params
                     assert rule.params["op"] in valid_ops, (
-                        f"field_value rule '{rule.rule_id}' uses invalid op "
-                        f"'{rule.params['op']}'"
+                        f"field_value rule '{rule.rule_id}' uses invalid op '{rule.params['op']}'"
                     )
                     assert rule.params["field"].startswith("/")
 
     @pytest.mark.parametrize("template_id", TEMPLATE_IDS)
-    def test_evidence_freshness_rules_have_required_params(
-        self, template_id: str
-    ) -> None:
+    def test_evidence_freshness_rules_have_required_params(self, template_id: str) -> None:
         template = load_template(template_id)
         valid_refs = {"validation_time", "package_time", "obligation_effective_date"}
         for prov in template.provisions:
@@ -285,9 +258,7 @@ class TestRuleValidation:
                     assert rule.params["reference_date"] in valid_refs
 
     @pytest.mark.parametrize("template_id", TEMPLATE_IDS)
-    def test_exists_where_rules_have_required_params(
-        self, template_id: str
-    ) -> None:
+    def test_exists_where_rules_have_required_params(self, template_id: str) -> None:
         template = load_template(template_id)
         for prov in template.provisions:
             for rule in prov.evaluation:
@@ -300,9 +271,7 @@ class TestRuleValidation:
                     assert rule.params["field"].startswith("/")
 
     @pytest.mark.parametrize("template_id", TEMPLATE_IDS)
-    def test_entity_linked_rules_have_required_params(
-        self, template_id: str
-    ) -> None:
+    def test_entity_linked_rules_have_required_params(self, template_id: str) -> None:
         template = load_template(template_id)
         valid_entity_types = {"subject", "component", "dataset", "actor"}
         for prov in template.provisions:
@@ -313,9 +282,7 @@ class TestRuleValidation:
                     assert rule.params["entity_type"] in valid_entity_types
 
     @pytest.mark.parametrize("template_id", TEMPLATE_IDS)
-    def test_attachment_kind_exists_rules_have_required_params(
-        self, template_id: str
-    ) -> None:
+    def test_attachment_kind_exists_rules_have_required_params(self, template_id: str) -> None:
         template = load_template(template_id)
         for prov in template.provisions:
             for rule in prov.evaluation:
@@ -325,9 +292,7 @@ class TestRuleValidation:
                     assert "min_count" in rule.params
 
     @pytest.mark.parametrize("template_id", TEMPLATE_IDS)
-    def test_attachment_exists_rules_have_required_params(
-        self, template_id: str
-    ) -> None:
+    def test_attachment_exists_rules_have_required_params(self, template_id: str) -> None:
         template = load_template(template_id)
         for prov in template.provisions:
             for rule in prov.evaluation:
@@ -456,9 +421,7 @@ class TestEUAIActTemplate:
         prov = self._find_provision(template, "article-53")
         for rule in prov.evaluation:
             if rule.condition is not None:
-                assert "gpai" in rule.condition.if_system_type or (
-                    "gpai-systemic" in rule.condition.if_system_type
-                )
+                assert "gpai" in rule.condition.if_system_type or ("gpai-systemic" in rule.condition.if_system_type)
 
     def test_total_provision_count(self, template: Template) -> None:
         assert len(template.provisions) == 10

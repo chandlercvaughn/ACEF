@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from acef.models.enums import ObligationRole, LifecyclePhase, RuleOutcome, RuleSeverity
+from acef.models.enums import LifecyclePhase, ObligationRole, RuleOutcome
 from acef.models.records import EntityRefs, RecordEnvelope
 from acef.templates.models import EvaluationRule, Provision, RuleCondition, RuleScope
 from acef.validation.rule_engine import (
@@ -175,7 +175,8 @@ class TestEvaluateRulesForSubject:
         ]
         records = [_make_record()]
         results = evaluate_rules_for_subject(
-            provisions, records,
+            provisions,
+            records,
             profile_id="test-profile",
         )
         assert len(results) == 1
@@ -203,7 +204,8 @@ class TestEvaluateRulesForSubject:
         ]
         records = [_make_record()]
         results = evaluate_rules_for_subject(
-            provisions, records,
+            provisions,
+            records,
             profile_id="test-profile",
             subject_risk_classification="high-risk",
         )
@@ -232,7 +234,8 @@ class TestEvaluateRulesForSubject:
         ]
         records = [_make_record()]
         results = evaluate_rules_for_subject(
-            provisions, records,
+            provisions,
+            records,
             profile_id="test-profile",
             subject_risk_classification="high-risk",
         )
@@ -259,7 +262,9 @@ class TestEvaluateRulesForSubject:
         ]
         records = [_make_record()]
         results = evaluate_rules_for_subject(
-            provisions, records, profile_id="test-profile",
+            provisions,
+            records,
+            profile_id="test-profile",
         )
         assert len(results) == 1
         assert results[0].outcome == RuleOutcome.ERROR
@@ -289,7 +294,8 @@ class TestEvaluateRulesForSubject:
         # Record linked to a different subject
         records = [_make_record(subject_refs=[other_id])]
         results = evaluate_rules_for_subject(
-            provisions, records,
+            provisions,
+            records,
             profile_id="test-profile",
             subject_id=subject_id,
         )
@@ -312,7 +318,9 @@ class TestEvaluateRulesForSubject:
             _make_record(record_type="data_provenance"),
         ]
         results = evaluate_rules_for_subject(
-            provisions, records, profile_id="test-profile",
+            provisions,
+            records,
+            profile_id="test-profile",
         )
         assert len(results) == 2
         assert all(r.outcome == RuleOutcome.PASSED for r in results)
@@ -338,7 +346,8 @@ class TestEvaluateRulesForSubject:
         ]
         records = [_make_record(timestamp="2025-06-01T00:00:00Z")]
         results = evaluate_rules_for_subject(
-            provisions, records,
+            provisions,
+            records,
             profile_id="test-profile",
             evaluation_instant="2025-06-15T00:00:00Z",
         )
@@ -367,7 +376,8 @@ class TestEvaluateRulesForSubject:
         ]
         records = [_make_record()]
         results = evaluate_rules_for_subject(
-            provisions, records,
+            provisions,
+            records,
             profile_id="test-profile",
             subject_risk_classification="high-risk",
         )

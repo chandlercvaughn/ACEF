@@ -45,9 +45,7 @@ def check_integrity(bundle_dir: Path) -> list[ValidationDiagnostic]:
     # files, non-UTF-8 bytes, and non-object top-level values all surface
     # as ACEF-014 rather than crashing the validator.
     try:
-        expected_hashes = json.loads(
-            content_hashes_path.read_text(encoding="utf-8")
-        )
+        expected_hashes = json.loads(content_hashes_path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, UnicodeDecodeError, OSError) as e:
         diagnostics.append(
             ValidationDiagnostic(
@@ -74,8 +72,7 @@ def check_integrity(bundle_dir: Path) -> list[ValidationDiagnostic]:
         diagnostics.append(
             ValidationDiagnostic(
                 "ACEF-014",
-                f"content-hashes.json values must be hex strings; "
-                f"non-string values for keys: {bad_value_keys!r}",
+                f"content-hashes.json values must be hex strings; non-string values for keys: {bad_value_keys!r}",
                 path="/hashes/content-hashes.json",
             )
         )
@@ -93,19 +90,13 @@ def check_integrity(bundle_dir: Path) -> list[ValidationDiagnostic]:
         hash_errors = verify_content_hashes(bundle_dir, expected_hashes)
     except _CanonErr as exc:
         rel = str(exc.path.relative_to(bundle_dir)) if exc.path else "?"
-        diagnostics.append(
-            ValidationDiagnostic("ACEF-051", str(exc), path=f"/{rel}")
-        )
+        diagnostics.append(ValidationDiagnostic("ACEF-051", str(exc), path=f"/{rel}"))
         hash_errors = []
     for error_msg in hash_errors:
         if "mismatch" in error_msg.lower():
-            diagnostics.append(
-                ValidationDiagnostic("ACEF-010", error_msg)
-            )
+            diagnostics.append(ValidationDiagnostic("ACEF-010", error_msg))
         else:
-            diagnostics.append(
-                ValidationDiagnostic("ACEF-014", error_msg)
-            )
+            diagnostics.append(ValidationDiagnostic("ACEF-014", error_msg))
 
     # Check Merkle tree
     merkle_path = bundle_dir / "hashes" / "merkle-tree.json"
@@ -168,7 +159,7 @@ def _check_signatures(bundle_dir: Path, content_hashes_bytes: bytes) -> list[Val
     5. On invalid signature, emit ACEF-012.
     """
     from acef.errors import ACEFSigningError
-    from acef.integrity import ACEFCanonicalizationError, canonicalize_json_str
+    from acef.integrity import canonicalize_json_str
     from acef.signing import verify_detached_jws
 
     diagnostics: list[ValidationDiagnostic] = []
@@ -188,9 +179,7 @@ def _check_signatures(bundle_dir: Path, content_hashes_bytes: bytes) -> list[Val
             manifest_timestamp = None
 
     try:
-        canonical_input = canonicalize_json_str(
-            content_hashes_bytes.decode("utf-8")
-        )
+        canonical_input = canonicalize_json_str(content_hashes_bytes.decode("utf-8"))
     except (ValueError, UnicodeDecodeError) as exc:
         diagnostics.append(
             ValidationDiagnostic(
@@ -342,9 +331,7 @@ def get_signature_info(bundle_dir: Path) -> tuple[int, list[str]]:
     from acef.signing import verify_detached_jws
 
     try:
-        canonical_input = canonicalize_json_str(
-            content_hashes_path.read_text(encoding="utf-8")
-        )
+        canonical_input = canonicalize_json_str(content_hashes_path.read_text(encoding="utf-8"))
     except (ValueError, UnicodeDecodeError):
         return 0, []
 

@@ -57,10 +57,7 @@ class TestMergeBasic:
         pkg2 = _make_package(subject_name="B")
         result = merge_packages([pkg1, pkg2])
         manifest = result.package.build_manifest()
-        merge_events = [
-            e for e in manifest.audit_trail
-            if "Merged" in e.description
-        ]
+        merge_events = [e for e in manifest.audit_trail if "Merged" in e.description]
         assert len(merge_events) >= 1
 
 
