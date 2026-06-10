@@ -22,11 +22,21 @@ Assertions exercised:
   (``registry-canonical`` and any unknown grade are rejected).
 
 The incident_card schema ``$ref``s a companion ``harm-core-taxonomy.json``
-(authored by F-M2-SCHEMA-SEV-CROSS, not yet present). To keep these tests GREEN
-today without that file, a minimal stub for the missing ``$id`` is registered in
-a local ``referencing.Registry`` alongside the two real v1.1 schemas. No card
-fixture exercises the ``taxonomy_crosswalk`` member subschemas, so the only
-external dependency is the ``harm_class`` enum stub.
+(authored by F-M2-SCHEMA-SEV-CROSS). Until that file lands, an UNMISTAKABLE
+``HARM_CORE_TAXONOMY_STUB`` constant supplies the single ``$defs/harm_class``
+definition the card ``$ref``s, registered in a local ``referencing.Registry``
+alongside the two real v1.1 schemas. The registry is SELF-DE-STUBBING: if the
+real ``acef-conventions/v1.1/harm-core-taxonomy.json`` exists on disk it is
+loaded and used instead, so these tests automatically upgrade from stub to the
+real companion the moment SEV-CROSS ships it — no false green about
+resolvability. No card fixture exercises the ``taxonomy_crosswalk`` member
+subschemas, so the only external dependency is the ``harm_class`` enum.
+
+The card-level ``coordinated_disclosure`` ``$ref`` is exercised THROUGH the
+incident_card schema (not only against the standalone block): cards carrying a
+``coordinated_disclosure`` object validate/reject per the §5.6 ``status: public``
+conditional, proving the card→coordinated_disclosure ``$ref`` resolves and
+enforces against the registry.
 
 Determinism: fixtures are static literals; no wall-clock or random values.
 """
@@ -45,6 +55,30 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _V1_1_DIR = _PROJECT_ROOT / "acef-conventions" / "v1.1"
 _INCIDENT_CARD_PATH = _V1_1_DIR / "incident_card.schema.json"
 _COORDINATED_DISCLOSURE_PATH = _V1_1_DIR / "coordinated_disclosure.schema.json"
+_HARM_CORE_TAXONOMY_PATH = _V1_1_DIR / "harm-core-taxonomy.json"
+
+# The exact relative $ref string the incident_card schema uses to reach the
+# harm_class enum in the harm-core-taxonomy companion. GATING's production
+# resolver MUST wire this companion $id; this constant pins the contract so a
+# rename of the companion's $defs path can never silently pass.
+_HARM_CLASS_REF = "harm-core-taxonomy.json#/$defs/harm_class"
+
+# INTERIM STUB — replace with the real acef-conventions/v1.1/harm-core-taxonomy.json
+# once F-M2-SCHEMA-SEV-CROSS lands it (de-stub tracked). Supplies ONLY the single
+# $defs/harm_class definition the incident_card schema $ref's, so these tests run
+# GREEN before the real companion exists. The validator fixture below is
+# self-de-stubbing: it loads the real file in preference to this constant the
+# moment SEV-CROSS ships it, so no test asserts false confidence in resolvability.
+HARM_CORE_TAXONOMY_STUB: dict[str, Any] = {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://acef.ai/schemas/v1.1/harm-core-taxonomy.json",
+    "$defs": {
+        "harm_class": {
+            "type": "string",
+            "enum": ["3.49.a", "3.49.b", "3.49.c", "3.49.d"],
+        }
+    },
+}
 
 # A valid Crockford-base32 suffix carrying >=128 bits (exactly 26 chars, the
 # minimum the pattern permits). Alphabet excludes I, L, O, U.
@@ -70,23 +104,18 @@ def _load(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def _harm_core_taxonomy_stub() -> dict[str, Any]:
-    """Minimal stub for the not-yet-authored harm-core-taxonomy.json.
+def _resolve_harm_core_taxonomy() -> dict[str, Any]:
+    """Return the harm-core-taxonomy resource, real if present else the stub.
 
-    Supplies the single ``$defs/harm_class`` definition the incident_card
-    schema ``$ref``s, so these tests run GREEN before F-M2-SCHEMA-SEV-CROSS
-    lands the real companion file.
+    SELF-DE-STUBBING: prefers the real ``acef-conventions/v1.1/harm-core-taxonomy.json``
+    (authored by F-M2-SCHEMA-SEV-CROSS) the moment it exists on disk, otherwise
+    falls back to ``HARM_CORE_TAXONOMY_STUB``. This keeps the suite GREEN today
+    while automatically exercising the real companion schema once SEV-CROSS ships
+    it — no test asserts false confidence in a non-existent file's resolvability.
     """
-    return {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "$id": "https://acef.ai/schemas/v1.1/harm-core-taxonomy.json",
-        "$defs": {
-            "harm_class": {
-                "type": "string",
-                "enum": ["3.49.a", "3.49.b", "3.49.c", "3.49.d"],
-            }
-        },
-    }
+    if _HARM_CORE_TAXONOMY_PATH.exists():
+        return _load(_HARM_CORE_TAXONOMY_PATH)
+    return dict(HARM_CORE_TAXONOMY_STUB)
 
 
 @pytest.fixture(scope="module")
@@ -106,14 +135,16 @@ def incident_card_validator(
 ) -> Draft202012Validator:
     """Validator for incident_card with the companion-schema registry.
 
-    Registers the two real v1.1 schemas plus a minimal harm-core-taxonomy stub
-    so the relative ``harm-core-taxonomy.json#/$defs/harm_class`` ``$ref``
-    resolves against the card's ``$id`` base.
+    Registers the two real v1.1 schemas plus the harm-core-taxonomy resource
+    (real file if present, else ``HARM_CORE_TAXONOMY_STUB``) so the relative
+    ``harm-core-taxonomy.json#/$defs/harm_class`` ``$ref`` and the
+    ``coordinated_disclosure.schema.json`` ``$ref`` both resolve against the
+    card's ``$id`` base.
     """
     resources = [
         Resource.from_contents(incident_card_schema),
         Resource.from_contents(coordinated_disclosure_schema),
-        Resource.from_contents(_harm_core_taxonomy_stub()),
+        Resource.from_contents(_resolve_harm_core_taxonomy()),
     ]
     registry = Registry().with_resources([(r.id(), r) for r in resources])
     return Draft202012Validator(incident_card_schema, registry=registry)
@@ -143,6 +174,50 @@ def _valid_card() -> dict[str, Any]:
 def test_incident_card_check_schema(incident_card_schema: dict[str, Any]) -> None:
     """The incident_card schema is itself a valid Draft 2020-12 schema."""
     Draft202012Validator.check_schema(incident_card_schema)
+
+
+def test_incident_card_references_harm_core_taxonomy_companion(
+    incident_card_schema: dict[str, Any],
+) -> None:
+    """The card's ``harm_core.harm_class`` ``$ref`` is exactly the documented
+    companion pointer (VAL-CARD-001).
+
+    Pins the production dependency that F-M2-SCHEMA-GATING's resolver MUST wire:
+    the card reaches the harm_class enum via the relative
+    ``harm-core-taxonomy.json#/$defs/harm_class`` ``$ref``, resolved against the
+    card's ``$id`` base. A rename of the companion file or its ``$defs`` path
+    would break the real registry; asserting the exact string here makes that
+    break loud rather than silent.
+    """
+    harm_class_ref = incident_card_schema["properties"]["harm_core"]["properties"]["harm_class"]["$ref"]
+    assert harm_class_ref == _HARM_CLASS_REF
+
+
+def test_harm_core_taxonomy_companion_resolution_auto_upgrades() -> None:
+    """The harm-core-taxonomy resource is the real file if present, else the stub
+    (VAL-CARD-001).
+
+    This documents — and self-de-stubs — the F-M2-SCHEMA-SEV-CROSS dependency:
+    while ``acef-conventions/v1.1/harm-core-taxonomy.json`` is absent the stub is
+    used; once SEV-CROSS ships the real file this test (and the card validator)
+    automatically exercise it, with the contract that whichever resource is in
+    play declares the companion ``$id`` and supplies a ``$defs/harm_class`` enum
+    covering the Art.3(49)(a-d) classes the card fixtures use.
+    """
+    taxonomy = _resolve_harm_core_taxonomy()
+    assert taxonomy["$id"] == "https://acef.ai/schemas/v1.1/harm-core-taxonomy.json"
+    harm_class = taxonomy["$defs"]["harm_class"]
+    assert harm_class["type"] == "string"
+    # The Art.3(49)(a-d) class used by every card fixture MUST be admissible by
+    # whichever resource (stub today, real companion once SEV-CROSS lands) is in
+    # play, so the card validator's harm_class $ref keeps resolving and passing.
+    assert _VALID_HARM_CORE["harm_class"] in harm_class["enum"]
+    if _HARM_CORE_TAXONOMY_PATH.exists():
+        # SEV-CROSS has shipped the real companion: this assertion proves the
+        # test upgraded off the stub and is now exercising the production schema.
+        assert taxonomy == _load(_HARM_CORE_TAXONOMY_PATH)
+    else:
+        assert taxonomy == HARM_CORE_TAXONOMY_STUB
 
 
 def test_incident_card_minimal_conforming_validates(
@@ -239,6 +314,72 @@ def test_incident_card_rejects_malformed_extension_keys(
     """Malformed x-* keys/values are rejected (VAL-CARD-001)."""
     card = _valid_card()
     card[key] = value
+    assert not incident_card_validator.is_valid(card), reason
+
+
+# --------------------------------------------------------------------------- #
+# card -> coordinated_disclosure $ref integration                             #
+#                                                                             #
+# Exercise the card's coordinated_disclosure $ref THROUGH the incident_card    #
+# schema (not only the standalone block), proving the $ref resolves against    #
+# the registry and the §5.6 status: public conditional is enforced from the    #
+# card surface.                                                                #
+# --------------------------------------------------------------------------- #
+
+
+def test_incident_card_with_valid_coordinated_disclosure_validates(
+    incident_card_validator: Draft202012Validator,
+) -> None:
+    """A card whose coordinated_disclosure is a valid status: public block (with
+    reporter_role, no embargo) validates THROUGH the card $ref (VAL-CARD-001).
+
+    Proves the card-level ``coordinated_disclosure.schema.json`` ``$ref``
+    resolves against the registry and admits a §5.6-conforming public block.
+    """
+    card = _valid_card()
+    card["coordinated_disclosure"] = {
+        "status": "public",
+        "reporter_role": "external_researcher",
+    }
+    errors = list(incident_card_validator.iter_errors(card))
+    assert errors == [], [e.message for e in errors]
+
+
+@pytest.mark.parametrize(
+    ("disclosure", "reason"),
+    [
+        pytest.param(
+            {"status": "public"},
+            "status: public missing reporter_role rejected through card $ref (§5.6 if/then)",
+            id="card-disclosure-public-missing-reporter-role",
+        ),
+        pytest.param(
+            {
+                "status": "public",
+                "reporter_role": "regulator",
+                "embargo_until": "2026-01-01T00:00:00Z",
+            },
+            "embargo_until forbidden on status: public rejected through card $ref (§5.6 if/then not)",
+            id="card-disclosure-public-with-embargo",
+        ),
+    ],
+)
+def test_incident_card_with_invalid_coordinated_disclosure_rejects(
+    incident_card_validator: Draft202012Validator,
+    disclosure: dict[str, Any],
+    reason: str,
+) -> None:
+    """A card carrying an invalid coordinated_disclosure block is rejected
+    THROUGH the card ``$ref`` (VAL-CARD-001).
+
+    The card embeds a coordinated_disclosure that violates the §5.6
+    ``status: public`` conditional; the card-level ``$ref`` to
+    ``coordinated_disclosure.schema.json`` MUST propagate that failure so the
+    whole card is invalid (proving the ``$ref`` actually enforces, not merely
+    resolves).
+    """
+    card = _valid_card()
+    card["coordinated_disclosure"] = disclosure
     assert not incident_card_validator.is_valid(card), reason
 
 
