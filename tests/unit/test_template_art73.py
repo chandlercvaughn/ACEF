@@ -2,25 +2,48 @@
 
 Feature F-M3-TEMPLATE-ART73 / assertion VAL-TMPL-001.
 
-Covers:
-- the template loads through the existing template registry
-  (``acef.templates.registry.load_template``);
-- it encodes the Art. 73 provisions with per-provision effective dates and
-  the `pending-final-adoption` Digital-Omnibus status (RFC-0002 §5.7, Q7);
-- it requires ``public_incident_id``, the EU trigger array, ``widespread``,
-  ``death_involved``, ``coordinated_disclosure.regulatory_timeline[]``, and
-  ``notification_timeline[]`` via DSL ``field_present`` / ``exists_where`` rules;
-- the encoded reporting-clock metadata computes the SHORTEST applicable
-  deadline: ``death_involved`` → 10 days; ``3.49.b`` (critical-infrastructure)
-  OR ``widespread`` → 2 days; otherwise (incl. non-fatal ``3.49.a``) → 15 days;
-  the shortest clock wins for compound incidents.
+Honesty correction (roborev, codex). The ACEF generic rule DSL CANNOT express
+the three load-bearing Art. 73 enforcement checks:
 
-The DSL operators in ``src/acef/validation/operators.py`` are pass/fail
-predicates and cannot themselves *compute* a derived deadline. Per RFC-0002
-§5.7 the clock is therefore carried as structured, byte-stable template
-metadata (on the Art. 73 reporting provision's ``tiered_requirements``); this
-test reads that metadata and evaluates the shortest-applicable-clock algorithm
-against representative incident facts, asserting each branch's deadline.
+1. **existential dual-source** — "at least ONE valid evidence path exists" with
+   the trigger facts present on EITHER ``incident_card.taxonomy_crosswalk.eu_ai_act``
+   (public) OR ``incident_report.card_source.eu_ai_act_facts`` (confidential);
+2. **regulatory_timeline framework-match** — "some ``regulatory_timeline[]`` entry
+   has ``framework == 'eu-ai-act-art73'``" (an order-insensitive array-element scan
+   by a field predicate);
+3. **shortest-clock + ACEF-084** — "the stated deadline matches the shortest
+   applicable clock (death→10 / 3.49.b|widespread→2 / else→15)".
+
+``field_present`` is a UNIVERSAL operator (PASS vacuously on zero records), so a
+pair of ``field_present`` rules — one targeting ``incident_card`` and one targeting
+``incident_report`` — is NOT a real OR: an EMPTY bundle (no incident evidence at
+all) passes BOTH vacuously (false green), and ``field_present`` accepts an empty
+``regulatory_timeline: []``. ``exists_where`` resolves a single RFC-6901 pointer per
+record and ``jsonpointer`` has no array-wildcard, so no operator can scan
+order-insensitive array entries by a ``framework`` predicate, and no operator can
+COMPUTE a derived deadline. Encoding (1)/(2) as vacuous ``field_present`` pairs is
+worse than nothing — it gives a false green.
+
+Per RFC-0002 §5.7 (line 270/278) the matching-entry / deadline-consistency /
+shortest-clock enforcement is therefore DELEGATED to the validator
+(F-M3-VALIDATOR-RULES, assertion VAL-CLOCK-001), which raises ACEF-084 on mismatch.
+The template (a) DECLARES the structured shortest-clock metadata the validator
+reads, (b) keeps ONLY the DSL rules that are CORRECTLY expressible as per-record
+conditionals, and (c) DOCUMENTS the validator-delegated checks explicitly so the
+delegation is a pinned, honest contract — not a silent hole.
+
+This test:
+- asserts the template loads through the registry and is binding EU law;
+- asserts the per-provision effective dates + ``pending-final-adoption`` status;
+- reads the ``reporting_clock`` metadata and evaluates the shortest-applicable-clock
+  algorithm against representative incident facts, asserting each branch's deadline
+  (VAL-TMPL-001's core evidence);
+- asserts the retained DSL rules behave CORRECTLY (no vacuous-OR false green, no
+  hard-coded array index, ``notification_timeline`` targets ``incident_report``);
+- pins the template's documentation of the three validator-delegated Art. 73 checks.
+
+It does NOT re-implement the Art. 73 ACEF-084 enforcement (that is the validator's
+job, F-M3-VALIDATOR-RULES).
 """
 
 from __future__ import annotations
@@ -178,73 +201,82 @@ class TestPerProvisionEffectiveDates:
         assert ANNEX_I_EFFECTIVE_DATE in annex_dates
 
 
-# ── Required-field DSL rules (field_present / exists_where) ──
+# ── Retained DSL rules: only what the generic DSL can CORRECTLY enforce ──
 
 
-class TestRequiredFieldRules:
+class TestRetainedDslRules:
+    """The template retains ONLY DSL rules that are correct per-record conditionals.
+
+    The vacuous-truth ``field_present`` pairs that *appeared* to enforce the
+    existential dual-source OR and the ``regulatory_timeline`` framework-match are
+    REMOVED — they gave a false green (an empty bundle passed them all). The
+    surviving rules are honest: each validates a field on the record type that
+    actually carries it, with no cross-applying, no index-0 logic, and no false
+    existential claim.
+    """
+
     def _all_rules(self, template: Template) -> list[Any]:
         rules: list[Any] = []
         for prov in template.provisions:
             rules.extend(prov.evaluation)
         return rules
 
-    def _fields_for_operator(self, template: Template, operator: str) -> set[str]:
+    def _fail_rules(self, template: Template) -> list[Any]:
+        return [r for r in self._all_rules(template) if r.severity == "fail"]
+
+    def _fields_for_record_type(self, template: Template, record_type: str) -> set[str]:
         fields: set[str] = set()
         for rule in self._all_rules(template):
-            if rule.rule == operator:
+            if rule.params.get("record_type") == record_type:
                 fld = rule.params.get("field")
                 if fld:
                     fields.add(fld)
         return fields
 
-    def _rules_for_record_type(self, template: Template, record_type: str) -> list[Any]:
-        return [r for r in self._all_rules(template) if r.params.get("record_type") == record_type]
+    def test_notification_timeline_targets_incident_report_only(self, template: Template) -> None:
+        # notification_timeline[] is a top-level field on incident_report
+        # (incident_report.schema.json), NOT on the CLOSED incident_card schema.
+        # A field_present rule over incident_report is a CORRECT per-record
+        # conditional (IF a report exists, it carries notification_timeline) — it
+        # does NOT participate in the (removed) vacuous dual-source OR.
+        card_fields = self._fields_for_record_type(template, "incident_card")
+        report_fields = self._fields_for_record_type(template, "incident_report")
+        assert "/payload/notification_timeline" not in card_fields, (
+            "incident_card is a closed schema with no notification_timeline field"
+        )
+        assert "/payload/notification_timeline" in report_fields
 
-    def _fields_for_record_type(self, template: Template, record_type: str) -> set[str]:
-        fields: set[str] = set()
-        for rule in self._rules_for_record_type(template, record_type):
-            fld = rule.params.get("field")
-            if fld:
-                fields.add(fld)
-        return fields
+    def test_no_vacuous_dual_source_field_present_pairs(self, template: Template) -> None:
+        # The DSL-inexpressible existential dual-source OR (trigger array / widespread
+        # / death_involved / public_incident_id / regulatory_timeline on EITHER the
+        # public card OR the confidential card_source) is REMOVED, not encoded as a
+        # vacuous field_present pair. None of those broken fields may survive as a
+        # field_present rule on either path.
+        banned_field_present_fields = {
+            "/payload/public_incident_id",
+            "/payload/card_source/public_incident_id",
+            "/payload/taxonomy_crosswalk/eu_ai_act/serious_incident_triggers",
+            "/payload/card_source/eu_ai_act_facts/serious_incident_triggers",
+            "/payload/taxonomy_crosswalk/eu_ai_act/widespread",
+            "/payload/card_source/eu_ai_act_facts/widespread",
+            "/payload/taxonomy_crosswalk/eu_ai_act/death_involved",
+            "/payload/card_source/eu_ai_act_facts/death_involved",
+            "/payload/coordinated_disclosure/regulatory_timeline",
+            "/payload/card_source/coordinated_disclosure/regulatory_timeline",
+        }
+        for rule in self._all_rules(template):
+            if rule.rule == "field_present":
+                fld = rule.params.get("field", "")
+                assert fld not in banned_field_present_fields, (
+                    f"rule {rule.rule_id!r} re-introduces a vacuous-truth field_present over "
+                    f"{fld!r}; the existential dual-source OR is DSL-inexpressible and is "
+                    "delegated to F-M3-VALIDATOR-RULES (ACEF-084), not encoded vacuously"
+                )
 
-    def test_requires_public_incident_id(self, template: Template) -> None:
-        # The id is required via EITHER the public card OR the confidential
-        # card_source path (§5.3 / §5.7 dual path); a reserved-id, no-public-card
-        # report carries the id on incident_report.card_source.public_incident_id.
-        fields = self._fields_for_operator(template, "field_present")
-        assert "/payload/public_incident_id" in fields
-        assert "/payload/card_source/public_incident_id" in fields
-
-    def test_requires_trigger_array_on_both_paths(self, template: Template) -> None:
-        # The Art.3(49) trigger array is required on the public path AND on the
-        # confidential card_source.eu_ai_act_facts path (§5.7 dual clock-source).
-        fields = self._fields_for_operator(template, "field_present")
-        assert "/payload/taxonomy_crosswalk/eu_ai_act/serious_incident_triggers" in fields
-        assert "/payload/card_source/eu_ai_act_facts/serious_incident_triggers" in fields
-
-    def test_requires_widespread_and_death_facts_on_both_paths(self, template: Template) -> None:
-        fields = self._fields_for_operator(template, "field_present")
-        # Public path (taxonomy_crosswalk.eu_ai_act).
-        assert "/payload/taxonomy_crosswalk/eu_ai_act/widespread" in fields
-        assert "/payload/taxonomy_crosswalk/eu_ai_act/death_involved" in fields
-        # Confidential path (card_source.eu_ai_act_facts).
-        assert "/payload/card_source/eu_ai_act_facts/widespread" in fields
-        assert "/payload/card_source/eu_ai_act_facts/death_involved" in fields
-
-    def test_requires_regulatory_timeline_position_independent(self, template: Template) -> None:
-        # The regulatory_timeline[] array is ORDER-INSENSITIVE (§5.10); the rule
-        # MUST require the array present without hard-coding an index, on both
-        # the public coordinated_disclosure path and the confidential card_source
-        # coordinated_disclosure path. The matching `framework == eu-ai-act-art73`
-        # entry check is a cross-field validator concern (ACEF-084), not a
-        # position-fixed template rule.
-        present = self._fields_for_operator(template, "field_present")
-        assert "/payload/coordinated_disclosure/regulatory_timeline" in present
-        assert "/payload/card_source/coordinated_disclosure/regulatory_timeline" in present
-        # No rule may key on a hard-coded array index (e.g. /0/...): such a rule
-        # wrongly rejects a valid multi-jurisdiction timeline whose EU entry is
-        # not first.
+    def test_no_rule_hard_codes_regulatory_timeline_index(self, template: Template) -> None:
+        # No retained rule may key on a hard-coded array index (e.g. /0/...): such a
+        # rule wrongly rejects a valid multi-jurisdiction timeline whose EU entry is
+        # not first (order-insensitive array, §5.10).
         for rule in self._all_rules(template):
             fld = rule.params.get("field", "")
             assert "/regulatory_timeline/0/" not in fld, (
@@ -260,16 +292,6 @@ class TestRequiredFieldRules:
                 f"rule {rule.rule_id!r} references regulatory_timeline[].jurisdiction; the schema field is `framework`"
             )
 
-    def test_notification_timeline_targets_incident_report(self, template: Template) -> None:
-        # notification_timeline[] is a top-level field on incident_report
-        # (incident_report.schema.json), NOT on the CLOSED incident_card schema.
-        card_fields = self._fields_for_record_type(template, "incident_card")
-        report_fields = self._fields_for_record_type(template, "incident_report")
-        assert "/payload/notification_timeline" not in card_fields, (
-            "incident_card is a closed schema with no notification_timeline field"
-        )
-        assert "/payload/notification_timeline" in report_fields
-
     def test_no_hard_record_count_blocks_confidential_path(self, template: Template) -> None:
         # A confidential, reserved-id Art.73 filing has NO public incident_card
         # (§5.7 critical path). No `has_record_type incident_card` fail-rule may
@@ -282,18 +304,7 @@ class TestRequiredFieldRules:
                 )
 
     def test_all_operators_are_known(self, template: Template) -> None:
-        known = {
-            "has_record_type",
-            "field_present",
-            "field_value",
-            "evidence_freshness",
-            "attachment_exists",
-            "entity_linked",
-            "exists_where",
-            "attachment_kind_exists",
-            "bundle_signed",
-            "record_attested",
-        }
+        known = set(OPERATOR_REGISTRY.keys())
         for rule in self._all_rules(template):
             assert rule.rule in known, f"unknown operator {rule.rule!r}"
 
@@ -301,8 +312,12 @@ class TestRequiredFieldRules:
         ids = [r.rule_id for r in self._all_rules(template)]
         assert len(ids) == len(set(ids))
 
+    def test_retained_rules_have_messages(self, template: Template) -> None:
+        for rule in self._all_rules(template):
+            assert rule.message.strip(), f"rule {rule.rule_id!r} has an empty message"
 
-# ── Dual confidential/public path evaluated through the REAL DSL operators ──
+
+# ── The retained rules behave correctly through the REAL DSL operators ──
 
 
 def _make_record(record_type: str, payload: dict[str, Any]) -> RecordEnvelope:
@@ -317,20 +332,13 @@ def _make_record(record_type: str, payload: dict[str, Any]) -> RecordEnvelope:
 _VALID_AIIC_ID = "AIIC-ACME-2026-0123456789ABCDEFGHJKMNPQRS"
 
 
-def _confidential_report(*, eu_entry_first: bool = True) -> RecordEnvelope:
+def _confidential_report() -> RecordEnvelope:
     """A RESERVED-id confidential Art.73 incident_report with NO public card.
 
-    Carries the card_source overlay (the §5.7 confidential/source-backed path):
-    eu_ai_act_facts trigger facts, the reserved public_incident_id, and a
-    coordinated_disclosure.regulatory_timeline[] whose EU entry may be placed
-    later in the (order-insensitive) array.
+    Carries the card_source overlay (the §5.7 confidential/source-backed path) and
+    a top-level notification_timeline[] (the only field the retained DSL rules
+    enforce on incident_report).
     """
-    timeline = [
-        {"framework": "us-circia", "clock_model": "awareness_days", "awareness_date": "2026-09-01T00:00:00Z"},
-        {"framework": "eu-ai-act-art73", "clock_model": "awareness_days", "awareness_date": "2026-09-01T00:00:00Z"},
-    ]
-    if eu_entry_first:
-        timeline.reverse()
     return _make_record(
         "incident_report",
         {
@@ -347,7 +355,16 @@ def _confidential_report(*, eu_entry_first: bool = True) -> RecordEnvelope:
                     "widespread": False,
                     "death_involved": True,
                 },
-                "coordinated_disclosure": {"status": "private", "regulatory_timeline": timeline},
+                "coordinated_disclosure": {
+                    "status": "private",
+                    "regulatory_timeline": [
+                        {
+                            "framework": "eu-ai-act-art73",
+                            "clock_model": "awareness_days",
+                            "awareness_date": "2026-09-01T00:00:00Z",
+                        }
+                    ],
+                },
             },
             "notification_timeline": [
                 {"recipient": "national authority", "notification_date": "2026-09-05T00:00:00Z"},
@@ -356,94 +373,100 @@ def _confidential_report(*, eu_entry_first: bool = True) -> RecordEnvelope:
     )
 
 
-def _public_card(*, eu_entry_first: bool = True) -> RecordEnvelope:
-    """A published public incident_card (the §5.7 public clock-source path)."""
-    timeline = [
-        {"framework": "us-circia", "clock_model": "awareness_days", "awareness_date": "2026-09-01T00:00:00Z"},
-        {"framework": "eu-ai-act-art73", "clock_model": "awareness_days", "awareness_date": "2026-09-01T00:00:00Z"},
-    ]
-    if eu_entry_first:
-        timeline.reverse()
-    return _make_record(
-        "incident_card",
-        {
-            "public_incident_id": _VALID_AIIC_ID,
-            "id_grade": "self-asserted",
-            "taxonomy_crosswalk": {
-                "eu_ai_act": {
-                    "edition": "reg-2024-1689",
-                    "serious_incident_triggers": ["3.49.a"],
-                    "widespread": False,
-                    "death_involved": True,
-                }
-            },
-            "coordinated_disclosure": {
-                "status": "public",
-                "reporter_role": "internal",
-                "regulatory_timeline": timeline,
-            },
-        },
-    )
+class TestRetainedRuleEvaluation:
+    """Evaluate the retained fail-severity rules through the real DSL operators.
 
-
-class TestDualPathRuleEvaluation:
-    """Evaluate the template's actual fail-severity rules through the real DSL.
-
-    Rules are evaluated via :data:`OPERATOR_REGISTRY` — the same operator
-    functions the validation engine uses — not a re-implementation.
+    Rules are evaluated via :data:`OPERATOR_REGISTRY` — the same operator functions
+    the validation engine uses — not a re-implementation.
     """
 
-    def _fail_rules(self, template: Template) -> list[Any]:
-        rules: list[Any] = []
-        for prov in template.provisions:
-            rules.extend(r for r in prov.evaluation if r.severity == "fail")
-        return rules
-
-    def _failed_rule_ids(self, template: Template, records: list[RecordEnvelope]) -> list[str]:
+    def _failed_fail_rule_ids(self, template: Template, records: list[RecordEnvelope]) -> list[str]:
         failed: list[str] = []
-        for rule in self._fail_rules(template):
-            op = OPERATOR_REGISTRY[rule.rule]
-            passed, _ = op(rule.params, records)
-            if not passed:
-                failed.append(rule.rule_id)
+        for prov in template.provisions:
+            for rule in prov.evaluation:
+                if rule.severity != "fail":
+                    continue
+                op = OPERATOR_REGISTRY[rule.rule]
+                passed, _ = op(rule.params, records)
+                if not passed:
+                    failed.append(rule.rule_id)
         return failed
 
-    def test_confidential_report_no_public_card_passes_all_fail_rules(self, template: Template) -> None:
-        # The load-bearing §5.7 case: a RESERVED-id confidential report with NO
-        # public incident_card MUST satisfy every fail-severity Art.73 rule.
-        records = [_confidential_report()]
-        assert self._failed_rule_ids(template, records) == []
-
-    def test_public_card_passes_all_fail_rules(self, template: Template) -> None:
-        # The public-card path must also satisfy every fail-severity rule.
-        records = [_public_card()]
-        assert self._failed_rule_ids(template, records) == []
-
-    def test_regulatory_timeline_eu_entry_not_first_still_passes(self, template: Template) -> None:
-        # A valid multi-jurisdiction timeline whose eu-ai-act-art73 entry is NOT
-        # first (order-insensitive array, §5.10) must NOT be rejected.
-        conf = [_confidential_report(eu_entry_first=False)]
-        pub = [_public_card(eu_entry_first=False)]
-        assert self._failed_rule_ids(template, conf) == []
-        assert self._failed_rule_ids(template, pub) == []
-
-    def test_confidential_card_source_missing_triggers_fails(self, template: Template) -> None:
-        # A card_source present but missing the trigger facts MUST fail a
-        # fail-severity rule — the dual path does not silently pass an
-        # incomplete confidential source.
+    def test_incident_report_without_notification_timeline_fails(self, template: Template) -> None:
+        # The retained per-record conditional: an incident_report MUST carry
+        # notification_timeline[]. A report missing it MUST fail a fail-severity rule.
         report = _make_record(
             "incident_report",
             {
                 "incident_type": "safety",
                 "severity": "critical",
-                "description": "incomplete card_source",
+                "description": "report with no notification_timeline",
                 "card_source": {"public_incident_id": _VALID_AIIC_ID, "id_grade": "self-asserted"},
             },
         )
-        assert self._failed_rule_ids(template, [report]) != []
+        assert self._failed_fail_rule_ids(template, [report]) != []
+
+    def test_confidential_report_with_notification_timeline_passes_retained_rules(self, template: Template) -> None:
+        # A complete confidential report (with notification_timeline) satisfies the
+        # retained fail-severity rules — the retained rules do NOT block the §5.7
+        # confidential path. (The existential dual-source / ACEF-084 enforcement is
+        # the validator's job, not these rules.)
+        assert self._failed_fail_rule_ids(template, [_confidential_report()]) == []
 
 
-# ── The shortest-applicable-clock metadata + evaluation ──
+# ── Validator-delegated Art. 73 enforcement is DOCUMENTED (pinned contract) ──
+
+
+class TestDelegatedEnforcementDocumented:
+    """The three DSL-inexpressible Art. 73 checks are documented as delegated.
+
+    This pins the honest delegation: the template states WHICH checks the validator
+    (F-M3-VALIDATOR-RULES) performs and WHY the DSL cannot, so the delegation is a
+    visible contract rather than a silent hole.
+    """
+
+    def _delegation_note(self, raw_template: dict[str, Any]) -> str:
+        prov = next(p for p in raw_template["provisions"] if p["provision_id"] == "article-73")
+        note = prov.get("validator_delegated_enforcement")
+        assert note is not None, "article-73 provision must document validator_delegated_enforcement"
+        return json.dumps(note)
+
+    def test_delegation_block_present_and_pins_acef_084(self, raw_template: dict[str, Any]) -> None:
+        prov = next(p for p in raw_template["provisions"] if p["provision_id"] == "article-73")
+        block = prov.get("validator_delegated_enforcement")
+        assert block is not None
+        # The block names the owning feature and the error code.
+        text = json.dumps(block)
+        assert "F-M3-VALIDATOR-RULES" in text
+        assert "ACEF-084" in text
+        assert "§5.7" in text or "5.7" in text
+
+    def test_delegation_block_lists_three_checks(self, raw_template: dict[str, Any]) -> None:
+        prov = next(p for p in raw_template["provisions"] if p["provision_id"] == "article-73")
+        block = prov["validator_delegated_enforcement"]
+        checks = block["checks"]
+        # All three DSL-inexpressible checks are enumerated.
+        ids = {c["id"] for c in checks}
+        assert {
+            "existential-dual-source",
+            "regulatory-timeline-framework-match",
+            "shortest-clock-deadline-consistency",
+        } <= ids
+        # Each check states it is enforced by the validator, not the template DSL,
+        # and explains why the DSL cannot express it.
+        for check in checks:
+            assert check["enforced_by"] == "F-M3-VALIDATOR-RULES"
+            assert check["dsl_expressible"] is False
+            assert check["reason"].strip()
+
+    def test_delegation_block_names_both_fact_source_paths(self, raw_template: dict[str, Any]) -> None:
+        note = self._delegation_note(raw_template)
+        # The §5.7 dual fact-source rule is documented as the validator's input.
+        assert "card_source.eu_ai_act_facts" in note
+        assert "taxonomy_crosswalk.eu_ai_act" in note
+
+
+# ── The shortest-applicable-clock metadata + evaluation (VAL-TMPL-001 core) ──
 
 
 class TestReportingClockMetadata:
@@ -454,6 +477,15 @@ class TestReportingClockMetadata:
         rule_days = {r["days"] for r in spec["rules"]}
         assert DEATH_CLOCK_DAYS in rule_days
         assert CRITICAL_OR_WIDESPREAD_CLOCK_DAYS in rule_days
+
+    def test_clock_selection_is_shortest_applicable(self, template: Template) -> None:
+        spec = _clock_spec(template)
+        assert spec["selection"] == "shortest-applicable"
+
+    def test_clock_error_on_mismatch_is_acef_084(self, template: Template) -> None:
+        # The clock metadata names the error the validator raises on a mismatch.
+        spec = _clock_spec(template)
+        assert spec["error_on_mismatch"] == "ACEF-084"
 
     def test_clock_source_paths_documented(self, template: Template) -> None:
         # The template documents BOTH fact-source paths (§5.7): confidential
@@ -538,7 +570,7 @@ class TestShortestApplicableClock:
         assert _shortest_applicable_clock(spec, facts) == DEFAULT_CLOCK_DAYS
 
     def test_branch_3_49_d_non_fatal_is_15_days(self, template: Template) -> None:
-        # 3.49.d (fundamental-rights harm) alone, non-fatal → 15 days.
+        # 3.49.d (property/environment harm) alone, non-fatal → 15 days.
         spec = _clock_spec(template)
         facts = {
             "serious_incident_triggers": ["3.49.d"],
