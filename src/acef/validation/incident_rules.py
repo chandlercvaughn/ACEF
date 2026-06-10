@@ -856,9 +856,13 @@ def check_severity_band_consistency(records: list[dict[str, Any]]) -> list[Valid
       the coarse band). A root severity disagreeing with ``band(card_source.vector)``
       is an ACEF-088 mismatch.
 
-    Each distinct severity FIELD is judged at most once (the root-vs-root and
-    root-vs-card_source comparisons share the same root ``severity`` field, so the
-    root case is only emitted under one of them) to avoid double-counting.
+    Each distinct severity_vector PATH that disagrees with its governing
+    ``severity`` produces one diagnostic. The root ``severity`` is compared against
+    EVERY vector that governs it — its OWN root vector (same-container) AND, on a
+    source-backed report, the ``card_source.severity_vector`` (cross-container) —
+    so a matching root vector NEVER masks a disagreeing card_source vector. After
+    both comparisons run, diagnostics are de-duplicated by (record, vector path) so
+    a single genuine mismatch is reported once, never collapsed into a passing one.
     """
     diags: list[ValidationDiagnostic] = []
     for _idx, rec in _records_iter(records):
@@ -866,39 +870,61 @@ def check_severity_band_consistency(records: list[dict[str, Any]]) -> list[Valid
             continue
         payload = _payload_of(rec)
         card_source = _as_dict(payload.get("card_source"))
+        rid = _record_id_of(rec)
 
-        # (severity_value, severity_path, vector_value) comparison pairs. The root
-        # severity prefers its OWN (same-container) vector when present; otherwise it
-        # is compared against the card_source vector (cross-container) so a
-        # source-backed report with only a card_source vector is still checked.
+        root_severity = payload.get("severity")
         root_vector = payload.get("severity_vector")
-        root_vector_for_root = root_vector if isinstance(root_vector, str) else card_source.get("severity_vector")
-        pairs: list[tuple[Any, str, Any]] = [
-            (payload.get("severity"), f"/{_record_id_of(rec)}/severity", root_vector_for_root),
+        cs_severity = card_source.get("severity")
+        cs_vector = card_source.get("severity_vector")
+
+        # (governing_severity, severity_path, vector_value, vector_path) comparison
+        # tuples. The vector PATH keys de-duplication so each distinct vector is
+        # judged at most once, but a matching root vector cannot suppress a
+        # card_source-vector comparison:
+        #   - root severity vs its OWN root vector (same-container);
+        #   - root severity vs card_source vector (cross-container, source-backed) —
+        #     ALWAYS evaluated when a card_source vector is present, independent of
+        #     whether a root vector exists or matches;
+        #   - card_source severity vs card_source vector (same-container).
+        comparisons: list[tuple[Any, str, Any, str]] = [
+            (root_severity, f"/{rid}/severity", root_vector, f"/{rid}/severity_vector"),
             (
-                card_source.get("severity"),
-                f"/{_record_id_of(rec)}/card_source/severity",
-                card_source.get("severity_vector"),
+                root_severity,
+                f"/{rid}/severity",
+                cs_vector,
+                f"/{rid}/card_source/severity_vector",
+            ),
+            (
+                cs_severity,
+                f"/{rid}/card_source/severity",
+                cs_vector,
+                f"/{rid}/card_source/severity_vector",
             ),
         ]
-        for severity, sev_path, vector in pairs:
+
+        seen_vector_paths: set[str] = set()
+        for severity, sev_path, vector, vec_path in comparisons:
             if not isinstance(severity, str) or not isinstance(vector, str):
                 continue
             projected = band(vector)
             if projected is None:
                 continue  # unbandable vector is ACEF-082, not ACEF-088
-            if severity != projected:
-                diags.append(
-                    ValidationDiagnostic(
-                        "ACEF-088",
-                        (
-                            f"Record {_record_id_of(rec)!r}: severity {severity!r} disagrees with "
-                            f"band(severity_vector)={projected!r} (§5.4). Set severity to the band() "
-                            f"projection of severity_vector, or remove one of the two fields."
-                        ),
-                        path=sev_path,
-                    )
+            if severity == projected:
+                continue
+            if vec_path in seen_vector_paths:
+                continue  # one diagnostic per distinct disagreeing vector path
+            seen_vector_paths.add(vec_path)
+            diags.append(
+                ValidationDiagnostic(
+                    "ACEF-088",
+                    (
+                        f"Record {rid!r}: severity {severity!r} disagrees with "
+                        f"band(severity_vector)={projected!r} (§5.4). Set severity to the band() "
+                        f"projection of severity_vector, or remove one of the two fields."
+                    ),
+                    path=sev_path,
                 )
+            )
     return diags
 
 

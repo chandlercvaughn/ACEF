@@ -989,3 +989,56 @@ class TestACEF088:
         }
         diags = ir.check_severity_band_consistency([report])
         assert "ACEF-088" not in _codes(diags)
+
+    def test_root_vector_match_does_not_mask_card_source_mismatch_raises_088(self) -> None:
+        # Source-backed incident_report: the REQUIRED root payload.severity is
+        # "major" and a root payload.severity_vector ALSO projects to "major"
+        # (BR:I/RV:A -> no escalation), so the root-vs-root comparison passes.
+        # BUT payload.card_source.severity_vector escalates (BR:P -> critical) and
+        # therefore DISAGREES with the governing root severity "major". The matching
+        # root vector MUST NOT mask the card_source mismatch -> ACEF-088 still fires.
+        report = {
+            "record_id": "rec-report-1",
+            "record_type": "incident_report",
+            "payload": {
+                "incident_type": "malfunction",
+                "severity": "major",
+                "severity_vector": "ACEF-SEV:1.0/HT:P/HG:H/RV:A/SC:U/BR:I",  # band -> major
+                "description": "x",
+                "card_source": {
+                    "public_incident_id": _VALID_ID,
+                    "id_grade": "self-asserted",
+                    "harm_core": dict(_VALID_HARM_CORE),
+                    # band -> critical (BR:P escalates), disagrees with root "major"
+                    "severity_vector": "ACEF-SEV:1.0/HT:P/HG:H/RV:A/SC:U/BR:P",
+                },
+            },
+        }
+        diags = ir.check_severity_band_consistency([report])
+        codes = _codes(diags)
+        assert "ACEF-088" in codes
+        # exactly one ACEF-088 for the single genuine (card_source) mismatch — the
+        # passing root-vs-root comparison must not add a second.
+        assert codes.count("ACEF-088") == 1
+
+    def test_root_vector_and_card_source_vector_both_agree_no_088(self) -> None:
+        # Positive control: root severity "major", root vector band -> major, and
+        # card_source vector band -> major as well. No mismatch on any surface.
+        report = {
+            "record_id": "rec-report-1",
+            "record_type": "incident_report",
+            "payload": {
+                "incident_type": "malfunction",
+                "severity": "major",
+                "severity_vector": "ACEF-SEV:1.0/HT:P/HG:H/RV:A/SC:U/BR:I",  # band -> major
+                "description": "x",
+                "card_source": {
+                    "public_incident_id": _VALID_ID,
+                    "id_grade": "self-asserted",
+                    "harm_core": dict(_VALID_HARM_CORE),
+                    "severity_vector": "ACEF-SEV:1.0/HT:P/HG:H/RV:A/SC:U/BR:I",  # band -> major
+                },
+            },
+        }
+        diags = ir.check_severity_band_consistency([report])
+        assert "ACEF-088" not in _codes(diags)
