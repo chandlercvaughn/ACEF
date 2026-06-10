@@ -1,0 +1,125 @@
+{
+  "china-cac-labeling": {
+    "provision_outcomes": {
+      "china-cac-labeling-2025::cac-explicit-label": "satisfied",
+      "china-cac-labeling-2025::cac-implicit-metadata": "satisfied",
+      "china-cac-labeling-2025::cac-log-retention": "satisfied",
+      "china-cac-labeling-2025::cac-watermark": "satisfied"
+    },
+    "rule_result_counts": {
+      "passed": 17
+    },
+    "structural_diagnostics": [
+      {
+        "category": "schema",
+        "code": "ACEF-002",
+        "message": "Manifest schema violation: '' does not match '^urn:acef:act:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'",
+        "path": "/audit_trail/0/actor_ref",
+        "severity": "fatal"
+      }
+    ]
+  },
+  "eu-high-risk-core": {
+    "provision_outcomes": {
+      "eu-ai-act-2024::article-10": "satisfied",
+      "eu-ai-act-2024::article-11": "satisfied",
+      "eu-ai-act-2024::article-12": "satisfied",
+      "eu-ai-act-2024::article-13": "satisfied",
+      "eu-ai-act-2024::article-14": "satisfied",
+      "eu-ai-act-2024::article-15": "satisfied",
+      "eu-ai-act-2024::article-17": "satisfied",
+      "eu-ai-act-2024::article-9": "satisfied"
+    },
+    "rule_result_counts": {
+      "passed": 25
+    },
+    "structural_diagnostics": [
+      {
+        "category": "schema",
+        "code": "ACEF-002",
+        "message": "Manifest schema violation: '' does not match '^urn:acef:act:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'",
+        "path": "/audit_trail/0/actor_ref",
+        "severity": "fatal"
+      }
+    ]
+  },
+  "gpai-provider-annex-xi-xii": {
+    "provision_outcomes": {
+      "eu-ai-act-2024::article-53": "satisfied"
+    },
+    "rule_result_counts": {
+      "passed": 4
+    },
+    "structural_diagnostics": [
+      {
+        "category": "schema",
+        "code": "ACEF-002",
+        "message": "Manifest schema violation: '' does not match '^urn:acef:act:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'",
+        "path": "/audit_trail/0/actor_ref",
+        "severity": "fatal"
+      }
+    ]
+  },
+  "multi-subject-composed": {
+    "provision_outcomes": {
+      "eu-ai-act-2024::article-10": "satisfied",
+      "eu-ai-act-2024::article-11": "satisfied",
+      "eu-ai-act-2024::article-13": "satisfied",
+      "eu-ai-act-2024::article-53": "partially-satisfied",
+      "eu-ai-act-2024::article-9": "satisfied",
+      "nist-ai-rmf-1.0::govern-1": "partially-satisfied",
+      "nist-ai-rmf-1.0::map-1": "partially-satisfied",
+      "nist-ai-rmf-1.0::measure-1": "satisfied"
+    },
+    "rule_result_counts": {
+      "failed": 5,
+      "passed": 31
+    },
+    "structural_diagnostics": [
+      {
+        "category": "schema",
+        "code": "ACEF-002",
+        "message": "Manifest schema violation: '' does not match '^urn:acef:act:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'",
+        "path": "/audit_trail/0/actor_ref",
+        "severity": "fatal"
+      }
+    ]
+  },
+  "synthetic-content-marking": {
+    "provision_outcomes": {
+      "eu-ai-act-2024::article-50.2": "satisfied"
+    },
+    "rule_result_counts": {
+      "passed": 4
+    },
+    "structural_diagnostics": [
+      {
+        "category": "schema",
+        "code": "ACEF-002",
+        "message": "Manifest schema violation: '' does not match '^urn:acef:act:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'",
+        "path": "/audit_trail/0/actor_ref",
+        "severity": "fatal"
+      }
+    ]
+  },
+  "us-federal-governance": {
+    "provision_outcomes": {
+      "nist-ai-rmf-1.0::govern-1": "satisfied",
+      "nist-ai-rmf-1.0::manage-1": "satisfied",
+      "nist-ai-rmf-1.0::map-1": "satisfied",
+      "nist-ai-rmf-1.0::measure-1": "satisfied"
+    },
+    "rule_result_counts": {
+      "passed": 12
+    },
+    "structural_diagnostics": [
+      {
+        "category": "schema",
+        "code": "ACEF-002",
+        "message": "Manifest schema violation: '' does not match '^urn:acef:act:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'",
+        "path": "/audit_trail/0/actor_ref",
+        "severity": "fatal"
+      }
+    ]
+  }
+}
