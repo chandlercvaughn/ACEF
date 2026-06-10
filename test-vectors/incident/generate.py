@@ -44,6 +44,7 @@ from typing import Any
 from acef.models.metadata import Versioning
 from acef.models.urns import URNType
 from acef.package import Package
+from acef.redaction import RedactionPolicy
 from acef.validation.engine import validate_bundle
 
 # ---------------------------------------------------------------------------
@@ -60,6 +61,13 @@ _FORGED_ASSIGNER = "OPENAI"
 _FIXED_CLOCK = datetime(2026, 8, 1, 0, 0, 0, tzinfo=UTC)
 _RECORD_TS = "2026-08-10T00:00:00Z"
 _AWARENESS = "2026-08-01T00:00:00Z"
+
+# Confidentiality of a source-backed / confidential incident_report carrying the
+# private card_source block (Finding 2). RFC-0002 §5.1: incident_report defaults to
+# regulator-only, "never the public artifact".
+_CONFIDENTIAL = "regulator-only"
+# Fixed semver for the X1 redaction_policy_version on non-public records.
+_REDACTION_POLICY_VERSION = "1.0.0"
 
 _VALID_HARM_CORE: dict[str, Any] = {
     "realization": "harm_event",
@@ -107,6 +115,7 @@ def _build_bundle(
     *,
     record_type: str,
     payload: dict[str, Any],
+    confidentiality: str = "public",
 ) -> None:
     """Materialize a v1.1 incident bundle directory carrying ONE incident record.
 
@@ -125,15 +134,40 @@ def _build_bundle(
     No ``manifest.profiles[]`` block is declared; the §6 conformance class is supplied
     to the driver via ``vectors.json`` (passed to ``validate_bundle(profiles=...)``),
     keeping the bundle minimal and free of template-DSL evaluation noise.
+
+    Confidentiality (Finding 2): a source-backed / confidential ``incident_report``
+    carries the private ``card_source`` block (and ``root_cause_analysis``) and therefore
+    MUST be emitted NON-public (``regulator-only``) — never ``public`` — so the private
+    block is not published (RFC-0002 §5.1/§5.11: ``incident_report`` defaults to
+    ``confidentiality: regulator-only``, "never the public artifact"). When
+    ``confidentiality`` is non-public, a ``RedactionPolicy`` is attached so the SDK
+    auto-populates the v1.1 X1 (``redaction_policy_version``) + X2
+    (``redaction_attestation_ref``) envelope fields and mints the in-bundle Core
+    ``event_log`` attestation record, so the non-public record validates cleanly (no
+    ACEF-074/078). Both X1/X2 and the attestation record are minted under the SAME
+    injected fixed clock + deterministic URN generator, so the bundle stays byte-stable.
+    The public ``incident_card`` vectors keep ``confidentiality: public``.
     """
     if bundle_dir.exists():
         shutil.rmtree(bundle_dir)
     bundle_dir.parent.mkdir(parents=True, exist_ok=True)
 
+    is_non_public = confidentiality != "public"
+    redaction_policy = (
+        RedactionPolicy(
+            version=_REDACTION_POLICY_VERSION,
+            method="sha256-hash-commitment",
+            description="Confidential Art.73 source-backed redaction policy (regulator-only card_source).",
+        )
+        if is_non_public
+        else None
+    )
+
     pkg = Package(
         producer={"name": "acef-incident-vectors", "version": "1.1.0"},
         clock=lambda: _FIXED_CLOCK,
         urn_generator=_deterministic_urn_generator(),
+        redaction_policy=redaction_policy,
     )
     # v1.1 gating: route Phase-1 schema validation to the v1.1 incident schema set.
     pkg._versioning = Versioning(core_version="1.1.0", profiles_version="1.0.0")
@@ -149,7 +183,7 @@ def _build_bundle(
     pkg.record(
         record_type,
         payload=payload,
-        confidentiality="public",
+        confidentiality=confidentiality,
         timestamp=_RECORD_TS,
     )
     # The SDK constructor seeds an audit_trail entry with no actor_ref, which fails
@@ -345,6 +379,7 @@ def _vector_specs() -> list[dict[str, Any]]:
             "name": "pass-art73-single-trigger",
             "conformance_class": "source-backed",
             "disposition": "pass",
+            "confidentiality": _CONFIDENTIAL,
             "profiles": [_ART73_PROFILE],
             "record_type": "incident_report",
             "title": "Art.73 single-trigger — 15-day general clock",
@@ -368,6 +403,7 @@ def _vector_specs() -> list[dict[str, Any]]:
             "name": "pass-art73-compound-2day",
             "conformance_class": "source-backed",
             "disposition": "pass",
+            "confidentiality": _CONFIDENTIAL,
             "profiles": [_ART73_PROFILE],
             "record_type": "incident_report",
             "title": "Art.73 compound (death + critical-infra) — 2-day shortest clock",
@@ -532,6 +568,7 @@ def _vector_specs() -> list[dict[str, Any]]:
             "name": "fail-art73-compound-wrong-clock-084",
             "conformance_class": "source-backed",
             "disposition": "fail",
+            "confidentiality": _CONFIDENTIAL,
             "profiles": [_ART73_PROFILE],
             "record_type": "incident_report",
             "title": "Art.73 compound multi-trigger wrong clock (ACEF-084)",
@@ -557,6 +594,7 @@ def _vector_specs() -> list[dict[str, Any]]:
             "name": "reserved-id-death-10day",
             "conformance_class": "source-backed",
             "disposition": "pass",
+            "confidentiality": _CONFIDENTIAL,
             "profiles": [_ART73_PROFILE],
             "record_type": "incident_report",
             "title": "RESERVED-id death clock (10 days), no public card",
@@ -583,6 +621,7 @@ def _vector_specs() -> list[dict[str, Any]]:
             "name": "reserved-id-death-compound-2day",
             "conformance_class": "source-backed",
             "disposition": "pass",
+            "confidentiality": _CONFIDENTIAL,
             "profiles": [_ART73_PROFILE],
             "record_type": "incident_report",
             "title": "RESERVED-id compound death + critical-infra (2 days), no public card",
@@ -603,23 +642,32 @@ def _vector_specs() -> list[dict[str, Any]]:
         }
     )
 
-    # === VAL-VEC-002 — forged-assigner online-class fail (offline PASSES) ===
-    # The bundle ITSELF passes the offline class (valid pattern AIIC-OPENAI-...); the
-    # online-class reject is exercised by the driver via verify_domain_control with an
-    # injected attacker proof. We mark offline_disposition=pass so the driver asserts the
-    # offline-pass cross-check (VAL-DOMAIN-001).
+    # === VAL-VEC-002 — forged-assigner online-class REJECT (offline PASSES) ===
+    # Finding 1: the vector's PRIMARY disposition is the ONLINE outcome — `reject` —
+    # so a generic consumer reading `disposition` classifies the required online-reject
+    # case correctly (it previously sat under `online-conformance/pass` with
+    # disposition=pass, which mislabeled the required reject as a pass). The bundle ITSELF
+    # still passes the OFFLINE class (valid pattern AIIC-OPENAI-…); that fact is carried on
+    # the SEPARATE `offline_class: pass` field documenting the VAL-DOMAIN-001 cross-check.
+    # The online-class reject (ACEF-083) is exercised by the driver via
+    # verify_domain_control with an injected attacker proof; the offline-pass premise is
+    # exercised by validate_bundle (no ACEF-083). The committed `.acef-assessment.json`
+    # records the OFFLINE emitted-code set (the bundle's deterministic offline output).
     specs.append(
         {
             "name": "forged-assigner-online-reject-083",
             "conformance_class": "online-conformance",
-            "disposition": "pass",  # OFFLINE disposition: the card passes the offline class.
-            "offline_disposition": "pass",
+            # PRIMARY disposition = the ONLINE verdict (Finding 1). The bundle lands under
+            # `online-conformance/reject/`, not under a `pass` tree.
+            "disposition": "reject",
+            # The OFFLINE-pass fact is a SEPARATE field (not the disposition).
+            "offline_class": "pass",
             "online_disposition": "reject",
             "public_incident_id": _VALID_ID,
             "assigner": _FORGED_ASSIGNER,
             "profiles": [],
             "record_type": "incident_card",
-            "title": "Forged assigner — online reject (ACEF-083), offline PASS",
+            "title": "Forged assigner — online REJECT (ACEF-083), offline class PASS",
             "body": (
                 "A public incident_card bearing a valid-pattern `AIIC-OPENAI-2026-…` id that "
                 "was forged by an attacker (signed with an attacker key, not OpenAI's). "
@@ -651,20 +699,63 @@ def _vector_specs() -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 
+def _prune_stale_vector_dirs(live_bundle_dirs: set[Path], live_assessment_files: set[Path]) -> list[str]:
+    """Remove generated vector artifacts NOT produced by the current spec set.
+
+    Finding 3: the on-disk corpus must NOT silently drift from the manifest. A
+    ``*.acef`` directory (identified by its ``acef-manifest.json``) or a
+    ``*.acef.acef-assessment.json`` file under ``test-vectors/incident/`` that the
+    current ``_vector_specs()`` did NOT just emit is stale (a removed/renamed
+    vector) and is deleted, so re-running ``generate.py`` after dropping a vector
+    leaves no orphan on disk. Returns the list of pruned relative paths (for the
+    run log)."""
+    pruned: list[str] = []
+    for manifest_path in sorted(_INCIDENT_DIR.rglob("acef-manifest.json")):
+        bundle = manifest_path.parent
+        if bundle not in live_bundle_dirs:
+            shutil.rmtree(bundle)
+            pruned.append(bundle.relative_to(_INCIDENT_DIR).as_posix())
+    for assessment_path in sorted(_INCIDENT_DIR.rglob("*.acef.acef-assessment.json")):
+        if assessment_path not in live_assessment_files:
+            assessment_path.unlink()
+            pruned.append(assessment_path.relative_to(_INCIDENT_DIR).as_posix())
+    # Drop now-empty class/disposition directories left behind by pruning.
+    for child in sorted(_INCIDENT_DIR.rglob("*"), reverse=True):
+        if child.is_dir() and not any(child.iterdir()):
+            child.rmdir()
+    return pruned
+
+
 def generate() -> None:
     specs = _vector_specs()
     vectors_index: list[dict[str, Any]] = []
+    live_bundle_dirs: set[Path] = set()
+    live_assessment_files: set[Path] = set()
 
     for spec in specs:
         name = spec["name"]
         conformance_class = spec["conformance_class"]
         disposition = spec["disposition"]
+        confidentiality = spec.get("confidentiality", "public")
         rel_dir = Path(conformance_class) / disposition / f"{name}.acef"
         bundle_dir = _INCIDENT_DIR / rel_dir
+        live_bundle_dirs.add(bundle_dir)
 
-        _build_bundle(bundle_dir, record_type=spec["record_type"], payload=spec["payload"])
+        _build_bundle(
+            bundle_dir,
+            record_type=spec["record_type"],
+            payload=spec["payload"],
+            confidentiality=confidentiality,
+        )
 
-        expected_label = ", ".join(spec.get("expect_codes", [])) if spec.get("expect_codes") else "none (pass)"
+        if spec.get("expect_codes"):
+            expected_label = ", ".join(spec["expect_codes"])
+        elif disposition == "reject":
+            # Finding 1: an online-conformance reject vector emits NO offline code
+            # (offline never attributes); the reject is the ONLINE verdict (ACEF-083).
+            expected_label = "ACEF-083 (online-conformance reject); offline class: pass (none)"
+        else:
+            expected_label = "none (pass)"
         _write_readme(bundle_dir, title=spec["title"], body=spec["body"], expected=expected_label)
 
         # Validate now to capture the live emitted-code set into the committed
@@ -675,6 +766,7 @@ def generate() -> None:
 
         assessment_rel = Path(conformance_class) / disposition / f"{name}.acef.acef-assessment.json"
         assessment_path = _INCIDENT_DIR / assessment_rel
+        live_assessment_files.add(assessment_path)
         _write_json(
             assessment_path,
             {
@@ -693,6 +785,7 @@ def generate() -> None:
             "assessment_path": str(assessment_rel),
             "record_type": spec["record_type"],
             "profiles": spec.get("profiles", []),
+            "confidentiality": confidentiality,
         }
         for optional in (
             "expect_codes",
@@ -700,6 +793,7 @@ def generate() -> None:
             "info_codes",
             "clock_days",
             "no_public_card",
+            "offline_class",
             "offline_disposition",
             "online_disposition",
             "public_incident_id",
@@ -708,6 +802,10 @@ def generate() -> None:
             if optional in spec:
                 entry[optional] = spec[optional]
         vectors_index.append(entry)
+
+    # Finding 3: prune any on-disk vector artifact not in the current spec set, so
+    # the corpus cannot silently drift from the manifest we are about to write.
+    pruned = _prune_stale_vector_dirs(live_bundle_dirs, live_assessment_files)
 
     vectors_index.sort(key=lambda e: str(e["name"]))
     _write_json(
@@ -723,6 +821,20 @@ def generate() -> None:
             "vectors": vectors_index,
         },
     )
+
+    # Finding 3: hard consistency guard — the on-disk *.acef dirs MUST equal the
+    # manifest exactly after pruning. Fail loudly rather than emit a drifted corpus.
+    manifest_dirs = {str(e["path"]) for e in vectors_index}
+    on_disk_dirs = {m.parent.relative_to(_INCIDENT_DIR).as_posix() for m in _INCIDENT_DIR.rglob("acef-manifest.json")}
+    if on_disk_dirs != manifest_dirs:
+        raise SystemExit(
+            "generate.py: on-disk vector dirs disagree with vectors.json after pruning: "
+            f"stale-on-disk={sorted(on_disk_dirs - manifest_dirs)!r} "
+            f"missing-on-disk={sorted(manifest_dirs - on_disk_dirs)!r}"
+        )
+
+    if pruned:
+        print(f"pruned {len(pruned)} stale vector artifact(s): {sorted(pruned)!r}")
     print(f"generated {len(vectors_index)} incident conformance vectors under {_INCIDENT_DIR}")
 
 

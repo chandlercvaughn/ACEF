@@ -78,10 +78,24 @@ def _load_vectors_manifest() -> list[dict[str, Any]]:
 _VECTORS = _load_vectors_manifest()
 
 
+# The online-conformance class is NOT validated through the generic offline
+# ``validate_bundle`` pass/fail path — its disposition (``reject``) is the ONLINE
+# verifier's verdict, which the offline engine (which NEVER attributes the id)
+# cannot and must not produce. Online-conformance vectors are exercised ONLY
+# through ``verify_domain_control`` (see ``test_forged_assigner_*``), with the
+# bundle separately asserted to PASS the offline class.
+_OFFLINE_VALIDATABLE_CLASSES = {"offline-deterministic", "source-backed"}
+
+
 def _vectors_for(disposition: str, *, conformance_class: str | None = None) -> list[dict[str, Any]]:
     out = []
     for v in _VECTORS:
         if v.get("disposition") != disposition:
+            continue
+        # Generic offline pass/fail parametrization runs vectors THROUGH the
+        # offline ``validate_bundle``; the online-conformance class is routed
+        # through the online verifier instead (Finding 1 — VAL-VEC-002).
+        if str(v.get("class")) not in _OFFLINE_VALIDATABLE_CLASSES:
             continue
         if conformance_class is not None and v.get("class") != conformance_class:
             continue
@@ -139,8 +153,128 @@ def test_required_fail_codes_each_have_a_vector() -> None:
     fail_codes: set[str] = set()
     for v in _vectors_for("fail"):
         fail_codes.update(str(c) for c in v.get("expect_codes", []))
-    for required in ("ACEF-082", "ACEF-083", "ACEF-084", "ACEF-085", "ACEF-086", "ACEF-088"):
+    for required in ("ACEF-082", "ACEF-084", "ACEF-085", "ACEF-086", "ACEF-088"):
         assert required in fail_codes, f"no fail vector triggers {required}"
+    # ACEF-083 is exercised by BOTH (a) the offline-class pattern-failure fail
+    # vector (offline-deterministic) AND (b) the online-conformance forged-assigner
+    # reject vector (verifier path). Either source satisfies the requirement; the
+    # offline source is asserted directly here so the offline fail surface stays
+    # covered even after the online vector moved off the generic fail path.
+    assert "ACEF-083" in fail_codes, "no offline fail vector triggers ACEF-083 (pattern surface)"
+
+
+# ---------------------------------------------------------------------------
+# Finding 3 — EXACT inventory protection. The required vector NAMES, grouped by
+# (class, disposition), MUST match an explicit expected set. Renaming or deleting
+# a required vector — or silently adding one — FAILS this test. The on-disk vector
+# directories MUST also match the manifest exactly (no silent drift).
+# ---------------------------------------------------------------------------
+
+# The exact required corpus, keyed (class, disposition) -> frozenset of names.
+# This is the single authoritative inventory the driver enforces; it is kept in
+# lockstep with ``generate.py`` ``_vector_specs()``.
+_EXPECTED_INVENTORY: dict[tuple[str, str], frozenset[str]] = {
+    ("offline-deterministic", "pass"): frozenset(
+        {
+            "pass-multi-profile-card",
+            "pass-oecd-voluntary-advisory",
+            "pass-near-miss-info",
+        }
+    ),
+    ("offline-deterministic", "fail"): frozenset(
+        {
+            "fail-severity-vector-parse-082",
+            "fail-public-id-offline-083",
+            "fail-harm-core-crosswalk-085",
+            "fail-severity-band-088",
+            "fail-publishability-086",
+        }
+    ),
+    ("source-backed", "pass"): frozenset(
+        {
+            "pass-art73-single-trigger",
+            "pass-art73-compound-2day",
+            "reserved-id-death-10day",
+            "reserved-id-death-compound-2day",
+        }
+    ),
+    ("source-backed", "fail"): frozenset(
+        {
+            "fail-art73-compound-wrong-clock-084",
+        }
+    ),
+    ("online-conformance", "reject"): frozenset(
+        {
+            "forged-assigner-online-reject-083",
+        }
+    ),
+}
+
+
+def test_exact_inventory_matches_manifest() -> None:
+    """The (class, disposition) -> {names} grouping of ``vectors.json`` MUST equal
+    the explicit expected inventory EXACTLY. Removing, renaming, or adding a
+    required vector fails this test (Finding 3 — no silent corpus drift)."""
+    actual: dict[tuple[str, str], set[str]] = {}
+    for v in _VECTORS:
+        key = (str(v.get("class")), str(v.get("disposition")))
+        actual.setdefault(key, set()).add(str(v.get("name")))
+
+    expected = {k: set(names) for k, names in _EXPECTED_INVENTORY.items()}
+    assert actual.keys() == expected.keys(), (
+        f"vector (class, disposition) groups changed: "
+        f"unexpected={sorted(actual.keys() - expected.keys())!r} "
+        f"missing={sorted(expected.keys() - actual.keys())!r}"
+    )
+    for key in expected:
+        assert actual[key] == expected[key], (
+            f"vector inventory for {key!r} drifted: "
+            f"unexpected={sorted(actual[key] - expected[key])!r} "
+            f"missing={sorted(expected[key] - actual[key])!r}"
+        )
+
+
+def test_on_disk_vector_dirs_match_manifest_exactly() -> None:
+    """The set of ``*.acef`` vector directories ON DISK MUST equal exactly the set
+    declared in ``vectors.json`` (Finding 3). A generated dir not in the manifest
+    (stale drift) OR a manifest entry with no dir (dangling) fails this test."""
+    manifest_dirs = {str(v.get("path")) for v in _VECTORS}
+    on_disk: set[str] = set()
+    for manifest_path in _INCIDENT_DIR.rglob("acef-manifest.json"):
+        bundle = manifest_path.parent
+        rel = bundle.relative_to(_INCIDENT_DIR).as_posix()
+        on_disk.add(rel)
+
+    assert on_disk == manifest_dirs, (
+        f"on-disk vector dirs disagree with vectors.json: "
+        f"stale-on-disk={sorted(on_disk - manifest_dirs)!r} "
+        f"missing-on-disk={sorted(manifest_dirs - on_disk)!r} — "
+        f"run `python test-vectors/incident/generate.py` to resync."
+    )
+
+
+def test_source_backed_incident_reports_are_non_public() -> None:
+    """Finding 2: every SOURCE-BACKED ``incident_report`` vector (it carries the
+    private ``card_source`` block + ``root_cause_analysis``) MUST be emitted
+    NON-public on disk (e.g. ``regulator-only``), so the confidential block is not
+    published. The public ``incident_card`` vectors stay ``public``."""
+    source_backed = [v for v in _VECTORS if str(v.get("class")) == "source-backed"]
+    assert source_backed, "no source-backed vectors present"
+    for vector in source_backed:
+        bundle_dir = _bundle_dir(vector)
+        report_path = bundle_dir / "records" / "incident_report.jsonl"
+        assert report_path.is_file(), f"{vector.get('name')!r} has no incident_report record"
+        record = json.loads(report_path.read_text(encoding="utf-8").splitlines()[0])
+        conf = record.get("confidentiality")
+        assert conf is not None and conf != "public", (
+            f"source-backed {vector.get('name')!r} published its confidential card_source as "
+            f"confidentiality={conf!r}; it MUST be non-public (e.g. regulator-only)"
+        )
+        # The private block must still be carried on the (non-public) record so the
+        # regulator-only consumer can read the Art.73 facts.
+        assert "card_source" in record.get("payload", {}), (
+            f"{vector.get('name')!r} lost its card_source block during regeneration"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -290,19 +424,49 @@ def _forged_vector() -> dict[str, Any]:
 
 
 @pytest.mark.conformance
+def test_forged_assigner_vector_is_labeled_online_reject() -> None:
+    """Finding 1: the forged-assigner vector's PRIMARY ``disposition`` is the ONLINE
+    outcome — ``reject`` — and it lives under the ``online-conformance/reject``
+    tree, NOT under a ``pass`` tree. The OFFLINE-pass fact is carried on a SEPARATE
+    ``offline_class: pass`` field (documenting the VAL-DOMAIN-001 cross-check), so a
+    generic consumer reading the disposition classifies it as the required
+    online-reject case, never as a pass."""
+    vector = _forged_vector()
+    assert vector.get("disposition") == "reject", (
+        f"forged-assigner vector disposition must be the online outcome 'reject', got {vector.get('disposition')!r}"
+    )
+    assert str(vector.get("path", "")).startswith("online-conformance/reject/"), (
+        f"forged-assigner vector must live under online-conformance/reject/, got {vector.get('path')!r}"
+    )
+    # The offline-pass fact is a SEPARATE field — not the disposition.
+    assert vector.get("offline_class") == "pass", (
+        "forged-assigner vector must record offline_class=pass (the offline cross-check)"
+    )
+
+
+@pytest.mark.conformance
 def test_forged_assigner_passes_offline_class() -> None:
     """VAL-VEC-002 / cross-check VAL-DOMAIN-001: the forged ``AIIC-OPENAI-…`` card —
     a valid pattern signed by an attacker key, internally self-consistent — PASSES
     the OFFLINE-deterministic class (no ACEF-083), because the offline class NEVER
-    attributes the id to the assigner domain. The vector's README documents this."""
+    attributes the id to the assigner domain. The vector's README documents this.
+
+    The SAME bundle that the online verifier REJECTS is asserted here to PASS the
+    offline class — proving the forged card's offline-pass / online-reject split."""
     vector = _forged_vector()
     assessment = _validate(vector)
     assert "ACEF-083" not in _emitted_codes(assessment), (
         "the offline class must NOT attribute the forged AIIC-OPENAI id to openai.com — "
         "a self-consistent forged card passes offline by design (§5.3)"
     )
-    # The vector declares its offline disposition as pass.
-    assert vector.get("offline_disposition") == "pass"
+    # Offline class emits ZERO ERROR/FATAL diagnostics for this bundle.
+    assert not _blocking_diags(assessment), (
+        "forged-assigner bundle must PASS the offline class with no ERROR/FATAL; got "
+        + "; ".join(f"{d.get('code')}:{d.get('severity')}" for d in _blocking_diags(assessment))
+    )
+    # The vector declares its offline class fact as pass (separate from the
+    # primary online ``reject`` disposition).
+    assert vector.get("offline_class") == "pass"
 
 
 @pytest.mark.conformance
