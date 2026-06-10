@@ -382,80 +382,82 @@ class _NoFollowRedirectHandler(_urllib_request.HTTPRedirectHandler):
         )
 
 
-#: Four dot-separated all-numeric labels — a "dotted quad" SHAPE. This matches the
-#: ambiguous IPv4 textual forms that :func:`ipaddress.ip_address` REJECTS (leading-zero
-#: / octal-looking octets like ``127.000.000.001``, out-of-range octets like
-#: ``999.999.999.999``) but that an OS resolver / ``inet_aton`` may still normalize to a
-#: loopback/private IP — the exact gap left by the bare ``ip_address`` check.
-_DOTTED_QUAD_SHAPE = _re.compile(r"^[0-9]+(?:\.[0-9]+){3}$")
+#: Maximum total length of a DNS hostname (RFC 1035 §3.1 — 253 chars in presentation
+#: form, the 255-octet wire limit minus the length/root bytes).
+_MAX_HOSTNAME_LEN = 253
 
-#: A single bare integer host — e.g. ``2130706433`` (== 127.0.0.1) or ``2852039166``
-#: (== 169.254.169.254). ``inet_aton`` accepts the 32-bit decimal form of an IPv4
-#: address, so a bare integer is an IP-ish SSRF pivot, never a registrable domain.
-_BARE_INTEGER_SHAPE = _re.compile(r"^[0-9]+$")
+#: A single DNS LABEL in the LDH (letters/digits/hyphen) grammar: 1–63 chars, starting
+#: and ending with an alphanumeric, no leading/trailing hyphen (RFC 1123 §2.1 / §952).
+_LDH_LABEL = _re.compile(r"^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$")
+
+#: A valid TLD (final label) form: PURELY ALPHABETIC (≥2 chars), OR a punycode A-label
+#: (``xn--`` IDNA prefix). A numeric or HEX final label — ``0x1``, ``123``, ``1`` — is
+#: NOT a valid TLD, which structurally rejects every IPv4/IPv6 textual form here.
+_VALID_TLD = _re.compile(r"^(?:[A-Za-z]{2,}|xn--[A-Za-z0-9-]+)$")
 
 
 def _is_allowed_well_known_host(host: str) -> bool:
-    """True iff ``host`` is a syntactically plausible DNS hostname (default deny).
+    """True iff ``host`` is a syntactically valid DNS hostname (ALLOWLIST, default deny).
 
     The verifier always builds ``https://{registrable-domain}/.well-known/...``, so a
-    legitimate host is a DNS name (e.g. ``openai.com``). An IP-literal host — or, more
-    broadly, ANY *IP-ish* textual form — is anomalous and is denied by default (an IP
-    target is a classic SSRF pivot and is never a registrable domain). A profile that
-    needs IP-literal or other hosts supplies its own ``http_fetcher``.
+    legitimate host is a DNS name (e.g. ``openai.com``). Rather than DENYLISTING the
+    ever-growing menagerie of IP textual forms (decimal/octal/hex/dotted-quad/bare-int/
+    mixed — including hex-component smuggling like ``127.0x1`` / ``0x7f.0x1`` that an OS
+    resolver normalizes to ``127.0.0.1``), this guard ALLOWLISTS: it ACCEPTS the host
+    ONLY if it is a syntactically valid DNS hostname, a shape that STRUCTURALLY EXCLUDES
+    every IP literal/textual form at once. Anything else is denied (an IP target is a
+    classic SSRF pivot and is never a registrable domain); a profile that needs other
+    hosts supplies its own ``http_fetcher``.
 
-    The accept rule is therefore "accept ONLY a syntactically plausible DNS hostname".
-    A host is DENIED if ANY of the following hold:
+    A host is ACCEPTED iff ALL of the following hold:
 
-    1. :func:`ipaddress.ip_address` parses it — every clean IPv4 dotted-quad AND every
-       IPv6 form. (``urllib.parse.urlsplit(url).hostname`` STRIPS the ``[...]`` brackets
-       from a bracketed IPv6 authority before the host reaches this guard, so
-       ``https://[::1]/...`` arrives here as the bare ``"::1"``; compressed and
-       IPv4-mapped forms — e.g. ``::ffff:169.254.169.254`` — also parse and are denied.)
-    2. It matches the four-all-numeric-label "dotted quad" SHAPE
-       (:data:`_DOTTED_QUAD_SHAPE`). This closes the AMBIGUOUS IPv4 textual forms that
-       ``ipaddress.ip_address`` REJECTS as a ``ValueError`` — leading-zero / octal-looking
-       octets (``127.000.000.001``) and out-of-range octets (``999.999.999.999``) — which
-       therefore fell through to the old "hostname" allow path even though an OS resolver
-       / ``inet_aton`` may normalize them to loopback/private IPs (roborev SSRF class).
-    3. It is a single bare integer (:data:`_BARE_INTEGER_SHAPE`) — e.g. ``2130706433``
-       (== 127.0.0.1 in 32-bit decimal), which ``inet_aton`` accepts as an IPv4 address.
-    4. Defense-in-depth: its FINAL label (TLD) is all-numeric, OR it contains no
-       alphabetic character at all. A real DNS hostname has at least one dot and a
-       NON-numeric TLD; an all-numeric TLD / alpha-free host (e.g. ``0x7f.0.0.1`` hex-ish
-       octet smuggling, ``1.2.3.4.5``) is never a registrable domain.
+    1. :func:`ipaddress.ip_address` does NOT parse it — so every clean IPv4 dotted-quad
+       AND every IPv6 form is still rejected. (``urllib.parse.urlsplit(url).hostname``
+       STRIPS the ``[...]`` brackets from a bracketed IPv6 authority before the host
+       reaches this guard, so ``https://[::1]/...`` arrives here as the bare ``"::1"``;
+       compressed and IPv4-mapped forms — e.g. ``::ffff:169.254.169.254`` — also parse
+       and are denied.)
+    2. It has at least one dot and splits into labels each matching the LDH grammar
+       :data:`_LDH_LABEL` (``^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$`` — letters/
+       digits/hyphen, no leading/trailing hyphen, ≤63 chars; no empty labels).
+    3. Its FINAL label (the TLD) matches :data:`_VALID_TLD` — purely ALPHABETIC
+       (``^[A-Za-z]{2,}$``) OR a punycode A-label (``^xn--[A-Za-z0-9-]+$``). A numeric or
+       HEX final label (``0x1``, ``123``, ``1``) is NOT a valid TLD, so EVERY IPv4/IPv6
+       textual form — decimal, octal, hex (incl. hex-component ``127.0x1`` /
+       ``0x7f.0x1``), dotted-quad, bare-int, mixed — is rejected by this rule alone.
+    4. Total length ≤ :data:`_MAX_HOSTNAME_LEN` (253).
+
+    The precise IDNA/eTLD+1 policy (U-label canonicalization, Public Suffix List
+    enforcement) remains a profile-pinnable §5.3 underspec item; this guard implements a
+    reasonable v1.1 default that admits A-label / punycode hosts and rejects all IP forms.
 
     Only an ``https://`` URL ever reaches this guard (the caller rejects ``http://``
     before calling); this function decides the HOST allow/deny within that.
     """
     if not host:
         return False
+    if len(host) > _MAX_HOSTNAME_LEN:
+        return False
     # (1) Any parseable IP literal — IPv4 dotted-quad OR IPv6 (the brackets are already
     # stripped by urlsplit, so "::1" / "fe80::1" / "::ffff:169.254.169.254" all parse)
     # — is an SSRF pivot → deny. A ValueError means it is NOT a clean IP literal; we
-    # still must run the IP-ISH checks below before allowing it.
+    # then require it to be a syntactically valid DNS hostname (the allowlist below).
     try:
         ipaddress.ip_address(host)
     except ValueError:
-        pass  # not a clean IP literal — fall through to the IP-ish / hostname checks
+        pass  # not a clean IP literal — apply the DNS-hostname allowlist
     else:
         return False  # parsed as an IP literal (IPv4 or IPv6) → deny (SSRF guard)
-    # (2) Ambiguous dotted-quad shape (leading-zero / octal-looking / out-of-range
-    # octets) that ip_address rejects but a resolver may normalize to loopback → deny.
-    if _DOTTED_QUAD_SHAPE.match(host):
-        return False
-    # (3) A single bare integer (32-bit decimal IPv4 form, e.g. 2130706433) → deny.
-    if _BARE_INTEGER_SHAPE.match(host):
-        return False
-    # (4) Defense-in-depth: a plausible DNS hostname has at least one dot and a
-    # NON-numeric final label (TLD), and contains at least one alphabetic character.
+    # (2) A registrable domain has at least one dot and every label is LDH-valid.
     if "." not in host:
-        return False  # no dot → not a registrable domain (and not a bare-int IP, handled above)
-    final_label = host.rsplit(".", 1)[-1]
-    if final_label.isdigit():
-        return False  # all-numeric TLD → never a real hostname (IP-ish smuggling)
-    if not any(ch.isalpha() for ch in host):
-        return False  # no alphabetic char anywhere → not a plausible DNS hostname
+        return False  # a bare single label (no dot) is not a registrable domain
+    labels = host.split(".")
+    if not all(_LDH_LABEL.match(label) for label in labels):
+        return False  # an empty label, an over-long label, or a non-LDH char → deny
+    # (3) The TLD (final label) MUST be alphabetic or a punycode A-label. A numeric / hex
+    # final label (0x1, 123, 1) is not a valid TLD → every IP textual form is rejected.
+    if not _VALID_TLD.match(labels[-1]):
+        return False
     return True
 
 

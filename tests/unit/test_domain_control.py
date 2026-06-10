@@ -776,6 +776,64 @@ class TestDefaultFetcherHardening:
     @pytest.mark.parametrize(
         "host",
         [
+            # Hex-COMPONENT IPv4 textual forms (roborev a-class residual). A label such
+            # as ``0x1`` / ``0x7f`` looks like a DNS label to a denylist (it is NOT all
+            # digits — ``isdigit()`` is False — and it carries the alphabetic char ``x``),
+            # so the old denylist's "all-numeric TLD / no-alpha" checks LET THEM THROUGH.
+            # But ``inet_aton`` / ``getaddrinfo`` parses 0x-prefixed octets as HEX: the OS
+            # resolver normalizes EVERY one of these to the loopback 127.0.0.1 — a genuine
+            # SSRF pivot. The allowlist closes the whole class at once because ``0x1`` is
+            # not a valid TLD (a TLD must be purely alphabetic or a ``xn--`` punycode
+            # A-label), so the host is not a syntactically valid DNS hostname.
+            "127.0x1",  # getaddrinfo -> 127.0.0.1
+            "0x7f.0x1",  # getaddrinfo -> 127.0.0.1
+            "0x7f.0.0x1",  # getaddrinfo -> 127.0.0.1
+            "0x7f.0x0.0x0.0x1",  # fully-hex dotted quad -> 127.0.0.1
+            "0xA.0xB.0xC.0xD",  # uppercase-hex octets
+        ],
+    )
+    def test_hex_component_ip_ish_host_is_rejected_directly(self, host: str) -> None:
+        """SSRF residual (roborev hex-component class): an IPv4 textual form using
+        0x-prefixed HEX octets — ``127.0x1``, ``0x7f.0x1``, ``0x7f.0.0x1`` — slips a
+        denylist (the labels are not all-numeric and carry the alpha char ``x``) yet the
+        OS resolver normalizes it to 127.0.0.1. The ALLOWLIST rejects it: ``0x1`` is not
+        a valid alphabetic/punycode TLD, so the host is not a valid DNS hostname."""
+        assert _is_allowed_well_known_host(host) is False, f"hex-component IP-ish host must be denied: {host!r}"
+
+    @pytest.mark.parametrize(
+        "host",
+        [
+            # Clean / bracket-stripped IP literals (ip_address parses these).
+            "169.254.169.254",
+            "::1",
+            "::ffff:169.254.169.254",
+            # Ambiguous IPv4 textual forms (leading-zero / out-of-range / bare-int).
+            "127.000.000.001",
+            "2130706433",
+            "999.999.999.999",
+            # Numeric / hex final label.
+            "example.123",
+            "0x7f.0.0x1",
+            # Bare single-label hosts (no dot at all → not a registrable domain).
+            "0",
+            "localhost",
+            # Trailing-dot / empty-label degeneracies.
+            "openai.com.",
+            ".com",
+            "openai..com",
+        ],
+    )
+    def test_allowlist_rejects_every_non_hostname_form(self, host: str) -> None:
+        """The ALLOWLIST converges the whole IP-textual class: a host is accepted ONLY if
+        it is a syntactically valid DNS hostname (≥1 dot, every label LDH, an alphabetic
+        or ``xn--`` punycode final TLD label, ≤253 total). EVERY IPv4/IPv6 textual form —
+        decimal/octal/hex/dotted-quad/bare-int/mixed — and every bare/degenerate label is
+        rejected by the same rule, not by a growing denylist."""
+        assert _is_allowed_well_known_host(host) is False, f"non-hostname form must be denied: {host!r}"
+
+    @pytest.mark.parametrize(
+        "host",
+        [
             "openai.com",
             "sub.example.co.uk",
             "a.io",
@@ -798,6 +856,12 @@ class TestDefaultFetcherHardening:
             "https://2130706433/.well-known/acef-incident-challenge",
             # Hex-ish octet smuggling.
             "https://0x7f.0.0.1/.well-known/acef-incident-challenge",
+            # Hex-COMPONENT forms (roborev residual): getaddrinfo normalizes each to
+            # 127.0.0.1. The allowlist rejects them (``0x1`` is not a valid TLD) so the
+            # SSRF request is never issued.
+            "https://127.0x1/.well-known/acef-incident-challenge",
+            "https://0x7f.0x1/.well-known/acef-incident-challenge",
+            "https://0x7f.0.0x1/.well-known/acef-incident-challenge",
         ],
     )
     def test_ambiguous_ip_ish_url_is_rejected_without_fetch(self, url: str, monkeypatch: pytest.MonkeyPatch) -> None:
