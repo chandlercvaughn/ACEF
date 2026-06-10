@@ -339,6 +339,47 @@ def incident_error_detail(code: str) -> IncidentErrorDetail | None:
     return INCIDENT_ERROR_DETAILS.get(code)
 
 
+# The conservative default for an unknown / unregistered code. A code we cannot
+# resolve is treated as a generic schema-level ERROR — never silently dropped,
+# never elevated. This matches the historical fallback that ``ACEFError`` and
+# ``ValidationDiagnostic`` applied inline before the shared resolver existed.
+_DEFAULT_ERROR_META: tuple[Severity, ErrorCategory] = (Severity.ERROR, ErrorCategory.SCHEMA)
+
+
+def resolve_error_meta(code: str) -> tuple[Severity, ErrorCategory]:
+    """Resolve any ACEF error code to its ``(Severity, ErrorCategory)`` pair.
+
+    This is the SINGLE source of truth for code → (severity, category) used by
+    BOTH public emission paths (:class:`ACEFError` and
+    :class:`ValidationDiagnostic`). Resolution order is:
+
+    1. :data:`ERROR_REGISTRY` — the frozen v0.4 + v1.1 agent-reliability surface
+       (ACEF-001..ACEF-080). Checked FIRST so the frozen snapshot governs those
+       codes unchanged.
+    2. :data:`INCIDENT_ERROR_DETAILS` — the RFC-0002 §7 incident band
+       (ACEF-081..088). The incident codes are deliberately kept OUT of
+       ``ERROR_REGISTRY`` (so the frozen v1.0 snapshot stays byte-equal), but
+       they still carry an authoritative ``severity`` + ``category`` on their
+       :class:`IncidentErrorDetail`. Without this fallback, an incident code
+       emitted through the public APIs would mis-serialize with the conservative
+       default — e.g. ACEF-087 would surface as ``error/schema`` instead of its
+       correct ``info/profile``.
+    3. :data:`_DEFAULT_ERROR_META` — an unknown code is conservatively treated
+       as a generic ``error/schema`` so it is never silently dropped.
+
+    Returns the enum pair (not their ``.value`` strings); callers serialize as
+    needed.
+    """
+    registry_entry = ERROR_REGISTRY.get(code)
+    if registry_entry is not None:
+        severity, category, _ = registry_entry
+        return severity, category
+    incident = INCIDENT_ERROR_DETAILS.get(code)
+    if incident is not None:
+        return incident.severity, incident.category
+    return _DEFAULT_ERROR_META
+
+
 class ACEFError(Exception):
     """Base exception for all ACEF errors."""
 
@@ -347,13 +388,12 @@ class ACEFError(Exception):
     def __init__(self, message: str, *, code: str | None = None, details: dict[str, Any] | None = None) -> None:
         self.code = code or self.__class__.code
         self.details = details or {}
-        if self.code in ERROR_REGISTRY:
-            severity, category, _ = ERROR_REGISTRY[self.code]
-            self.severity = severity
-            self.category = category
-        else:
-            self.severity = Severity.ERROR
-            self.category = ErrorCategory.SCHEMA
+        # Resolve severity/category through the SHARED resolver so an incident
+        # code (ACEF-081..088, which lives in INCIDENT_ERROR_DETAILS, not the
+        # frozen ERROR_REGISTRY) surfaces its correct severity+category — e.g.
+        # ACEF-087 is info/profile, ACEF-084 is error/evaluation — instead of
+        # the conservative error/schema default.
+        self.severity, self.category = resolve_error_meta(self.code)
         super().__init__(f"[{self.code}] {message}")
 
     @property
@@ -457,11 +497,13 @@ class ValidationDiagnostic:
         self.message = message
         self.path = path
         self.details = details or {}
-        if code in ERROR_REGISTRY:
-            self.severity, self.category, _ = ERROR_REGISTRY[code]
-        else:
-            self.severity = Severity.ERROR
-            self.category = ErrorCategory.SCHEMA
+        # Resolve via the SHARED resolver (ERROR_REGISTRY first, then the
+        # incident band in INCIDENT_ERROR_DETAILS). This is the surface the
+        # validator (F-M3-VALIDATOR-RULES) and the Assessment Bundle consume, so
+        # an ACEF-081..088 diagnostic MUST serialize its correct severity +
+        # category (e.g. ACEF-087 → info/profile) rather than the old hardcoded
+        # error/schema fallback.
+        self.severity, self.category = resolve_error_meta(code)
 
     def __repr__(self) -> str:
         path_str = f" at {self.path}" if self.path else ""
