@@ -123,9 +123,9 @@
       "description": "Keyed variant for redacted-subject dedupe; pepper held by the §5.3 resolver."
     },
     "severity_vector": {
-      "type": "string",
-      "pattern": "^ACEF-SEV:1\\.0/",
-      "description": "Recomputable vector (§5.4). The coarse `severity` enum MUST equal band(severity_vector)."
+      "$ref": "severity_vector.schema.json",
+      "description": "Recomputable ACEF-SEV:1.0 vector (§5.4). Companion grammar referenced, not inlined: delegates to severity_vector.schema.json, whose top-level is a string validator carrying the FULL mandatory Group-I sequence (HT/HG/RV/SC/BR in fixed order) plus the optional T/E/S metrics. The previous weak `^ACEF-SEV:1\\.0/` prefix admitted HG-less/unbandable vectors; the `$ref` rejects them so the card enforces bandability. The coarse `severity` enum MUST equal band(severity_vector).",
+      "$comment": "Delegated to severity_vector.schema.json (§5.4: companion grammar referenced, not inlined). A present-but-unparseable or HG-less vector is rejected here via the companion's mandatory-Group-I pattern (raises ACEF-082 at validate time, §7)."
     },
     "sector_of_deployment": {
       "type": "object",

@@ -56,6 +56,19 @@ _V1_1_DIR = _PROJECT_ROOT / "acef-conventions" / "v1.1"
 _INCIDENT_CARD_PATH = _V1_1_DIR / "incident_card.schema.json"
 _COORDINATED_DISCLOSURE_PATH = _V1_1_DIR / "coordinated_disclosure.schema.json"
 _HARM_CORE_TAXONOMY_PATH = _V1_1_DIR / "harm-core-taxonomy.json"
+_SEVERITY_VECTOR_PATH = _V1_1_DIR / "severity_vector.schema.json"
+
+# Card-level severity_vector fixtures (§5.4). The card now $ref's the companion
+# severity_vector.schema.json (companions are "referenced, not inlined"), whose
+# top-level is a string validator enforcing the FULL mandatory Group-I grammar
+# (HT/HG/RV/SC/BR in fixed order). A full-Group-I vector validates; an HG-less /
+# unbandable vector and an out-of-order vector are rejected THROUGH the card $ref.
+_VALID_SEVERITY_VECTOR = "ACEF-SEV:1.0/HT:R/HG:H/RV:I/SC:C/BR:P"
+# HG-less: only HT is present, so the vector is unbandable (band() keys on HG) and
+# the old weak `^ACEF-SEV:1\.0/` prefix would have WRONGLY accepted it.
+_HG_LESS_SEVERITY_VECTOR = "ACEF-SEV:1.0/HT:S"
+# Out-of-order: HG precedes HT, violating the fixed group/within-group order.
+_OUT_OF_ORDER_SEVERITY_VECTOR = "ACEF-SEV:1.0/HG:H/HT:R/RV:I/SC:C/BR:P"
 
 # The exact relative $ref string the incident_card schema uses to reach the
 # harm_class enum in the harm-core-taxonomy companion. GATING's production
@@ -160,21 +173,32 @@ def coordinated_disclosure_schema() -> dict[str, Any]:
 
 
 @pytest.fixture(scope="module")
+def severity_vector_schema() -> dict[str, Any]:
+    return _load(_SEVERITY_VECTOR_PATH)
+
+
+@pytest.fixture(scope="module")
 def incident_card_validator(
     incident_card_schema: dict[str, Any],
     coordinated_disclosure_schema: dict[str, Any],
+    severity_vector_schema: dict[str, Any],
 ) -> Draft202012Validator:
     """Validator for incident_card with the companion-schema registry.
 
-    Registers the two real v1.1 schemas plus the harm-core-taxonomy resource
-    (real file if present, else ``HARM_CORE_TAXONOMY_STUB``) so the relative
-    ``harm-core-taxonomy.json#/$defs/harm_class`` ``$ref`` and the
-    ``coordinated_disclosure.schema.json`` ``$ref`` both resolve against the
-    card's ``$id`` base.
+    Registers the real v1.1 schemas — coordinated_disclosure and
+    severity_vector — plus the harm-core-taxonomy resource (real file if
+    present, else ``HARM_CORE_TAXONOMY_STUB``) so the relative
+    ``harm-core-taxonomy.json#/$defs/harm_class``,
+    ``coordinated_disclosure.schema.json`` and ``severity_vector.schema.json``
+    ``$ref``s all resolve against the card's ``$id`` base. The
+    ``severity_vector.schema.json`` resource is what lets the card's
+    ``severity_vector`` ``$ref`` (which delegates to the full companion grammar,
+    rejecting HG-less/unbandable vectors) resolve in-test.
     """
     resources = [
         Resource.from_contents(incident_card_schema),
         Resource.from_contents(coordinated_disclosure_schema),
+        Resource.from_contents(severity_vector_schema),
         Resource.from_contents(_resolve_harm_core_taxonomy()),
     ]
     registry = Registry().with_resources([(r.id(), r) for r in resources])
@@ -442,6 +466,75 @@ def test_incident_card_with_invalid_coordinated_disclosure_rejects(
     """
     card = _valid_card()
     card["coordinated_disclosure"] = disclosure
+    assert not incident_card_validator.is_valid(card), reason
+
+
+# --------------------------------------------------------------------------- #
+# card -> severity_vector $ref integration                                     #
+#                                                                             #
+# The card's severity_vector now $ref's the companion severity_vector.schema   #
+# .json (companions are "referenced, not inlined", RFC §5.4), whose top-level   #
+# is a string validator enforcing the FULL mandatory Group-I grammar. Exercise  #
+# that the card now REJECTS HG-less/unbandable and out-of-order vectors the old #
+# weak `^ACEF-SEV:1\.0/` prefix wrongly admitted, and still ACCEPTS a full      #
+# Group-I vector — all THROUGH the card $ref against the registry.             #
+# --------------------------------------------------------------------------- #
+
+
+def test_incident_card_with_valid_severity_vector_validates(
+    incident_card_validator: Draft202012Validator,
+) -> None:
+    """A card with a full-Group-I ``severity_vector`` validates THROUGH the card
+    ``$ref`` (VAL-CARD-001).
+
+    Proves the card-level ``severity_vector.schema.json`` ``$ref`` resolves
+    against the registry and admits a §5.4-conforming bandable vector
+    (HT/HG/RV/SC/BR all present, in fixed order).
+    """
+    card = _valid_card()
+    card["severity_vector"] = _VALID_SEVERITY_VECTOR
+    errors = list(incident_card_validator.iter_errors(card))
+    assert errors == [], [e.message for e in errors]
+
+
+@pytest.mark.parametrize(
+    ("vector", "reason"),
+    [
+        pytest.param(
+            _HG_LESS_SEVERITY_VECTOR,
+            "HG-less/unbandable vector rejected through card $ref (band() keys on HG; §5.4)",
+            id="card-severity-vector-hg-less-unbandable",
+        ),
+        pytest.param(
+            _OUT_OF_ORDER_SEVERITY_VECTOR,
+            "out-of-order Group-I vector rejected through card $ref (fixed-order grammar; §5.4)",
+            id="card-severity-vector-out-of-order",
+        ),
+        pytest.param(
+            "ACEF-SEV:1.0/",
+            "bare prefix with no Group-I metrics rejected through card $ref (§5.4)",
+            id="card-severity-vector-bare-prefix",
+        ),
+    ],
+)
+def test_incident_card_with_invalid_severity_vector_rejects(
+    incident_card_validator: Draft202012Validator,
+    vector: str,
+    reason: str,
+) -> None:
+    """A card carrying an unbandable or malformed ``severity_vector`` is rejected
+    THROUGH the card ``$ref`` (VAL-CARD-001).
+
+    The previous inline ``{"type": "string", "pattern": "^ACEF-SEV:1\\.0/"}``
+    accepted any string with the prefix — including the HG-less
+    ``ACEF-SEV:1.0/HT:S`` and a bare ``ACEF-SEV:1.0/``. Delegating to
+    ``severity_vector.schema.json`` (whose top-level enforces the full mandatory
+    Group-I sequence) means the card now propagates that failure: an unbandable
+    or out-of-order vector makes the whole card invalid, proving the card
+    enforces the full grammar via the ``$ref`` (not merely resolves it).
+    """
+    card = _valid_card()
+    card["severity_vector"] = vector
     assert not incident_card_validator.is_valid(card), reason
 
 
