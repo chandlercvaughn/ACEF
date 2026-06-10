@@ -1,0 +1,127 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://acef.ai/schemas/v1.1/coordinated_disclosure.schema.json",
+  "title": "ACEF Coordinated Disclosure Block (incident_card / incident_report)",
+  "description": "The single canonical coordinated_disclosure shape referenced by incident_card and incident_report (RFC-0002 §5.6; ACEF core_version 1.1.0). Modeled on ISO/IEC 29147 and 30111, CERT/CC and FIRST multi-party guidance, and the Stanford CRFM coordinated flaw disclosure proposal (arXiv 2503.16861). Closed (additionalProperties: false). `status` is always required; on a `status: public` card the public subset (`status`, `reporter_role`) is required and `embargo_until` MUST be absent (§5.6 Requiredness; the public-subset/embargo conditional is enforced by the validator, not this base shape). `regulatory_timeline[]` is an order-insensitive array (one entry per applicable jurisdiction, §5.7 registry) and MUST be sorted ascending by the RFC-8785 canonical byte sequence of its elements before hashing and serialization (§5.10). The notification_timeline[] is a separate, order-significant top-level record field (§5.10) and is NOT part of this block.",
+  "type": "object",
+  "required": [
+    "status"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": [
+        "private",
+        "coordinated",
+        "public"
+      ],
+      "description": "Disclosure state of the incident (§5.6). Always required."
+    },
+    "reporter_role": {
+      "type": "string",
+      "enum": [
+        "internal",
+        "external_researcher",
+        "deployer",
+        "affected_party",
+        "regulator"
+      ],
+      "description": "Who reported the incident (§5.6). Reuses and extends the envelope obligation_role enum plus a neutral coordinator actor; required on a `status: public` card (§5.6 Requiredness)."
+    },
+    "coordinator_ref": {
+      "type": "string",
+      "description": "Entity ref (or typed relationships[] edge per §5.8) to a neutral coordinator actor."
+    },
+    "safe_harbor_ref": {
+      "type": "string",
+      "description": "Pointer to the rules-of-engagement / safe-harbor document (referenced, not embedded; §5.6). The self-reporter incentive/immunity question is Appendix E Q22."
+    },
+    "embargo_until": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Embargo expiry (ISO 8601). MUST be absent on a `status: public` card (§5.6 Requiredness; enforced by the validator)."
+    },
+    "regulatory_timeline": {
+      "type": "array",
+      "description": "One entry per applicable jurisdiction; an incident is routinely reportable under several regimes at once, each with its own clock model (§5.7 registry). Order-insensitive: MUST be sorted ascending by the RFC-8785 canonical byte sequence of its elements before hashing and serialization (§5.10).",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "framework",
+          "clock_model",
+          "awareness_date"
+        ],
+        "properties": {
+          "framework": {
+            "type": "string",
+            "description": "Open, scheme-tagged jurisdiction id from the §5.7 clock registry, e.g. \"eu-ai-act-art73\", \"eu-ai-act-art55\", \"us-circia\", \"cn-cac-2025\", \"kr-ai-basic-act\"."
+          },
+          "clock_model": {
+            "type": "string",
+            "enum": [
+              "awareness_days",
+              "tiered_severity",
+              "pending",
+              "risk_management_no_clock"
+            ],
+            "description": "Clock model for this framework (§5.7 registry)."
+          },
+          "awareness_date": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the reporting party became aware (ISO 8601); start of the awareness clock."
+          },
+          "deadline": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Computed reporting deadline (ISO 8601). MAY be null when clock_model is `pending` or `risk_management_no_clock` (§5.7). An inconsistent stated Art. 73 deadline raises ACEF-084 (§7), enforced by the validator."
+          }
+        }
+      }
+    },
+    "data_residency": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cross_border_restricted",
+        "jurisdiction"
+      ],
+      "description": "China PIPL/DSL conflict with global export (§5.7, Appendix E Q18).",
+      "properties": {
+        "cross_border_restricted": {
+          "type": "boolean",
+          "description": "Whether localization (e.g. PIPL/DSL) forbids global export of the report."
+        },
+        "jurisdiction": {
+          "type": "string",
+          "description": "The jurisdiction imposing the residency restriction."
+        }
+      }
+    },
+    "remediation_timeline": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "negotiated_disclosure_date",
+        "rationale"
+      ],
+      "description": "Negotiated, complexity-keyed remediation timeline; not a fixed 90-day clock, because AI fixes often require retraining over weeks or months and depend on transferability across models (§5.6).",
+      "properties": {
+        "negotiated_disclosure_date": {
+          "type": "string",
+          "format": "date-time",
+          "description": "The negotiated disclosure date (ISO 8601)."
+        },
+        "rationale": {
+          "type": "string",
+          "description": "Why this remediation/disclosure date was negotiated."
+        }
+      }
+    }
+  }
+}
