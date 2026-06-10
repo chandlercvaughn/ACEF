@@ -1,0 +1,447 @@
+"""VAL-VEC-001/002/003 — RFC-0002 §6 incident conformance vectors.
+
+This driver discovers and runs the v1.1-REQUIRED incident conformance vectors
+under ``test-vectors/incident/`` through the PRODUCTION validator
+(:func:`acef.validation.engine.validate_bundle`) and the OPTIONAL online
+domain-control verifier (:func:`acef.domain_control.verify_domain_control`). It
+covers exactly the two v1.1-REQUIRED conformance classes of RFC-0002 §6 —
+**offline-deterministic** (card-only) and **source-backed** — plus the
+``online-conformance`` ``reject`` outcome for the single forged-assigner vector
+(VAL-VEC-002). The ``online-registry`` and ``public-registry-admission`` classes
+are v1.2 (§11) and are NOT exercised here.
+
+Vector layout (mirrors ``test-vectors/freddy/``):
+
+    test-vectors/incident/
+      vectors.json                 # the per-vector manifest (source of truth)
+      generate.py                  # deterministic regenerator (no wall-clock/random)
+      <class>/<disposition>/<name>.acef/
+        acef-manifest.json
+        records/<record_type>.jsonl
+        hashes/content-hashes.json
+        README.md                  # human-readable + the expected-code declaration
+      <name>.acef.acef-assessment.json   # the expected assessment (codes only)
+
+The ``vectors.json`` manifest declares, per vector: its conformance ``class``,
+``disposition`` (pass | fail), the validation ``profiles`` the §6 class runs it
+under (passed to ``validate_bundle(profiles=...)`` — NOT declared in the bundle
+manifest, so the bundle stays minimal and no template-DSL diagnostics fire), the
+``expect_codes`` membership set (fail vectors), the ``forbid_codes`` set (pass
+vectors that must stay clean), and — for the two RESERVED-id death-clock vectors
+(VAL-VEC-003) — the asserted ``clock_days`` (10 / 2) and ``no_public_card`` flag.
+
+Determinism: every vector is a static on-disk byte-stable artifact (fixed
+timestamps, fixed ids, sorted JSON). The driver re-validates them twice and
+asserts the emitted code set is byte-stable across the two runs (VAL-VEC-001).
+The online verifier runs against INJECTED in-memory DNS/HTTP stubs and a fixed
+clock — never the real network.
+"""
+
+from __future__ import annotations
+
+import json
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from acef.domain_control import (
+    DomainControlVerdict,
+    challenge_token_for,
+    verify_domain_control,
+)
+from acef.signing import _derive_jwk, create_detached_jws, verify_detached_jws
+from acef.validation.engine import validate_bundle
+
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+_INCIDENT_DIR = _REPO_ROOT / "test-vectors" / "incident"
+_VECTORS_MANIFEST = _INCIDENT_DIR / "vectors.json"
+
+# A fixed check-time instant for the OPTIONAL online verifier (no wall-clock).
+_FIXED_NOW = datetime(2026, 8, 15, 12, 0, 0, tzinfo=UTC)
+
+
+# ---------------------------------------------------------------------------
+# Vector-manifest loading.
+# ---------------------------------------------------------------------------
+
+
+def _load_vectors_manifest() -> list[dict[str, Any]]:
+    if not _VECTORS_MANIFEST.is_file():
+        return []
+    data = json.loads(_VECTORS_MANIFEST.read_text(encoding="utf-8"))
+    vectors = data.get("vectors")
+    return vectors if isinstance(vectors, list) else []
+
+
+_VECTORS = _load_vectors_manifest()
+
+
+def _vectors_for(disposition: str, *, conformance_class: str | None = None) -> list[dict[str, Any]]:
+    out = []
+    for v in _VECTORS:
+        if v.get("disposition") != disposition:
+            continue
+        if conformance_class is not None and v.get("class") != conformance_class:
+            continue
+        out.append(v)
+    return sorted(out, key=lambda v: str(v.get("name")))
+
+
+def _bundle_dir(vector: dict[str, Any]) -> Path:
+    return _INCIDENT_DIR / str(vector.get("path"))
+
+
+def _emitted_codes(assessment: Any) -> list[str]:
+    return [str(e.get("code")) for e in assessment.structural_errors]
+
+
+def _blocking_diags(assessment: Any) -> list[dict[str, Any]]:
+    return [e for e in assessment.structural_errors if str(e.get("severity", "")).lower() in ("error", "fatal")]
+
+
+def _validate(vector: dict[str, Any]) -> Any:
+    profiles = vector.get("profiles")
+    profiles = profiles if isinstance(profiles, list) and profiles else None
+    return validate_bundle(_bundle_dir(vector), profiles=profiles)
+
+
+# ---------------------------------------------------------------------------
+# Sanity: the manifest + at least the required vector families are present.
+# ---------------------------------------------------------------------------
+
+
+def test_vectors_manifest_present_and_nonempty() -> None:
+    assert _VECTORS_MANIFEST.is_file(), (
+        f"missing vectors manifest {_VECTORS_MANIFEST} — run "
+        f"`python test-vectors/incident/generate.py` to materialize the vectors."
+    )
+    assert _VECTORS, "vectors.json declares no vectors"
+
+
+def test_required_conformance_classes_only() -> None:
+    """RFC-0002 §6: the v1.1-REQUIRED classes are offline-deterministic +
+    source-backed; the only other class exercised here is the single
+    online-conformance reject vector (VAL-VEC-002). online-registry /
+    public-registry-admission (v1.2) MUST NOT appear."""
+    allowed = {"offline-deterministic", "source-backed", "online-conformance"}
+    seen = {str(v.get("class")) for v in _VECTORS}
+    forbidden = seen - allowed
+    assert not forbidden, f"v1.2 conformance classes leaked into v1.1 vectors: {sorted(forbidden)!r}"
+
+
+def test_required_fail_codes_each_have_a_vector() -> None:
+    """Every reserved incident error in the v1.1-required §8 set has at least one
+    fail vector that triggers it: ACEF-082/083/084/085/086/088 (082..086 + 088).
+    ACEF-087 (near_miss INFO) is exercised as a PASS-with-info vector; ACEF-081 is
+    exercised through the OECD advisory + multi-profile pass vectors."""
+    fail_codes: set[str] = set()
+    for v in _vectors_for("fail"):
+        fail_codes.update(str(c) for c in v.get("expect_codes", []))
+    for required in ("ACEF-082", "ACEF-083", "ACEF-084", "ACEF-085", "ACEF-086", "ACEF-088"):
+        assert required in fail_codes, f"no fail vector triggers {required}"
+
+
+# ---------------------------------------------------------------------------
+# VAL-VEC-001 — pass vectors validate clean (modulo INFO/advisory).
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.plumbing
+@pytest.mark.conformance
+@pytest.mark.parametrize(
+    "vector",
+    _vectors_for("pass"),
+    ids=lambda v: str(v.get("name")),
+)
+def test_pass_vector_validates_clean(vector: dict[str, Any]) -> None:
+    """A pass vector emits ZERO ERROR/FATAL diagnostics. INFO-severity diagnostics
+    (e.g. ACEF-087 near_miss) and advisory (WARNING) diagnostics are permitted —
+    they are explicitly non-binding (§5.5 / legal_force=voluntary)."""
+    assessment = _validate(vector)
+    blocking = _blocking_diags(assessment)
+    assert not blocking, (
+        f"pass vector {vector.get('name')!r} emitted ERROR/FATAL diagnostics (expected none):\n"
+        + "\n".join(
+            f"  {d.get('severity', '?')} {d.get('code', '?')}: {str(d.get('message', ''))[:200]}" for d in blocking
+        )
+    )
+    # Pass vectors must NOT emit any code on their forbid list.
+    emitted = set(_emitted_codes(assessment))
+    forbidden = {str(c) for c in vector.get("forbid_codes", [])}
+    leaked = emitted & forbidden
+    assert not leaked, f"pass vector {vector.get('name')!r} emitted forbidden codes {sorted(leaked)!r}"
+
+
+@pytest.mark.plumbing
+@pytest.mark.conformance
+def test_near_miss_pass_vector_surfaces_acef087_info() -> None:
+    """The near_miss vector is a PASS (no ERROR/FATAL) but MUST surface ACEF-087 at
+    INFO severity (§5.5 — informational marker, never a failure)."""
+    near_miss = [v for v in _vectors_for("pass") if "ACEF-087" in {str(c) for c in v.get("info_codes", [])}]
+    assert near_miss, "no near_miss pass vector declaring ACEF-087 as an info marker"
+    for vector in near_miss:
+        assessment = _validate(vector)
+        info_087 = [
+            e
+            for e in assessment.structural_errors
+            if str(e.get("code")) == "ACEF-087" and str(e.get("severity", "")).lower() == "info"
+        ]
+        assert info_087, f"{vector.get('name')!r} expected an ACEF-087 INFO marker"
+        assert not _blocking_diags(assessment), f"{vector.get('name')!r} near_miss must not block"
+
+
+# ---------------------------------------------------------------------------
+# VAL-VEC-001 — fail vectors emit the expected ACEF code(s).
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.plumbing
+@pytest.mark.conformance
+@pytest.mark.parametrize(
+    "vector",
+    _vectors_for("fail"),
+    ids=lambda v: str(v.get("name")),
+)
+def test_fail_vector_emits_expected_codes(vector: dict[str, Any]) -> None:
+    """A fail vector emits every code in its ``expect_codes`` set (membership, not
+    exclusivity — additional diagnostics are allowed) and none in ``forbid_codes``
+    (e.g. ACEF-022 must NEVER substitute for a reserved ACEF-08x publishability
+    code)."""
+    expected = [str(c) for c in vector.get("expect_codes", [])]
+    assert expected, f"fail vector {vector.get('name')!r} declares no expect_codes"
+    assessment = _validate(vector)
+    emitted = _emitted_codes(assessment)
+    for code in expected:
+        assert code in emitted, (
+            f"fail vector {vector.get('name')!r} expected {code} but it was not emitted. "
+            f"Emitted: {sorted(set(emitted))!r}\n"
+            + "\n".join(
+                f"  {d.get('severity', '?')} {d.get('code', '?')}: {str(d.get('message', ''))[:160]}"
+                for d in assessment.structural_errors
+            )
+        )
+    forbidden = {str(c) for c in vector.get("forbid_codes", [])}
+    leaked = set(emitted) & forbidden
+    assert not leaked, f"fail vector {vector.get('name')!r} emitted forbidden codes {sorted(leaked)!r}"
+
+
+# ---------------------------------------------------------------------------
+# VAL-VEC-001 — byte-stability across two runs.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.plumbing
+@pytest.mark.conformance
+@pytest.mark.parametrize(
+    "vector",
+    sorted(_VECTORS, key=lambda v: str(v.get("name"))),
+    ids=lambda v: str(v.get("name")),
+)
+def test_vector_validation_is_byte_stable(vector: dict[str, Any]) -> None:
+    """Validating the SAME on-disk vector twice produces a byte-identical sorted
+    diagnostic projection (code + severity + message). The vectors carry no
+    wall-clock / random content, and validate_bundle derives its evaluation
+    instant from the manifest timestamp, so the result is reproducible."""
+
+    def _projection(assessment: Any) -> str:
+        rows = sorted(
+            (str(e.get("code")), str(e.get("severity")), str(e.get("message"))) for e in assessment.structural_errors
+        )
+        return json.dumps(rows, sort_keys=True, ensure_ascii=False)
+
+    first = _projection(_validate(vector))
+    second = _projection(_validate(vector))
+    assert first == second, f"vector {vector.get('name')!r} validation is not byte-stable across two runs"
+
+
+def test_committed_assessment_matches_emitted_codes() -> None:
+    """Each vector's committed ``.acef-assessment.json`` records the SAME emitted
+    code set the production validator emits now — proving the committed expected
+    assessment is not stale."""
+    for vector in sorted(_VECTORS, key=lambda v: str(v.get("name"))):
+        expected_path = _INCIDENT_DIR / str(vector.get("assessment_path"))
+        assert expected_path.is_file(), f"missing committed assessment for {vector.get('name')!r}: {expected_path}"
+        committed = json.loads(expected_path.read_text(encoding="utf-8"))
+        committed_codes = sorted(str(c) for c in committed.get("emitted_codes", []))
+        live_codes = sorted(set(_emitted_codes(_validate(vector))))
+        assert committed_codes == live_codes, (
+            f"vector {vector.get('name')!r}: committed assessment codes {committed_codes!r} "
+            f"!= live emitted codes {live_codes!r} — regenerate the vectors."
+        )
+
+
+# ---------------------------------------------------------------------------
+# VAL-VEC-002 — forged-assigner: ONLINE class rejects (ACEF-083), OFFLINE passes.
+# ---------------------------------------------------------------------------
+
+
+def _gen_ec_key() -> Any:
+    from cryptography.hazmat.primitives.asymmetric import ec
+
+    return ec.generate_private_key(ec.SECP256R1())
+
+
+def _forged_vector() -> dict[str, Any]:
+    forged = [v for v in _VECTORS if v.get("class") == "online-conformance"]
+    assert forged, "no online-conformance forged-assigner vector declared"
+    return forged[0]
+
+
+@pytest.mark.conformance
+def test_forged_assigner_passes_offline_class() -> None:
+    """VAL-VEC-002 / cross-check VAL-DOMAIN-001: the forged ``AIIC-OPENAI-…`` card —
+    a valid pattern signed by an attacker key, internally self-consistent — PASSES
+    the OFFLINE-deterministic class (no ACEF-083), because the offline class NEVER
+    attributes the id to the assigner domain. The vector's README documents this."""
+    vector = _forged_vector()
+    assessment = _validate(vector)
+    assert "ACEF-083" not in _emitted_codes(assessment), (
+        "the offline class must NOT attribute the forged AIIC-OPENAI id to openai.com — "
+        "a self-consistent forged card passes offline by design (§5.3)"
+    )
+    # The vector declares its offline disposition as pass.
+    assert vector.get("offline_disposition") == "pass"
+
+
+@pytest.mark.conformance
+def test_forged_assigner_rejected_online_class_acef083() -> None:
+    """VAL-VEC-002: under the ONLINE class the forged card is REJECTED with ACEF-083
+    ``class: online-conformance``. The attacker publishes a challenge-shaped DNS TXT
+    proof bound to THEIR OWN key, not the card's registrant key — a presented-but-
+    invalid proof → reject. The verifier runs against INJECTED in-memory stubs and a
+    fixed clock; NO real network is touched."""
+    vector = _forged_vector()
+    public_incident_id = str(vector.get("public_incident_id"))
+    assigner = str(vector.get("assigner"))
+
+    # The card's legitimate registrant key (the key the card's JWS is signed with).
+    card_key = _gen_ec_key()
+    card_jwk = _derive_jwk(card_key)
+
+    # Sanity: the card's own JWS is internally consistent (the offline-pass premise).
+    payload_bytes = json.dumps({"public_incident_id": public_incident_id}, sort_keys=True).encode("utf-8")
+    jws = create_detached_jws(payload_bytes, card_key, kid="card-kid")
+    verify_detached_jws(jws, payload_bytes)
+
+    # The attacker controls a DIFFERENT key and publishes a proof bound to it. This is
+    # a presented-but-invalid proof for the CARD's key → reject (online-conformance).
+    attacker_jwk = _derive_jwk(_gen_ec_key())
+    attacker_proof = challenge_token_for(assigner, attacker_jwk)
+
+    def dns_resolver(name: str) -> list[str]:
+        return [attacker_proof]
+
+    def no_http(url: str) -> Any:
+        from acef.domain_control import HttpResponse
+
+        return HttpResponse(status=404, content_type="", body="")
+
+    result = verify_domain_control(
+        public_incident_id,
+        card_jwk,
+        dns_resolver=dns_resolver,
+        http_fetcher=no_http,
+        now=_FIXED_NOW,
+    )
+    assert result.verdict is DomainControlVerdict.REJECT, (
+        f"forged-assigner online check expected REJECT, got {result.verdict.value!r}"
+    )
+    assert result.diagnostic is not None
+    assert result.diagnostic.code == "ACEF-083"
+    assert result.diagnostic.details.get("class") == "online-conformance"
+
+
+@pytest.mark.conformance
+def test_forged_assigner_absent_proof_is_unverified_not_reject() -> None:
+    """The online class returns ``unverified`` (NOT reject, NEVER a silent pass) when
+    NO proof is presented and the lookups cannot complete — the explicit-non-result
+    invariant the forged-assigner vector's README documents (§5.3)."""
+    vector = _forged_vector()
+    card_jwk = _derive_jwk(_gen_ec_key())
+
+    def dns_timeout(name: str) -> list[str]:
+        raise TimeoutError("DNS timed out")
+
+    def http_timeout(url: str) -> Any:
+        raise TimeoutError("HTTP timed out")
+
+    result = verify_domain_control(
+        str(vector.get("public_incident_id")),
+        card_jwk,
+        dns_resolver=dns_timeout,
+        http_fetcher=http_timeout,
+        now=_FIXED_NOW,
+    )
+    assert result.verdict is DomainControlVerdict.UNVERIFIED
+    assert result.diagnostic is None
+
+
+# ---------------------------------------------------------------------------
+# VAL-VEC-003 — two RESERVED-id death-clock source-backed vectors (10d / 2d).
+# ---------------------------------------------------------------------------
+
+
+def _death_clock_vectors() -> list[dict[str, Any]]:
+    return sorted(
+        (v for v in _VECTORS if v.get("clock_days") in (10, 2) and v.get("no_public_card")),
+        key=lambda v: int(v.get("clock_days")),
+    )
+
+
+def test_two_reserved_id_death_clock_vectors_exist() -> None:
+    vectors = _death_clock_vectors()
+    clocks = sorted(int(v.get("clock_days")) for v in vectors)
+    assert clocks == [2, 10], f"expected RESERVED-id death-clock vectors for 2 and 10 days; got {clocks!r}"
+
+
+@pytest.mark.conformance
+@pytest.mark.parametrize(
+    "vector",
+    _death_clock_vectors(),
+    ids=lambda v: f"{v.get('name')}-{v.get('clock_days')}d",
+)
+def test_reserved_id_death_clock_vector(vector: dict[str, Any]) -> None:
+    """VAL-VEC-003: each RESERVED-id source-backed vector validates its Art.73 clock
+    from ``card_source.eu_ai_act_facts`` (NO public incident_card present):
+
+    - (a) ``death_involved: true`` → 10-day clock, deadline = awareness + 10d → no ACEF-084;
+    - (b) compound ``death_involved: true`` + ``3.49.b`` → 2-day shortest clock → no ACEF-084.
+
+    The clock-days assertion is proven directly via
+    :func:`acef.validation.incident_rules.shortest_art73_clock_days` over the
+    vector's own ``card_source.eu_ai_act_facts``, and end-to-end through
+    ``validate_bundle`` (no ACEF-084, no public card)."""
+    from acef.validation.incident_rules import shortest_art73_clock_days
+
+    clock_days = int(vector.get("clock_days"))
+    bundle_dir = _bundle_dir(vector)
+
+    # No public incident_card record exists in this bundle (RESERVED id, confidential).
+    record_types = sorted(p.stem for p in (bundle_dir / "records").glob("*.jsonl"))
+    assert "incident_card" not in record_types, (
+        f"{vector.get('name')!r} must be a RESERVED-id report with NO public incident_card; "
+        f"found record files {record_types!r}"
+    )
+
+    # Read the source-backed facts straight from the on-disk record and assert the
+    # shortest applicable clock the validator computes from them.
+    report_path = bundle_dir / "records" / "incident_report.jsonl"
+    record = json.loads(report_path.read_text(encoding="utf-8").splitlines()[0])
+    facts = record["payload"]["card_source"]["eu_ai_act_facts"]
+    assert shortest_art73_clock_days(facts) == clock_days, (
+        f"{vector.get('name')!r}: expected {clock_days}-day shortest clock from eu_ai_act_facts {facts!r}"
+    )
+
+    # End-to-end: the bundle validates with NO ACEF-084 (the stated deadline equals
+    # the shortest applicable clock).
+    assessment = _validate(vector)
+    assert "ACEF-084" not in _emitted_codes(assessment), (
+        f"{vector.get('name')!r}: a correct {clock_days}-day clock must not raise ACEF-084:\n"
+        + "\n".join(
+            f"  {d.get('severity', '?')} {d.get('code', '?')}: {str(d.get('message', ''))[:200]}"
+            for d in assessment.structural_errors
+            if str(d.get("code")) == "ACEF-084"
+        )
+    )
