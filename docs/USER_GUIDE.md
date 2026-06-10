@@ -1356,7 +1356,10 @@ the assigner domain **at check time** — and only when they have actually
 published `minted.challenge_token` at `minted.dns_record_name` (DNS-01 TXT) or
 `minted.well_known_url` (`.well-known`). It returns a tri-valued verdict
 (`verified` / `unverified` / `reject`); a network timeout returns an explicit
-`unverified`, never a silent pass.
+`unverified`, never a silent pass. With the built-in defaults only the
+`.well-known` HTTP channel runs against a live host — the default `dns_resolver`
+cannot perform a TXT lookup (no stdlib TXT API) and signals cannot-complete, so
+the DNS-01 channel requires you to pass a real `dns_resolver=`.
 
 ### Worked example: mint → build → sign → validate
 
@@ -1367,7 +1370,7 @@ from pathlib import Path
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 
-from acef.domain_control import DomainControlVerdict, verify_domain_control
+from acef.domain_control import DomainControlVerdict, HttpResponse, verify_domain_control
 from acef.package import Package, band, mint_incident_id
 from acef.redaction import RedactionPolicy
 from acef.validation.engine import validate_bundle
@@ -1478,19 +1481,41 @@ assert not card_incident_codes, f"unexpected card diagnostics: {card_incident_co
 
 # 6. (Optional, online) prove domain control AT CHECK TIME. The id is only a
 #    SELF-ASSERTED handle offline; the verifier reaches `verified` ONLY when the
-#    registrant actually publishes minted.challenge_token at minted.dns_record_name.
-#    Here we simulate that publication with an injected resolver so the example is
-#    self-contained (no live network).
+#    registrant actually publishes minted.challenge_token at minted.dns_record_name
+#    (DNS-01 TXT) or serves it at minted.well_known_url (.well-known HTTP).
+#
+#    `verify_domain_control` evaluates BOTH channels. To keep this example fully
+#    offline (NO live network), we inject BOTH dependencies:
+#      * dns_resolver — a stub that returns the published challenge for the DNS-01
+#        channel (this is the channel that yields `verified`);
+#      * http_fetcher — a stub that returns an empty 404 so the .well-known channel
+#        touches no network. Without this stub, verify_domain_control would call the
+#        DEFAULT fetcher and make a REAL HTTPS GET to minted.well_known_url
+#        (openai.com here). The 404 stub is ABSENT (no proof on that channel), so the
+#        verdict stays `verified` via the DNS-01 channel.
+#
+#    NOTE: the DEFAULT dns_resolver CANNOT perform a real TXT lookup (the Python
+#    stdlib has no TXT API) — it signals cannot-complete → `unverified`. Running the
+#    DNS-01 channel against live DNS therefore REQUIRES passing a real dns_resolver
+#    (e.g. a dnspython wrapper). The no-injected-resolver default path is
+#    `.well-known` HTTP only.
 def _dns_resolver(name: str) -> list[str]:
     if name == minted.dns_record_name:
         return [minted.challenge_token]
     return []
 
 
+def _http_fetcher(url: str) -> HttpResponse:
+    # Offline stub: no proof on the .well-known channel (404). Keeps the verdict
+    # `verified` via the DNS-01 channel above while making zero network requests.
+    return HttpResponse(status=404, content_type="", body="")
+
+
 result = verify_domain_control(
     minted.public_incident_id,
     minted.jwk,
     dns_resolver=_dns_resolver,
+    http_fetcher=_http_fetcher,
 )
 print("\ndomain-control verdict:", result.verdict.value)
 assert result.verdict is DomainControlVerdict.VERIFIED
@@ -1535,7 +1560,17 @@ OK: mint -> build -> sign -> validate completed; incident requirements satisfied
   regulatory-filing critical path: the confidential report validates from
   `card_source.eu_ai_act_facts` with a RESERVED id and **no** public card. The
   `incident_card(...)` projection is the separate publishable surface.
-- To actually reach `verified` against live DNS, publish the printed
-  `challenge_token` as a TXT record at `minted.dns_record_name` (or serve it at
-  `minted.well_known_url`) and call `verify_domain_control` without the injected
-  resolver. Until you do, the verdict is the honest `unverified`.
+- To reach `verified` against a real domain you publish the printed
+  `challenge_token` and run the check with the matching channel's dependency:
+  - **`.well-known` HTTP** works with the defaults. Serve the `challenge_token` as
+    `text/plain` at `minted.well_known_url` and call `verify_domain_control(...)`
+    with NO injected `http_fetcher` — the default stdlib `urllib` fetcher performs
+    the real HTTPS GET. (For safety it follows no redirect, requires HTTPS to a
+    non-IP registrable-domain host, and reads a bounded body.)
+  - **DNS-01 TXT** does **not** work with the defaults. The default `dns_resolver`
+    CANNOT perform a TXT lookup (the Python stdlib has no TXT-record API), so it
+    signals cannot-complete → `unverified`. To run the DNS-01 channel against live
+    DNS you MUST pass a real `dns_resolver=` (e.g. a `dnspython` wrapper that
+    returns the TXT values at `minted.dns_record_name`).
+  Until a presented proof validates on at least one channel, the verdict is the
+  honest `unverified` — never a silent pass.

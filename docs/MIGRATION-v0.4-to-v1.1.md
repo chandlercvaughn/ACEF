@@ -36,10 +36,14 @@ It adds:
 
 Existing ACEF v1.0 producers, consumers, and bundles are not impacted. The v1.0
 schemas in `acef-conventions/v1/` are frozen and byte-identical. New schemas live
-in `acef-conventions/v1.1/`. A bundle is treated as v1.1 only when its manifest
-declares `core_version: 1.1.0`; all other bundles validate against v1.0 schemas
-with v1.0 semantics, and none of the incident rules fire on them. This is the
-load-bearing compatibility invariant (RFC-0002 §11; see "Version Gating" below).
+in `acef-conventions/v1.1/`. Routing is keyed on the manifest's
+`core_version` **minor**: a `1.0.x` bundle (and any bundle with an absent, empty,
+or unparseable `core_version`) routes to the frozen v1.0 schemas with v1.0
+semantics, and none of the incident rules fire on it; a `1.1.x` bundle (the minor
+the SDK stamps, `1.1.0`) routes to the v1.1 schema path where the incident
+schemas and rules run. This is the load-bearing compatibility invariant
+(RFC-0002 §11; see "Version Gating Semantics" below for the exact resolver
+mapping).
 
 ---
 
@@ -167,18 +171,38 @@ problem → cause → fix (e.g. the ACEF-084 fatal-clock hint).
 
 ## Version Gating Semantics
 
-The incident surface is gated entirely on `manifest.versioning.core_version`:
+The incident surface is gated entirely on `manifest.versioning.core_version`. The
+resolver is `src/acef/schemas/registry.py` `schema_version_for_core_version()`,
+which maps the version string to a schema-directory token, and
+`build_schema_registry()` / `load_schema()`, which apply the per-token fallback
+chain `_VERSION_FALLBACK` (`"v1" → ("v1",)`, `"v1.1" → ("v1.1", "v1")`). The
+exact mapping the code implements:
 
-- A bundle is validated against the v1.1 incident schemas **only** when its
-  manifest declares `core_version: 1.1.0`. The loader/registry
-  (`src/acef/schemas/registry.py` `schema_version_for_core_version()`) routes
-  `1.1.0` bundles to the v1.1 schema set; `acef-conventions/v1.1/manifest.schema.json`
-  and `acef-conventions/v1.1/variant-registry.json` register the new record types
-  under that gate.
-- A v1.0 bundle (no `core_version: 1.1.0`) validates **identically to
-  pre-operation behavior** — none of the incident rules (ACEF-081..088, the Art.
-  73 clock, the publishability gate) fire. Every existing v1.0 golden
-  `incident_report` validates byte-identically.
+| `core_version` | major / minor | schema token | resolves against |
+|----------------|---------------|--------------|------------------|
+| absent / empty / unparseable | — | `v1` | `v1/` only |
+| `1.0`, `1.0.x` (minor ≤ 0) | major 1, minor ≤ 0 | `v1` | `v1/` only |
+| `1.1.x`, and any future `1.y` with y ≥ 1 | major 1, minor ≥ 1 | `v1.1` | `v1.1/` then `v1/` fallback |
+| `2.x` (major ≠ 1) | major ≠ 1 | — | raises `ACEFSchemaError` `ACEF-001` (validator supports 1.x only) |
+
+So routing is on the **minor**, not on an exact `1.1.0` match:
+
+- Any `1.1.x` bundle (and any later supported `1.y`, y ≥ 1) routes to the `v1.1`
+  token. The validator resolves each record type against `acef-conventions/v1.1/`
+  first and falls back to `acef-conventions/v1/` for record types unchanged in the
+  v1.1 minor (the `("v1.1", "v1")` chain). The v1.1 incident schemas, the new
+  record types registered in `acef-conventions/v1.1/manifest.schema.json` and
+  `acef-conventions/v1.1/variant-registry.json`, and the incident rules
+  (ACEF-081..088, the Art. 73 clock, the publishability gate) run here. The SDK
+  stamps `core_version: 1.1.0`, so SDK-built incident bundles land on this path.
+- A `1.0.x` bundle — and any bundle whose `core_version` is absent, empty, or has
+  an unparseable major (lenient fallback) — routes to the `v1` token, which has
+  **no** forward fallback to `v1.1` (`("v1",)`). It validates **identically to
+  pre-operation behavior**: none of the incident rules fire, and a v1.0-declared
+  bundle never silently inherits a v1.1-only record type. Every existing v1.0
+  golden `incident_report` validates byte-identically.
+- A `core_version` with a major other than 1 is rejected up front with
+  `ACEFSchemaError` code `ACEF-001` (the validator supports the 1.x line only).
 - `acef-conventions/v1/` and `tests/conformance/golden-bundles/` are frozen and
   byte-unchanged by this release.
 
@@ -194,7 +218,9 @@ The SDK builders call an internal `_ensure_v1_1()` that sets `core_version:
 
 No action required. v1.0 bundles continue to validate against the frozen v1.0
 schemas with v1.0 semantics. The incident schemas, templates, and ACEF-081..088
-codes do not apply to a bundle that does not declare `core_version: 1.1.0`.
+codes do not apply to a bundle that routes to the `v1` token — i.e. any bundle
+whose `core_version` minor is ≤ 0 (`1.0.x`) or whose `core_version` is absent,
+empty, or unparseable (see "Version Gating Semantics" for the full mapping).
 
 ### Producers Filing an Art. 73 Incident
 
@@ -225,9 +251,18 @@ codes do not apply to a bundle that does not declare `core_version: 1.1.0`.
    surface produces no ACEF-08x diagnostics.
 
 5. **(Optional, online) prove domain control.** Publish the minted
-   `challenge_token` at `dns_record_name` (TXT) or `well_known_url`, then call
-   `verify_domain_control(public_incident_id, jwk)` to reach `verified` at check
-   time.
+   `challenge_token` and run the matching channel:
+   - **`.well-known` HTTP** works with the defaults: serve the token as
+     `text/plain` at `well_known_url` and call
+     `verify_domain_control(public_incident_id, jwk)` — the default stdlib fetcher
+     does the live HTTPS GET.
+   - **DNS-01 TXT** requires a real injected resolver: the default `dns_resolver`
+     cannot perform a TXT lookup (the Python stdlib has no TXT API) and signals
+     cannot-complete → `unverified`, so publishing at `dns_record_name` only
+     reaches `verified` when you call
+     `verify_domain_control(..., dns_resolver=<real TXT resolver>)`.
+   Either way the result is the tri-valued verdict (`verified` / `unverified` /
+   `reject`) proving control **at check time**, never a silent pass.
 
 The full copy-paste recipe is in
 [`USER_GUIDE.md` §8](USER_GUIDE.md#8-reporting-an-ai-incident-eu-art-73).
