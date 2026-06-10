@@ -46,6 +46,7 @@ from acef.domain_control import (
     DomainControlVerdict,
     HttpResponse,
     _default_http_fetcher,
+    _is_allowed_well_known_host,
     _NoFollowRedirectHandler,
     challenge_token_for,
     jwk_thumbprint,
@@ -662,6 +663,96 @@ class TestDefaultFetcherHardening:
         assert ip_resp.status != 200
         # Neither anomalous URL was ever opened.
         assert opener.opened == []
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            # IPv4 dotted-quad literal (already covered by the legacy check, kept here
+            # so the parametrized regression locks ALL IP-literal forms in one place).
+            "https://169.254.169.254/.well-known/acef-incident-challenge",
+            # Bracketed IPv6 loopback. urlsplit STRIPS the brackets, so the host that
+            # reaches the guard is the bare "::1" — the residual SSRF that this fix closes.
+            "https://[::1]/.well-known/acef-incident-challenge",
+            # Bracketed IPv6 link-local.
+            "https://[fe80::1]/.well-known/acef-incident-challenge",
+            # IPv4-mapped IPv6 literal targeting the cloud metadata endpoint — the
+            # nastiest SSRF pivot (it resolves to 169.254.169.254 at the IP layer).
+            "https://[::ffff:169.254.169.254]/.well-known/acef-incident-challenge",
+            # Full/compressed IPv6 forms.
+            "https://[2001:db8::1]/.well-known/acef-incident-challenge",
+            "https://[0:0:0:0:0:0:0:1]/.well-known/acef-incident-challenge",
+        ],
+    )
+    def test_ip_literal_host_is_rejected_without_fetch(self, url: str, monkeypatch: pytest.MonkeyPatch) -> None:
+        """SSRF residual (roborev Medium): EVERY IP-literal host — IPv4 dotted-quad
+        AND bracketed/compressed/IPv4-mapped IPv6 — MUST be rejected as not-a-valid-proof
+        (non-200 HttpResponse) WITHOUT performing any open(). ``urlsplit`` strips the
+        ``[...]`` brackets before the host reaches the guard, so a bracketed IPv6 host
+        must be detected by parsing the bare host as an IP address, not by a string check.
+        """
+        import urllib.request
+
+        opener = _CapturingOpener(_StubResponse(200, {"Content-Type": "text/plain"}, b"x"))
+        monkeypatch.setattr(urllib.request, "build_opener", lambda *handlers: opener)
+
+        resp = _default_http_fetcher(url)
+        # No valid proof, and the IP target was NEVER opened (no SSRF request issued).
+        assert resp.status != 200
+        assert resp.body == ""
+        assert opener.opened == []
+
+    def test_ip_literal_host_guard_rejects_all_forms_directly(self) -> None:
+        """Unit the host guard directly: after ``urlsplit`` strips IPv6 brackets the
+        bare host string reaches ``_is_allowed_well_known_host``. The guard MUST reject
+        every parseable IP literal (the bracket-stripped IPv6 forms AND IPv4) and MUST
+        accept a real DNS hostname."""
+        from urllib.parse import urlsplit
+
+        for url in (
+            "https://[::1]/x",
+            "https://[fe80::1]/x",
+            "https://[::ffff:169.254.169.254]/x",
+            "https://[2001:db8::1]/x",
+            "https://169.254.169.254/x",
+        ):
+            host = urlsplit(url).hostname or ""
+            assert _is_allowed_well_known_host(host) is False, f"IP literal host must be denied: {host!r}"
+        # A genuine registrable domain (and an uppercase/idna-ish label) still passes.
+        assert _is_allowed_well_known_host("openai.com") is True
+        assert _is_allowed_well_known_host("sub.example.co.uk") is True
+
+    def test_normal_hostname_still_passes_guard_and_verifies_end_to_end(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Regression: a normal hostname target is STILL fetched (the guard did not
+        over-reject), and a valid challenge body yields a ``verified`` verdict
+        end-to-end (hardening preserves the happy path)."""
+        import urllib.request
+
+        _key, jwk = _registrant_jwk()
+        expected = challenge_token_for(_FORGED_ASSIGNER, jwk)
+        body = expected.encode("ascii")
+        stub = _StubResponse(200, {"Content-Type": "text/plain", "Content-Length": str(len(body))}, body)
+        opener = _CapturingOpener(stub)
+        monkeypatch.setattr(urllib.request, "build_opener", lambda *handlers: opener)
+
+        # The default fetcher accepts the hostname URL and issues exactly one open().
+        resp = _default_http_fetcher(f"https://{_FORGED_DOMAIN}/.well-known/acef-incident-challenge")
+        assert resp.status == 200
+        assert resp.body == expected
+        assert opener.opened == [f"https://{_FORGED_DOMAIN}/.well-known/acef-incident-challenge"]
+
+        # And the same fetcher drives a full verified verdict end-to-end.
+        opener2 = _CapturingOpener(
+            _StubResponse(200, {"Content-Type": "text/plain", "Content-Length": str(len(body))}, body)
+        )
+        monkeypatch.setattr(urllib.request, "build_opener", lambda *handlers: opener2)
+        result = verify_domain_control(
+            _FORGED_ID,
+            jwk,
+            dns_resolver=_no_dns,
+            now=_FIXED_NOW,
+        )
+        assert result.verdict is DomainControlVerdict.VERIFIED
+        assert result.diagnostic is None
 
 
 class _StubRequest:

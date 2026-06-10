@@ -93,6 +93,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import ipaddress
 import json
 import urllib.error as _urllib_error
 import urllib.parse as _urllib_parse
@@ -385,20 +386,32 @@ def _is_allowed_well_known_host(host: str) -> bool:
     """True iff ``host`` is an allowed registrable-domain host (default deny).
 
     The verifier always builds ``https://{registrable-domain}/.well-known/...``, so a
-    legitimate host is a DNS name (e.g. ``openai.com``). An IP-literal host (IPv4 or
-    bracketed IPv6) is anomalous and is denied by default (an IP target is a classic
-    SSRF pivot and is never a registrable domain). A profile that needs IP-literal or
-    other hosts supplies its own ``http_fetcher``.
+    legitimate host is a DNS name (e.g. ``openai.com``). An IP-literal host is anomalous
+    and is denied by default (an IP target is a classic SSRF pivot and is never a
+    registrable domain). A profile that needs IP-literal or other hosts supplies its own
+    ``http_fetcher``.
+
+    SSRF residual (roborev Medium): ``urllib.parse.urlsplit(url).hostname`` STRIPS the
+    ``[...]`` brackets from a bracketed IPv6 authority BEFORE the host reaches this guard,
+    so ``https://[::1]/...`` arrives here as the bare ``"::1"`` and a string ``startswith
+    "["`` test never fired — the bracketed IPv6 (incl. compressed and IPv4-mapped, e.g.
+    ``::ffff:169.254.169.254``) forms bypassed the old check. We instead parse the bare
+    host with :func:`ipaddress.ip_address`: if it parses as ANY IP literal (every IPv4
+    dotted-quad AND every IPv6 form — bracketed, compressed, IPv4-mapped), it is rejected;
+    only a host that is NOT a parseable IP literal (i.e. a DNS hostname) is allowed.
     """
     if not host:
         return False
-    # Bracketed IPv6 literal, e.g. "[::1]" or "[fd00::1]".
-    if host.startswith("["):
-        return False
-    # IPv4 dotted-quad literal, e.g. "169.254.169.254".
-    labels = host.split(".")
-    if len(labels) == 4 and all(label.isdigit() for label in labels):
-        return False
+    # Any parseable IP literal — IPv4 dotted-quad OR IPv6 (the brackets are already
+    # stripped by urlsplit, so "::1" / "fe80::1" / "::ffff:169.254.169.254" all parse)
+    # — is an SSRF pivot, never a registrable domain → deny. A ValueError means the
+    # host is NOT an IP literal (a DNS hostname), so it continues to the allow path.
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        pass  # not an IP literal → a DNS hostname, continue the checks below
+    else:
+        return False  # parsed as an IP literal (IPv4 or IPv6) → deny (SSRF guard)
     return True
 
 
