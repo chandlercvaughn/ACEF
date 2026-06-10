@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class RuleScope(BaseModel):
@@ -63,7 +63,21 @@ class Provision(BaseModel):
 
 
 class Template(BaseModel):
-    """A regulation mapping template."""
+    """A regulation mapping template.
+
+    ``extra="allow"`` preserves template-LEVEL metadata blocks that are not
+    modelled as explicit fields (e.g. the OECD ``oecd_framework`` block carrying
+    ``mandatory_criteria_ordinals``). Keeping them on the loaded model makes
+    :func:`acef.templates.registry.load_template` the single source of truth for
+    those blocks, so validators read them via the model instead of a divergent
+    raw-file read. This does NOT affect the hash domain: template digests are
+    computed from on-disk JSON bytes (see
+    :func:`acef.templates.registry.compute_template_digest`), never from a
+    Pydantic re-serialization, and the on-disk templates already contain these
+    keys — so preserving them on load is byte-neutral.
+    """
+
+    model_config = ConfigDict(extra="allow")
 
     template_id: str
     template_name: str = ""

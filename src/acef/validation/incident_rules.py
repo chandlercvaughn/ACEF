@@ -581,34 +581,26 @@ OECD_PROFILE_ID = "oecd-ai-incidents-2025"
 _OECD_EDITION = "oecd-crf-2025"
 
 
-def _oecd_template_path() -> Path:
-    """Resolve the OECD template JSON path (editable + wheel install)."""
-    here = Path(__file__).resolve()
-    for ancestor in here.parents:
-        candidate = ancestor / "acef" / "templates" / f"{OECD_PROFILE_ID}.json"
-        if candidate.is_file():
-            return candidate
-        candidate = ancestor / "src" / "acef" / "templates" / f"{OECD_PROFILE_ID}.json"
-        if candidate.is_file():
-            return candidate
-    return Path("src/acef/templates") / f"{OECD_PROFILE_ID}.json"
-
-
 @lru_cache(maxsize=1)
 def _oecd_mandatory_ordinals() -> tuple[int, ...]:
     """Return the 7 OECD mandatory criterion ordinals, read from the OECD template.
 
     SINGLE SOURCE OF TRUTH: the ordinals come from
-    ``oecd_framework.mandatory_criteria_ordinals`` in the OECD template JSON (the
-    same template that documents the framework), so the completeness check and the
-    template never diverge. Returns an empty tuple if the template is unreadable
-    (defensive — the completeness check then becomes a no-op rather than crashing).
+    ``oecd_framework.mandatory_criteria_ordinals`` in the OECD template, accessed
+    through the registry-loaded :class:`~acef.templates.models.Template` (whose
+    ``extra="allow"`` config preserves the template-level ``oecd_framework`` block
+    in ``model_extra``). Reading via ``load_template`` — rather than a raw-file
+    ``json.loads`` — guarantees the completeness check and the loaded template can
+    never diverge. Returns an empty tuple if the template is unavailable or the
+    block is malformed (defensive — the completeness check then becomes a no-op
+    rather than crashing).
     """
     try:
-        data = json.loads(_oecd_template_path().read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, UnicodeDecodeError, OSError):
+        template = load_template(OECD_PROFILE_ID)
+    except ACEFProfileError:
         return ()
-    framework = data.get("oecd_framework") if isinstance(data, dict) else None
+    extra = template.model_extra or {}
+    framework = extra.get("oecd_framework")
     if not isinstance(framework, dict):
         return ()
     ordinals = framework.get("mandatory_criteria_ordinals")

@@ -222,6 +222,20 @@ class TestMandatoryCriteria:
             "Table 2.2); inventing/omitting an ordinal misrepresents the OECD source"
         )
 
+    def test_loaded_model_preserves_oecd_framework_metadata(self, template: Template) -> None:
+        # The registry-loaded Template is the SINGLE SOURCE OF TRUTH: template-level
+        # extra metadata such as ``oecd_framework`` MUST survive ``load_template`` so
+        # the OECD completeness check can read the mandatory ordinals via the model
+        # rather than a divergent raw-file read.
+        extra = template.model_extra
+        assert extra is not None, "Template must preserve template-level extra metadata"
+        framework = extra.get("oecd_framework")
+        assert isinstance(framework, dict), (
+            "oecd_framework template-level metadata was dropped by the Template model; "
+            "it must be preserved so load_template() is the single source of truth"
+        )
+        assert list(framework["mandatory_criteria_ordinals"]) == MANDATORY_ORDINALS
+
     def test_each_mandatory_criterion_has_a_rule(self, template: Template) -> None:
         # Each of the 7 mandatory OECD criteria is encoded as an evaluation rule
         # checking its presence on the OECD crosswalk member (the mandatory-core
