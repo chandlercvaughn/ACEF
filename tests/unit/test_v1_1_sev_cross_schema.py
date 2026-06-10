@@ -10,11 +10,13 @@ Assertions exercised:
 
 - VAL-SEV-001: ``severity_vector.schema.json`` encodes the ACEF-SEV:1.0 metric
   grammar from RFC-0002 §5.4 — a representative §5.4 example vector validates,
-  the fixed group/metric order is enforced, the mandatory Group-I ``HT`` metric
-  is required, out-of-table values and a malformed ``RP`` trials count are
-  rejected — AND the schema embeds the normative ``band()`` table (the §5.4
-  HG/BR/RV → severity rows) with the coarse ``severity`` enum as the band()
-  projection target.
+  the fixed group/metric order is enforced, the FULL mandatory Group-I sequence
+  (``HT``/``HG``/``RV``/``SC``/``BR``) is required so every conforming vector is
+  bandable (a vector missing ``HG`` — or any other mandatory Group-I metric — is
+  unbandable per the §5.4 band() table and is rejected), out-of-table values and
+  a malformed ``RP`` trials count are rejected — AND the schema embeds the
+  normative ``band()`` table (the §5.4 HG/BR/RV → severity rows) with the coarse
+  ``severity`` enum as the band() projection target.
 - VAL-CROSS-001: ``harm-core-taxonomy.json`` carries ``$defs`` for the closed
   ACEF ``harm_class`` (exactly the 11 RFC §5.2 codes, keyed to Art.3(49)(a-d)),
   ``realization``, ``causality``, ``tangibility``, plus the concrete one-directional
@@ -210,10 +212,15 @@ def test_severity_vector_accepts_section_5_4_example(
 @pytest.mark.parametrize(
     "vector",
     [
-        pytest.param("ACEF-SEV:1.0/HT:P/HG:N", id="mandatory-HT-plus-HG"),
-        pytest.param("ACEF-SEV:1.0/HT:S", id="mandatory-HT-only"),
+        # Bare full Group-I sequence (no optional T/E/S metrics) — the minimal
+        # bandable vector.
+        pytest.param("ACEF-SEV:1.0/HT:P/HG:N/RV:A/SC:U/BR:I", id="bare-full-group-I"),
         pytest.param("ACEF-SEV:1.0/HT:K/HG:H/RV:I/SC:C/BR:P", id="full-group-I"),
-        pytest.param("ACEF-SEV:1.0/HT:R/HG:L/RP:1.0@1", id="RP-boundary-rate-1-trials-1"),
+        # Full Group I + an optional Group-T RP at the boundary rate/trials.
+        pytest.param(
+            "ACEF-SEV:1.0/HT:R/HG:L/RV:U/SC:U/BR:G/RP:1.0@1",
+            id="RP-boundary-rate-1-trials-1",
+        ),
         pytest.param(_SEV_EXAMPLE, id="section-5-4-example"),
     ],
 )
@@ -221,7 +228,11 @@ def test_severity_vector_accepts_well_formed(
     severity_vector_validator: Draft202012Validator,
     vector: str,
 ) -> None:
-    """Well-formed ACEF-SEV:1.0 vectors validate (VAL-SEV-001)."""
+    """Well-formed ACEF-SEV:1.0 vectors validate (VAL-SEV-001).
+
+    Every accepted vector carries the FULL mandatory Group-I sequence
+    (HT/HG/RV/SC/BR) so it is bandable; optional Group T/E/S metrics may follow.
+    """
     errors = list(severity_vector_validator.iter_errors(vector))
     assert errors == [], [e.message for e in errors]
 
@@ -229,14 +240,79 @@ def test_severity_vector_accepts_well_formed(
 @pytest.mark.parametrize(
     ("vector", "reason"),
     [
-        pytest.param("ACEF-SEV:1.0/HG:H", "missing mandatory Group-I HT", id="missing-HT"),
-        pytest.param("ACEF-SEV:1.0/HG:H/HT:P", "metrics out of fixed group order", id="out-of-order"),
-        pytest.param("ACEF-SEV:1.0/HT:Z", "HT value outside the closed table", id="bad-HT-value"),
-        pytest.param("ACEF-SEV:1.0/HT:P/HG:X", "HG value outside the closed table", id="bad-HG-value"),
-        pytest.param("ACEF-SEV:1.0/HT:P/RP:0.5@0", "RP trials count N must be >= 1", id="RP-zero-trials"),
-        pytest.param("ACEF-SEV:1.0/HT:P/RP:1.5@5", "RP rate must be in [0,1]", id="RP-rate-over-1"),
+        # --- mandatory Group-I completeness (the roborev fix) ----------------
+        pytest.param(
+            "ACEF-SEV:1.0/HT:S",
+            "HT-only vector has no HG and is therefore UNBANDABLE — the §5.4 "
+            "band() table keys every row on Group-I metrics",
+            id="HT-only-unbandable",
+        ),
+        pytest.param(
+            "ACEF-SEV:1.0/HT:P/RV:A/SC:U/BR:I",
+            "missing mandatory Group-I HG (the primary band() input)",
+            id="missing-HG",
+        ),
+        pytest.param(
+            "ACEF-SEV:1.0/HT:P/HG:N/SC:U/BR:I",
+            "missing mandatory Group-I RV",
+            id="missing-RV",
+        ),
+        pytest.param(
+            "ACEF-SEV:1.0/HT:P/HG:N/RV:A/BR:I",
+            "missing mandatory Group-I SC",
+            id="missing-SC",
+        ),
+        pytest.param(
+            "ACEF-SEV:1.0/HT:P/HG:N/RV:A/SC:U",
+            "missing mandatory Group-I BR",
+            id="missing-BR",
+        ),
+        pytest.param(
+            "ACEF-SEV:1.0/HG:H",
+            "missing mandatory Group-I HT (and the rest of Group I)",
+            id="missing-HT",
+        ),
+        # --- metric ORDER enforcement ----------------------------------------
+        pytest.param(
+            "ACEF-SEV:1.0/HG:H/HT:P/RV:A/SC:U/BR:I",
+            "HG before HT — Group-I metrics out of fixed within-group order",
+            id="within-group-I-out-of-order",
+        ),
+        pytest.param(
+            "ACEF-SEV:1.0/HT:P/HG:N/RV:A/RZ:E/SC:U/BR:I",
+            "Group-T RZ interleaved before Group I is complete — group order I then T then E then S is violated",
+            id="group-T-before-completing-group-I",
+        ),
+        # --- closed value tables ---------------------------------------------
+        pytest.param(
+            "ACEF-SEV:1.0/HT:Z/HG:N/RV:A/SC:U/BR:I",
+            "HT value outside the closed table",
+            id="bad-HT-value",
+        ),
+        pytest.param(
+            "ACEF-SEV:1.0/HT:P/HG:X/RV:A/SC:U/BR:I",
+            "HG value outside the closed table",
+            id="bad-HG-value",
+        ),
+        # --- RP wire-form constraints (full Group I present so the ONLY defect
+        #     is the RP token) -------------------------------------------------
+        pytest.param(
+            "ACEF-SEV:1.0/HT:P/HG:N/RV:A/SC:U/BR:I/RP:0.5@0",
+            "RP trials count N must be >= 1",
+            id="RP-zero-trials",
+        ),
+        pytest.param(
+            "ACEF-SEV:1.0/HT:P/HG:N/RV:A/SC:U/BR:I/RP:1.5@5",
+            "RP rate must be in [0,1]",
+            id="RP-rate-over-1",
+        ),
+        # --- prefix / version ------------------------------------------------
         pytest.param("CVSS:4.0/AV:N", "wrong vector prefix", id="wrong-prefix"),
-        pytest.param("ACEF-SEV:2.0/HT:P", "wrong version token", id="wrong-version"),
+        pytest.param(
+            "ACEF-SEV:2.0/HT:P/HG:N/RV:A/SC:U/BR:I",
+            "wrong version token",
+            id="wrong-version",
+        ),
     ],
 )
 def test_severity_vector_rejects_malformed(
@@ -244,7 +320,13 @@ def test_severity_vector_rejects_malformed(
     vector: str,
     reason: str,
 ) -> None:
-    """Malformed ACEF-SEV:1.0 vectors are rejected (VAL-SEV-001)."""
+    """Malformed ACEF-SEV:1.0 vectors are rejected (VAL-SEV-001).
+
+    Covers the mandatory full Group-I sequence (HT/HG/RV/SC/BR) — a vector
+    missing any Group-I metric is unbandable and rejected — plus within-group
+    and cross-group order enforcement, the closed value tables, and the RP
+    wire-form constraints.
+    """
     assert not severity_vector_validator.is_valid(vector), reason
 
 
@@ -284,13 +366,21 @@ def test_severity_vector_publishes_full_metric_value_tables(
     severity_vector_schema: dict[str, Any],
 ) -> None:
     """The schema publishes the full §5.4 metric value tables in group order
-    I, T, E, S with the mandatory Group-I HT metric (VAL-SEV-001)."""
+    I, T, E, S, with the ENTIRE Group-I sequence (HT/HG/RV/SC/BR) flagged
+    mandatory and Groups T/E/S optional (VAL-SEV-001)."""
     groups = severity_vector_schema["$defs"]["metric_value_tables"]["groups"]
     assert list(groups.keys()) == ["I", "T", "E", "S"]
-    # Group I is mandatory; HT is the mandatory metric and leads the order.
+    # Group I is mandatory and runs HT, HG, RV, SC, BR in fixed order.
     assert groups["I"]["optional"] is False
-    assert groups["I"]["order"][0] == "HT"
-    assert groups["I"]["metrics"]["HT"]["mandatory"] is True
+    assert groups["I"]["order"] == ["HT", "HG", "RV", "SC", "BR"]
+    # §5.4 declares "Group I — Intrinsic Harm (mandatory)" without exempting any
+    # member, so every Group-I metric is mandatory (the roborev fix: an HG-less
+    # vector is unbandable).
+    for metric in ("HT", "HG", "RV", "SC", "BR"):
+        assert groups["I"]["metrics"][metric]["mandatory"] is True, metric
+    # Groups T/E/S are optional (their metrics default to Not-Defined X).
+    for grp in ("T", "E", "S"):
+        assert groups[grp]["optional"] is True, grp
     # HT value table is the closed §5.4 set keyed to Art.3(49).
     assert set(groups["I"]["metrics"]["HT"]["values"].keys()) == {"P", "R", "K", "E", "S"}
 

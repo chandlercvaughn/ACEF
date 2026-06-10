@@ -4,11 +4,11 @@
   "title": "ACEF Recomputable Severity Vector (ACEF-SEV:1.0)",
   "description": "Normative grammar, metric value tables, and band() projection for the ACEF-SEV:1.0 severity vector (RFC-0002 §5.4; ACEF core_version 1.1.0). A self-contained, recomputable, slash-delimited, fixed-order vector string modeled structurally on CVSS v4.0. It is Evidence, not risk: Group I expresses the magnitude of harm if realized, NOT probability-weighted risk (severity-is-not-risk). A vector begins `ACEF-SEV:1.0/` and concatenates `Name:Value` pairs with `/`, in group order I, T, E, S and in the listed order within a group; any omitted optional metric defaults to Not-Defined (X). Group I is mandatory. A present-but-unparseable vector raises ACEF-082 (§7). This schema validates the WIRE-FORMAT string structurally via `pattern` (prefix + the fixed-order metric grammar), and additionally publishes (a) the full normative metric value tables in `$defs/metric_value_tables` and (b) the normative band() table in `$defs/band_table`. Per §5.4: \"This table is reproduced normatively in severity_vector.schema.json; the table here governs and the schema file MUST match it\" — the band_table below MUST match §5.4 byte-for-meaning. Deterministic data artifact: no wall-clock or random values.",
   "type": "string",
-  "pattern": "^ACEF-SEV:1\\.0/HT:[PRKES](/HG:[HLN])?(/RV:[AUI])?(/SC:[CU])?(/BR:[IGP])?(/RZ:[ESN])?(/RP:(0(\\.[0-9]+)?|1(\\.0+)?)@[1-9][0-9]*)?(/XF:[YNX])?(/AU:[LOA])?(/EX:[HLN])?(/KC:[HML])?(/SF:[PN])?(/VL:[FTAC])?(/DB:[YN])?$",
-  "$comment": "Wire-format grammar (§5.4): the vector MUST begin `ACEF-SEV:1.0/`, MUST carry mandatory Group-I metric HT, and MAY carry the remaining metrics in the fixed group order I (HT,HG,RV,SC,BR), T (RZ,RP,XF), E (AU,EX,KC), S (SF,VL,DB). Each metric appears at most once; omitted optional metrics default to Not-Defined (X) per §5.4. RP uses the wire form `RP:<rate>@<N>` with rate in [0,1] over N>=1 trials. The full closed value table for every metric is published in $defs/metric_value_tables; the deterministic projection to the coarse `severity` enum is published in $defs/band_table. The example vector from §5.4 (`ACEF-SEV:1.0/HT:R/HG:H/RV:I/SC:C/BR:P/RZ:E/RP:0.62@200/XF:Y/AU:A/EX:H/KC:H/SF:N/VL:F/DB:Y`) validates against this pattern.",
+  "pattern": "^ACEF-SEV:1\\.0/HT:[PRKES]/HG:[HLN]/RV:[AUI]/SC:[CU]/BR:[IGP](/RZ:[ESN])?(/RP:(0(\\.[0-9]+)?|1(\\.0+)?)@[1-9][0-9]*)?(/XF:[YNX])?(/AU:[LOA])?(/EX:[HLN])?(/KC:[HML])?(/SF:[PN])?(/VL:[FTAC])?(/DB:[YN])?$",
+  "$comment": "Wire-format grammar (§5.4): the vector MUST begin `ACEF-SEV:1.0/` and MUST carry the FULL mandatory Group-I sequence in fixed order — HT (harm type), HG (harm gravity), RV (reversibility), SC (scope), BR (breadth) — because §5.4 declares \"Group I — Intrinsic Harm (mandatory)\" and the band() table keys every row on Group-I metrics (HG, and BR/RV in some rows); a vector lacking any mandatory Group-I metric is UNBANDABLE and is rejected (raises ACEF-082 at validate time, §7). After Group I the vector MAY carry the optional metrics in fixed group order T (RZ,RP,XF), E (AU,EX,KC), S (SF,VL,DB). Each metric appears at most once; omitted OPTIONAL metrics default to Not-Defined (X) per §5.4 (only Groups T/E/S metrics are optional). RP uses the wire form `RP:<rate>@<N>` with rate in [0,1] over N>=1 trials. The full closed value table for every metric is published in $defs/metric_value_tables; the deterministic projection to the coarse `severity` enum is published in $defs/band_table. The example vector from §5.4 (`ACEF-SEV:1.0/HT:R/HG:H/RV:I/SC:C/BR:P/RZ:E/RP:0.62@200/XF:Y/AU:A/EX:H/KC:H/SF:N/VL:F/DB:Y`) validates against this pattern.",
   "examples": [
     "ACEF-SEV:1.0/HT:R/HG:H/RV:I/SC:C/BR:P/RZ:E/RP:0.62@200/XF:Y/AU:A/EX:H/KC:H/SF:N/VL:F/DB:Y",
-    "ACEF-SEV:1.0/HT:P/HG:N"
+    "ACEF-SEV:1.0/HT:P/HG:N/RV:A/SC:U/BR:I"
   ],
   "$defs": {
     "severity": {
@@ -22,7 +22,7 @@
       ]
     },
     "metric_value_tables": {
-      "description": "The full normative ACEF-SEV:1.0 metric value tables (§5.4). Each metric belongs to one of four groups evaluated in fixed order I, T, E, S; within a group the metrics appear in the listed order. `mandatory` flags Group-I metric HT (and HG, which the band() requires); all other metrics are optional and default to Not-Defined (X) when omitted. The structural wire-format `pattern` at the schema root encodes the same closed value sets.",
+      "description": "The full normative ACEF-SEV:1.0 metric value tables (§5.4). Each metric belongs to one of four groups evaluated in fixed order I, T, E, S; within a group the metrics appear in the listed order. `mandatory` flags ALL of the Group-I metrics HT, HG, RV, SC, BR — §5.4 declares \"Group I — Intrinsic Harm (mandatory)\" without exempting any Group-I metric, and the band() table keys its rows on Group-I metrics, so every conforming vector MUST carry the full Group-I sequence to be bandable; the Group T/E/S metrics are optional and default to Not-Defined (X) when omitted. The structural wire-format `pattern` at the schema root encodes the same closed value sets and requires the full Group-I sequence.",
       "groups": {
         "I": {
           "name": "Intrinsic Harm",
@@ -43,8 +43,8 @@
             },
             "HG": {
               "name": "harm gravity",
-              "mandatory": false,
-              "description": "ACEF-defined gravity (NOT a CSET mapping; CSET Severity is unbuilt). Band() input.",
+              "mandatory": true,
+              "description": "ACEF-defined gravity (NOT a CSET mapping; CSET Severity is unbuilt). Mandatory Group-I metric and the primary band() input — every band() row keys on HG, so a vector lacking HG is unbandable.",
               "values": {
                 "H": "high",
                 "L": "low",
@@ -53,8 +53,8 @@
             },
             "RV": {
               "name": "reversibility",
-              "mandatory": false,
-              "description": "CVSS v4.0 Recovery semantics; `I` aligns with 3(49)(b) \"irreversible\". Band() input.",
+              "mandatory": true,
+              "description": "CVSS v4.0 Recovery semantics; `I` aligns with 3(49)(b) \"irreversible\". Mandatory Group-I metric and a band() input (the `RV:I` term escalates the band in two rows).",
               "values": {
                 "A": "automatic",
                 "U": "user-recoverable",
@@ -63,8 +63,8 @@
             },
             "SC": {
               "name": "scope",
-              "mandatory": false,
-              "description": "Whether the harm crosses a security/authorization boundary (CVSS v4.0 scope). Folded into BR by band(), not scored twice (§5.4).",
+              "mandatory": true,
+              "description": "Whether the harm crosses a security/authorization boundary (CVSS v4.0 scope). Mandatory Group-I metric. Folded into BR by band(), not scored twice (§5.4) — carried as evidence, not a direct band input.",
               "values": {
                 "C": "changed",
                 "U": "unchanged"
@@ -72,8 +72,8 @@
             },
             "BR": {
               "name": "affected-population breadth",
-              "mandatory": false,
-              "description": "Grounded on the EU \"widespread\" modifier; ACEF-defined (NOT a built CSET \"Spread\"). Band() input.",
+              "mandatory": true,
+              "description": "Grounded on the EU \"widespread\" modifier; ACEF-defined (NOT a built CSET \"Spread\"). Mandatory Group-I metric and a band() input (the `BR:P` term escalates the band in two rows).",
               "values": {
                 "I": "individual",
                 "G": "group",
