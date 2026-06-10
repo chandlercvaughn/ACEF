@@ -2,12 +2,39 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://acef.ai/schemas/v1.1/coordinated_disclosure.schema.json",
   "title": "ACEF Coordinated Disclosure Block (incident_card / incident_report)",
-  "description": "The single canonical coordinated_disclosure shape referenced by incident_card and incident_report (RFC-0002 §5.6; ACEF core_version 1.1.0). Modeled on ISO/IEC 29147 and 30111, CERT/CC and FIRST multi-party guidance, and the Stanford CRFM coordinated flaw disclosure proposal (arXiv 2503.16861). Closed (additionalProperties: false). `status` is always required; on a `status: public` card the public subset (`status`, `reporter_role`) is required and `embargo_until` MUST be absent (§5.6 Requiredness; the public-subset/embargo conditional is enforced by the validator, not this base shape). `regulatory_timeline[]` is an order-insensitive array (one entry per applicable jurisdiction, §5.7 registry) and MUST be sorted ascending by the RFC-8785 canonical byte sequence of its elements before hashing and serialization (§5.10). The notification_timeline[] is a separate, order-significant top-level record field (§5.10) and is NOT part of this block.",
+  "description": "The single canonical coordinated_disclosure shape referenced by incident_card and incident_report (RFC-0002 §5.6; ACEF core_version 1.1.0). Modeled on ISO/IEC 29147 and 30111, CERT/CC and FIRST multi-party guidance, and the Stanford CRFM coordinated flaw disclosure proposal (arXiv 2503.16861). Closed: unknown keys are rejected unless `x-*`-namespaced (matching `^x-[a-z0-9-]+/?$`), per the §5.5 / Appendix-E-Q15 closure rule and the repo X6 vendor-namespace pattern (v1.1/manifest.schema.json:96-102); any `x-*` member is accepted, safely-ignorable, preserved on round-trip, and MUST NOT affect conformance. SCHEMA-ENFORCED conditionals (§5.6 Requiredness, structurally expressible in JSON Schema and encoded in this base shape): `status` is always required; on a `status: public` card the public subset is required (`status` always, `reporter_role` via the if/then below) and `embargo_until` MUST be absent (the if/then `not`). VALIDATOR-ENFORCED conditionals (cross-field semantics delegated to F-M3-VALIDATOR-RULES, NOT encoded here): Art. 73 deadline consistency (ACEF-084), the awareness_date->deadline clock math (§5.7 shortest-applicable-clock), and the profile-declared conditional-requiredness of a matching `regulatory_timeline[]` entry when `eu-ai-act-art73-2026` / `eu-ai-act-art55` is declared (§5.7 union-of-declared-profiles rule). `regulatory_timeline[]` is an order-insensitive array (one entry per applicable jurisdiction, §5.7 registry) and MUST be sorted ascending by the RFC-8785 canonical byte sequence of its elements before hashing and serialization (§5.10). The notification_timeline[] is a separate, order-significant top-level record field (§5.10) and is NOT part of this block.",
   "type": "object",
   "required": [
     "status"
   ],
   "additionalProperties": false,
+  "patternProperties": {
+    "^x-[a-z0-9-]+/?$": {
+      "type": "object",
+      "description": "X6 vendor-extension namespace (§5.5 / Appendix E Q15; repo pattern v1.1/manifest.schema.json:96-102). Any `x-*`-namespaced key is accepted, safely-ignorable, preserved on round-trip, and MUST NOT affect conformance; non-`x-` unknown keys are rejected by additionalProperties: false."
+    }
+  },
+  "if": {
+    "properties": {
+      "status": {
+        "const": "public"
+      }
+    },
+    "required": [
+      "status"
+    ]
+  },
+  "then": {
+    "description": "§5.6 public-state conditional (SCHEMA-ENFORCED): on a `status: public` card the public subset (`status` is always-required at the top level; `reporter_role` is added here) is required, and `embargo_until` MUST be absent. The Art. 73 deadline-consistency (ACEF-084) and awareness_date->deadline clock math are NOT encoded here; they remain delegated to the validator (F-M3-VALIDATOR-RULES, §5.7).",
+    "required": [
+      "reporter_role"
+    ],
+    "not": {
+      "required": [
+        "embargo_until"
+      ]
+    }
+  },
   "properties": {
     "status": {
       "type": "string",
@@ -27,7 +54,7 @@
         "affected_party",
         "regulator"
       ],
-      "description": "Who reported the incident (§5.6). Reuses and extends the envelope obligation_role enum plus a neutral coordinator actor; required on a `status: public` card (§5.6 Requiredness)."
+      "description": "Who reported the incident (§5.6). Reuses and extends the envelope obligation_role enum plus a neutral coordinator actor; required on a `status: public` card (§5.6 Requiredness), enforced structurally by the top-level if/then in this schema."
     },
     "coordinator_ref": {
       "type": "string",
@@ -40,7 +67,7 @@
     "embargo_until": {
       "type": "string",
       "format": "date-time",
-      "description": "Embargo expiry (ISO 8601). MUST be absent on a `status: public` card (§5.6 Requiredness; enforced by the validator)."
+      "description": "Embargo expiry (ISO 8601). MUST be absent on a `status: public` card (§5.6 Requiredness), enforced structurally by the top-level if/then `not` in this schema."
     },
     "regulatory_timeline": {
       "type": "array",
