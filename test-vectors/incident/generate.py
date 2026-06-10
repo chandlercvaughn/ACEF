@@ -41,10 +41,17 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from acef.domain_control import (
+    DomainControlVerdict,
+    HttpResponse,
+    challenge_token_for,
+    verify_domain_control,
+)
 from acef.models.metadata import Versioning
 from acef.models.urns import URNType
 from acef.package import Package
 from acef.redaction import RedactionPolicy
+from acef.signing import _derive_jwk
 from acef.validation.engine import validate_bundle
 
 # ---------------------------------------------------------------------------
@@ -61,6 +68,21 @@ _FORGED_ASSIGNER = "OPENAI"
 _FIXED_CLOCK = datetime(2026, 8, 1, 0, 0, 0, tzinfo=UTC)
 _RECORD_TS = "2026-08-10T00:00:00Z"
 _AWARENESS = "2026-08-01T00:00:00Z"
+
+# A FIXED check-time instant for the OPTIONAL online verifier diagnostic captured
+# into the forged-assigner committed artifact (no wall-clock). MUST equal the
+# driver's ``_FIXED_NOW`` so the committed online_diagnostic == the live verdict.
+_ONLINE_FIXED_NOW = datetime(2026, 8, 15, 12, 0, 0, tzinfo=UTC)
+
+# FIXED deterministic EC private scalars for the forged-assigner online diagnostic.
+# The card key is the registrant key the card's JWS is (notionally) signed with;
+# the attacker key is the DIFFERENT key the attacker binds its published proof to.
+# Using FIXED scalars (not ``ec.generate_private_key``) makes the captured online
+# diagnostic byte-stable across regenerations: the diagnostic embeds the
+# assigner/domain/class/outcomes + fix-hint (all deterministic) and NO raw key
+# material, but the keys must still be reproducible so the verifier runs identically.
+_ONLINE_CARD_KEY_SCALAR = 0x0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A
+_ONLINE_ATTACKER_KEY_SCALAR = 0x0B0B0B0B0B0B0B0B0B0B0B0B0B0B0B0B0B0B0B0B0B0B0B0B0B0B0B0B0B0B0B0B
 
 # Confidentiality of a source-backed / confidential incident_report carrying the
 # private card_source block (Finding 2). RFC-0002 §5.1: incident_report defaults to
@@ -251,6 +273,77 @@ def _card_source_report_payload(
         "root_cause_analysis": "Privileged analysis withheld from the public projection.",
         "card_source": card_source,
     }
+
+
+# ---------------------------------------------------------------------------
+# OPTIONAL online verifier diagnostic — captured DETERMINISTICALLY into the
+# forged-assigner committed artifact (roborev fix).
+# ---------------------------------------------------------------------------
+
+
+def _derive_fixed_jwk(scalar: int) -> dict[str, Any]:
+    """Derive a public JWK from a FIXED EC private scalar (deterministic)."""
+    from cryptography.hazmat.primitives.asymmetric import ec
+
+    key = ec.derive_private_key(scalar, ec.SECP256R1())
+    return _derive_jwk(key)
+
+
+def _diagnostic_to_dict(diagnostic: Any) -> dict[str, Any]:
+    """Serialize a :class:`ValidationDiagnostic` to a byte-stable plain dict.
+
+    Only the deterministic, key-INDEPENDENT fields are captured (code, message,
+    path, details, severity, category). The message + details embed the assigner,
+    domain, class, channel outcomes, and the registered ACEF-083 fix-hint — all
+    deterministic — and contain NO raw key material, so the captured artifact is
+    byte-identical across regenerations under the FIXED keys + clock."""
+    severity = getattr(diagnostic.severity, "value", diagnostic.severity)
+    category = getattr(diagnostic.category, "value", diagnostic.category)
+    return {
+        "code": str(diagnostic.code),
+        "message": str(diagnostic.message),
+        "path": diagnostic.path,
+        "details": diagnostic.details,
+        "severity": str(severity),
+        "category": str(category),
+    }
+
+
+def online_reject_diagnostic_dict() -> dict[str, Any]:
+    """Run the OPTIONAL online verifier for the forged-assigner card and return its
+    ACEF-083 ``class: online-conformance`` reject diagnostic as a byte-stable dict.
+
+    This reproduces the EXACT online check the conformance driver asserts (a forged
+    challenge bound to an ATTACKER key, not the card's registrant key → a
+    presented-but-invalid proof → reject), but under FIXED deterministic keys + a
+    FIXED clock so the captured diagnostic is byte-stable. No real network: the
+    DNS resolver returns the attacker's published proof and the ``.well-known``
+    fetcher returns a 404 (no HTTP proof). This is the single source of truth for
+    BOTH the committed artifact (``generate.py``) and the driver cross-check
+    (``tests/conformance/test_incident_vectors.py``)."""
+    card_jwk = _derive_fixed_jwk(_ONLINE_CARD_KEY_SCALAR)
+    attacker_jwk = _derive_fixed_jwk(_ONLINE_ATTACKER_KEY_SCALAR)
+    attacker_proof = challenge_token_for(_FORGED_ASSIGNER, attacker_jwk)
+
+    def dns_resolver(_name: str) -> list[str]:
+        return [attacker_proof]
+
+    def no_http(_url: str) -> HttpResponse:
+        return HttpResponse(status=404, content_type="", body="")
+
+    result = verify_domain_control(
+        _VALID_ID,
+        card_jwk,
+        dns_resolver=dns_resolver,
+        http_fetcher=no_http,
+        now=_ONLINE_FIXED_NOW,
+    )
+    if result.verdict is not DomainControlVerdict.REJECT or result.diagnostic is None:
+        raise SystemExit(
+            "generate.py: forged-assigner online check did not REJECT as expected "
+            f"(verdict={result.verdict.value!r}); cannot capture the online ACEF-083 diagnostic."
+        )
+    return _diagnostic_to_dict(result.diagnostic)
 
 
 # ---------------------------------------------------------------------------
@@ -767,15 +860,29 @@ def generate() -> None:
         assessment_rel = Path(conformance_class) / disposition / f"{name}.acef.acef-assessment.json"
         assessment_path = _INCIDENT_DIR / assessment_rel
         live_assessment_files.add(assessment_path)
-        _write_json(
-            assessment_path,
-            {
-                "vector": name,
-                "class": conformance_class,
-                "disposition": disposition,
-                "emitted_codes": emitted_codes,
-            },
-        )
+        assessment_doc: dict[str, Any] = {
+            "vector": name,
+            "class": conformance_class,
+            "disposition": disposition,
+            # The OFFLINE ``validate_bundle`` emitted-code set (the deterministic
+            # offline output). For the online-conformance forged-assigner vector
+            # this is the OFFLINE-pass set (empty) — offline never attributes.
+            "emitted_codes": emitted_codes,
+        }
+        if conformance_class == "online-conformance":
+            # roborev fix: the committed artifact MUST be self-describing for the
+            # ONLINE class. A consumer reading ONLY this artifact (without re-running
+            # the optional online verifier) sees the expected ONLINE ACEF-083 reject
+            # alongside the offline-pass cross-check. The online diagnostic is the
+            # ACTUAL ``verify_domain_control`` reject the driver asserts, generated
+            # DETERMINISTICALLY (fixed keys + fixed clock + injected attacker proof,
+            # no real network), so the committed artifact is byte-stable.
+            online_diag = online_reject_diagnostic_dict()
+            assessment_doc["offline_class"] = spec.get("offline_class", "pass")
+            assessment_doc["offline_emitted_codes"] = emitted_codes
+            assessment_doc["online_emitted_codes"] = [str(online_diag["code"])]
+            assessment_doc["online_diagnostic"] = online_diag
+        _write_json(assessment_path, assessment_doc)
 
         entry: dict[str, Any] = {
             "name": name,
@@ -801,6 +908,13 @@ def generate() -> None:
         ):
             if optional in spec:
                 entry[optional] = spec[optional]
+        if conformance_class == "online-conformance":
+            # roborev fix: surface the online/offline code split on the manifest
+            # entry too, so a consumer scanning vectors.json (not just the committed
+            # assessment artifact) sees the expected ONLINE ACEF-083 reject vs the
+            # OFFLINE-pass cross-check directly.
+            entry["online_emitted_codes"] = assessment_doc["online_emitted_codes"]
+            entry["offline_emitted_codes"] = assessment_doc["offline_emitted_codes"]
         vectors_index.append(entry)
 
     # Finding 3: prune any on-disk vector artifact not in the current spec set, so

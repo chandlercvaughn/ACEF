@@ -121,6 +121,17 @@ def _validate(vector: dict[str, Any]) -> Any:
     return validate_bundle(_bundle_dir(vector), profiles=profiles)
 
 
+def _validate_any(vector: dict[str, Any]) -> Any:
+    """Run the OFFLINE ``validate_bundle`` on ANY vector regardless of its §6 class.
+
+    ``_validate`` is reached only for the offline-validatable classes (the
+    parametrization filters online-conformance off the generic path); the
+    online-conformance vector still PASSES the offline class by design
+    (VAL-DOMAIN-001), and this helper validates it directly so the committed
+    offline-pass cross-check can be asserted."""
+    return _validate(vector)
+
+
 # ---------------------------------------------------------------------------
 # Sanity: the manifest + at least the required vector families are present.
 # ---------------------------------------------------------------------------
@@ -393,17 +404,112 @@ def test_vector_validation_is_byte_stable(vector: dict[str, Any]) -> None:
 def test_committed_assessment_matches_emitted_codes() -> None:
     """Each vector's committed ``.acef-assessment.json`` records the SAME emitted
     code set the production validator emits now — proving the committed expected
-    assessment is not stale."""
+    assessment is not stale.
+
+    For the offline-validatable classes the committed ``emitted_codes`` is the
+    offline ``validate_bundle`` output. The online-conformance forged-assigner
+    vector is NOT routed through the offline pass/fail path (offline never
+    attributes), so its committed ``emitted_codes`` records the OFFLINE-pass cross
+    set (empty) and the ONLINE reject is carried separately on
+    ``online_emitted_codes`` (asserted in
+    :func:`test_online_conformance_committed_artifact_records_online_acef083`)."""
     for vector in sorted(_VECTORS, key=lambda v: str(v.get("name"))):
         expected_path = _INCIDENT_DIR / str(vector.get("assessment_path"))
         assert expected_path.is_file(), f"missing committed assessment for {vector.get('name')!r}: {expected_path}"
         committed = json.loads(expected_path.read_text(encoding="utf-8"))
         committed_codes = sorted(str(c) for c in committed.get("emitted_codes", []))
+        if str(vector.get("class")) not in _OFFLINE_VALIDATABLE_CLASSES:
+            # The online-conformance vector's committed ``emitted_codes`` is the
+            # OFFLINE-pass cross set (empty). It is NOT routed through the offline
+            # pass/fail driver path, but the bundle DOES pass offline by design
+            # (VAL-DOMAIN-001), so cross-check it directly here.
+            assert committed_codes == [], (
+                f"online-conformance vector {vector.get('name')!r}: committed offline "
+                f"emitted_codes must be [] (offline pass), got {committed_codes!r}"
+            )
+            live_codes = sorted(set(_emitted_codes(_validate_any(vector))))
+            assert live_codes == [], (
+                f"online-conformance vector {vector.get('name')!r}: offline validation must "
+                f"emit no codes (offline pass by design), got {live_codes!r}"
+            )
+            continue
         live_codes = sorted(set(_emitted_codes(_validate(vector))))
         assert committed_codes == live_codes, (
             f"vector {vector.get('name')!r}: committed assessment codes {committed_codes!r} "
             f"!= live emitted codes {live_codes!r} — regenerate the vectors."
         )
+
+
+def test_online_conformance_committed_artifact_records_online_acef083() -> None:
+    """roborev fix: the forged-assigner ``online-conformance`` vector's COMMITTED
+    assessment artifact (``assessment_path``) MUST be self-describing — a consumer
+    reading ONLY the committed artifact (without re-running the optional online
+    verifier) MUST see the expected ONLINE reject. Concretely the committed
+    artifact records:
+
+    * ``online_emitted_codes`` containing ``ACEF-083`` (the ONLINE verifier reject),
+    * ``offline_emitted_codes`` == ``[]`` (the OFFLINE-pass cross-check),
+    * an ``online_diagnostic`` carrying the byte-stable ACEF-083
+      ``class: online-conformance`` reject the driver asserts, and
+    * the legacy ``emitted_codes`` == ``[]`` (the offline-pass output, kept for the
+      existing matcher).
+
+    Previously the committed artifact recorded ``emitted_codes: []`` only (the
+    offline output), so a consumer never saw the online ACEF-083 reject in the
+    artifact — only in the README/driver. This test pins the artifact as the
+    authoritative source for BOTH the offline pass and the online reject."""
+    vector = _forged_vector()
+    expected_path = _INCIDENT_DIR / str(vector.get("assessment_path"))
+    assert expected_path.is_file(), f"missing committed assessment for {vector.get('name')!r}: {expected_path}"
+    committed = json.loads(expected_path.read_text(encoding="utf-8"))
+
+    online_codes = sorted(str(c) for c in committed.get("online_emitted_codes", []))
+    assert "ACEF-083" in online_codes, (
+        f"online-conformance committed artifact must record the ONLINE ACEF-083 reject in "
+        f"online_emitted_codes; got {online_codes!r}"
+    )
+
+    offline_codes = committed.get("offline_emitted_codes")
+    assert offline_codes == [], (
+        f"online-conformance committed artifact must record an EMPTY offline_emitted_codes "
+        f"(the offline-pass cross-check), got {offline_codes!r}"
+    )
+    # The legacy ``emitted_codes`` (consumed by the existing matcher) stays the
+    # offline-pass output (empty).
+    assert committed.get("emitted_codes") == [], (
+        "online-conformance committed artifact's legacy emitted_codes must stay [] (offline pass)"
+    )
+
+    # The committed online diagnostic must be the ACEF-083 class:online-conformance reject.
+    diag = committed.get("online_diagnostic")
+    assert isinstance(diag, dict), f"committed artifact must carry an online_diagnostic object, got {diag!r}"
+    assert diag.get("code") == "ACEF-083", f"online_diagnostic.code must be ACEF-083, got {diag.get('code')!r}"
+    assert (diag.get("details") or {}).get("class") == "online-conformance", (
+        f"online_diagnostic must be tagged class:online-conformance, got {(diag.get('details') or {}).get('class')!r}"
+    )
+    # The committed online_class fact stays consistent with the artifact.
+    assert committed.get("offline_class") == "pass", (
+        "online-conformance committed artifact must record offline_class=pass (the cross-check)"
+    )
+
+
+def test_online_conformance_committed_diagnostic_matches_live_verifier() -> None:
+    """The committed ``online_diagnostic`` MUST equal the diagnostic the OPTIONAL
+    online verifier produces NOW for the forged-assigner vector, under the same
+    fixed clock + injected attacker proof the generator used — proving the
+    committed online artifact is not stale and is reproduced deterministically by
+    ``generate.py`` (byte-stable). The keys are FIXED deterministic EC keys (not
+    randomly generated) so the diagnostic is byte-identical across runs."""
+    vector = _forged_vector()
+    expected_path = _INCIDENT_DIR / str(vector.get("assessment_path"))
+    committed = json.loads(expected_path.read_text(encoding="utf-8"))
+    committed_diag = committed.get("online_diagnostic")
+
+    live = _online_reject_diagnostic_dict(vector)
+    assert committed_diag == live, (
+        f"committed online_diagnostic is stale: committed={committed_diag!r} != live={live!r} — "
+        f"regenerate the vectors (`python test-vectors/incident/generate.py`)."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -421,6 +527,30 @@ def _forged_vector() -> dict[str, Any]:
     forged = [v for v in _VECTORS if v.get("class") == "online-conformance"]
     assert forged, "no online-conformance forged-assigner vector declared"
     return forged[0]
+
+
+def _load_generator() -> Any:
+    """Import the vector generator module by file path (it lives under
+    ``test-vectors/`` which is not an importable package). The generator owns the
+    SINGLE deterministic computation of the forged-assigner online ACEF-083 reject
+    diagnostic, so the committed-artifact cross-check uses the same code path the
+    generator persisted from — no drift between the two."""
+    import importlib.util
+
+    gen_path = _INCIDENT_DIR / "generate.py"
+    spec = importlib.util.spec_from_file_location("incident_generate", gen_path)
+    assert spec is not None and spec.loader is not None, f"cannot load generator from {gen_path}"
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _online_reject_diagnostic_dict(_vector: dict[str, Any]) -> dict[str, Any]:
+    """The byte-stable ACEF-083 ``class: online-conformance`` reject diagnostic the
+    OPTIONAL online verifier produces NOW for the forged-assigner card — computed
+    through the generator's single source of truth (fixed keys + fixed clock +
+    injected attacker proof)."""
+    return _load_generator().online_reject_diagnostic_dict()  # type: ignore[no-any-return]
 
 
 @pytest.mark.conformance
