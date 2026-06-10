@@ -219,29 +219,42 @@ class MintedIncidentId:
 
 
 def _registrable_label_from_domain(domain: str) -> str:
-    """Derive the assigner LABEL from ``domain`` so it ROUND-TRIPS through
-    :func:`acef.domain_control.assigner_to_registrable_domain` (default
-    ``LABEL -> "<label>.com"``).
+    """Derive the assigner LABEL from ``domain``, RESTRICTED to domains that
+    genuinely round-trip through the default
+    :func:`acef.domain_control.assigner_to_registrable_domain`
+    (``LABEL -> "<label>.com"``).
 
-    The mapping takes the registrable domain's LEFTMOST label, uppercases it, and
-    validates it against the ``[A-Z0-9]{2,8}`` assigner grammar (§5.3). Because the
-    default verifier maps a LABEL back to ``"<label>.com"``, this function only
-    accepts domains whose registrable form is ``<label>.com`` round-trippable: it
-    strips any subdomains (``api.openai.com`` -> ``openai`` -> ``OPENAI``) and
-    rejects a label that cannot satisfy the 2-8-char grammar.
+    The v1.1 default mapper has NO public-suffix list in scope, so it cannot
+    correctly split a multi-label eTLD (``co.uk``, ``com.au``) or a non-``.com``
+    eTLD (``.ai``). Naively taking ``labels[-2]`` would misparse
+    ``service.example.co.uk`` to the label ``CO`` and emit a challenge location for
+    ``co.com`` — a WRONG, silently-attributed challenge. To stay honest (roborev F2)
+    this helper:
 
-    .. note:: The default verifier round-trip is ``.com``-anchored. A non-``.com``
-       eTLD (e.g. ``openai.ai``) still derives the ``OPENAI`` LABEL here, but the
-       DEFAULT online verifier would look it up at ``openai.com`` — a profile that
-       pins a different eTLD supplies its own ``label_to_domain`` to
-       :func:`acef.domain_control.verify_domain_control`. The minted token /
-       record-name in :class:`MintedIncidentId` are emitted for the ``.com``
-       default; pass a custom ``label_to_domain`` to the verifier to match.
+    1. derives the candidate registrable LABEL from the host's leftmost
+       registrable label (the label immediately left of the eTLD for a multi-label
+       host: ``api.openai.com`` -> ``openai`` -> ``OPENAI``; the sole label
+       otherwise), validated against the ``[A-Z0-9]{2,8}`` assigner grammar (§5.3);
+       then
+    2. VERIFIES the derived LABEL round-trips:
+       ``assigner_to_registrable_domain(LABEL)`` MUST equal the host's REGISTRABLE
+       domain (its last two labels, or the bare host for a single label). If it does
+       not — a multi-label public suffix, a non-``.com`` eTLD, etc. — it raises a
+       clear :class:`ValueError` telling the caller to pass a ``<label>.com`` domain
+       or supply a custom mapping for v1.1, rather than emitting a wrong challenge.
+
+    Accepted (round-trips): ``openai.com``, ``api.openai.com`` (-> ``OPENAI``).
+    Rejected (no round-trip): ``example.ai``, ``example.co.uk``,
+    ``service.example.co.uk``.
 
     Raises:
-        ValueError: if ``domain`` is empty or its leftmost registrable label
-            cannot satisfy the ``[A-Z0-9]{2,8}`` assigner grammar.
+        ValueError: if ``domain`` is empty, has no DNS labels, its leftmost
+            registrable label cannot satisfy the ``[A-Z0-9]{2,8}`` assigner grammar,
+            or the derived LABEL does not round-trip to the host's registrable domain
+            under the default ``<label>.com`` mapper.
     """
+    from acef.domain_control import assigner_to_registrable_domain
+
     if not isinstance(domain, str) or not domain.strip():
         raise ValueError("mint_incident_id: domain must be a non-empty string (e.g. 'openai.com')")
     host = domain.strip().lower().rstrip(".")
@@ -255,11 +268,14 @@ def _registrable_label_from_domain(domain: str) -> str:
     # The registrable label is the leftmost label of the registrable domain. For
     # the .com-default round-trip we take the label immediately left of the eTLD
     # when a multi-label host is given (api.openai.com -> openai), else the sole
-    # label (openai.com -> openai; bare 'openai' -> openai).
+    # label (openai.com -> openai; bare 'openai' -> openai). The registrable DOMAIN
+    # is the host's last two labels (eTLD+1) for a multi-label host, else the host.
     if len(labels) >= 2:
         registrable_label = labels[-2]
+        registrable_domain = ".".join(labels[-2:])
     else:
         registrable_label = labels[0]
+        registrable_domain = labels[0]
     label = registrable_label.upper()
     if not _ASSIGNER_LABEL_PATTERN.match(label):
         raise ValueError(
@@ -267,6 +283,20 @@ def _registrable_label_from_domain(domain: str) -> str:
             f"registrable label {registrable_label!r} -> {label!r} does not satisfy the §5.3 "
             f"assigner grammar [A-Z0-9]{{2,8}} (2-8 uppercase alphanumerics). Use a domain whose "
             f"leftmost registrable label is 2-8 alphanumeric characters."
+        )
+    # Honesty round-trip (roborev F2): the v1.1 default mapper is <label>.com with NO
+    # PSL, so it only correctly handles .com registrable domains. If the derived LABEL
+    # does not map back to the host's registrable domain, the challenge location would
+    # be wrong (e.g. service.example.co.uk -> CO -> co.com). Refuse rather than emit it.
+    if assigner_to_registrable_domain(label) != registrable_domain:
+        raise ValueError(
+            f"mint_incident_id: domain {domain!r} does not round-trip under the v1.1 default "
+            f"assigner mapping — its registrable domain {registrable_domain!r} is not "
+            f"'<label>.com' (derived LABEL {label!r} maps back to "
+            f"{assigner_to_registrable_domain(label)!r}). The default mapper has no public-suffix "
+            f"list, so a multi-label public suffix (e.g. 'co.uk') or non-'.com' eTLD (e.g. '.ai') "
+            f"cannot be parsed without silently emitting a wrong challenge location. Pass a "
+            f"'<label>.com' domain, or supply a custom domain mapping for v1.1."
         )
     return label
 
@@ -1480,6 +1510,44 @@ class Package:
             self.add_profile(_ART73_PROFILE_ID, provisions=["art-73"])
 
     @staticmethod
+    def _merged_eu_facts(
+        harm_core: dict[str, Any],
+        eu_ai_act_facts: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Return the SINGLE merged Art.73 EU fact block (roborev F1).
+
+        Both builders derive Art.3(49) ``serious_incident_triggers`` from
+        ``harm_core.harm_class`` (a ``critical_infrastructure`` card DERIVES
+        ``3.49.b`` even when the caller supplies no triggers) and merge them with
+        any caller-supplied compound triggers, deterministically sorted (§5.10).
+        This is the ONE fact block the builder must use consistently for:
+
+        - the persisted ``card_source.eu_ai_act_facts`` (confidential path) /
+          ``taxonomy_crosswalk.eu_ai_act`` (public path) the validator reads, AND
+        - the Art.73 ``regulatory_timeline`` deadline computation.
+
+        Computing the deadline from the PRE-derivation caller facts (without the
+        derived ``3.49.b``) while persisting the DERIVED triggers would make the
+        builder's deadline disagree with the validator's clock (derived from the
+        persisted triggers) — exactly the ACEF-084 mismatch roborev F1 found. The
+        ``edition`` pin is included so this block is reusable verbatim as the
+        confidential ``card_source.eu_ai_act_facts``.
+        """
+        from acef.validation.incident_rules import _class_to_triggers
+
+        harm_class = harm_core.get("harm_class")
+        derived_triggers: set[str] = set()
+        if isinstance(harm_class, str):
+            derived_triggers = set(_class_to_triggers().get(harm_class, frozenset()))
+        supplied = {t for t in eu_ai_act_facts.get("serious_incident_triggers", []) if isinstance(t, str)}
+        return {
+            "edition": _EU_AI_ACT_EDITION,
+            "serious_incident_triggers": sorted(derived_triggers | supplied),
+            "widespread": bool(eu_ai_act_facts.get("widespread", False)),
+            "death_involved": bool(eu_ai_act_facts.get("death_involved", False)),
+        }
+
+    @staticmethod
     def _derive_taxonomy_crosswalk(
         harm_core: dict[str, Any],
         eu_ai_act_facts: dict[str, Any],
@@ -1495,7 +1563,9 @@ class Package:
           ``serious_incident_triggers`` (the trigger derived from ``harm_class`` is
           always included; any caller-supplied compound triggers are merged in,
           deterministically sorted §5.10) plus the ``widespread`` / ``death_involved``
-          booleans from ``eu_ai_act_facts``;
+          booleans. This is the SAME merged block (:meth:`_merged_eu_facts`) the
+          Art.73 deadline is computed from, so the public crosswalk the validator
+          reads and the builder's deadline agree (roborev F1, no ACEF-084).
         - ``nist_ai_600_1`` — the closed NIST category projection for the row (the one
           external enum already transcribed/closed), present only when non-empty.
 
@@ -1503,7 +1573,7 @@ class Package:
         construction (it is derived from the same rows). An unmappable harm_class
         (empty members) leaves the corresponding member legitimately absent.
         """
-        from acef.validation.incident_rules import _class_to_triggers, _derivation_rows_by_class
+        from acef.validation.incident_rules import _derivation_rows_by_class
 
         harm_class = harm_core.get("harm_class")
         crosswalk: dict[str, Any] = {}
@@ -1514,16 +1584,9 @@ class Package:
         row = rows.get(harm_class, {})
 
         # --- eu_ai_act member (always emitted; it anchors the Art.73 facts) ---
-        derived_triggers = set(_class_to_triggers().get(harm_class, frozenset()))
-        supplied = {t for t in eu_ai_act_facts.get("serious_incident_triggers", []) if isinstance(t, str)}
-        all_triggers = sorted(derived_triggers | supplied)
-        eu_member: dict[str, Any] = {
-            "edition": _EU_AI_ACT_EDITION,
-            "serious_incident_triggers": all_triggers,
-            "widespread": bool(eu_ai_act_facts.get("widespread", False)),
-            "death_involved": bool(eu_ai_act_facts.get("death_involved", False)),
-        }
-        crosswalk["eu_ai_act"] = eu_member
+        # REUSE the merged (derived ∪ supplied) fact block so the public crosswalk
+        # the validator reads carries the same triggers the deadline is clocked from.
+        crosswalk["eu_ai_act"] = Package._merged_eu_facts(harm_core, eu_ai_act_facts)
 
         # --- nist_ai_600_1 member (only when the row has a non-empty projection) ---
         nist_row = row.get("nist_ai_600_1", {}) if isinstance(row, dict) else {}
@@ -1610,14 +1673,12 @@ class Package:
         self._ensure_v1_1()
         self._declare_art73_profile()
 
-        facts = {
-            "edition": _EU_AI_ACT_EDITION,
-            "serious_incident_triggers": sorted(
-                {t for t in eu_ai_act_facts.get("serious_incident_triggers", []) if isinstance(t, str)}
-            ),
-            "widespread": bool(eu_ai_act_facts.get("widespread", False)),
-            "death_involved": bool(eu_ai_act_facts.get("death_involved", False)),
-        }
+        # ONE merged Art.73 fact block (harm_core-derived ∪ caller-supplied triggers).
+        # The SAME block backs card_source.eu_ai_act_facts AND the deadline below, so
+        # the persisted facts the validator reads and the builder's clock agree —
+        # roborev F1 (a critical_infrastructure report deriving 3.49.b without an
+        # explicit supplied trigger now yields a 2-day deadline, not 15-day → no ACEF-084).
+        facts = self._merged_eu_facts(harm_core, eu_ai_act_facts)
 
         timeline_entry = self._art73_timeline_entry(awareness_date, facts)
 
@@ -1721,15 +1782,15 @@ class Package:
         self._ensure_v1_1()
         self._declare_art73_profile()
 
-        facts = {
-            "serious_incident_triggers": sorted(
-                {t for t in eu_ai_act_facts.get("serious_incident_triggers", []) if isinstance(t, str)}
-            ),
-            "widespread": bool(eu_ai_act_facts.get("widespread", False)),
-            "death_involved": bool(eu_ai_act_facts.get("death_involved", False)),
-        }
+        # ONE merged Art.73 fact block (harm_core-derived ∪ caller-supplied triggers).
+        # It backs taxonomy_crosswalk.eu_ai_act (via _derive_taxonomy_crosswalk, which
+        # re-derives the same merged block) AND the deadline below, so the public
+        # crosswalk the validator reads and the builder's clock agree — roborev F1
+        # (a critical_infrastructure card deriving 3.49.b without an explicit supplied
+        # trigger now yields a 2-day deadline, not 15-day → no ACEF-084).
+        facts = self._merged_eu_facts(harm_core, eu_ai_act_facts)
 
-        crosswalk = self._derive_taxonomy_crosswalk(harm_core, facts)
+        crosswalk = self._derive_taxonomy_crosswalk(harm_core, eu_ai_act_facts)
         timeline_entry = self._art73_timeline_entry(awareness_date, facts)
         band_value = band(severity_vector)
 

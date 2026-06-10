@@ -144,6 +144,39 @@ class TestMintIncidentId:
         minted = mint_incident_id("openai.com", key, year=2026)
         assert minted.challenge_token == challenge_token_for(minted.assigner, _derive_jwk(key))
 
+    # roborev F2 — the .com-default LABEL derivation must REJECT domains that do
+    # not round-trip under assigner_to_registrable_domain (<label>.com). Silently
+    # taking labels[-2] misparses multi-label public suffixes (service.example.co.uk
+    # -> CO -> co.com challenge), so those MUST raise rather than emit a wrong
+    # challenge location. v1.1's default mapper has no PSL; pass a <label>.com domain.
+
+    def test_subdomain_round_trips_to_label(self) -> None:
+        # api.openai.com -> OPENAI -> openai.com round-trips, so it is accepted.
+        key = _gen_key()
+        minted = mint_incident_id("api.openai.com", key, year=2026)
+        assert minted.assigner == "OPENAI"
+        assert assigner_to_registrable_domain(minted.assigner) == "openai.com"
+
+    def test_multi_label_public_suffix_raises_valueerror(self) -> None:
+        # service.example.co.uk would misparse to assigner CO (co.com challenge) —
+        # it does NOT round-trip under <label>.com, so it MUST raise.
+        key = _gen_key()
+        with pytest.raises(ValueError, match=r"round-?trip|\.com|custom mapping"):
+            mint_incident_id("service.example.co.uk", key, year=2026)
+
+    def test_non_com_etld_raises_valueerror(self) -> None:
+        # example.ai derives EXAMPLE but maps to example.com (NOT example.ai), so it
+        # does NOT round-trip under the default mapper and MUST raise.
+        key = _gen_key()
+        with pytest.raises(ValueError, match=r"round-?trip|\.com|custom mapping"):
+            mint_incident_id("example.ai", key, year=2026)
+
+    def test_two_label_etld_raises_valueerror(self) -> None:
+        # example.co.uk -> EXAMPLE -> example.com (NOT example.co.uk) — no round-trip.
+        key = _gen_key()
+        with pytest.raises(ValueError, match=r"round-?trip|\.com|custom mapping"):
+            mint_incident_id("example.co.uk", key, year=2026)
+
 
 # ---------------------------------------------------------------------------
 # VAL-DX-001 — fluent incident_card / report_incident builder shape
@@ -339,6 +372,115 @@ class TestReportIncidentBuilder:
 
 
 # ---------------------------------------------------------------------------
+# VAL-DX-001 (roborev F1) — the Art.73 clock the builder WRITES must equal the
+# clock the validator DERIVES from the same harm_core-derived crosswalk facts.
+#
+# The builder derives harm_core -> serious_incident_triggers (a
+# critical_infrastructure card DERIVES "3.49.b" even when the caller omits it),
+# and the validator reads those DERIVED triggers from card_source.eu_ai_act_facts
+# (report) / taxonomy_crosswalk.eu_ai_act (card) when computing the shortest
+# clock. So the deadline the builder writes MUST be computed from the SAME merged
+# (derived ∪ supplied) fact block, or the validator fires ACEF-084. These tests
+# assert the deadline alone; the end-to-end zero-ACEF-084 proof is in the
+# integration suite.
+# ---------------------------------------------------------------------------
+
+_CRITICAL_INFRA_HARM_CORE = {
+    "realization": "harm_event",
+    "causality": {"entity": "ai", "intent": "unintentional", "timing": "post_deployment"},
+    "harm_class": "critical_infrastructure",
+}
+
+
+class TestArt73DerivedTriggerClockConsistency:
+    def test_report_incident_derives_3_49_b_for_2_day_clock_when_caller_omits_trigger(self) -> None:
+        # critical_infrastructure DERIVES 3.49.b -> 2-day clock, even though the
+        # caller supplies NO triggers. awareness 08-01 -> deadline 08-03.
+        pkg = _new_pkg()
+        env = pkg.report_incident(
+            public_incident_id="AIIC-OPENAI-2026-0123456789ABCDEFGHJKMNPQRS",
+            harm_core=dict(_CRITICAL_INFRA_HARM_CORE),
+            incident_type="operational_failure",
+            description="x",
+            awareness_date="2026-08-01T00:00:00Z",
+            eu_ai_act_facts={
+                "serious_incident_triggers": [],  # OMITTED — must be derived
+                "widespread": False,
+                "death_involved": False,
+            },
+        )
+        card_source = env.payload["card_source"]
+        facts = card_source["eu_ai_act_facts"]
+        # The derived trigger is merged into the persisted card_source facts...
+        assert "3.49.b" in facts["serious_incident_triggers"]
+        timeline = card_source["coordinated_disclosure"]["regulatory_timeline"]
+        art73 = next(e for e in timeline if e["framework"] == "eu-ai-act-art73")
+        # ...and the deadline reflects the 2-day clock derived from that trigger.
+        assert art73["deadline"] == "2026-08-03T00:00:00Z"
+
+    def test_incident_card_derives_3_49_b_for_2_day_clock_when_caller_omits_trigger(self) -> None:
+        # Same on the public path: the crosswalk carries the derived 3.49.b and the
+        # timeline deadline matches the 2-day clock the validator derives from it.
+        pkg = _new_pkg()
+        env = pkg.incident_card(
+            public_incident_id="AIIC-OPENAI-2026-0123456789ABCDEFGHJKMNPQRS",
+            harm_core=dict(_CRITICAL_INFRA_HARM_CORE),
+            severity_vector="ACEF-SEV:1.0/HT:P/HG:H/RV:A/SC:U/BR:I",
+            awareness_date="2026-08-01T00:00:00Z",
+            eu_ai_act_facts={
+                "serious_incident_triggers": [],  # OMITTED — must be derived
+                "widespread": False,
+                "death_involved": False,
+            },
+        )
+        eu = env.payload["taxonomy_crosswalk"]["eu_ai_act"]
+        assert "3.49.b" in eu["serious_incident_triggers"]
+        timeline = env.payload["coordinated_disclosure"]["regulatory_timeline"]
+        art73 = next(e for e in timeline if e["framework"] == "eu-ai-act-art73")
+        assert art73["deadline"] == "2026-08-03T00:00:00Z"
+
+    def test_report_incident_widespread_drives_2_day_clock(self) -> None:
+        # widespread=True (no 3.49.b) -> 2-day clock. awareness 08-01 -> deadline 08-03.
+        pkg = _new_pkg()
+        env = pkg.report_incident(
+            public_incident_id="AIIC-OPENAI-2026-0123456789ABCDEFGHJKMNPQRS",
+            harm_core=dict(_HARM_CORE),  # physical_health derives 3.49.a (15-day base)
+            incident_type="operational_failure",
+            description="x",
+            awareness_date="2026-08-01T00:00:00Z",
+            eu_ai_act_facts={
+                "serious_incident_triggers": [],
+                "widespread": True,
+                "death_involved": False,
+            },
+        )
+        card_source = env.payload["card_source"]
+        assert card_source["eu_ai_act_facts"]["widespread"] is True
+        timeline = card_source["coordinated_disclosure"]["regulatory_timeline"]
+        art73 = next(e for e in timeline if e["framework"] == "eu-ai-act-art73")
+        assert art73["deadline"] == "2026-08-03T00:00:00Z"
+
+    def test_incident_card_widespread_drives_2_day_clock(self) -> None:
+        pkg = _new_pkg()
+        env = pkg.incident_card(
+            public_incident_id="AIIC-OPENAI-2026-0123456789ABCDEFGHJKMNPQRS",
+            harm_core=dict(_HARM_CORE),
+            severity_vector="ACEF-SEV:1.0/HT:P/HG:H/RV:A/SC:U/BR:I",
+            awareness_date="2026-08-01T00:00:00Z",
+            eu_ai_act_facts={
+                "serious_incident_triggers": [],
+                "widespread": True,
+                "death_involved": False,
+            },
+        )
+        eu = env.payload["taxonomy_crosswalk"]["eu_ai_act"]
+        assert eu["widespread"] is True
+        timeline = env.payload["coordinated_disclosure"]["regulatory_timeline"]
+        art73 = next(e for e in timeline if e["framework"] == "eu-ai-act-art73")
+        assert art73["deadline"] == "2026-08-03T00:00:00Z"
+
+
+# ---------------------------------------------------------------------------
 # VAL-DX-003 — ACEF-08x fix hints surfaced through SDK error rendering
 # ---------------------------------------------------------------------------
 
@@ -385,6 +527,44 @@ class TestIncidentFixHintRendering:
         assert detail is not None
         assert detail.cause in rendered
         assert "Fix:" in rendered or "fix" in rendered.lower()
+
+    def test_markdown_084_renders_problem_cause_and_fix(self) -> None:
+        # roborev F3: the structured PROBLEM text (not only cause/fix) is rendered.
+        assessment = _assessment_with(["ACEF-084"])
+        rendered = render_markdown(assessment)
+        detail = incident_error_detail("ACEF-084")
+        assert detail is not None
+        assert detail.problem in rendered
+        assert detail.cause in rendered
+        assert detail.fix in rendered
+
+    def test_markdown_086_renders_problem_cause_and_fix(self) -> None:
+        assessment = _assessment_with(["ACEF-086"])
+        rendered = render_markdown(assessment)
+        detail = incident_error_detail("ACEF-086")
+        assert detail is not None
+        assert detail.problem in rendered
+        assert detail.cause in rendered
+        assert detail.fix in rendered
+
+    def test_console_084_renders_problem_cause_and_fix(self) -> None:
+        # roborev F3: the console renderer surfaces Problem + Cause + Fix, not Fix alone.
+        assessment = _assessment_with(["ACEF-084"])
+        rendered = render_console(assessment)
+        detail = incident_error_detail("ACEF-084")
+        assert detail is not None
+        assert detail.problem in rendered
+        assert detail.cause in rendered
+        assert detail.fix in rendered
+
+    def test_console_086_renders_problem_cause_and_fix(self) -> None:
+        assessment = _assessment_with(["ACEF-086"])
+        rendered = render_console(assessment)
+        detail = incident_error_detail("ACEF-086")
+        assert detail is not None
+        assert detail.problem in rendered
+        assert detail.cause in rendered
+        assert detail.fix in rendered
 
     def test_non_incident_code_renders_without_fix_block(self) -> None:
         # A v0.4 code (no IncidentErrorDetail) renders normally with NO fix-hint

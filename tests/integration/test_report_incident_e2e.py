@@ -194,6 +194,102 @@ class TestReportIncidentEndToEnd:
         assert errors == [], f"unexpected ERROR/FATAL diagnostics: {errors}"
         assert "ACEF-086" not in _codes(assessment)
 
+    def test_critical_infra_report_with_omitted_trigger_validates_clean(self, tmp_path: Path) -> None:
+        # roborev F1: a critical_infrastructure report with NO supplied
+        # serious_incident_triggers DERIVES 3.49.b into card_source.eu_ai_act_facts,
+        # which drives the 2-day clock. The builder MUST compute the deadline from
+        # that SAME merged fact block; otherwise the validator (reading the derived
+        # facts) fires ACEF-084 on a clock mismatch.
+        key_path, key = _write_ec_key(tmp_path)
+        pkg = _new_pkg()
+        minted = mint_incident_id("openai.com", key, year=2026)
+
+        pkg.add_subject("ai_system", name="Sys", risk_classification="high-risk", modalities=["text"])
+        pkg.report_incident(
+            public_incident_id=minted.public_incident_id,
+            harm_core={
+                "realization": "harm_event",
+                "causality": {"entity": "ai", "intent": "unintentional", "timing": "post_deployment"},
+                "harm_class": "critical_infrastructure",
+            },
+            incident_type="operational_failure",
+            description="Critical-infrastructure disruption; caller omitted the 3.49.b trigger.",
+            awareness_date="2026-08-01T00:00:00Z",
+            eu_ai_act_facts={
+                "serious_incident_triggers": [],  # OMITTED — derived to 3.49.b (2-day clock)
+                "widespread": False,
+                "death_involved": False,
+            },
+        )
+        pkg.sign(key_path)
+        bundle_dir = tmp_path / "critical-infra-report.acef"
+        pkg.export(str(bundle_dir))
+
+        assessment = validate_bundle(bundle_dir, profiles=["eu-ai-act-art73-2026"])
+        errors = _error_diags(assessment)
+        assert errors == [], f"unexpected ERROR/FATAL diagnostics: {errors}"
+        assert "ACEF-084" not in _codes(assessment)
+
+    def test_critical_infra_card_with_omitted_trigger_validates_clean(self, tmp_path: Path) -> None:
+        # Same on the public path: the crosswalk DERIVES 3.49.b and the timeline
+        # deadline computed by the builder must equal the validator's 2-day clock.
+        key_path, key = _write_ec_key(tmp_path)
+        pkg = _new_pkg()
+        minted = mint_incident_id("openai.com", key, year=2026)
+
+        pkg.add_subject("ai_system", name="Sys", risk_classification="high-risk", modalities=["text"])
+        pkg.incident_card(
+            public_incident_id=minted.public_incident_id,
+            harm_core={
+                "realization": "harm_event",
+                "causality": {"entity": "ai", "intent": "unintentional", "timing": "post_deployment"},
+                "harm_class": "critical_infrastructure",
+            },
+            severity_vector="ACEF-SEV:1.0/HT:P/HG:H/RV:A/SC:U/BR:I",
+            awareness_date="2026-08-01T00:00:00Z",
+            eu_ai_act_facts={
+                "serious_incident_triggers": [],  # OMITTED — derived to 3.49.b (2-day clock)
+                "widespread": False,
+                "death_involved": False,
+            },
+        )
+        pkg.sign(key_path)
+        bundle_dir = tmp_path / "critical-infra-card.acef"
+        pkg.export(str(bundle_dir))
+
+        assessment = validate_bundle(bundle_dir, profiles=["eu-ai-act-art73-2026"])
+        errors = _error_diags(assessment)
+        assert errors == [], f"unexpected ERROR/FATAL diagnostics: {errors}"
+        assert "ACEF-084" not in _codes(assessment)
+
+    def test_widespread_card_validates_clean(self, tmp_path: Path) -> None:
+        # widespread=True (no 3.49.b) -> 2-day clock; the builder writes that clock
+        # and the validator agrees (no ACEF-084).
+        key_path, key = _write_ec_key(tmp_path)
+        pkg = _new_pkg()
+        minted = mint_incident_id("openai.com", key, year=2026)
+
+        pkg.add_subject("ai_system", name="Sys", risk_classification="high-risk", modalities=["text"])
+        pkg.incident_card(
+            public_incident_id=minted.public_incident_id,
+            harm_core=dict(_HARM_CORE),
+            severity_vector="ACEF-SEV:1.0/HT:P/HG:H/RV:A/SC:U/BR:I",
+            awareness_date="2026-08-01T00:00:00Z",
+            eu_ai_act_facts={
+                "serious_incident_triggers": ["3.49.a"],
+                "widespread": True,
+                "death_involved": False,
+            },
+        )
+        pkg.sign(key_path)
+        bundle_dir = tmp_path / "widespread-card.acef"
+        pkg.export(str(bundle_dir))
+
+        assessment = validate_bundle(bundle_dir, profiles=["eu-ai-act-art73-2026"])
+        errors = _error_diags(assessment)
+        assert errors == [], f"unexpected ERROR/FATAL diagnostics: {errors}"
+        assert "ACEF-084" not in _codes(assessment)
+
     def test_two_runs_are_byte_identical(self, tmp_path: Path) -> None:
         # The builder is deterministic given an injected clock/urn_generator and an
         # explicit public_incident_id (the only entropy is the minted suffix, which

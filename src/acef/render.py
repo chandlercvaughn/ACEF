@@ -109,12 +109,14 @@ def render_markdown(assessment: AssessmentBundle) -> str:
             lines.append(f"- **{code}** [{severity}]: {msg}")
             if path:
                 lines.append(f"  - Path: `{path}`")
-            # RFC-0002 §7 incident band (ACEF-081..088): surface the structured
-            # problem + cause + FIX-HINT so a filer sees exactly what to correct
-            # (VAL-DX-003). incident_error_detail returns None for a v0.4 code, so
-            # no fix block is emitted for non-incident codes.
+            # RFC-0002 §7 incident band (ACEF-081..088): surface the FULL structured
+            # diagnostic — Problem + Cause + FIX-HINT — so a filer sees exactly what
+            # failed, why, and what to correct (VAL-DX-003). incident_error_detail
+            # returns None for a v0.4 code, so no fix block is emitted for non-incident
+            # codes.
             detail = incident_error_detail(code)
             if detail is not None:
+                lines.append(f"  - Problem: {detail.problem}")
                 lines.append(f"  - Cause: {detail.cause}")
                 lines.append(f"  - Fix: {detail.fix}")
         lines.append("")
@@ -168,10 +170,14 @@ def render_console(assessment: AssessmentBundle) -> str:
         for error in assessment.structural_errors[:10]:
             code = error.get("code", "")
             lines.append(f"  {code}: {error.get('message', '')}")
-            # Surface the RFC-0002 §7 incident fix-hint (ACEF-081..088) so a filer
-            # sees the remediation in the concise console output too (VAL-DX-003).
+            # Surface the RFC-0002 §7 incident diagnostic (ACEF-081..088) — Problem +
+            # Cause + Fix — so a filer sees what failed, why, and the remediation in
+            # the concise console output too (VAL-DX-003), consistent with the
+            # Markdown renderer.
             detail = incident_error_detail(code)
             if detail is not None:
+                lines.append(f"    Problem: {detail.problem}")
+                lines.append(f"    Cause: {detail.cause}")
                 lines.append(f"    Fix: {detail.fix}")
         if len(assessment.structural_errors) > 10:
             lines.append(f"  ... and {len(assessment.structural_errors) - 10} more")
