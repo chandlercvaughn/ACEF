@@ -22,13 +22,21 @@ making the "never raises" contract explicit.
 
 from __future__ import annotations
 
+import base64
+import datetime
 import json
 from pathlib import Path
 from typing import Any
 
 import pytest
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.x509.oid import NameOID
 
+from acef.integrity import canonicalize
 from acef.models.assessment import AssessmentBundle
+from acef.signing import create_detached_jws
 from acef.validation.engine import validate_bundle
 
 
@@ -542,11 +550,65 @@ def test_malformed_metadata_timestamp_via_profiles_never_crashes(tmp_path: Path,
     assert isinstance(assessment.evaluation_instant, str)
 
 
+def _make_x5c_detached_jws(
+    payload: bytes,
+    *,
+    kid: str = "signed-ts-key",
+) -> str:
+    """Build a SYNTACTICALLY VALID ES256 detached JWS whose header carries an
+    ``x5c`` chain (a single self-signed P-256 cert), signed over ``payload``.
+
+    The ``x5c`` header — as opposed to an embedded ``jwk`` — is what forces
+    ``verify_detached_jws`` to call ``verify_x5c_chain(..., manifest_timestamp=...)``,
+    which is the ONLY consumer of ``manifest_timestamp`` that runs
+    ``manifest_timestamp.endswith("Z")`` (signing.py ``_make ... ts_norm.endswith``).
+    A ``jwk`` header would skip that path entirely, so the x5c form is required
+    to actually exercise the integrity checker's non-string-timestamp guard.
+
+    The certificate's validity window is wide (10 years) so that — if a real
+    string timestamp WERE passed — the cert-validity check would pass; this keeps
+    the test focused on the timestamp-type guard, not on cert expiry.
+    """
+    private_key = ec.generate_private_key(ec.SECP256R1())
+    now = datetime.datetime(2026, 1, 1, tzinfo=datetime.UTC)
+    subject = issuer = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "acef-test-signer")])
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(subject)
+        .issuer_name(issuer)
+        .public_key(private_key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - datetime.timedelta(days=3650))
+        .not_valid_after(now + datetime.timedelta(days=3650))
+        .sign(private_key, hashes.SHA256())
+    )
+    # x5c entries are base64-encoded DER (standard base64, NOT base64url).
+    cert_der = cert.public_bytes(serialization.Encoding.DER)
+    x5c_entry = base64.b64encode(cert_der).decode("ascii")
+    return create_detached_jws(payload, private_key, kid=kid, x5c=[x5c_entry])
+
+
 def test_malformed_metadata_timestamp_on_signed_bundle_never_crashes(tmp_path: Path) -> None:
     """The integrity checker reads ``metadata.timestamp`` as ``manifest_ts`` to
     anchor x5c cert-validity checks. A non-string timestamp on a bundle that
     has a signatures/ directory must not reach the signing layer's
-    ``.endswith('Z')`` string op and raise AttributeError."""
+    ``.endswith('Z')`` string op and raise AttributeError.
+
+    To ACTUALLY exercise that path (roborev correction), this test ships a
+    SYNTACTICALLY VALID detached JWS whose ``x5c`` header gets past the format +
+    header gates in ``_check_signatures`` so ``verify_detached_jws(...,
+    manifest_timestamp=<malformed>)`` — and, through it, ``verify_x5c_chain``'s
+    ``manifest_timestamp.endswith("Z")`` cert-validity branch — is genuinely
+    invoked. The integrity checker's ``isinstance(_ts, str)`` guard coerces the
+    non-string ``[123]`` timestamp to ``None``, so that branch is skipped and the
+    signature path completes normally instead of crashing on ``AttributeError``.
+
+    Guard-is-load-bearing proof: if the ``isinstance(_ts, str)`` guard in
+    ``integrity_checker._check_signatures`` were removed, the raw ``[123]`` list
+    would flow into ``verify_x5c_chain`` and ``[123].endswith("Z")`` would raise
+    AttributeError, which the validator backstop would surface as a FATAL
+    ACEF-001 — failing the "signature path ran cleanly" assertions below.
+    """
     bundle_dir = tmp_path / "signedts.acef"
     manifest = {
         "versioning": {"core_version": "1.0.0"},
@@ -567,23 +629,49 @@ def test_malformed_metadata_timestamp_on_signed_bundle_never_crashes(tmp_path: P
     # test would not exercise its target. An empty flat mapping ``{}`` passes the
     # type gate, so check_integrity proceeds into ``_check_signatures`` where the
     # non-string manifest timestamp is consumed (and handled gracefully).
+    #
+    # ``_check_signatures`` re-canonicalizes content-hashes.json via RFC 8785 and
+    # verifies the JWS over those exact bytes, so we sign ``canonicalize({})`` —
+    # the same bytes the verifier will reconstruct — producing a VALID signature.
+    content_hashes_obj: dict[str, str] = {}
     (bundle_dir / "hashes").mkdir(parents=True, exist_ok=True)
-    (bundle_dir / "hashes" / "content-hashes.json").write_text(json.dumps({}), encoding="utf-8")
+    (bundle_dir / "hashes" / "content-hashes.json").write_text(json.dumps(content_hashes_obj), encoding="utf-8")
+    sig_payload = canonicalize(content_hashes_obj)
+    jws = _make_x5c_detached_jws(sig_payload)
+    # Sanity: this is a real 3-part detached JWS that will pass the format +
+    # x5c header gates in _check_signatures (NOT the old "not-a-real-jws" stub
+    # that short-circuited on the 3-part split before reaching the timestamp).
+    assert jws.count(".") == 2 and jws.split(".")[1] == ""
     sig_dir = bundle_dir / "signatures"
     sig_dir.mkdir(parents=True, exist_ok=True)
-    (sig_dir / "broken.jws").write_text("not-a-real-jws", encoding="utf-8")
+    (sig_dir / "valid.jws").write_text(jws, encoding="utf-8")
 
     assessment = _run_never_raises(bundle_dir)
     assert isinstance(assessment, AssessmentBundle)
     assert _has_diagnostics(assessment)
-    # Prove the signature-verification path was ACTUALLY reached (not short-
-    # circuited by the integrity type gate): the broken.jws is not a valid
-    # 3-part JWS, so ``_check_signatures`` emits ACEF-012. Its presence is
-    # evidence the guarded manifest-timestamp path ran without raising.
     codes = [e.get("code") for e in assessment.structural_errors]
-    assert "ACEF-012" in codes, (
-        f"signature-verification path was not reached: expected ACEF-012 from the broken .jws, got codes={codes}"
+    # The signature path ran to completion WITHOUT crashing on the malformed
+    # timestamp. Concretely:
+    #   * No FATAL ACEF-001 backstop — proves no exception (e.g. the
+    #     AttributeError that would fire if the guard were removed) escaped.
+    assert "ACEF-001" not in codes, (
+        "validate_bundle hit the fatal backstop on the signed bundle — the "
+        f"manifest-timestamp guard did not hold. codes={codes}"
     )
+    #   * The signature itself is cryptographically VALID over the canonicalized
+    #     content-hashes bytes, so _check_signatures emits NO signature error for
+    #     it. The ABSENCE of a signature-failure code on a JWS that genuinely
+    #     reached verify_detached_jws (it has a valid 3-part form AND an x5c
+    #     header, so it passed every pre-verify gate) is the evidence that the
+    #     timestamp-consuming path executed cleanly.
+    assert "ACEF-013" not in codes, f"unexpected algorithm rejection; codes={codes}"
+    sig_failures = [e for e in assessment.structural_errors if e.get("path") == "/signatures/valid.jws"]
+    assert not sig_failures, (
+        "the valid x5c JWS produced a signature diagnostic — verification did not "
+        f"complete cleanly through the manifest-timestamp path: {sig_failures!r}"
+    )
+    # The remaining diagnostics come from the malformed manifest itself (schema
+    # phase flags the non-string metadata.timestamp), satisfying _has_diagnostics.
 
 
 # --------------------------------------------------------------------------- #
