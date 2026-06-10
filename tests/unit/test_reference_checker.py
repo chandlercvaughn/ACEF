@@ -216,6 +216,65 @@ class TestRecordCountMismatches:
         acef_025 = [d for d in diags if d.code == "ACEF-025"]
         assert len(acef_025) == 0
 
+    def test_non_string_record_type_does_not_crash_count(self):
+        """A record whose ``record_type`` is a non-string (list/dict/int/bool/
+        null) must NOT crash ``_check_record_counts`` — ``record_type`` is used
+        as a dict KEY there, so a list/dict would raise an unhashable-type
+        ``TypeError``. The malformed records are skipped (their wrong type is
+        already flagged with ACEF-004 by the Phase-1 envelope schema); the
+        string-typed record is still counted correctly.
+
+        Regression for the roborev High finding on ``53d33079`` (VAL-SCH-001).
+        """
+        manifest = _make_manifest(
+            record_files=[
+                {
+                    "path": "records/risk_register.jsonl",
+                    "record_type": "risk_register",
+                    "count": 1,
+                }
+            ],
+        )
+        records = [
+            {"record_type": "risk_register", "record_id": "rec-0", "entity_refs": {}},
+            {"record_type": ["x"], "record_id": "rec-1", "entity_refs": {}},
+            {"record_type": {"k": "v"}, "record_id": "rec-2", "entity_refs": {}},
+            {"record_type": 123, "record_id": "rec-3", "entity_refs": {}},
+            {"record_type": True, "record_id": "rec-4", "entity_refs": {}},
+            {"record_type": None, "record_id": "rec-5", "entity_refs": {}},
+        ]
+        # MUST NOT raise. The single valid risk_register matches its count of 1.
+        diags = check_references(manifest, records)
+        acef_025 = [d for d in diags if d.code == "ACEF-025"]
+        assert acef_025 == [], (
+            "The one string-typed record matches the manifest count of 1; "
+            "non-string record_types must be skipped, not counted or crashed. "
+            f"Got: {[(d.code, d.message) for d in acef_025]}"
+        )
+
+    def test_non_string_manifest_record_type_does_not_crash_count(self):
+        """A ``record_files`` entry whose declared ``record_type`` is a
+        non-string must NOT crash the expected-count roll-up (it is also used as
+        a dict key), and a non-dict ``record_files`` entry must be skipped
+        (VAL-SCH-001)."""
+        manifest = _make_manifest(
+            record_files=[
+                {"path": "records/a.jsonl", "record_type": ["x"], "count": 3},
+                {"path": "records/b.jsonl", "record_type": 99, "count": 3},
+                "not-a-dict",  # malformed entry: must be skipped, not crash
+                {"path": "records/c.jsonl", "record_type": "risk_register", "count": 1},
+            ],
+        )
+        records = [{"record_type": "risk_register", "record_id": "rec-0", "entity_refs": {}}]
+        # MUST NOT raise. Only the string-typed manifest entry is counted; it
+        # matches the single string-typed record.
+        diags = check_references(manifest, records)
+        acef_025 = [d for d in diags if d.code == "ACEF-025"]
+        assert acef_025 == [], (
+            "Non-string / non-dict record_files entries must be skipped without "
+            f"crashing. Got: {[(d.code, d.message) for d in acef_025]}"
+        )
+
 
 class TestComponentSubjectRefs:
     """Test dangling subject_refs on components and datasets."""

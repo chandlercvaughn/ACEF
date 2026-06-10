@@ -286,17 +286,36 @@ def _check_record_counts(
     diagnostics: list[ValidationDiagnostic],
 ) -> None:
     """Check that record_files counts match actual record counts."""
-    # Count records by type
+    # Count records by type. ``record_type`` is the dict KEY here, so a
+    # non-string value (list/dict/int/bool/null) — which is well-formed JSON
+    # but invalid per the record-envelope schema — would raise
+    # ``TypeError: unhashable type`` (list/dict) and crash the validator. A
+    # validator MUST NEVER raise on malformed input: it returns diagnostics.
+    # The wrong-typed ``record_type`` is already flagged with ACEF-004 by the
+    # Phase-1 envelope schema, so we simply SKIP non-string record_types in the
+    # count (they cannot meaningfully match a manifest-declared string type).
     actual_counts: dict[str, int] = {}
     for rec in records:
         rt = rec.get("record_type", "")
+        if not isinstance(rt, str):
+            continue
         actual_counts[rt] = actual_counts.get(rt, 0) + 1
 
-    # Sum expected counts from record_files
+    # Sum expected counts from record_files. The manifest is schema-checked in
+    # Phase 1 too, but a malformed manifest must likewise not crash this count
+    # roll-up: skip any record_files entry whose declared ``record_type`` is a
+    # non-string (relying on the Phase-1 manifest-schema diagnostic).
     expected_counts: dict[str, int] = {}
     for rf in manifest_data.get("record_files", []):
+        if not isinstance(rf, dict):
+            continue
         rt = rf.get("record_type", "")
-        expected_counts[rt] = expected_counts.get(rt, 0) + rf.get("count", 0)
+        if not isinstance(rt, str):
+            continue
+        count = rf.get("count", 0)
+        if not isinstance(count, int) or isinstance(count, bool):
+            count = 0
+        expected_counts[rt] = expected_counts.get(rt, 0) + count
 
     for rt, expected in expected_counts.items():
         actual = actual_counts.get(rt, 0)

@@ -24,10 +24,13 @@ Determinism: every fixture is a static literal; no wall-clock / random values.
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Any
 
 import pytest
 
+from acef.validation.engine import validate_bundle
 from acef.validation.schema_validator import validate_record_schemas
 
 # A 26-char Crockford-base32 suffix (>=128 bits, the pattern minimum).
@@ -275,4 +278,127 @@ def test_non_string_record_type_in_bundle_returns_diagnostics() -> None:
     assert envelope_paths, (
         "The non-string record_type at index 1 must produce an ACEF-004 envelope "
         f"diagnostic. Got: {[(d.code, d.path, d.message) for d in diagnostics]}"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Robustness: FULL validate_bundle pipeline never crashes on a malformed       #
+# non-string record_type (the unhashable-dict-key class of bug)                #
+# --------------------------------------------------------------------------- #
+
+
+def _write_records_jsonl_bundle(bundle_dir: Path, records: list[dict[str, Any]]) -> None:
+    """Write a minimal directory-layout bundle whose single records file
+    carries the supplied (possibly malformed) record dicts verbatim.
+
+    The bundle is intentionally unsigned/unhashed — integrity diagnostics are
+    orthogonal to the question under test (does the validator CRASH on a
+    non-string ``record_type``). What matters is that every record dict reaches
+    Phase 3 (:func:`reference_checker.check_references` ->
+    ``_check_record_counts``), which counts records by ``record_type`` using it
+    as a dict key. A non-string value (list/dict/int/bool/null) must be handled
+    without an unhashable-type ``TypeError`` or an ``AttributeError``.
+    """
+    bundle_dir.mkdir(parents=True, exist_ok=True)
+    (bundle_dir / "records").mkdir(parents=True, exist_ok=True)
+
+    lines = "".join(json.dumps(rec) + "\n" for rec in records)
+    (bundle_dir / "records" / "all.jsonl").write_text(lines, encoding="utf-8")
+
+    manifest = {
+        "metadata": {
+            "package_id": "urn:acef:pkg:11111111-1111-1111-1111-111111111111",
+            "created_at": "2026-01-01T00:00:00Z",
+            "timestamp": "2026-01-01T00:00:00Z",
+            "producer": {"name": "test-producer", "version": "1.0.0"},
+        },
+        "versioning": {"core_version": "1.1.0", "profiles_version": "1.0.0"},
+        "subjects": [],
+        "entities": {
+            "components": [],
+            "datasets": [],
+            "actors": [],
+            "relationships": [],
+        },
+        "profiles": [],
+        "record_files": [
+            {
+                "count": len(records),
+                "path": "records/all.jsonl",
+                "record_type": "incident_card",
+            }
+        ],
+        "audit_trail": [],
+    }
+    (bundle_dir / "acef-manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+
+def test_validate_bundle_malformed_record_type_does_not_crash(tmp_path: Path) -> None:
+    """A REAL ``validate_bundle`` over a bundle whose records JSONL carries
+    malformed (non-string) ``record_type`` values — list, dict, int, bool, null
+    — MUST return diagnostics WITHOUT raising (VAL-SCH-001).
+
+    Regression for the roborev High finding on ``53d33079``: Phase 1
+    (``validate_record_schemas``) was guarded, but Phase 3
+    (``reference_checker._check_record_counts``) still used ``record_type`` as a
+    DICT KEY, so a ``record_type`` of ``["x"]`` / ``{"k": "v"}`` raised
+    ``TypeError: unhashable type`` and crashed the whole validator instead of
+    returning controlled diagnostics. A validator must NEVER raise on malformed
+    input.
+    """
+    # One genuinely valid record (string record_type) plus one of every
+    # malformed shape. The valid record keeps the happy path exercised; the
+    # malformed ones must not crash the count/grouping logic.
+    records = [
+        _envelope("incident_card", {}),
+        {**_envelope("placeholder", {}), "record_type": ["x"]},
+        {**_envelope("placeholder", {}), "record_type": {"k": "v"}},
+        {**_envelope("placeholder", {}), "record_type": 123},
+        {**_envelope("placeholder", {}), "record_type": True},
+        {**_envelope("placeholder", {}), "record_type": None},
+    ]
+    # Distinct record_ids so duplicate-id (ACEF-026) noise doesn't mask intent.
+    for i, rec in enumerate(records):
+        rec["record_id"] = f"rec-{i:04d}"
+
+    bundle = tmp_path / "malformed-record-type-bundle"
+    _write_records_jsonl_bundle(bundle, records)
+
+    # MUST NOT raise. If reference_checker._check_record_counts (or any other
+    # downstream site) uses record_type as a dict key / set member / string
+    # method without an isinstance(str) guard, this call raises here.
+    assessment = validate_bundle(bundle)
+
+    diagnostics = assessment.structural_errors
+    codes = {d.get("code") for d in diagnostics}
+
+    # The record-envelope schema flags each non-string record_type with the
+    # wrong-type diagnostic (ACEF-004). Downstream phases must simply not crash.
+    assert "ACEF-004" in codes, (
+        "Each non-string record_type must be flagged by the envelope schema "
+        "(ACEF-004) and the full validate_bundle pipeline must not crash. "
+        f"Got codes: {sorted(c for c in codes if c)}"
+    )
+
+
+def test_validate_bundle_list_record_type_does_not_crash_count_phase(tmp_path: Path) -> None:
+    """Narrow regression isolating the exact unhashable crash: a single record
+    whose ``record_type`` is a LIST (``["x"]``) must not raise
+    ``TypeError: unhashable type: 'list'`` inside
+    ``reference_checker._check_record_counts`` when it counts records by
+    ``record_type`` (VAL-SCH-001)."""
+    record = {**_envelope("placeholder", {}), "record_type": ["x"]}
+    record["record_id"] = "rec-0000"
+
+    bundle = tmp_path / "list-record-type-bundle"
+    _write_records_jsonl_bundle(bundle, [record])
+
+    # Pre-fix this raised TypeError: unhashable type: 'list' in _check_record_counts.
+    assessment = validate_bundle(bundle)
+
+    assert assessment is not None
+    codes = {d.get("code") for d in assessment.structural_errors}
+    assert "ACEF-004" in codes, (
+        "A list-valued record_type must produce the ACEF-004 envelope diagnostic "
+        f"without crashing the validator. Got codes: {sorted(c for c in codes if c)}"
     )
