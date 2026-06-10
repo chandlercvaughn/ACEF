@@ -175,7 +175,14 @@ def _check_signatures(bundle_dir: Path, content_hashes_bytes: bytes) -> list[Val
         try:
             mdata = json.loads(manifest_path.read_text(encoding="utf-8"))
             _md = mdata.get("metadata") if isinstance(mdata, dict) else None
-            manifest_timestamp = _md.get("timestamp") if isinstance(_md, dict) else None
+            _ts = _md.get("timestamp") if isinstance(_md, dict) else None
+            # ``metadata.timestamp`` is untrusted external JSON and may be a
+            # non-string (list/dict/int/bool). It is forwarded as
+            # ``manifest_timestamp`` into the JWS cert-validity check, which
+            # calls ``.endswith("Z")`` on it — a non-string would raise
+            # AttributeError. Only accept a real string; ``None`` skips the
+            # cert-anchor check (the manifest schema flags the wrong type).
+            manifest_timestamp = _ts if isinstance(_ts, str) else None
         except json.JSONDecodeError:
             manifest_timestamp = None
 
@@ -343,7 +350,11 @@ def get_signature_info(bundle_dir: Path) -> tuple[int, list[str]]:
         try:
             mdata = json.loads(manifest_path.read_text(encoding="utf-8"))
             _md = mdata.get("metadata") if isinstance(mdata, dict) else None
-            manifest_timestamp = _md.get("timestamp") if isinstance(_md, dict) else None
+            _ts = _md.get("timestamp") if isinstance(_md, dict) else None
+            # Untrusted external JSON: a non-string ``metadata.timestamp`` must
+            # not reach the JWS cert-validity ``.endswith("Z")`` string op (see
+            # the sibling guard in the signature-verification path above).
+            manifest_timestamp = _ts if isinstance(_ts, str) else None
         except json.JSONDecodeError:
             manifest_timestamp = None
 

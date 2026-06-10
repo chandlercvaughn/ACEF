@@ -132,7 +132,14 @@ def validate_bundle(
         # validation in Phase 1 but Phase 0 must not crash on them).
         _metadata = manifest_data.get("metadata")
         manifest_ts = _metadata.get("timestamp") if isinstance(_metadata, dict) else None
-        if manifest_ts:
+        # ``metadata.timestamp`` is untrusted external JSON and may be a
+        # non-string (list/dict/int/bool) even when ``metadata`` is a dict.
+        # It must NOT flow into ``AssessmentBundle.evaluation_instant`` (a
+        # Pydantic ``str`` field) or the rule-engine timestamp parser, both of
+        # which would raise on a non-string. Only accept a real string; the
+        # Phase-1 manifest schema emits the wrong-type diagnostic, and the
+        # wall-clock fallback below keeps Phase 0 non-crashing.
+        if isinstance(manifest_ts, str) and manifest_ts:
             evaluation_instant = manifest_ts
         else:
             # Last resort — should be unreachable for spec-valid bundles
@@ -181,6 +188,104 @@ def validate_bundle(
     except (ValueError, IndexError):
         pass  # Malformed version — schema validation will catch it
 
+    # ---------------------------------------------------------------- #
+    # UNTRUSTED-INPUT BOUNDARY (last-resort defensive backstop).
+    #
+    # Everything below this point is the phase orchestration that walks
+    # arbitrary, attacker-controlled on-disk JSON/JSONL. The per-field guards
+    # throughout this module (and ``_run_validation_phases``) handle the KNOWN
+    # crash sites with PRECISE typed diagnostics — that is the primary
+    # mechanism and the common path. This try/except is the LAST RESORT only:
+    # if some not-yet-guarded deep path raises an UNEXPECTED exception, we
+    # convert it into a FATAL ACEF-001 structural diagnostic (carrying the
+    # exception type + message so the failure is SURFACED, never hidden) and
+    # return the diagnostics collected so far. This guarantees
+    # ``validate_bundle`` NEVER crashes on untrusted input.
+    #
+    # Scope discipline (so this does NOT hide real bugs on well-formed input):
+    #   * We catch ``Exception`` (NOT ``BaseException``) — KeyboardInterrupt /
+    #     SystemExit still propagate.
+    #   * The wrapper is at the OUTERMOST phase-orchestration level ONLY; it is
+    #     not sprinkled around individual statements.
+    #   * Well-formed bundles never raise here, so the backstop never fires for
+    #     them — the unchanged full test suite proves the happy path is intact.
+    #
+    # The shared ``assessment`` is created up-front so partial diagnostics
+    # gathered before any failure are preserved alongside the fatal one.
+    package_id, package_timestamp = _resolve_package_scalars(manifest_data)
+    assessment = AssessmentBundle(
+        evaluation_instant=evaluation_instant,
+        assessor=Assessor(name="acef-validator", version="0.1.0", organization="AI Commons"),
+        evidence_bundle_ref=EvidenceBundleRef(package_id=package_id),
+    )
+    try:
+        _run_validation_phases(
+            assessment,
+            bundle_path,
+            manifest_data,
+            schema_version=schema_version,
+            evaluation_instant=evaluation_instant,
+            package_timestamp=package_timestamp,
+            profiles=profiles,
+        )
+    except Exception as exc:  # noqa: BLE001 — deliberate untrusted-input backstop
+        # A not-yet-guarded path raised. Surface it as a FATAL structural
+        # error (ACEF-001 = package structurally invalid / cannot complete
+        # validation) including the concrete exception type and message, then
+        # return everything collected so far. Never swallow silently.
+        assessment.structural_errors.append(
+            ValidationDiagnostic(
+                "ACEF-001",
+                "Validation could not be completed: an unexpected "
+                f"{type(exc).__name__} was raised while processing this "
+                f"(structurally invalid) bundle: {exc}",
+            ).to_dict()
+        )
+    return assessment
+
+
+def _resolve_package_scalars(manifest_data: dict[str, Any]) -> tuple[str, str]:
+    """Extract ``metadata.package_id`` / ``metadata.timestamp`` as guaranteed
+    strings from untrusted manifest JSON.
+
+    ``metadata`` may be a non-dict, and even when it is a dict the scalar
+    values may be wrong-typed (list / dict / int / bool). ``package_id`` flows
+    into the Pydantic ``EvidenceBundleRef`` (str) field and ``timestamp`` flows
+    into the rule-engine date parser — both raise on a non-string. Coerce any
+    non-string to ``""`` so a malformed scalar never reaches a string sink; the
+    Phase-1 manifest schema emits the wrong-type diagnostic.
+    """
+    _metadata_section = manifest_data.get("metadata")
+    if not isinstance(_metadata_section, dict):
+        _metadata_section = {}
+    package_id = _metadata_section.get("package_id", "")
+    if not isinstance(package_id, str):
+        package_id = ""
+    package_timestamp = _metadata_section.get("timestamp", "")
+    if not isinstance(package_timestamp, str):
+        package_timestamp = ""
+    return package_id, package_timestamp
+
+
+def _run_validation_phases(
+    assessment: AssessmentBundle,
+    bundle_path: Path,
+    manifest_data: dict[str, Any],
+    *,
+    schema_version: str,
+    evaluation_instant: str,
+    package_timestamp: str,
+    profiles: list[str] | None,
+) -> None:
+    """Run validation Phases 1–4, appending diagnostics into ``assessment``.
+
+    This is the inner phase orchestration. It is intentionally invoked inside
+    the untrusted-input try/except in :func:`validate_bundle`: per-field guards
+    here handle the common malformed cases with precise diagnostics, and the
+    caller's backstop catches any not-yet-guarded path so the public entrypoint
+    never crashes. ``assessment`` is mutated in place so that partial
+    diagnostics survive even if a later phase raises.
+    """
     # Load all records from JSONL files. Wrap each parse / model
     # conversion so a single malformed line surfaces as ACEF-050 / ACEF-004
     # rather than crashing the validator before Phase 1 diagnostics are
@@ -289,24 +394,10 @@ def validate_bundle(
                         )
                     )
 
-    # Initialize assessment. ``metadata`` is untrusted external JSON and may be
-    # a non-dict (e.g. ``"metadata": []``) even though it survived the
-    # top-level dict check above; the chained ``.get(...).get(...)`` would then
-    # raise. Coerce to an empty dict so a malformed metadata section yields
-    # empty package id/timestamp rather than crashing — the Phase-1 manifest
-    # schema already flags the wrong type (ACEF-002).
-    _metadata_section = manifest_data.get("metadata")
-    if not isinstance(_metadata_section, dict):
-        _metadata_section = {}
-    package_id = _metadata_section.get("package_id", "")
-    package_timestamp = _metadata_section.get("timestamp", "")
-
-    assessment = AssessmentBundle(
-        evaluation_instant=evaluation_instant,
-        assessor=Assessor(name="acef-validator", version="0.1.0", organization="AI Commons"),
-        evidence_bundle_ref=EvidenceBundleRef(package_id=package_id),
-    )
-
+    # ``assessment`` (with its EvidenceBundleRef.package_id) and the
+    # ``package_timestamp`` scalar are resolved by the caller via
+    # ``_resolve_package_scalars`` and passed in — they are guaranteed strings,
+    # so no wrong-typed metadata scalar reaches a Pydantic/timestamp sink here.
     all_diagnostics: list[ValidationDiagnostic] = []
 
     # Phase 1: Schema validation — route to v1/ or v1.1/ schemas based on
@@ -431,7 +522,9 @@ def validate_bundle(
             # computed.
             pass
 
-    return assessment
+    # ``assessment`` was mutated in place; the caller (validate_bundle) owns it
+    # and returns it (wrapped by the untrusted-input backstop).
+    return
 
 
 def _collect_results(
