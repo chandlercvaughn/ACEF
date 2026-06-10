@@ -1,0 +1,116 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://acef.ai/schemas/v1.1/card_source.schema.json",
+  "title": "ACEF incident_report card_source overlay (private projection source)",
+  "description": "The private projection-source overlay block carried on a v1.1 incident_report (RFC-0002 §5.1 / §5.7 / §5.11 / Appendix B; ACEF core_version 1.1.0). card_source holds exactly the projection inputs from which a public incident_card is generated: the reserved public_incident_id and its self-asserted id_grade and id_state lifecycle snapshot, the coordinated_disclosure block, the severity_vector, the canonical harm_core, the structured Art.73 eu_ai_act_facts (the CONFIDENTIAL/embargoed serious-incident source path), and the §5.11 publishability_map. The privileged-analysis fields (root_cause_analysis, lessons_learned, corrective_actions, impact_assessment) stay on incident_report and are NEVER part of card_source's public projection. This overlay ships under acef-conventions/v1.1/ and gates on manifest.versioning.core_version 1.1.0; the frozen acef-conventions/v1/ incident_report payload is unchanged and v1.0 reports validate without it. Closed (additionalProperties: false); unknown keys MUST be x-*-namespaced (matching the X6 vendor pattern ^x-[a-z0-9-]+(/[a-z0-9-]+)*$, accepting both the bare x-<vendor> form and the slash-qualified x-<vendor>/<segment>(/<segment>)* form) to be safely-ignorable per §5.5 / Appendix E Q15. VAL-SRC-001 adds eu_ai_act_facts to the Appendix B required set so a confidential/embargoed Art.73 report validates BEFORE any public incident_card exists (§5.7): the regulatory-filing critical path runs entirely source-backed and produces no public card. The harm_core, coordinated_disclosure, and severity_vector grammars are referenced from the companion v1.1 schemas, not inlined. Deterministic data: companion arrays are sorted ascending by RFC-8785 canonical byte order (§5.10); no wall-clock or random values.",
+  "type": "object",
+  "required": [
+    "public_incident_id",
+    "id_grade",
+    "id_state",
+    "harm_core",
+    "publishability_map",
+    "eu_ai_act_facts"
+  ],
+  "properties": {
+    "public_incident_id": {
+      "type": "string",
+      "pattern": "^AIIC-[A-Z0-9]{2,8}-[0-9]{4}-[0-9A-HJKMNP-TV-Z]{26,}$",
+      "description": "Reserved, assigner-scoped, non-enumerable, self-asserted federated handle of the form AIIC-{assigner}-{year}-{suffix}: assigner is 2-8 uppercase alphanumerics (a human-legible namespace hint derived from a registrable-domain label, NOT the dotted domain and NOT a uniqueness guarantee), year is 4 digits, and the suffix is >=26 Crockford-base32 chars [0-9A-HJKMNP-TV-Z] (>=128 bits of entropy, resolving collision-resistance and non-enumerability independent of any assigner overlap). Identical pattern to incident_card.public_incident_id (§5.3). The handle is self-asserted, NOT a forgery-resistant credential: it asserts authorship but does not prove it; attribution to the assigner domain is established only by the OPTIONAL online domain-control check, at check time. On card_source the id is typically RESERVED while coordinated_disclosure is private/coordinated, so no public card exists (§5.3 embargo safety)."
+    },
+    "id_grade": {
+      "type": "string",
+      "const": "self-asserted",
+      "description": "Trust grade of public_incident_id (§5.3); the grade travels with the id and is required on every v1.1 record carrying a public_incident_id (a card_source carrying the id but omitting id_grade is rejected, §5.3). Pinned to 'self-asserted' on the v1.1 schema surface; 'registry-canonical' is reserved for the v1.2 schema surface (§11) and is therefore rejected here, matching the v1.1 validator (§5.3, §6)."
+    },
+    "id_state": {
+      "type": "string",
+      "enum": [
+        "RESERVED",
+        "PUBLISHED",
+        "REJECTED"
+      ],
+      "description": "Self-asserted lifecycle snapshot state frozen at export time (§5.3): RESERVED -> PUBLISHED (embargo lifts) | REJECTED (terminal). DISPUTED is NOT a primary state — it is the separate boolean `disputed` overlay on a PUBLISHED id. In v1.1 the state is a self-asserted snapshot value like the handle itself; the mutable lifecycle and the out-of-band id-state authority that resolves it are v1.2 registry surface (§11) and MUST NOT be a v1.1 conformance dependency."
+    },
+    "disputed": {
+      "type": "boolean",
+      "description": "Status overlay on a PUBLISHED id (§5.3); a card may be simultaneously PUBLISHED and disputed (matching CVE's treatment of dispute as a tag rather than a primary publication state). Self-asserted in v1.1; no institution adjudicates it."
+    },
+    "coordinated_disclosure": {
+      "$ref": "coordinated_disclosure.schema.json",
+      "description": "The single canonical coordinated_disclosure block (status, embargo, regulatory_timeline) carried as a projection input (§5.1 / §5.6). Companion shape referenced, not inlined."
+    },
+    "severity_vector": {
+      "$ref": "severity_vector.schema.json",
+      "description": "The recomputable ACEF-SEV:1.0 severity vector (§5.4) carried as a projection input. Companion grammar referenced, not inlined: delegates to severity_vector.schema.json, whose top-level is a string validator carrying the FULL mandatory Group-I sequence (HT/HG/RV/SC/BR in fixed order) plus the optional T/E/S metrics; an HG-less/unbandable vector is rejected (raises ACEF-082 at validate time, §7).",
+      "$comment": "Delegated to severity_vector.schema.json (§5.4: companion grammar referenced, not inlined). The Appendix B excerpt's weak `^ACEF-SEV:1\\.0/` prefix is superseded by the full companion grammar so card_source enforces bandability identically to incident_card."
+    },
+    "harm_core": {
+      "$ref": "incident_card.schema.json#/properties/harm_core",
+      "description": "The single canonical normalized harm core (§5.2), referenced from the incident_card companion so the card and its source share one closed shape: a closed object requiring realization, causality, and harm_class (harm_class resolved via harm-core-taxonomy.json#/$defs/harm_class). The eu_ai_act crosswalk and severity are derived projections of this core."
+    },
+    "eu_ai_act_facts": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Structured Art.73 serious-incident trigger facts (§5.7). REQUIRED on card_source (VAL-SRC-001) so a CONFIDENTIAL/embargoed Art.73 report validates BEFORE any public incident_card exists: in the confidential/source-backed validation context the shortest-applicable reporting clock (ACEF-084) is computed from these facts, not from incident_card.taxonomy_crosswalk.eu_ai_act. death_involved is carried EXPLICITLY because it is NOT derivable from harm_class (physical_health covers both death and non-fatal serious health harm, which take different clocks: death_involved -> 10 days; 3.49.b or widespread -> 2 days; else 15 days, §5.7).",
+      "required": [
+        "edition",
+        "serious_incident_triggers",
+        "widespread",
+        "death_involved"
+      ],
+      "properties": {
+        "edition": {
+          "type": "string",
+          "description": "The Art.73 edition pin against which the trigger facts are stated, anchoring the serious-incident triggers and clocks to Regulation (EU) 2024/1689 (§5.7, Appendix C). Pinned to the adopted regulation identifier 'reg-2024-1689' per the Appendix B normative excerpt.",
+          "const": "reg-2024-1689"
+        },
+        "serious_incident_triggers": {
+          "type": "array",
+          "description": "The EU Art.3(49)(a-d) serious-incident TRIGGER codes that apply to this incident (§5.7). These `3.49.*` codes are crosswalk trigger values, distinct from the ACEF harm_class NAMES carried in harm_core. Order-insensitive: sorted ascending by RFC-8785 canonical byte order before hashing and serialization (§5.10).",
+          "items": {
+            "type": "string",
+            "enum": [
+              "3.49.a",
+              "3.49.b",
+              "3.49.c",
+              "3.49.d"
+            ]
+          }
+        },
+        "widespread": {
+          "type": "boolean",
+          "description": "Whether the Art.3(49)(c) fundamental-rights infringement is 'widespread' (§5.7); a true value drives the 2-day clock alongside the 3.49.b critical-infrastructure trigger."
+        },
+        "death_involved": {
+          "type": "boolean",
+          "description": "Whether the incident involved death (§5.7). Carried explicitly because Art.3(49)(a) covers BOTH death AND non-fatal serious harm to health, which take different clocks: only death_involved drives the 10-day clock, while non-fatal 3.49.a serious-health-harm takes the general 15-day clock."
+        }
+      }
+    },
+    "publishability_map": {
+      "type": "object",
+      "description": "Per-field §5.11 disposition map governing how each incident_report source field is projected onto the public incident_card. KEYS are RFC 6901 JSON Pointers into the source incident_report (e.g. /root_cause_analysis), NOT free strings: the root pointer \"\" is forbidden, and each key MUST be a syntactically valid JSON Pointer with ~0/~1 escaping and MUST resolve to exactly one source value (resolution checked only in source-backed validation, §5.11). VALUES are the closed disposition set: public (copied verbatim), regulator-only (stays private/not projected), hash-committed (the card carries a <field>_commitment SHA-256 value), anonymized (an irreversibly anonymized derivative under a declared anonymization_method), or omitted (never a card field).",
+      "propertyNames": {
+        "pattern": "^(/([^/~]|~0|~1)*)+$"
+      },
+      "additionalProperties": {
+        "type": "string",
+        "enum": [
+          "public",
+          "regulator-only",
+          "hash-committed",
+          "anonymized",
+          "omitted"
+        ]
+      }
+    }
+  },
+  "patternProperties": {
+    "^x-[a-z0-9-]+(/[a-z0-9-]+)*$": {
+      "type": "object",
+      "description": "X6 vendor-extension namespace (§5.5 / Appendix E Q15). Accepts both the bare `x-<vendor>` form and the slash-qualified namespace form `x-<vendor>/<segment>(/<segment>)*` documented in the repo (e.g. x-freddy and x-freddy/voice-rubric-emission, as cited in v1.1/manifest.schema.json:95 and present in tests/conformance/golden-bundles/). Segments are lowercase [a-z0-9-]; uppercase keys, non-`x-` keys, and a bare trailing slash (x-freddy/) are rejected. Any matching `x-*` key is accepted, safely-ignorable, preserved on round-trip, and MUST NOT affect conformance. Non-`x-` unknown keys remain rejected by additionalProperties: false."
+    }
+  },
+  "additionalProperties": false
+}
