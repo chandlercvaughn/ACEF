@@ -1,23 +1,23 @@
 {
-  "$schema_note": "Post-v0.4 M1 baseline wall-clock for tests/conformance/ excluding test_freddy_* and test_legacy_runtime_budget.py itself. Used by tests/conformance/test_legacy_runtime_budget.py (VAL-REGRESSION-LEGACY-BUDGET-001). Re-captured after M1 v1.1 work (cross-record, v1_1_rules, namespace_lints, validator_*, redaction integration) landed; the new tests are in tests/conformance/ but not test_freddy_*, so they fall inside the selector and account for the runtime increase over the pre-v0.4 baseline. The 10% headroom continues to enforce no future regression.",
-  "captured_at": "2026-05-28T03:00:00Z",
-  "captured_by_feature": "F-M1-DOCS (orchestrator re-capture after M1 completion)",
-  "captured_at_commit": "08e3562ccc8738b563ded3c33a01b1ccbceca1b4",
-  "ops_operation": "acef-v0.4-freddy-adoption",
+  "$schema_note": "Baseline wall-clock for tests/conformance/ excluding test_freddy_* and test_legacy_runtime_budget.py itself. Used by tests/conformance/test_legacy_runtime_budget.py (VAL-REGRESSION-LEGACY-BUDGET-001). Re-captured after the acef-rfc0002-incident-reporting operation (RFC-0002 v1.1 incident reporting). The selection grew because new conformance tests landed inside the selector (a prior operation's cross-language/gzip determinism tests, and this operation's incident vector + v1.0 backward-compat tests); those net-new tests account for the runtime increase over the post-M1 baseline. The 10% headroom continues to enforce no future regression. Empirically verified this is test-scope growth, NOT a per-bundle validation regression: see notes[5].",
+  "captured_at": "2026-06-10T18:30:00Z",
+  "captured_by_feature": "orchestrator re-capture after acef-rfc0002-incident-reporting M5 completion",
+  "captured_at_commit": "1f7c0355ed9247a5409aefa5c043cfd7bdee9e41",
+  "ops_operation": "acef-rfc0002-incident-reporting",
   "selection": {
     "include_globs": ["tests/conformance/"],
     "ignore_globs": ["*test_freddy_*", "tests/conformance/test_legacy_runtime_budget.py"],
-    "test_count_at_capture": 425
+    "test_count_at_capture": 569
   },
   "wall_clock_seconds": {
-    "min_of_three_runs": 23.345,
-    "median_of_three_runs": 23.561,
-    "max_of_three_runs": 23.968,
-    "baseline_for_budget_check": 23.345
+    "min_of_three_runs": 26.87,
+    "median_of_three_runs": 26.88,
+    "max_of_three_runs": 26.95,
+    "baseline_for_budget_check": 26.87
   },
   "budget": {
     "headroom_pct": 10,
-    "max_allowed_seconds": 25.68
+    "max_allowed_seconds": 29.56
   },
   "platform": {
     "python": "3.14.3",
@@ -28,6 +28,7 @@
     "Three back-to-back warm runs with `-p no:cacheprovider` were used to suppress pytest's .pytest_cache effects. min is the conservative anchor (lowest observed; future regressions are most visible against the floor).",
     "Headroom is 10% per VAL-REGRESSION-LEGACY-BUDGET-001. Budget check: current_seconds <= baseline_for_budget_check * 1.10.",
     "Set ACEF_SKIP_RUNTIME_BUDGET=1 to skip the gate (e.g., on busy local machines). CI is the authoritative enforcement environment.",
-    "Original pre-v0.4 baseline was 19.58s with 406 tests; post-M1 baseline is 23.345s with 425 tests. The +3.76s delta is explained by 19 new conformance tests added by M1 v1.1 work (cross_record, validator_rules, namespace_lints, redaction integration, CLI verify driver). Per-test runtime average is comparable (~55ms each)."
+    "Lineage: pre-v0.4 19.58s/406 tests -> post-M1 (acef-v0.4-freddy-adoption) 23.345s/425 tests -> post-RFC-0002 26.87s/569 tests. The 425->569 (+144 tests) growth is the prior operation's cross-language (test_cross_lang_jcs/jws) + gzip-determinism conformance tests plus this operation's test_incident_vectors + test_incident_backward_compat.",
+    "Re-capture justification (empirical, not a number bump): per-test average runtime DROPPED across the re-capture (54.9ms/test at 425 -> 47.2ms/test at 569), so the validation hot path did not get slower per bundle. Decisive A/B under identical current load: the legacy-budget selection RESTRICTED to the pre-existing (non-newly-added) test files runs at min 24.22s vs the 23.345s post-M1 baseline = +3.7%, comfortably inside the 10% gate. The v1.1 schema-registry resolver (build_schema_registry) and per-version schema loader are both functools.lru_cache-backed, so the incident schema graph adds no per-validation rebuild cost to the v1.0 path. The +13% overage against the stale 23.345s anchor was purely added test scope (a prior operation's cross-lang/gzip tests were already inside the selector at this operation's base commit 411b65e and were never re-baselined), not a per-bundle regression."
   ]
 }
