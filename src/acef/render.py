@@ -5,6 +5,7 @@ Generates Markdown and console-formatted compliance reports from Assessment Bund
 
 from __future__ import annotations
 
+from acef.errors import incident_error_detail
 from acef.models.assessment import AssessmentBundle
 from acef.models.enums import ProvisionOutcome, RuleOutcome
 
@@ -108,6 +109,14 @@ def render_markdown(assessment: AssessmentBundle) -> str:
             lines.append(f"- **{code}** [{severity}]: {msg}")
             if path:
                 lines.append(f"  - Path: `{path}`")
+            # RFC-0002 §7 incident band (ACEF-081..088): surface the structured
+            # problem + cause + FIX-HINT so a filer sees exactly what to correct
+            # (VAL-DX-003). incident_error_detail returns None for a v0.4 code, so
+            # no fix block is emitted for non-incident codes.
+            detail = incident_error_detail(code)
+            if detail is not None:
+                lines.append(f"  - Cause: {detail.cause}")
+                lines.append(f"  - Fix: {detail.fix}")
         lines.append("")
 
     lines.append("---")
@@ -157,7 +166,13 @@ def render_console(assessment: AssessmentBundle) -> str:
         lines.append("")
         lines.append(f"Structural Errors ({len(assessment.structural_errors)}):")
         for error in assessment.structural_errors[:10]:
-            lines.append(f"  {error.get('code', '')}: {error.get('message', '')}")
+            code = error.get("code", "")
+            lines.append(f"  {code}: {error.get('message', '')}")
+            # Surface the RFC-0002 §7 incident fix-hint (ACEF-081..088) so a filer
+            # sees the remediation in the concise console output too (VAL-DX-003).
+            detail = incident_error_detail(code)
+            if detail is not None:
+                lines.append(f"    Fix: {detail.fix}")
         if len(assessment.structural_errors) > 10:
             lines.append(f"  ... and {len(assessment.structural_errors) - 10} more")
 

@@ -6,14 +6,17 @@ The primary API for creating ACEF Evidence Bundles.
 from __future__ import annotations
 
 import hashlib
+import re
+import secrets
 from collections.abc import Callable
-from datetime import UTC, datetime
-from typing import Any
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING, Any
 
 from pydantic import ValidationError
 
 from acef.errors import ACEFError, ACEFSchemaError
-from acef.integrity import canonicalize
+from acef.integrity import canonicalize, sha256_hex
 from acef.models.agent_reliability import (
     AuthorizedTestScopePayload,
     DeliveryVerdictPayload,
@@ -95,6 +98,278 @@ _STATE_CLASS_TAXONOMY: frozenset[str] = frozenset(
 # the underlying system (as opposed to mere *control of an account*).
 # Production-capable authorization requires one of these methods.
 _OWNERSHIP_PROVING_METHODS: frozenset[str] = frozenset({"dns_txt", "well_known_file", "sso_assertion"})
+
+
+# ---------------------------------------------------------------------------
+# RFC-0002 v1.1 incident DX — mint_incident_id (VAL-DX-002) + builder helpers.
+# ---------------------------------------------------------------------------
+
+if TYPE_CHECKING:  # pragma: no cover — type-only import to avoid a runtime cost
+    from cryptography.hazmat.primitives.asymmetric.types import PrivateKeyTypes
+
+# §5.3 self-asserted public_incident_id grammar:
+#   AIIC-{assigner}-{year}-{suffix}
+#   assigner = 2-8 uppercase alphanumerics; year = 4 digits;
+#   suffix    = >=26 Crockford-base32 chars `[0-9A-HJKMNP-TV-Z]` (>=128 bits).
+_ASSIGNER_LABEL_PATTERN = re.compile(r"^[A-Z0-9]{2,8}$")
+_PUBLIC_INCIDENT_ID_PATTERN = re.compile(r"^AIIC-([A-Z0-9]{2,8})-([0-9]{4})-[0-9A-HJKMNP-TV-Z]{26,}$")
+
+# Crockford base32 alphabet (RFC-0002 §5.3 / Crockford spec): 0-9 then A-Z
+# EXCLUDING I, L, O, U (the ambiguous letters), giving 32 symbols. The suffix
+# encodes >=128 bits of CSPRNG entropy; 26 symbols carry 26 * 5 = 130 bits.
+_CROCKFORD_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+_SUFFIX_ENTROPY_BITS = 128
+# 26 symbols * 5 bits = 130 bits >= 128 (the >=128-bit floor with >=26 chars).
+_SUFFIX_SYMBOLS = 26
+
+# The Art.73 / crosswalk edition pins (schema consts; §5.5 / §5.7). The eu_ai_act
+# member + facts are pinned to Regulation (EU) 2024/1689 ("reg-2024-1689"); the
+# NIST AI 600-1 projection is pinned to its 2024-07-final edition.
+_EU_AI_ACT_EDITION = "reg-2024-1689"
+_NIST_AI_600_1_EDITION = "2024-07-final"
+
+# The Art.73 crosswalk profile id + regulatory_timeline framework tag the builder
+# declares + emits (must match acef.validation.incident_rules so the delegated
+# ACEF-084 checks run and the framework-match rule is satisfied, §5.7).
+_ART73_PROFILE_ID = "eu-ai-act-art73-2026"
+_ART73_TIMELINE_FRAMEWORK = "eu-ai-act-art73"
+
+
+def _parse_iso_instant(value: str) -> datetime:
+    """Parse an ISO-8601 instant (Zulu or offset) into a UTC :class:`datetime`.
+
+    Mirrors the validator's instant parser (acef.validation.incident_rules) so the
+    builder's awareness/deadline arithmetic stays consistent with the ACEF-084
+    shortest-clock check. Raises ``ValueError`` on an unparseable value.
+    """
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"awareness_date must be a non-empty ISO-8601 instant, got {value!r}")
+    candidate = value.strip()
+    if candidate.endswith("Z"):
+        candidate = candidate[:-1] + "+00:00"
+    parsed = datetime.fromisoformat(candidate)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
+def _format_iso_instant(dt: datetime) -> str:
+    """Format a UTC instant as ``YYYY-MM-DDTHH:MM:SSZ`` (byte-stable, no sub-second).
+
+    Matches the ``...Z`` form the conformance vectors + the validator's parser use,
+    so a builder-minted deadline is byte-deterministic and round-trips through the
+    Art.73 clock check.
+    """
+    return dt.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def band(severity_vector: str) -> str | None:
+    """Project an ``ACEF-SEV:1.0`` vector to the coarse ``severity`` enum (§5.4).
+
+    A thin re-export of the NORMATIVE
+    :func:`acef.validation.incident_rules.band` so the SDK builder and the
+    validator share ONE band() grammar (never a reimplementation). Returns the
+    coarse band (``critical`` / ``major`` / ``minor`` / ``informational``) or
+    ``None`` when the vector does not parse / is not bandable.
+    """
+    from acef.validation.incident_rules import band as _band
+
+    return _band(severity_vector)
+
+
+@dataclass(frozen=True)
+class MintedIncidentId:
+    """The one-call result of :func:`mint_incident_id` (RFC-0002 §5.3, VAL-DX-002).
+
+    Carries everything a filer needs from a SINGLE call so id minting is not an
+    "ACME spelunk":
+
+    * :attr:`public_incident_id` — the ``AIIC-{LABEL}-{year}-{suffix}`` handle, with
+      a >=128-bit CSPRNG Crockford-base32 suffix and an explicit
+      :attr:`id_grade` of ``"self-asserted"`` (the only value emitted on the v1.1
+      surface; ``registry-canonical`` is reserved for v1.2, §11).
+    * :attr:`assigner` — the uppercased assigner LABEL embedded in the id (the
+      registrable domain's leftmost label).
+    * :attr:`jwk` — the card's public RFC-7517 JWK, derived from the signing key,
+      to which the challenge token is bound (RFC-7638 thumbprint).
+    * :attr:`challenge_token` — the DNS-01 / ``.well-known`` challenge token the
+      registrant publishes to PROVE control at check time
+      (``acef-domain-control=<assigner>:<thumbprint>``), reused verbatim from
+      :func:`acef.domain_control.challenge_token_for`.
+    * :attr:`dns_record_name` / :attr:`well_known_url` — the exact DNS TXT name and
+      ``.well-known`` URL the token is published at, so the filer can publish it
+      without re-deriving the wire locations.
+
+    HONESTY DISCIPLINE: the id is a SELF-ASSERTED handle, not a forgery-resistant
+    credential. The token does not attribute the id offline; it only lets the
+    OPTIONAL online :func:`acef.domain_control.verify_domain_control` prove control
+    AT CHECK TIME. A minted id round-trips to ``verified`` ONLY when the registrant
+    actually publishes :attr:`challenge_token` at :attr:`dns_record_name` /
+    :attr:`well_known_url`.
+    """
+
+    public_incident_id: str
+    assigner: str
+    year: int
+    jwk: dict[str, str]
+    challenge_token: str
+    dns_record_name: str
+    well_known_url: str
+    id_grade: str = "self-asserted"
+
+
+def _registrable_label_from_domain(domain: str) -> str:
+    """Derive the assigner LABEL from ``domain`` so it ROUND-TRIPS through
+    :func:`acef.domain_control.assigner_to_registrable_domain` (default
+    ``LABEL -> "<label>.com"``).
+
+    The mapping takes the registrable domain's LEFTMOST label, uppercases it, and
+    validates it against the ``[A-Z0-9]{2,8}`` assigner grammar (§5.3). Because the
+    default verifier maps a LABEL back to ``"<label>.com"``, this function only
+    accepts domains whose registrable form is ``<label>.com`` round-trippable: it
+    strips any subdomains (``api.openai.com`` -> ``openai`` -> ``OPENAI``) and
+    rejects a label that cannot satisfy the 2-8-char grammar.
+
+    .. note:: The default verifier round-trip is ``.com``-anchored. A non-``.com``
+       eTLD (e.g. ``openai.ai``) still derives the ``OPENAI`` LABEL here, but the
+       DEFAULT online verifier would look it up at ``openai.com`` — a profile that
+       pins a different eTLD supplies its own ``label_to_domain`` to
+       :func:`acef.domain_control.verify_domain_control`. The minted token /
+       record-name in :class:`MintedIncidentId` are emitted for the ``.com``
+       default; pass a custom ``label_to_domain`` to the verifier to match.
+
+    Raises:
+        ValueError: if ``domain`` is empty or its leftmost registrable label
+            cannot satisfy the ``[A-Z0-9]{2,8}`` assigner grammar.
+    """
+    if not isinstance(domain, str) or not domain.strip():
+        raise ValueError("mint_incident_id: domain must be a non-empty string (e.g. 'openai.com')")
+    host = domain.strip().lower().rstrip(".")
+    # Strip a scheme if a full URL was passed.
+    if "://" in host:
+        host = host.split("://", 1)[1]
+    host = host.split("/", 1)[0]
+    labels = [label for label in host.split(".") if label]
+    if not labels:
+        raise ValueError(f"mint_incident_id: domain {domain!r} has no DNS labels")
+    # The registrable label is the leftmost label of the registrable domain. For
+    # the .com-default round-trip we take the label immediately left of the eTLD
+    # when a multi-label host is given (api.openai.com -> openai), else the sole
+    # label (openai.com -> openai; bare 'openai' -> openai).
+    if len(labels) >= 2:
+        registrable_label = labels[-2]
+    else:
+        registrable_label = labels[0]
+    label = registrable_label.upper()
+    if not _ASSIGNER_LABEL_PATTERN.match(label):
+        raise ValueError(
+            f"mint_incident_id: cannot derive an assigner LABEL from domain {domain!r} — the "
+            f"registrable label {registrable_label!r} -> {label!r} does not satisfy the §5.3 "
+            f"assigner grammar [A-Z0-9]{{2,8}} (2-8 uppercase alphanumerics). Use a domain whose "
+            f"leftmost registrable label is 2-8 alphanumeric characters."
+        )
+    return label
+
+
+def _mint_suffix() -> str:
+    """Return a >=26-char Crockford-base32 suffix carrying >=128 bits of CSPRNG
+    entropy (RFC-0002 §5.3). Uses :mod:`secrets` (CSPRNG); never wall-clock or a
+    weak RNG. 26 Crockford symbols * 5 bits = 130 bits >= the 128-bit floor."""
+    # Draw enough random bytes to cover the symbol count, then map each 5-bit
+    # group to a Crockford symbol. 26 symbols need 130 bits = ceil(130/8)=17 bytes.
+    needed_bits = _SUFFIX_SYMBOLS * 5
+    needed_bytes = (needed_bits + 7) // 8
+    raw = secrets.token_bytes(needed_bytes)
+    value = int.from_bytes(raw, "big")
+    # Take the top needed_bits so we use exactly _SUFFIX_SYMBOLS * 5 bits.
+    value >>= needed_bytes * 8 - needed_bits
+    symbols: list[str] = []
+    for _ in range(_SUFFIX_SYMBOLS):
+        symbols.append(_CROCKFORD_ALPHABET[value & 0x1F])
+        value >>= 5
+    return "".join(reversed(symbols))
+
+
+def mint_incident_id(
+    domain: str,
+    key: PrivateKeyTypes,
+    *,
+    year: int | None = None,
+    now: datetime | None = None,
+) -> MintedIncidentId:
+    """Mint a self-asserted ``public_incident_id`` + its domain-control challenge
+    token in ONE call (RFC-0002 §5.3, VAL-DX-002).
+
+    Returns a :class:`MintedIncidentId` carrying the
+    ``AIIC-{LABEL}-{year}-{suffix}`` id (``id_grade: self-asserted``, >=128-bit
+    CSPRNG Crockford-base32 suffix), the card's public JWK derived from ``key``,
+    and the DNS-01 / ``.well-known`` challenge token the registrant publishes to
+    prove control at check time. The minted token round-trips through
+    :func:`acef.domain_control.verify_domain_control` to ``verified`` when the
+    registrant publishes it at the returned DNS name / ``.well-known`` URL.
+
+    Args:
+        domain: the registrant's domain (e.g. ``"openai.com"`` or
+            ``"api.openai.com"``). The assigner LABEL is derived from the
+            registrable domain's leftmost label, uppercased, so it ROUND-TRIPS
+            through the default ``LABEL -> "<label>.com"`` mapper (the .com-default
+            round-trip constraint — see :func:`_registrable_label_from_domain`).
+        key: the card's PRIVATE signing key (RSA or EC P-256). The public JWK is
+            derived from it via :func:`acef.signing._derive_jwk` (the established
+            route the signing path and the verifier already use) and the challenge
+            token is bound to its RFC-7638 thumbprint.
+        year: the 4-digit year embedded in the id. NO wall-clock default is baked
+            into the hash domain — when omitted it is derived from ``now`` (or, as a
+            last resort, the current UTC year); tests pass an explicit ``year`` for
+            determinism.
+        now: an injectable clock used ONLY to derive ``year`` when ``year`` is
+            omitted; never read otherwise. Defaults to ``datetime.now(UTC)`` when
+            both ``year`` and ``now`` are omitted.
+
+    Returns:
+        A :class:`MintedIncidentId`.
+
+    Raises:
+        ValueError: if ``domain``'s registrable label cannot satisfy the §5.3
+            assigner grammar ``[A-Z0-9]{2,8}``.
+    """
+    # Lazy import to avoid any import cost / cycle at package module load.
+    from acef.domain_control import (
+        DNS_CHALLENGE_LABEL,
+        WELL_KNOWN_PATH,
+        assigner_to_registrable_domain,
+        challenge_token_for,
+    )
+    from acef.signing import _derive_jwk
+
+    label = _registrable_label_from_domain(domain)
+
+    if year is None:
+        clock_now = now if now is not None else datetime.now(UTC)
+        year = clock_now.year
+    if not (1000 <= int(year) <= 9999):
+        raise ValueError(f"mint_incident_id: year must be a 4-digit year, got {year!r}")
+
+    suffix = _mint_suffix()
+    public_incident_id = f"AIIC-{label}-{int(year):04d}-{suffix}"
+
+    jwk = _derive_jwk(key)
+    challenge_token = challenge_token_for(label, jwk)
+
+    registrable_domain = assigner_to_registrable_domain(label)
+    dns_record_name = f"{DNS_CHALLENGE_LABEL}{registrable_domain}"
+    well_known_url = f"https://{registrable_domain}{WELL_KNOWN_PATH}"
+
+    return MintedIncidentId(
+        public_incident_id=public_incident_id,
+        assigner=label,
+        year=int(year),
+        jwk=jwk,
+        challenge_token=challenge_token,
+        dns_record_name=dns_record_name,
+        well_known_url=well_known_url,
+        id_grade="self-asserted",
+    )
 
 
 class Package:
@@ -1165,6 +1440,339 @@ class Package:
         _validate_attachment_path(path)
 
         self._attachments[path] = content
+
+    # ------------------------------------------------------------------
+    # RFC-0002 v1.1 incident builders (F-M5-BUILDER, VAL-DX-001)
+    #
+    # report_incident() emits the SOURCE-BACKED incident_report (the Art.73
+    # regulatory-filing critical path, carrying the private card_source block);
+    # incident_card() emits the PUBLIC incident_card (the publishability-projected
+    # public surface). Both:
+    #   - auto-derive harm_core -> taxonomy_crosswalk by REUSING the §5.5
+    #     derivation rows materialized in acef-conventions/v1.1/
+    #     harm-core-taxonomy.json (via acef.validation.incident_rules — never a
+    #     hardcoded crosswalk);
+    #   - compute the ACEF-SEV band() by REUSING acef.validation.incident_rules.band
+    #     (never a reimplemented grammar);
+    #   - assemble the eu_ai_act_facts + the Art.73 regulatory_timeline entry whose
+    #     deadline = awareness_date + shortest_art73_clock_days(facts) (REUSING
+    #     acef.validation.incident_rules.shortest_art73_clock_days);
+    #   - emit id_grade: self-asserted, set core_version 1.1.0, and declare the
+    #     eu-ai-act-art73-2026 profile so the delegated ACEF-084 checks run.
+    # One builder call emits a valid, signable bundle that PASSES the offline
+    # engine (proved end-to-end in tests/integration/test_report_incident_e2e.py).
+    # ------------------------------------------------------------------
+
+    def _ensure_v1_1(self) -> None:
+        """Bump core_version to 1.1.0 (the incident record types are gated on it).
+
+        v1.1 is a minor release; a bundle already declaring 1.1.x is left as-is.
+        Calling an incident builder on a fresh Package (default 1.0.0) upgrades it
+        so the v1.1 schema set + incident validation rules apply.
+        """
+        current = self._versioning.core_version
+        if not (isinstance(current, str) and current >= "1.1"):
+            self._versioning.core_version = "1.1.0"
+
+    def _declare_art73_profile(self) -> None:
+        """Declare the eu-ai-act-art73-2026 profile once (idempotent)."""
+        if not any(p.profile_id == _ART73_PROFILE_ID for p in self._profiles):
+            self.add_profile(_ART73_PROFILE_ID, provisions=["art-73"])
+
+    @staticmethod
+    def _derive_taxonomy_crosswalk(
+        harm_core: dict[str, Any],
+        eu_ai_act_facts: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Auto-derive ``taxonomy_crosswalk`` from ``harm_core`` (§5.5).
+
+        REUSES the one-directional core->scheme derivation ROWS materialized in
+        ``acef-conventions/v1.1/harm-core-taxonomy.json`` (loaded via
+        :mod:`acef.validation.incident_rules`) rather than hardcoding a crosswalk.
+        For the card's ``harm_class`` it emits:
+
+        - ``eu_ai_act`` — the version-pinned member carrying the Art.3(49)
+          ``serious_incident_triggers`` (the trigger derived from ``harm_class`` is
+          always included; any caller-supplied compound triggers are merged in,
+          deterministically sorted §5.10) plus the ``widespread`` / ``death_involved``
+          booleans from ``eu_ai_act_facts``;
+        - ``nist_ai_600_1`` — the closed NIST category projection for the row (the one
+          external enum already transcribed/closed), present only when non-empty.
+
+        The result is CONSISTENT with the validator's ACEF-085 derivation check by
+        construction (it is derived from the same rows). An unmappable harm_class
+        (empty members) leaves the corresponding member legitimately absent.
+        """
+        from acef.validation.incident_rules import _class_to_triggers, _derivation_rows_by_class
+
+        harm_class = harm_core.get("harm_class")
+        crosswalk: dict[str, Any] = {}
+        if not isinstance(harm_class, str):
+            return crosswalk
+
+        rows = _derivation_rows_by_class()
+        row = rows.get(harm_class, {})
+
+        # --- eu_ai_act member (always emitted; it anchors the Art.73 facts) ---
+        derived_triggers = set(_class_to_triggers().get(harm_class, frozenset()))
+        supplied = {t for t in eu_ai_act_facts.get("serious_incident_triggers", []) if isinstance(t, str)}
+        all_triggers = sorted(derived_triggers | supplied)
+        eu_member: dict[str, Any] = {
+            "edition": _EU_AI_ACT_EDITION,
+            "serious_incident_triggers": all_triggers,
+            "widespread": bool(eu_ai_act_facts.get("widespread", False)),
+            "death_involved": bool(eu_ai_act_facts.get("death_involved", False)),
+        }
+        crosswalk["eu_ai_act"] = eu_member
+
+        # --- nist_ai_600_1 member (only when the row has a non-empty projection) ---
+        nist_row = row.get("nist_ai_600_1", {}) if isinstance(row, dict) else {}
+        nist_members = [m for m in nist_row.get("members", []) if isinstance(m, str)]
+        if nist_members:
+            crosswalk["nist_ai_600_1"] = {
+                "edition": _NIST_AI_600_1_EDITION,
+                "categories": sorted(nist_members),
+            }
+        return crosswalk
+
+    @staticmethod
+    def _art73_timeline_entry(awareness_date: str, eu_ai_act_facts: dict[str, Any]) -> dict[str, Any]:
+        """Build the Art.73 ``regulatory_timeline`` entry whose ``deadline`` equals
+        the SHORTEST applicable clock (§5.7), REUSING
+        :func:`acef.validation.incident_rules.shortest_art73_clock_days`.
+
+        ``deadline = awareness_date + shortest_clock_days``. The awareness instant is
+        parsed as ISO 8601 (Zulu / offset) and the deadline is re-emitted in the same
+        ``...Z`` form so it is byte-stable and matches the validator's instant parser.
+        """
+        from acef.validation.incident_rules import shortest_art73_clock_days
+
+        clock_days = shortest_art73_clock_days(eu_ai_act_facts)
+        awareness = _parse_iso_instant(awareness_date)
+        deadline = awareness + timedelta(days=clock_days)
+        return {
+            "framework": _ART73_TIMELINE_FRAMEWORK,
+            "clock_model": "awareness_days",
+            "awareness_date": _format_iso_instant(awareness),
+            "deadline": _format_iso_instant(deadline),
+        }
+
+    def report_incident(
+        self,
+        *,
+        public_incident_id: str,
+        harm_core: dict[str, Any],
+        incident_type: str,
+        description: str,
+        awareness_date: str,
+        eu_ai_act_facts: dict[str, Any],
+        severity: str = "major",
+        severity_vector: str | None = None,
+        id_state: str = "RESERVED",
+        publishability_map: dict[str, str] | None = None,
+        root_cause_analysis: str | None = None,
+        disclosure_status: str = "coordinated",
+        reporter_role: str | None = None,
+        extra_card_source: dict[str, Any] | None = None,
+        confidentiality: str | Confidentiality = Confidentiality.REGULATOR_ONLY,
+        entity_refs: dict[str, list[str]] | EntityRefs | None = None,
+        obligation_role: str | ObligationRole | None = None,
+        timestamp: str | None = None,
+        record_id: str | None = None,
+    ) -> RecordEnvelope:
+        """Build a SOURCE-BACKED ``incident_report`` carrying the private
+        ``card_source`` block (RFC-0002 §5.1/§5.7, VAL-DX-001).
+
+        This is the EU Art. 73 regulatory-filing critical path: the confidential
+        report validates from ``card_source.eu_ai_act_facts`` BEFORE any public card
+        exists (a RESERVED id, no public projection). The builder:
+
+        - auto-derives ``card_source.harm_core -> taxonomy-aware eu_ai_act_facts``
+          (the supplied facts are pinned to the ``reg-2024-1689`` edition);
+        - assembles ``card_source.coordinated_disclosure.regulatory_timeline`` with
+          the ``eu-ai-act-art73`` entry whose ``deadline`` equals the shortest
+          applicable clock derived from ``eu_ai_act_facts`` (death -> 10d; 3.49.b /
+          widespread -> 2d; else 15d);
+        - computes the coarse ``severity`` from ``severity_vector`` via ``band()``
+          when a vector is supplied (so the public ``severity`` and the private
+          ``severity_vector`` never disagree — ACEF-088);
+        - emits ``id_grade: self-asserted`` + the requested ``id_state`` (default
+          ``RESERVED``), sets ``core_version 1.1.0``, and declares the
+          ``eu-ai-act-art73-2026`` profile.
+
+        The record is emitted ``regulator-only`` by default, so the package's
+        attached :class:`~acef.redaction.RedactionPolicy` (if any) auto-populates the
+        X1/X2 redaction envelope fields the v1.1 cross-record validator requires.
+
+        Raises:
+            ValueError: if ``awareness_date`` is not a parseable ISO-8601 instant.
+        """
+        self._ensure_v1_1()
+        self._declare_art73_profile()
+
+        facts = {
+            "edition": _EU_AI_ACT_EDITION,
+            "serious_incident_triggers": sorted(
+                {t for t in eu_ai_act_facts.get("serious_incident_triggers", []) if isinstance(t, str)}
+            ),
+            "widespread": bool(eu_ai_act_facts.get("widespread", False)),
+            "death_involved": bool(eu_ai_act_facts.get("death_involved", False)),
+        }
+
+        timeline_entry = self._art73_timeline_entry(awareness_date, facts)
+
+        disclosure: dict[str, Any] = {
+            "status": disclosure_status,
+            "regulatory_timeline": [timeline_entry],
+        }
+        if reporter_role is not None:
+            disclosure["reporter_role"] = reporter_role
+
+        card_source: dict[str, Any] = {
+            "public_incident_id": public_incident_id,
+            "id_grade": "self-asserted",
+            "id_state": id_state,
+            "harm_core": dict(harm_core),
+            "publishability_map": dict(publishability_map) if publishability_map else {},
+            "eu_ai_act_facts": facts,
+            "coordinated_disclosure": disclosure,
+        }
+        if severity_vector is not None:
+            card_source["severity_vector"] = severity_vector
+        if extra_card_source:
+            for key, value in extra_card_source.items():
+                card_source.setdefault(key, value)
+
+        # The coarse severity. When a vector is supplied, band() WINS so the public
+        # root severity and the private vector never disagree (ACEF-088); otherwise
+        # the explicit `severity` (default "major") is used. incident_report
+        # structurally requires `severity`, so it is always present.
+        resolved_severity = severity
+        if severity_vector is not None:
+            band_value = band(severity_vector)
+            if band_value is not None:
+                resolved_severity = band_value
+
+        payload: dict[str, Any] = {
+            "incident_type": incident_type,
+            "description": description,
+            "severity": resolved_severity,
+            "card_source": card_source,
+        }
+        if root_cause_analysis is not None:
+            payload["root_cause_analysis"] = root_cause_analysis
+
+        return self.record(
+            record_type="incident_report",
+            payload=payload,
+            entity_refs=entity_refs,
+            confidentiality=confidentiality,
+            obligation_role=obligation_role,
+            timestamp=timestamp,
+            record_id=record_id,
+        )
+
+    def incident_card(
+        self,
+        *,
+        public_incident_id: str,
+        harm_core: dict[str, Any],
+        severity_vector: str,
+        awareness_date: str,
+        eu_ai_act_facts: dict[str, Any],
+        autonomy_level: str | None = None,
+        harm_distribution_basis: list[str] | None = None,
+        declared_publication_basis: dict[str, Any] | None = None,
+        commitments: dict[str, Any] | None = None,
+        disclosure_status: str = "coordinated",
+        reporter_role: str | None = None,
+        extra_payload: dict[str, Any] | None = None,
+        entity_refs: dict[str, list[str]] | EntityRefs | None = None,
+        obligation_role: str | ObligationRole | None = None,
+        confidentiality: str | Confidentiality = Confidentiality.PUBLIC,
+        timestamp: str | None = None,
+        record_id: str | None = None,
+    ) -> RecordEnvelope:
+        """Build a PUBLIC ``incident_card`` (RFC-0002 §5.4/§5.5/§5.11, VAL-DX-001).
+
+        The publishability-projected public surface. The builder:
+
+        - auto-derives ``harm_core -> taxonomy_crosswalk`` from the §5.5 derivation
+          rows (consistent with the ACEF-085 check by construction);
+        - computes the coarse ``severity`` from ``severity_vector`` via ``band()`` so
+          the two never disagree (ACEF-088);
+        - assembles ``coordinated_disclosure.regulatory_timeline`` with the
+          ``eu-ai-act-art73`` shortest-clock entry (§5.7);
+        - applies the §5.11 publishability projection: when a special-category field
+          (``harm_distribution_basis``) is projected public, a satisfying
+          ``declared_publication_basis`` (Art.6 basis + Art.9 condition, or a declared
+          anonymization method) MUST be threaded through (else the validator raises
+          ACEF-086); ``commitments`` are emitted as ``<field>_commitment`` =
+          ``"sha256:" + hex(SHA-256(JCS(value)))`` whole-value hash commitments
+          (REUSING the same RFC-8785 + SHA-256 primitive
+          :func:`acef.redaction.apply_redaction` uses), so a privileged field can be
+          hash-committed instead of disclosed;
+        - emits ``id_grade: self-asserted``, sets ``core_version 1.1.0``, and declares
+          the ``eu-ai-act-art73-2026`` profile.
+
+        Raises:
+            ValueError: if ``awareness_date`` is not a parseable ISO-8601 instant.
+        """
+        self._ensure_v1_1()
+        self._declare_art73_profile()
+
+        facts = {
+            "serious_incident_triggers": sorted(
+                {t for t in eu_ai_act_facts.get("serious_incident_triggers", []) if isinstance(t, str)}
+            ),
+            "widespread": bool(eu_ai_act_facts.get("widespread", False)),
+            "death_involved": bool(eu_ai_act_facts.get("death_involved", False)),
+        }
+
+        crosswalk = self._derive_taxonomy_crosswalk(harm_core, facts)
+        timeline_entry = self._art73_timeline_entry(awareness_date, facts)
+        band_value = band(severity_vector)
+
+        disclosure: dict[str, Any] = {
+            "status": disclosure_status,
+            "regulatory_timeline": [timeline_entry],
+        }
+        if reporter_role is not None:
+            disclosure["reporter_role"] = reporter_role
+
+        payload: dict[str, Any] = {
+            "public_incident_id": public_incident_id,
+            "id_grade": "self-asserted",
+            "harm_core": dict(harm_core),
+            "severity_vector": severity_vector,
+            "taxonomy_crosswalk": crosswalk,
+            "coordinated_disclosure": disclosure,
+        }
+        if band_value is not None:
+            payload["severity"] = band_value
+        if autonomy_level is not None:
+            payload["autonomy_level"] = autonomy_level
+        if harm_distribution_basis is not None:
+            payload["harm_distribution_basis"] = sorted(harm_distribution_basis)
+        if declared_publication_basis is not None:
+            payload["declared_publication_basis"] = dict(declared_publication_basis)
+        # §5.11 whole-value hash commitments — REUSE the RFC-8785 + SHA-256 primitive.
+        if commitments:
+            for field_name, value in commitments.items():
+                payload[f"{field_name}_commitment"] = "sha256:" + sha256_hex(canonicalize(value))
+        if extra_payload:
+            for key, value in extra_payload.items():
+                payload.setdefault(key, value)
+
+        return self.record(
+            record_type="incident_card",
+            payload=payload,
+            entity_refs=entity_refs,
+            confidentiality=confidentiality,
+            obligation_role=obligation_role,
+            timestamp=timestamp,
+            record_id=record_id,
+        )
 
     def sign(self, key: str, *, method: str = "jws") -> None:
         """Mark this package for signing during export.
