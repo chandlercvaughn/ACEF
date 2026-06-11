@@ -238,6 +238,24 @@ def _issuer_constraint_violation(issuer: Certificate, *, ca_certs_below: int) ->
     return None
 
 
+def _path_length_exposure(chain: list[Certificate], issuer_index: int) -> int:
+    """Count CA certs below ``chain[issuer_index]`` that consume pathLen budget.
+
+    RFC 5280 §6.1.4(l): ``max_path_length`` is decremented only for
+    certificates that are NOT self-issued. A certificate is self-issued
+    when the same name appears in its OWN subject and issuer fields
+    (§6.1) — the CA key-rollover shape. Such certs MUST NOT count
+    against a superior CA's pathLenConstraint.
+
+    The certificates below the issuer are ``chain[1 .. issuer_index-1]``:
+    the leaf at ``chain[0]`` never counts (it issues nothing), and each
+    self-issued intermediate is excluded. Pass
+    ``issuer_index=len(chain)`` for a trust anchor acting as the issuer
+    of the chain's final certificate.
+    """
+    return sum(1 for cert in chain[1:issuer_index] if cert.subject != cert.issuer)
+
+
 def verify_x5c_chain(
     x5c: list[str],
     *,
@@ -338,10 +356,11 @@ def verify_x5c_chain(
                 f"x5c[{idx}] issuer name does not match x5c[{idx + 1}] subject (broken name chaining)",
                 code="ACEF-012",
             )
-        # The issuer at index idx+1 has the certs chain[1..idx] (idx CA
-        # certs) between itself and the leaf — that is its pathLenConstraint
-        # exposure.
-        violation = _issuer_constraint_violation(issuer, ca_certs_below=idx)
+        # The issuer at index idx+1 has the certs chain[1..idx] between
+        # itself and the leaf; its pathLenConstraint exposure counts only
+        # the NON-self-issued ones (RFC 5280 §6.1.4(l) — key-rollover
+        # certs with subject == issuer are excluded).
+        violation = _issuer_constraint_violation(issuer, ca_certs_below=_path_length_exposure(chain, idx + 1))
         if violation is not None:
             raise ACEFSigningError(
                 f"x5c[{idx + 1}] cannot act as an issuer: {violation}",
@@ -352,8 +371,9 @@ def verify_x5c_chain(
     # one of them (by DER equality) OR be signed by one of them. An anchor
     # matched via the signed-by rule acts as the ISSUER of the chain tail,
     # so it must satisfy the same X.509 issuer constraints (CA bits + name
-    # chaining + path_length over the len(chain)-1 CA certs below it); an
-    # anchor failing them simply does not anchor this chain.
+    # chaining + path_length over the NON-self-issued CA certs below it,
+    # per RFC 5280 §6.1.4(l)); an anchor failing them simply does not
+    # anchor this chain.
     if trust_anchors is not None:
         if not trust_anchors:
             raise ACEFSigningError(
@@ -366,10 +386,11 @@ def verify_x5c_chain(
         if tail_der in anchor_ders:
             anchored = True
         else:
+            anchor_exposure = _path_length_exposure(chain, len(chain))
             anchored = any(
                 _verify_cert_signed_by(tail, anchor)
                 and tail.issuer == anchor.subject
-                and _issuer_constraint_violation(anchor, ca_certs_below=len(chain) - 1) is None
+                and _issuer_constraint_violation(anchor, ca_certs_below=anchor_exposure) is None
                 for anchor in trust_anchors
             )
         if not anchored:

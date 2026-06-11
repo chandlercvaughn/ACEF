@@ -594,6 +594,128 @@ class TestIssuerPathConstraints:
 
 
 # --------------------------------------------------------------------------
+# RFC 5280 §6.1.4(l) self-issued exclusion (roborev Medium on 0d58e656):
+# pathLenConstraint processing decrements max_path_length only for certs
+# that are NOT self-issued (subject == issuer on the SAME cert). A CA key-
+# rollover cert (same DN as the CA, new key, signed by the old key) is
+# self-issued and MUST NOT consume path-length budget — otherwise a valid
+# rollover chain under a path_length=0 root is falsely rejected.
+# --------------------------------------------------------------------------
+
+
+def _build_rollover_chain() -> tuple[ec.EllipticCurvePrivateKey, list[x509.Certificate]]:
+    """leaf <- self-issued rollover <- root, all under ONE CA name.
+
+    The root is "rollover-ca" with pathLenConstraint=0. The rollover cert
+    carries the SAME name in BOTH subject and issuer (self-issued per RFC
+    5280 §6.1: subject == issuer field on that cert) with a NEW key, signed
+    by the root's old key — the classic key-rollover shape. Per §6.1.4(l)
+    it is excluded from path-length processing, so the pl=0 root is NOT
+    violated by it.
+
+    Returns (leaf_private_key, [leaf, rollover, root]).
+    """
+    old_key = _make_key()
+    new_key = _make_key()
+    leaf_key = _make_key()
+    root = _make_cert(
+        "rollover-ca",
+        public_key=old_key.public_key(),
+        signing_key=old_key,
+        basic_constraints=x509.BasicConstraints(ca=True, path_length=0),
+        key_usage=_ca_key_usage(),
+    )
+    rollover = _make_cert(
+        "rollover-ca",  # subject == issuer (issuer_cn defaults to subject_cn)
+        public_key=new_key.public_key(),
+        signing_key=old_key,
+        basic_constraints=x509.BasicConstraints(ca=True, path_length=0),
+        key_usage=_ca_key_usage(),
+    )
+    leaf = _make_cert(
+        "rollover-leaf",
+        public_key=leaf_key.public_key(),
+        signing_key=new_key,
+        issuer_cn="rollover-ca",
+    )
+    return leaf_key, [leaf, rollover, root]
+
+
+class TestSelfIssuedPathLengthExclusion:
+    def test_self_issued_rollover_under_path_length_zero_root_verifies(self) -> None:
+        """In-chain issuer check: root(pl=0) <- self-issued rollover <- leaf
+        is a VALID RFC 5280 path (the rollover cert is excluded from
+        path-length processing) and MUST verify as anchored."""
+        leaf_key, chain = _build_rollover_chain()
+        result = verify_x5c_chain(
+            [_b64(c) for c in chain],
+            manifest_timestamp=MANIFEST_TS,
+            trust_anchors=[chain[-1]],
+        )
+        assert result.public_numbers() == leaf_key.public_key().public_numbers()  # type: ignore[union-attr]
+
+    def test_self_issued_rollover_signed_by_anchor_verifies(self) -> None:
+        """Signed-by-anchor branch: wire chain [leaf, rollover] whose tail is
+        signed BY the pl=0 root anchor. The rollover cert is self-issued, so
+        the anchor's path-length exposure is 0, not len(chain)-1=1 — the
+        chain MUST anchor."""
+        leaf_key, chain = _build_rollover_chain()
+        leaf, rollover, root = chain
+        result = verify_x5c_chain(
+            [_b64(leaf), _b64(rollover)],  # root omitted from the wire chain
+            manifest_timestamp=MANIFEST_TS,
+            trust_anchors=[root],
+        )
+        assert result.public_numbers() == leaf_key.public_key().public_numbers()  # type: ignore[union-attr]
+
+    def test_non_self_issued_intermediate_below_rollover_still_counts(self) -> None:
+        """The exclusion is NARROW: a NON-self-issued intermediate (distinct
+        subject) below the pl=0 root still consumes path-length budget even
+        when a self-issued rollover cert sits alongside it — the chain MUST
+        be rejected."""
+        old_key = _make_key()
+        new_key = _make_key()
+        inter_key = _make_key()
+        leaf_key = _make_key()
+        root = _make_cert(
+            "rollover-ca",
+            public_key=old_key.public_key(),
+            signing_key=old_key,
+            basic_constraints=x509.BasicConstraints(ca=True, path_length=0),
+            key_usage=_ca_key_usage(),
+        )
+        rollover = _make_cert(
+            "rollover-ca",
+            public_key=new_key.public_key(),
+            signing_key=old_key,
+            basic_constraints=x509.BasicConstraints(ca=True, path_length=0),
+            key_usage=_ca_key_usage(),
+        )
+        real_inter = _make_cert(
+            "subordinate-ca",
+            public_key=inter_key.public_key(),
+            signing_key=new_key,
+            issuer_cn="rollover-ca",
+            basic_constraints=x509.BasicConstraints(ca=True, path_length=0),
+            key_usage=_ca_key_usage(),
+        )
+        leaf = _make_cert(
+            "subordinate-leaf",
+            public_key=leaf_key.public_key(),
+            signing_key=inter_key,
+            issuer_cn="subordinate-ca",
+        )
+        with pytest.raises(ACEFSigningError) as excinfo:
+            verify_x5c_chain(
+                [_b64(leaf), _b64(real_inter), _b64(rollover), _b64(root)],
+                manifest_timestamp=MANIFEST_TS,
+                trust_anchors=[root],
+            )
+        assert excinfo.value.code == "ACEF-012"
+        assert "path_length" in str(excinfo.value)
+
+
+# --------------------------------------------------------------------------
 # verify_detached_jws threads trust_anchors into verify_x5c_chain.
 # --------------------------------------------------------------------------
 
