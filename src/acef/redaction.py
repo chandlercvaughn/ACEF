@@ -332,15 +332,11 @@ def redact_record(
 
     Raises:
         ACEFFormatError: If ``method`` is not a documented redaction
-            method (ACEF-004), or the source record's timestamp is not
-            ISO 8601 (ACEF-050, policy mode).
+            method (ACEF-004, legacy mode only — in policy mode ``method``
+            is ignored and ``policy.method`` governs, validated on the
+            :class:`RedactionPolicy` model itself), or the source record's
+            timestamp is not ISO 8601 (ACEF-050, policy mode).
     """
-    if method not in _SUPPORTED_REDACTION_METHODS:
-        raise ACEFFormatError(
-            f"Unsupported redaction method: {method!r}. Supported methods: {sorted(_SUPPORTED_REDACTION_METHODS)}",
-            code="ACEF-004",
-        )
-
     if policy is not None:
         # ---- Policy mode (v1.1): canonical commitment + X1/X2 + attestation.
         redacted_payload, attestation = apply_redaction(
@@ -366,6 +362,16 @@ def redact_record(
         return redacted, attestation
 
     # ---- Legacy mode (v1.0-era): hash commitment without X1/X2.
+    # ``method`` is only consulted on this branch — validating it before the
+    # policy branch made policy-mode calls fail on an otherwise-ignored
+    # value (roborev finding on bba166b4, e.g. via
+    # ``redact_package(..., policy=..., method=...)``).
+    if method not in _SUPPORTED_REDACTION_METHODS:
+        raise ACEFFormatError(
+            f"Unsupported redaction method: {method!r}. Supported methods: {sorted(_SUPPORTED_REDACTION_METHODS)}",
+            code="ACEF-004",
+        )
+
     payload_canonical = canonicalize(record.payload)
     payload_hash = sha256_hex(payload_canonical)
 

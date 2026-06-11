@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import pytest
 
+from acef.errors import ACEFFormatError
 from acef.integrity import canonicalize, sha256_hex
 from acef.models.enums import Confidentiality
 from acef.models.records import RecordEnvelope
@@ -90,6 +91,17 @@ class TestRedactRecordLegacyMode:
         assert redacted.redaction_attestation_ref is None
         assert attestation is None
 
+    def test_legacy_mode_rejects_unsupported_method(self):
+        """Legacy mode (no policy) still validates ``method``: misspellings
+        raise ACEF-004 rather than minting records labeled with a method
+        downstream tools cannot interpret (guard for roborev bba166b4 #2 —
+        moving the check into the legacy branch must not weaken it)."""
+        with pytest.raises(ACEFFormatError) as exc_info:
+            redact_record(_make_record(), method="not-a-real-method")
+
+        assert exc_info.value.code == "ACEF-004"
+        assert "not-a-real-method" in str(exc_info.value)
+
 
 class TestRedactRecordPolicyMode:
     """VAL-FIX-REDACT-002 — policy mode sets X1/X2 + mints the attestation."""
@@ -163,6 +175,27 @@ class TestRedactRecordPolicyMode:
         assert attestation is not None
         assert attestation.record_id == "urn:acef:rec:00000000-0000-4000-8000-000000000042"
         assert redacted.redaction_attestation_ref == attestation.record_id
+
+    def test_legacy_method_argument_ignored_in_policy_mode(self):
+        """RED (roborev bba166b4 #2): when ``policy`` is supplied,
+        ``policy.method`` governs and the legacy ``method`` argument is
+        documented as ignored — so an unsupported ``method`` value must NOT
+        raise. Today the legacy validation runs before the policy branch and
+        rejects the call."""
+        original = _make_record()
+        redacted, attestation = redact_record(
+            original,
+            policy=RedactionPolicy(version="1.0.0"),
+            method="not-a-real-method",
+        )
+
+        assert attestation is not None
+        assert redacted.redaction_policy_version == "1.0.0"
+        # policy.method (validated on the RedactionPolicy model) governs the
+        # commitment label — never the ignored legacy argument.
+        assert redacted.redaction_method is not None
+        assert redacted.redaction_method.startswith("sha256-hash-commitment:")
+        assert "not-a-real-method" not in redacted.redaction_method
 
 
 class TestVerifyRedaction:
@@ -325,3 +358,22 @@ class TestRedactPackagePolicyMode:
         redacted_pkg = redact_package(pkg, record_filter={"record_types": ["risk_register"]})
         assert len(redacted_pkg.records) == 1
         assert redacted_pkg.records[0].confidentiality == Confidentiality.PUBLIC
+
+    def test_policy_mode_ignores_legacy_method_argument(self):
+        """RED (roborev bba166b4 #2): ``redact_package(..., policy=...,
+        method=<unsupported>)`` must succeed — ``policy.method`` governs and
+        the legacy ``method`` argument is ignored in policy mode."""
+        pkg = self._v1_1_pkg()
+        pkg.record("risk_register", payload={"secret": "S"})
+
+        redacted_pkg = redact_package(
+            pkg,
+            record_filter={"record_types": ["risk_register"]},
+            policy=RedactionPolicy(version="2.0.0"),
+            method="not-a-real-method",
+        )
+
+        rr = next(r for r in redacted_pkg.records if r.record_type == "risk_register")
+        assert rr.redaction_policy_version == "2.0.0"
+        assert rr.redaction_method is not None
+        assert rr.redaction_method.startswith("sha256-hash-commitment:")

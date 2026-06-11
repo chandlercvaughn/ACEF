@@ -30,6 +30,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+from pydantic import ValidationError
+
 from acef.integrity import canonicalize, sha256_hex
 from acef.models.enums import Confidentiality
 from acef.package import Package
@@ -299,6 +302,85 @@ def test_regulator_only_payload_is_retained(tmp_path: Path) -> None:
     rec = next(r for r in pkg.records if r.record_type == "risk_register")
     assert rec.redaction_policy_version == "1.0.0"
     assert rec.redaction_attestation_ref is not None
+
+
+# ---------------------------------------------------------------------------
+# roborev follow-up on bba166b4 (finding 1, MEDIUM — partial mutation):
+# Package.record appended the minted redaction attestation to pkg.records
+# BEFORE constructing the primary RecordEnvelope. If envelope construction
+# then raised, the package was left mutated with an ORPHAN attestation whose
+# X2 consumer was never added. The append must be atomic: nothing lands in
+# pkg.records unless the primary envelope construction succeeds, and on the
+# success path the ordering (attestation, then primary) is unchanged.
+# ---------------------------------------------------------------------------
+
+
+def _build_atomicity_package() -> Package:
+    """v1.1 package with an attached policy and no records yet."""
+    pkg = Package(
+        producer={"name": "atomic-append-test", "version": "1.0.0"},
+        redaction_policy=RedactionPolicy(version="1.0.0"),
+    )
+    pkg.versioning.core_version = "1.1.0"
+    pkg.add_subject(
+        subject_type="ai_system",
+        name="AtomicSystem",
+        risk_classification="minimal-risk",
+    )
+    return pkg
+
+
+def test_failed_envelope_construction_leaves_no_orphan_attestation() -> None:
+    """RED (roborev bba166b4 #1): a record_id that passes the redaction block
+    untouched (it is only validated by RecordEnvelope construction, which runs
+    AFTER the attestation was minted and appended) must not leave the package
+    mutated. Before the fix: pkg.records grows by 1 — an orphan event_log
+    attestation for a record that was never added."""
+    pkg = _build_atomicity_package()
+    record_ids_before = [r.record_id for r in pkg.records]
+
+    with pytest.raises(ValidationError):
+        pkg.record(
+            "risk_register",
+            payload={"description": "secret content"},
+            confidentiality=Confidentiality.HASH_COMMITTED,
+            # Invalid on purpose: an int is rejected by the RecordEnvelope
+            # model (pydantic str field, no int→str coercion) but flows
+            # through record_id resolution and the redaction block untouched.
+            record_id=12345,
+        )
+
+    record_ids_after = [r.record_id for r in pkg.records]
+    assert record_ids_after == record_ids_before, (
+        "Package.record mutated pkg.records despite raising: "
+        f"{len(record_ids_before)} record(s) before, {len(record_ids_after)} after. "
+        "An orphan redaction attestation was appended for a record that was "
+        "never added (roborev bba166b4 finding 1)."
+    )
+    orphan_attestations = [
+        r for r in pkg.records if r.record_type == "event_log" and r.payload.get("event_type") == "redaction"
+    ]
+    assert orphan_attestations == [], (
+        f"Found {len(orphan_attestations)} orphan redaction attestation(s) after a failed Package.record call."
+    )
+
+
+def test_success_path_appends_attestation_then_primary_record() -> None:
+    """Ordering/audit-trail lock: on the success path the atomic append keeps
+    the pre-fix semantics — the minted attestation precedes the primary
+    record in pkg.records, and the primary's X2 points at it."""
+    pkg = _build_atomicity_package()
+    rec = pkg.record(
+        "risk_register",
+        payload={"description": "secret content"},
+        confidentiality=Confidentiality.HASH_COMMITTED,
+    )
+
+    record_ids = [r.record_id for r in pkg.records]
+    assert record_ids == [rec.redaction_attestation_ref, rec.record_id], (
+        "Expected exactly [attestation, primary] in pkg.records after a "
+        f"successful redacted Package.record call; got {record_ids!r}"
+    )
 
 
 def test_explicit_attestation_ref_payload_passthrough(tmp_path: Path) -> None:

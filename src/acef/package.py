@@ -906,6 +906,12 @@ class Package:
         # ------------------------------------------------------------------
         resolved_policy_version: str | None = redaction_policy_version
         resolved_attestation_ref: str | None = redaction_attestation_ref
+        # The auto-minted event_log attestation (if any) is HELD here and
+        # only appended together with the primary record once the
+        # RecordEnvelope construction below succeeds — a failing
+        # construction must leave the package unmutated (no orphan
+        # attestation; roborev finding on bba166b4).
+        pending_attestation: RecordEnvelope | None = None
 
         is_non_public = confidentiality != Confidentiality.PUBLIC
 
@@ -973,7 +979,12 @@ class Package:
                     clock=self._clock,
                     urn_generator=self._urn_generator,
                 )
-                self._records.append(attestation_record)
+                # Held locally; appended only AFTER the primary envelope
+                # constructs successfully (atomic append below). Appending
+                # here left an ORPHAN attestation in self._records whenever
+                # RecordEnvelope construction raised (roborev partial-
+                # mutation finding on bba166b4).
+                pending_attestation = attestation_record
                 resolved_attestation_ref = attestation_record.record_id
 
                 if confidentiality in (
@@ -1011,6 +1022,12 @@ class Package:
             redaction_attestation_ref=resolved_attestation_ref,
         )
 
+        # Atomic append: nothing is added to the package unless the primary
+        # envelope constructed successfully. The attestation precedes the
+        # primary record, preserving the pre-existing success-path ordering
+        # (and therefore export/audit semantics).
+        if pending_attestation is not None:
+            self._records.append(pending_attestation)
         self._records.append(envelope)
         return envelope
 
