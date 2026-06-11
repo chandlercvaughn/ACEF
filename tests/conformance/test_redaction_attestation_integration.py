@@ -13,15 +13,27 @@ must:
 4. The validator (``validate_bundle``) MUST NOT emit ACEF-074 or ACEF-078
    for this bundle — the auto-populated fields satisfy the cross-record
    policy/attestation checks.
+
+VAL-FIX-REDACT-001/003/004 (audit findings redaction-1/-3/-4) extend this
+file with strip assertions: a ``hash-committed`` / ``redacted`` record built
+through ``Package.record`` MUST persist the redacted (commitment-shaped)
+payload, NOT the source cleartext, and the stored payload bytes MUST hash to
+the attestation's ``redacted_payload_hash``. Access-class confidentiality
+levels (``regulator-only`` / ``under-nda``) retain the full payload — the
+RFC-0002 incident machinery reads ``incident_report.card_source`` from
+regulator-only records, so those are distribution restrictions, not content
+transforms.
 """
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
+from acef.integrity import canonicalize, sha256_hex
 from acef.models.enums import Confidentiality
 from acef.package import Package
-from acef.redaction import RedactionPolicy
+from acef.redaction import RedactionPolicy, verify_redaction
 from acef.validation.engine import validate_bundle
 
 
@@ -161,3 +173,152 @@ def test_explicit_redaction_policy_version_overrides_auto(tmp_path: Path) -> Non
     )
     assert rec.redaction_policy_version == "9.9.9"
     assert rec.redaction_attestation_ref == explicit_ref
+
+
+# ---------------------------------------------------------------------------
+# VAL-FIX-REDACT-001 / -003 / -004 (audit findings redaction-1/-3/-4):
+# the stored payload of a hash-committed / redacted Package.record output
+# MUST be the redacted commitment, never the source cleartext, and MUST
+# hash to the attestation's redacted_payload_hash.
+# ---------------------------------------------------------------------------
+
+_SECRET_TOKEN = "TOPSECRET-AUDIT-R1-token"
+_SECRET_PAYLOAD = {"description": f"{_SECRET_TOKEN} sensitive risk content", "score": 87}
+
+
+def _read_records_raw(bundle_dir: Path) -> str:
+    """Concatenate the raw on-disk bytes of every records/*.jsonl file."""
+    return "".join(f.read_text(encoding="utf-8") for f in sorted((bundle_dir / "records").glob("*.jsonl")))
+
+
+def _build_secret_bundle(
+    bundle_dir: Path,
+    confidentiality: Confidentiality,
+) -> Package:
+    """Build + export a v1.1 bundle with one secret-bearing non-public record."""
+    policy = RedactionPolicy(version="1.0.0")
+    pkg = Package(
+        producer={"name": "strip-assertion-test", "version": "1.0.0"},
+        redaction_policy=policy,
+    )
+    pkg.versioning.core_version = "1.1.0"
+    pkg.add_subject(
+        subject_type="ai_system",
+        name="StripTestSystem",
+        risk_classification="minimal-risk",
+    )
+    pkg.record(
+        "risk_register",
+        payload=dict(_SECRET_PAYLOAD),
+        confidentiality=confidentiality,
+    )
+    pkg.export(str(bundle_dir))
+    return pkg
+
+
+def _stored_record_and_attestation(raw: str) -> tuple[dict, dict]:
+    """Parse exported JSONL; return (risk_register record, redaction attestation)."""
+    records = [json.loads(line) for line in raw.splitlines() if line.strip()]
+    rr = next(r for r in records if r["record_type"] == "risk_register")
+    att = next(r for r in records if r["record_type"] == "event_log" and r["payload"].get("event_type") == "redaction")
+    return rr, att
+
+
+def test_hash_committed_export_does_not_contain_cleartext(tmp_path: Path) -> None:
+    """redaction-1 RED: the exported JSONL of a hash-committed record built via
+    Package.record must NOT contain the source secret tokens."""
+    bundle_dir = tmp_path / "hc.acef"
+    _build_secret_bundle(bundle_dir, Confidentiality.HASH_COMMITTED)
+
+    raw = _read_records_raw(bundle_dir)
+    assert _SECRET_TOKEN not in raw, (
+        "'claimed redacted, actually raw': the source secret survived into the "
+        "exported records/*.jsonl of a hash-committed record (audit finding redaction-1)."
+    )
+
+
+def test_redacted_export_does_not_contain_cleartext(tmp_path: Path) -> None:
+    """confidentiality='redacted' must also strip per the attached policy."""
+    bundle_dir = tmp_path / "red.acef"
+    _build_secret_bundle(bundle_dir, Confidentiality.REDACTED)
+
+    raw = _read_records_raw(bundle_dir)
+    assert _SECRET_TOKEN not in raw, (
+        "'claimed redacted, actually raw': the source secret survived into the "
+        "exported records/*.jsonl of a redacted record (audit finding redaction-1)."
+    )
+
+
+def test_stored_payload_hashes_to_attestation_redacted_payload_hash(tmp_path: Path) -> None:
+    """redaction-3: stored payload bytes == what the X2 attestation describes.
+
+    sha256(JCS(stored payload)) MUST equal the attestation's
+    ``redacted_payload_hash`` — the attestation must describe bytes that are
+    actually persisted, not a discarded intermediate.
+    """
+    bundle_dir = tmp_path / "hc-hash.acef"
+    _build_secret_bundle(bundle_dir, Confidentiality.HASH_COMMITTED)
+
+    rr, att = _stored_record_and_attestation(_read_records_raw(bundle_dir))
+    stored_hash = sha256_hex(canonicalize(rr["payload"]))
+    assert stored_hash == att["payload"]["redacted_payload_hash"], (
+        f"Stored payload hashes to {stored_hash!r} but the attestation's "
+        f"redacted_payload_hash is {att['payload']['redacted_payload_hash']!r} — "
+        "the attestation describes bytes that were never stored."
+    )
+    # The X2 wiring must point at this attestation.
+    assert rr["redaction_attestation_ref"] == att["record_id"]
+
+
+def test_hash_committed_record_redaction_method_and_verify(tmp_path: Path) -> None:
+    """The stored record carries a usable redaction_method commitment:
+    verify_redaction(record, original_payload) recomputes and matches."""
+    bundle_dir = tmp_path / "hc-verify.acef"
+    pkg = _build_secret_bundle(bundle_dir, Confidentiality.HASH_COMMITTED)
+
+    rec = next(r for r in pkg.records if r.record_type == "risk_register")
+    assert rec.redaction_method is not None and rec.redaction_method.startswith("sha256-hash-commitment:"), (
+        f"redaction_method must carry the method:original-hash commitment; got {rec.redaction_method!r}"
+    )
+    assert verify_redaction(rec, dict(_SECRET_PAYLOAD)) is True
+    wrong = {"description": "completely different", "score": 1}
+    assert verify_redaction(rec, wrong) is False
+
+
+def test_regulator_only_payload_is_retained(tmp_path: Path) -> None:
+    """Access-class levels (regulator-only/under-nda) are distribution
+    restrictions, NOT content transforms: the payload MUST survive so the
+    privileged consumer (e.g. RFC-0002 incident_report.card_source readers)
+    can read it. X1/X2 are still populated (ACEF-074 applies to all
+    non-public records)."""
+    bundle_dir = tmp_path / "reg.acef"
+    pkg = _build_secret_bundle(bundle_dir, Confidentiality.REGULATOR_ONLY)
+
+    raw = _read_records_raw(bundle_dir)
+    assert _SECRET_TOKEN in raw, "regulator-only payload must be retained for the privileged consumer"
+    rec = next(r for r in pkg.records if r.record_type == "risk_register")
+    assert rec.redaction_policy_version == "1.0.0"
+    assert rec.redaction_attestation_ref is not None
+
+
+def test_explicit_attestation_ref_payload_passthrough(tmp_path: Path) -> None:
+    """When the caller supplies X1+X2 explicitly, the SDK does not mint an
+    attestation and stores the caller's payload verbatim — the caller owns
+    pre-redaction in that flow (documented)."""
+    policy = RedactionPolicy(version="1.0.0")
+    pkg = Package(
+        producer={"name": "explicit-passthrough", "version": "1.0.0"},
+        redaction_policy=policy,
+    )
+    pkg.versioning.core_version = "1.1.0"
+    pkg.add_subject(subject_type="ai_system", name="X", risk_classification="minimal-risk")
+
+    pre_redacted = {"redaction_method": "sha256-hash-commitment", "redacted_payload_hash": "0" * 64}
+    rec = pkg.record(
+        "risk_register",
+        payload=dict(pre_redacted),
+        confidentiality=Confidentiality.HASH_COMMITTED,
+        redaction_policy_version="1.0.0",
+        redaction_attestation_ref="urn:acef:rec:caller-supplied-attestation",
+    )
+    assert rec.payload == pre_redacted

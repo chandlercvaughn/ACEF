@@ -23,7 +23,7 @@ class TestRedaction:
         but replaces the payload."""
         pkg = build_minimal_package()
         original = pkg.records[0]
-        redacted = redact_record(original)
+        redacted, _ = redact_record(original)
 
         assert redacted.record_id == original.record_id
         assert redacted.record_type == original.record_type
@@ -37,7 +37,7 @@ class TestRedaction:
         """The redacted payload contains a sha256 hash commitment."""
         pkg = build_minimal_package()
         original = pkg.records[0]
-        redacted = redact_record(original)
+        redacted, _ = redact_record(original)
 
         commitment = redacted.payload.get("_commitment", "")
         assert commitment.startswith("sha256:"), f"Commitment must start with 'sha256:', got: {commitment}"
@@ -52,7 +52,7 @@ class TestRedaction:
         pkg = build_minimal_package()
         original = pkg.records[0]
         original_payload = dict(original.payload)
-        redacted = redact_record(original)
+        redacted, _ = redact_record(original)
 
         assert verify_redaction(redacted, original_payload) is True
 
@@ -60,7 +60,7 @@ class TestRedaction:
         """verify_redaction returns False when given an incorrect payload."""
         pkg = build_minimal_package()
         original = pkg.records[0]
-        redacted = redact_record(original)
+        redacted, _ = redact_record(original)
 
         wrong_payload = {"description": "COMPLETELY DIFFERENT DATA"}
         assert verify_redaction(redacted, wrong_payload) is False

@@ -757,10 +757,22 @@ class Package:
         Args:
             record_type: One of the 16 ACEF v1 record types.
             provisions: Regulatory provisions this evidence supports.
-            payload: The type-specific evidence payload.
+            payload: The type-specific evidence payload. For v1.1 packages
+                with confidentiality ``redacted`` / ``hash-committed`` on
+                the auto-attestation path, the STORED payload is the
+                redacted hash-commitment produced by
+                :func:`acef.redaction.apply_redaction` — the source
+                cleartext is never persisted (VAL-FIX-REDACT-001). Callers
+                who pass ``redaction_attestation_ref`` explicitly own
+                their own pre-redaction and their payload is stored
+                verbatim.
             obligation_role: Who produced this evidence.
             entity_refs: Links to subjects, components, datasets, actors.
-            confidentiality: Evidence confidentiality level.
+            confidentiality: Evidence confidentiality level. ``redacted``
+                and ``hash-committed`` are redaction transforms (payload
+                replaced, see ``payload`` above); ``regulator-only`` and
+                ``under-nda`` are access-class restrictions (payload
+                retained for the privileged consumer).
             trust_level: Evidence trust provenance.
             lifecycle_phase: Which lifecycle phase this relates to.
             collector: Tool/person that collected this evidence.
@@ -850,6 +862,12 @@ class Package:
 
         resolved_record_id = record_id if record_id is not None else self._mint_record_urn()
 
+        # The payload that will actually be stored in the envelope. For
+        # redaction-transform confidentiality levels (redacted /
+        # hash-committed) on the auto-attestation path below, this is
+        # REPLACED with the redacted commitment payload (VAL-FIX-REDACT-001).
+        resolved_payload: dict[str, Any] = payload or {}
+
         # ------------------------------------------------------------------
         # VAL-REDACTION-003 — auto-populate X1/X2 on non-public records.
         #
@@ -871,6 +889,20 @@ class Package:
         #      acef.redaction.apply_redaction). The attestation record
         #      reuses the Core event_log record_type — no vendor
         #      namespace is introduced (VAL-REDACTION-004).
+        #
+        #   3. VAL-FIX-REDACT-001 (audit finding redaction-1): when the
+        #      confidentiality level is a redaction TRANSFORM (redacted /
+        #      hash-committed) and the SDK mints the attestation itself,
+        #      the STORED payload is the redacted commitment returned by
+        #      apply_redaction — never the source cleartext — so the
+        #      stored bytes hash to the attestation's
+        #      redacted_payload_hash. Access-CLASS levels (regulator-only
+        #      / under-nda) retain the full payload: they are distribution
+        #      restrictions, not content transforms (the RFC-0002 incident
+        #      machinery reads incident_report.card_source from
+        #      regulator-only records). Callers who supply X2 explicitly
+        #      own their own pre-redaction: the payload is stored verbatim
+        #      in that flow.
         # ------------------------------------------------------------------
         resolved_policy_version: str | None = redaction_policy_version
         resolved_attestation_ref: str | None = redaction_attestation_ref
@@ -935,8 +967,8 @@ class Package:
                 # must not import at module load time.
                 from acef.redaction import apply_redaction
 
-                _redacted_payload, attestation_record = apply_redaction(
-                    payload or {},
+                redacted_payload, attestation_record = apply_redaction(
+                    resolved_payload,
                     policy,
                     clock=self._clock,
                     urn_generator=self._urn_generator,
@@ -944,11 +976,25 @@ class Package:
                 self._records.append(attestation_record)
                 resolved_attestation_ref = attestation_record.record_id
 
+                if confidentiality in (
+                    Confidentiality.REDACTED,
+                    Confidentiality.HASH_COMMITTED,
+                ):
+                    # VAL-FIX-REDACT-001/-004 (audit finding redaction-1):
+                    # store the redacted commitment, never the cleartext.
+                    # The attestation's redacted_payload_hash describes
+                    # exactly these bytes; its original_payload_hash
+                    # commits to the (unstored) source payload.
+                    resolved_payload = redacted_payload
+                    if redaction_method is None:
+                        original_hash = attestation_record.payload["original_payload_hash"]
+                        redaction_method = f"{policy.method}:{original_hash}"
+
         envelope = RecordEnvelope(
             record_id=resolved_record_id,
             record_type=record_type,
             provisions_addressed=provisions or [],
-            payload=payload or {},
+            payload=resolved_payload,
             obligation_role=obligation_role,
             entity_refs=entity_refs,
             confidentiality=confidentiality,
