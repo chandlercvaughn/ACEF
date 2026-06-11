@@ -445,11 +445,22 @@ def build_pass_canary_mode(root: Path) -> None:
         # v1.1 overlay still requires the badge_id / integrity_state /
         # evidence_chain_root_ref / freshness_state_ref set, but
         # public_artifact_link is NOT required for page_state='unsupported'.
+        #
+        # confidentiality is the ACCESS-class 'regulator-only' (NOT the
+        # transform-class 'redacted'): canary mode merely forbids PUBLIC
+        # disclosures, and this record retains its cleartext badge payload.
+        # Since fix-F-M2-REDACTION the validator routes 'redacted'/
+        # 'hash-committed' records carrying X1+X2 to commitment-shape
+        # validation (the stored payload must BE the apply_redaction
+        # commitment), so labeling this cleartext record 'redacted' would be
+        # the non-conformant "claimed redacted, actually raw" state and emit
+        # ACEF-004. X1/X2 stay populated — ACEF-074 requires X1 on every
+        # non-public record regardless of class.
         base_record(
             record_id=urn("rec", 70),
             record_type="transparency_disclosure",
             timestamp=FIXED_TIMESTAMP,
-            confidentiality="redacted",
+            confidentiality="regulator-only",
             redaction_policy_version="1.0.0",
             redaction_attestation_ref=urn("rec", 99),
             payload={

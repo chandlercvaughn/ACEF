@@ -27,6 +27,15 @@ from acef.validation.engine import validate_bundle
 
 _SECRET_TOKEN = "TOPSECRET-AUDIT-R2-token"
 
+# Schema-valid per acef-conventions/v1/dataset_card.schema.json (required:
+# dataset_name, dataset_version, source, modality).
+_PUBLIC_DATASET_CARD_PAYLOAD = {
+    "dataset_name": "open-data",
+    "dataset_version": "1.0.0",
+    "source": "public-corpus",
+    "modality": "text",
+}
+
 
 def _codes(diagnostics: list[dict]) -> list[str]:
     return [d.get("code") for d in diagnostics if isinstance(d, dict)]
@@ -49,7 +58,10 @@ def _build_v1_1_source_package() -> Package:
         "risk_register",
         payload={"description": f"{_SECRET_TOKEN} sensitive risk content", "score": 87},
     )
-    pkg.record("dataset_card", payload={"name": "open-data"})
+    # Schema-VALID public payload: the end-to-end test asserts FULL ACEF-004
+    # cleanliness (fix-F-M2-REDACTION), so the untouched public record must
+    # not contribute its own per-type violations.
+    pkg.record("dataset_card", payload=dict(_PUBLIC_DATASET_CARD_PAYLOAD))
     return pkg
 
 
@@ -57,8 +69,15 @@ def _read_records_raw(bundle_dir: Path) -> str:
     return "".join(f.read_text(encoding="utf-8") for f in sorted((bundle_dir / "records").glob("*.jsonl")))
 
 
-def test_redact_package_v1_1_end_to_end_no_acef_074_or_078(tmp_path: Path) -> None:
-    """Exported redact_package output validates with no ACEF-074 / ACEF-078."""
+def test_redact_package_v1_1_end_to_end_no_acef_074_078_or_004(tmp_path: Path) -> None:
+    """Exported redact_package output validates with no ACEF-074 / ACEF-078 /
+    ACEF-004.
+
+    The ACEF-004 assertion is fix-F-M2-REDACTION: the stored commitment shape
+    of a hash-committed record must be validated AS a commitment, not against
+    the per-record-type payload schema — a conformant redacted bundle is
+    FULLY clean, not merely clean of the X1/X2 cross-record codes.
+    """
     pkg = _build_v1_1_source_package()
     redacted_pkg = redact_package(pkg, record_filter={"record_types": ["risk_register"]})
 
@@ -70,6 +89,11 @@ def test_redact_package_v1_1_end_to_end_no_acef_074_or_078(tmp_path: Path) -> No
     assert "ACEF-074" not in emitted, f"redact_package output still missing X1 (redaction_policy_version): {emitted!r}"
     assert "ACEF-078" not in emitted, (
         f"redact_package output has an unresolvable X2 (redaction_attestation_ref): {emitted!r}"
+    )
+    offending = [d for d in assessment.structural_errors if isinstance(d, dict) and d.get("code") == "ACEF-004"]
+    assert offending == [], (
+        "redact_package output (commitment-shaped payload + X1/X2) must be "
+        f"clean of ACEF-004; got: {[(d.get('code'), d.get('message')) for d in offending]!r}"
     )
 
 
@@ -105,7 +129,7 @@ def test_redact_package_v1_1_payload_stripped_and_hash_matches(tmp_path: Path) -
     # Untouched records stay public and unmodified.
     dc = next(r for r in records if r["record_type"] == "dataset_card")
     assert dc["confidentiality"] == "public"
-    assert dc["payload"] == {"name": "open-data"}
+    assert dc["payload"] == _PUBLIC_DATASET_CARD_PAYLOAD
 
 
 def test_redact_package_v1_1_without_policy_raises(tmp_path: Path) -> None:

@@ -134,6 +134,30 @@ def test_validator_emits_no_acef_074_or_078(tmp_path: Path) -> None:
     )
 
 
+def test_validator_emits_no_acef_004_on_conformant_redacted_bundle(tmp_path: Path) -> None:
+    """fix-F-M2-REDACTION RED: a CONFORMANT redacted bundle must be clean of
+    ACEF-004.
+
+    Since F-M2-REDACTION the stored payload of a hash-committed/redacted
+    record is the commitment shape (redaction_method /
+    redacted_payload_hash / redaction_policy_version), so validating it
+    against the per-record-type schema (risk_register requires
+    risk_id/description/category) emitted spurious ACEF-004s. The validator
+    must route commitment-shaped payloads of X1+X2-bearing redacted records
+    to commitment-shape validation instead.
+    """
+    bundle_dir = tmp_path / "redacted-clean.acef"
+    _build_bundle_with_redacted_record(bundle_dir)
+
+    assessment = validate_bundle(bundle_dir)
+    offending = [d for d in assessment.structural_errors if isinstance(d, dict) and d.get("code") == "ACEF-004"]
+    assert offending == [], (
+        "A conformant redacted bundle (commitment-shaped payload + X1/X2) "
+        f"must validate clean of ACEF-004; got: "
+        f"{[(d.get('code'), d.get('message')) for d in offending]!r}"
+    )
+
+
 def test_record_without_redaction_policy_raises_when_non_public(tmp_path: Path) -> None:
     """Package without a redaction_policy + non-public record raises ValueError.
 

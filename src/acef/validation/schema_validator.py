@@ -6,10 +6,133 @@ Collects ALL errors within the phase before stopping.
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from acef.errors import ValidationDiagnostic
 from acef.schemas.registry import list_record_type_schemas, validate_against_schema
+
+# ---------------------------------------------------------------------------
+# Commitment-shaped payload validation (fix-F-M2-REDACTION).
+#
+# Since F-M2-REDACTION, a record whose ``confidentiality`` is
+# ``hash-committed`` or ``redacted`` STORES the commitment shape minted by
+# :func:`acef.redaction.apply_redaction` — NOT the cleartext payload::
+#
+#     {
+#         "redaction_method": "sha256-hash-commitment",
+#         "redacted_payload_hash": "<64 lowercase hex chars>",
+#         "redaction_policy_version": "<policy semver>",
+#         "access_policy": {...}   # optional
+#     }
+#
+# Validating that stored payload against the per-record-type schema is a
+# category error (a redacted risk_register has no ``risk_id`` BY DESIGN), so
+# a conformant redacted bundle emitted spurious ACEF-004s. Such records are
+# routed to commitment-shape validation instead.
+#
+# Routing is FAIL-CLOSED: the commitment route engages ONLY when the envelope
+# carries BOTH X1 (``redaction_policy_version``) and X2
+# (``redaction_attestation_ref``) as non-empty strings — the surface
+# ``Package.record`` / ``redact_record`` always emit alongside the commitment
+# (spec §6.3, enforced as ACEF-074/ACEF-078 by
+# ``acef.validation.cross_record``). A record merely LABELED
+# hash-committed/redacted without that surface falls through to per-type
+# payload validation and fails on a cleartext-looking payload — there is no
+# bypass lane for mislabeled records.
+# ---------------------------------------------------------------------------
+
+# Confidentiality levels whose stored payload is a content TRANSFORM (the
+# commitment). Access-class levels (regulator-only / under-nda) are
+# distribution restrictions that RETAIN the cleartext payload and keep
+# per-type validation.
+_COMMITMENT_CONFIDENTIALITY = frozenset({"hash-committed", "redacted"})
+
+# Mirrors ``acef.redaction._SUPPORTED_REDACTION_METHODS``. Kept local so the
+# validation layer does not import the redaction module (which transitively
+# imports the Package builder). A drift-guard test asserts the two sets stay
+# equal: tests/integration/test_commitment_payload_validation.py::
+# test_supported_method_sets_do_not_drift.
+_SUPPORTED_COMMITMENT_METHODS = frozenset({"sha256-hash-commitment"})
+
+# ``acef.integrity.sha256_hex`` mints BARE lowercase hex (no "sha256:"
+# prefix) — that is the producer shape ``apply_redaction`` stores.
+_SHA256_BARE_HEX_RE = re.compile(r"^[0-9a-f]{64}$")
+
+_COMMITMENT_REQUIRED_KEYS = frozenset({"redaction_method", "redacted_payload_hash", "redaction_policy_version"})
+_COMMITMENT_OPTIONAL_KEYS = frozenset({"access_policy"})
+
+
+def _is_commitment_routed(record: dict[str, Any]) -> bool:
+    """True when this record's payload must be the apply_redaction commitment.
+
+    Requires the transform-class confidentiality label AND both X1 and X2 as
+    non-empty strings on the envelope (fail-closed — see module comment).
+    """
+    if record.get("confidentiality") not in _COMMITMENT_CONFIDENTIALITY:
+        return False
+    x1 = record.get("redaction_policy_version")
+    x2 = record.get("redaction_attestation_ref")
+    return isinstance(x1, str) and bool(x1) and isinstance(x2, str) and bool(x2)
+
+
+def _commitment_shape_problems(payload: dict[str, Any]) -> list[tuple[str, str]]:
+    """Validate a payload against the commitment shape.
+
+    Returns ``(message, relative_json_pointer)`` pairs — empty means the
+    commitment is well-formed. Collects ALL problems (Phase-1 discipline).
+    """
+    problems: list[tuple[str, str]] = []
+
+    method = payload.get("redaction_method")
+    if not isinstance(method, str) or method not in _SUPPORTED_COMMITMENT_METHODS:
+        problems.append(
+            (
+                f"redaction_method must be one of {sorted(_SUPPORTED_COMMITMENT_METHODS)!r}; got {method!r}",
+                "/redaction_method",
+            )
+        )
+
+    payload_hash = payload.get("redacted_payload_hash")
+    if not isinstance(payload_hash, str) or not _SHA256_BARE_HEX_RE.match(payload_hash):
+        problems.append(
+            (
+                "redacted_payload_hash must be 64 lowercase hex characters "
+                f"(bare SHA-256 digest); got {payload_hash!r}",
+                "/redacted_payload_hash",
+            )
+        )
+
+    policy_version = payload.get("redaction_policy_version")
+    if not isinstance(policy_version, str) or not policy_version:
+        problems.append(
+            (
+                f"redaction_policy_version must be a non-empty string; got {policy_version!r}",
+                "/redaction_policy_version",
+            )
+        )
+
+    if "access_policy" in payload and not isinstance(payload["access_policy"], dict):
+        problems.append(
+            (
+                f"access_policy must be an object when present; got {payload['access_policy']!r}",
+                "/access_policy",
+            )
+        )
+
+    extras = sorted(set(payload) - _COMMITMENT_REQUIRED_KEYS - _COMMITMENT_OPTIONAL_KEYS)
+    if extras:
+        problems.append(
+            (
+                f"unexpected key(s) {extras!r} — a commitment payload must "
+                f"contain exactly {sorted(_COMMITMENT_REQUIRED_KEYS)!r} "
+                f"(plus optional {sorted(_COMMITMENT_OPTIONAL_KEYS)!r}); "
+                "leftover cleartext fields are not a valid redaction",
+                "",
+            )
+        )
+
+    return problems
 
 
 def validate_manifest_schema(
@@ -128,6 +251,21 @@ def validate_record_schemas(
                     path=f"/records/{i}/record_type",
                 )
             )
+            continue
+
+        # Commitment route (fail-closed — see module comment): a
+        # hash-committed/redacted record carrying BOTH X1 and X2 stores the
+        # apply_redaction commitment, not the cleartext payload. Validate
+        # the commitment shape itself; per-type validation does not apply.
+        if _is_commitment_routed(record):
+            for message, relative_pointer in _commitment_shape_problems(payload):
+                diagnostics.append(
+                    ValidationDiagnostic(
+                        "ACEF-004",
+                        f"Redaction commitment violation for {record_type} (record {i}): {message}",
+                        path=f"/records/{i}/payload{relative_pointer}",
+                    )
+                )
             continue
 
         payload_errors = validate_against_schema(payload, record_type, version)
