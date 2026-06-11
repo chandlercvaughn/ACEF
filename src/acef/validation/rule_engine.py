@@ -255,6 +255,19 @@ def _evaluate_single_rule(
                 signature_count=signature_count,
                 signature_algorithms=signature_algorithms,
             )
+        elif operator_name == "record_attested":
+            # Thread the bundle's metadata.timestamp so x5c-backed
+            # attestation cert validity is anchored to the manifest
+            # timestamp (spec §3.1.3: NOT wall-clock). An empty string
+            # (missing/malformed manifest scalar, coerced by
+            # engine._resolve_package_scalars) maps to None — the signing
+            # layer's documented skip-if-not-provided semantics — instead
+            # of failing every x5c attestation on a parse error.
+            passed, evidence_refs = operator_func(
+                rule.params,
+                filtered_records,
+                manifest_timestamp=package_timestamp or None,
+            )
         else:
             passed, evidence_refs = operator_func(rule.params, filtered_records)
 

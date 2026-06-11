@@ -556,7 +556,11 @@ def op_bundle_signed(
     return effective_count >= min_signatures, []
 
 
-def _attestation_verifies(rec: RecordEnvelope) -> bool:
+def _attestation_verifies(
+    rec: RecordEnvelope,
+    *,
+    manifest_timestamp: str | None = None,
+) -> bool:
     """Return True iff the record's attestation block cryptographically verifies.
 
     Normative recipe (spec §3.5 record_attested row + §3.1 attestation block):
@@ -572,13 +576,17 @@ def _attestation_verifies(rec: RecordEnvelope) -> bool:
     5. Verify the detached JWS over those canonical bytes.
        :func:`acef.signing.verify_detached_jws` enforces RS256/ES256 only
        (ACEF-013 for anything else), requires ``kid``, and resolves the
-       verification key from the header's embedded ``jwk`` / ``x5c``.
+       verification key from the header's embedded ``jwk`` / ``x5c``. For
+       x5c-backed attestations, ``manifest_timestamp`` (the bundle's
+       ``metadata.timestamp``) anchors the certificate-validity check per
+       spec §3.1.3 — expiry is checked against the manifest timestamp, NOT
+       wall-clock — so an expired or not-yet-valid chain does NOT count.
 
     Fail-closed: any failure (forged or tampered signature, unsupported
-    algorithm, unresolvable pointer, non-canonicalizable content) means the
-    record is NOT counted. A forged attestation is a non-match for the
-    existential operator, never an evaluation-engine error, so this helper
-    never raises.
+    algorithm, out-of-validity x5c chain, unresolvable pointer,
+    non-canonicalizable content) means the record is NOT counted. A forged
+    attestation is a non-match for the existential operator, never an
+    evaluation-engine error, so this helper never raises.
     """
     att = rec.attestation
     if att is None or not att.signature:
@@ -591,7 +599,7 @@ def _attestation_verifies(rec: RecordEnvelope) -> bool:
         record_dict = rec.to_jsonl_dict()
         subset = {pointer: jsonpointer.resolve_pointer(record_dict, pointer) for pointer in att.signed_fields}
         canonical = canonicalize(subset)
-        verify_detached_jws(att.signature, canonical)
+        verify_detached_jws(att.signature, canonical, manifest_timestamp=manifest_timestamp)
     except Exception:
         # Intentionally broad: a record carrying ANY unverifiable attestation
         # (ACEFSigningError, JsonPointerException, rfc8785 domain errors, …)
@@ -603,6 +611,8 @@ def _attestation_verifies(rec: RecordEnvelope) -> bool:
 def op_record_attested(
     params: dict[str, Any],
     records: list[RecordEnvelope],
+    *,
+    manifest_timestamp: str | None = None,
 ) -> tuple[bool, list[str]]:
     """record_attested: At least min_count records have VERIFIED attestation blocks.
 
@@ -613,6 +623,11 @@ def op_record_attested(
     ``signed_fields``, canonicalize via RFC 8785, verify the detached JWS
     (see :func:`_attestation_verifies` for the full normative recipe).
     Presence of a signature string is NOT sufficient.
+
+    ``manifest_timestamp`` is the bundle's ``metadata.timestamp``, threaded
+    in by the rule engine the same way ``bundle_signed`` receives signature
+    context. It anchors x5c certificate-validity checks (spec §3.1.3: cert
+    expiry is checked against the manifest timestamp, NOT wall-clock).
     """
     record_type = params["record_type"]
     min_count = params.get("min_count", 1)
@@ -621,7 +636,7 @@ def op_record_attested(
 
     evidence_refs: list[str] = []
     for rec in matching:
-        if _attestation_verifies(rec):
+        if _attestation_verifies(rec, manifest_timestamp=manifest_timestamp):
             evidence_refs.append(rec.record_id)
 
     return len(evidence_refs) >= min_count, evidence_refs

@@ -14,13 +14,22 @@ implementation and passes only when the operator actually verifies the JWS.
 
 from __future__ import annotations
 
+import base64
+import datetime
+
 import jsonpointer  # type: ignore[import-untyped]  # no published stubs / py.typed
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, rsa
+from cryptography.x509.oid import NameOID
 
 from acef.integrity import canonicalize
+from acef.models.enums import RuleOutcome
 from acef.models.records import Attestation, RecordEnvelope
 from acef.signing import create_detached_jws
+from acef.templates.models import EvaluationRule, Provision
 from acef.validation.operators import op_record_attested
+from acef.validation.rule_engine import evaluate_rules_for_subject
 
 
 def _make_record(
@@ -256,3 +265,178 @@ class TestExistentialSemanticsPreserved:
         passed, refs = op_record_attested({"record_type": "risk_register", "min_count": 1}, [])
         assert passed is False
         assert refs == []
+
+
+def _x5c_entry_and_key(
+    not_valid_before: datetime.datetime,
+    not_valid_after: datetime.datetime,
+) -> tuple[str, ec.EllipticCurvePrivateKey]:
+    """Self-signed P-256 cert with an EXPLICIT validity window, as a base64-DER
+    x5c entry (standard base64, NOT base64url) plus its private key.
+
+    Mirrors tests/integration/test_validate_bundle_malformed_input.py — the
+    x5c header (as opposed to an embedded jwk) is what forces
+    verify_detached_jws onto the verify_x5c_chain path, the ONLY consumer of
+    manifest_timestamp.
+    """
+    private_key = ec.generate_private_key(ec.SECP256R1())
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "acef-test-attestor")])
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(name)
+        .issuer_name(name)
+        .public_key(private_key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(not_valid_before)
+        .not_valid_after(not_valid_after)
+        .sign(private_key, hashes.SHA256())
+    )
+    cert_der = cert.public_bytes(serialization.Encoding.DER)
+    return base64.b64encode(cert_der).decode("ascii"), private_key
+
+
+def _x5c_attested_record(
+    not_valid_before: datetime.datetime,
+    not_valid_after: datetime.datetime,
+) -> RecordEnvelope:
+    """A risk_register record whose attestation JWS carries an x5c chain with
+    the given validity window, signed per the normative recipe."""
+    x5c_entry, private_key = _x5c_entry_and_key(not_valid_before, not_valid_after)
+    rec = _make_record()
+    record_dict = rec.to_jsonl_dict()
+    subset = {"/payload": jsonpointer.resolve_pointer(record_dict, "/payload")}
+    signature = create_detached_jws(
+        canonicalize(subset),
+        private_key,
+        kid="x5c-attestor-key",
+        x5c=[x5c_entry],
+    )
+    rec.attestation = Attestation(method="jws", signer="provider", signature=signature)
+    return rec
+
+
+def _attestation_provision() -> Provision:
+    return Provision(
+        provision_id="att-prov-1",
+        evaluation=[
+            EvaluationRule(
+                rule_id="att-prov-1-attested",
+                rule="record_attested",
+                params={"record_type": "risk_register", "min_count": 1},
+                severity="fail",
+                message="risk_register must carry a verified attestation",
+            )
+        ],
+    )
+
+
+# Cert validity window used throughout: 2024-01-01 .. 2026-01-01 UTC.
+_WINDOW_START = datetime.datetime(2024, 1, 1, tzinfo=datetime.UTC)
+_WINDOW_END = datetime.datetime(2026, 1, 1, tzinfo=datetime.UTC)
+_TS_INSIDE_WINDOW = "2025-06-01T00:00:00Z"
+_TS_AFTER_EXPIRY = "2027-06-01T00:00:00Z"
+_TS_BEFORE_VALIDITY = "2023-06-01T00:00:00Z"
+
+
+class TestX5cCertValidityAnchoredToManifestTimestamp:
+    """x5c-backed attestation cert validity MUST be checked against the
+    bundle's metadata.timestamp (spec §3.1.3: anchored to the manifest
+    timestamp, NOT wall-clock).
+
+    RED-first reproduction of roborev finding on cbc3bd33:
+    _attestation_verifies called verify_detached_jws WITHOUT
+    manifest_timestamp, so an expired or not-yet-valid x5c chain still made
+    record_attested pass.
+    """
+
+    def test_expired_x5c_cert_at_manifest_timestamp_not_counted(self) -> None:
+        rec = _x5c_attested_record(_WINDOW_START, _WINDOW_END)
+        passed, refs = op_record_attested(
+            {"record_type": "risk_register", "min_count": 1},
+            [rec],
+            manifest_timestamp=_TS_AFTER_EXPIRY,
+        )
+        assert passed is False
+        assert refs == []
+
+    def test_not_yet_valid_x5c_cert_at_manifest_timestamp_not_counted(self) -> None:
+        rec = _x5c_attested_record(_WINDOW_START, _WINDOW_END)
+        passed, refs = op_record_attested(
+            {"record_type": "risk_register", "min_count": 1},
+            [rec],
+            manifest_timestamp=_TS_BEFORE_VALIDITY,
+        )
+        assert passed is False
+        assert refs == []
+
+    def test_valid_window_x5c_cert_at_manifest_timestamp_counted(self) -> None:
+        rec = _x5c_attested_record(_WINDOW_START, _WINDOW_END)
+        passed, refs = op_record_attested(
+            {"record_type": "risk_register", "min_count": 1},
+            [rec],
+            manifest_timestamp=_TS_INSIDE_WINDOW,
+        )
+        assert passed is True
+        assert refs == [rec.record_id]
+
+    def test_omitted_manifest_timestamp_skips_validity_check(self) -> None:
+        """Backward compatibility: with no manifest timestamp anchor the
+        signing layer documents the validity check is skipped (signing.py
+        verify_x5c_chain: 'or skip if not provided'). Direct operator calls
+        without the kwarg keep their pre-fix behavior."""
+        rec = _x5c_attested_record(_WINDOW_START, _WINDOW_END)
+        passed, refs = op_record_attested(
+            {"record_type": "risk_register", "min_count": 1},
+            [rec],
+        )
+        assert passed is True
+        assert refs == [rec.record_id]
+
+
+class TestRuleEngineThreadsManifestTimestamp:
+    """The rule engine must hand the bundle's metadata.timestamp
+    (package_timestamp) to record_attested the same way bundle_signed gets
+    signature context — otherwise the operator can never enforce cert
+    validity during bundle validation."""
+
+    def test_expired_cert_at_package_timestamp_rule_fails(self) -> None:
+        """RED proof of the roborev finding: before the fix this rule PASSED
+        because the operator never saw the manifest timestamp."""
+        rec = _x5c_attested_record(_WINDOW_START, _WINDOW_END)
+        results = evaluate_rules_for_subject(
+            [_attestation_provision()],
+            [rec],
+            profile_id="test-profile",
+            package_timestamp=_TS_AFTER_EXPIRY,
+        )
+        assert len(results) == 1
+        assert results[0].outcome == RuleOutcome.FAILED
+        assert results[0].evidence_refs == []
+
+    def test_valid_window_cert_at_package_timestamp_rule_passes(self) -> None:
+        rec = _x5c_attested_record(_WINDOW_START, _WINDOW_END)
+        results = evaluate_rules_for_subject(
+            [_attestation_provision()],
+            [rec],
+            profile_id="test-profile",
+            package_timestamp=_TS_INSIDE_WINDOW,
+        )
+        assert len(results) == 1
+        assert results[0].outcome == RuleOutcome.PASSED
+        assert results[0].evidence_refs == [rec.record_id]
+
+    def test_empty_package_timestamp_skips_validity_check(self) -> None:
+        """A bundle whose metadata.timestamp is missing/malformed is coerced
+        to '' by the engine (engine.py _resolve_package_scalars). The rule
+        engine maps '' -> None so the signing layer's documented
+        skip-if-not-provided semantics apply instead of fail-closed crashes
+        on every x5c attestation."""
+        rec = _x5c_attested_record(_WINDOW_START, _WINDOW_END)
+        results = evaluate_rules_for_subject(
+            [_attestation_provision()],
+            [rec],
+            profile_id="test-profile",
+            package_timestamp="",
+        )
+        assert len(results) == 1
+        assert results[0].outcome == RuleOutcome.PASSED
