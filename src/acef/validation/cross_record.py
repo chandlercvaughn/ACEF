@@ -28,6 +28,7 @@ from collections.abc import Iterator
 from typing import Any
 
 from acef.errors import ValidationDiagnostic
+from acef.validation.authority_matrix import AUTHORITY_CLASSES
 from acef.validation.authority_matrix import lookup as _matrix_lookup
 
 # ---------------------------------------------------------------------------
@@ -487,13 +488,20 @@ def enforce_disposition_authority(
     matrix. A denied cell fires ACEF-080.
 
     The authority_class is read from `payload.authority_check.authority_class`
-    (per Freddy brief §14.5 semantics). The actor URN is read from
-    `payload.authority_check.actor_ref` (the disposition's authorizing
-    actor). If actor_ref is absent, we fall back to the first
-    `entity_refs.actor_refs` URN. If neither yields a known actor, we
-    cannot evaluate the matrix and skip the record (the schema layer is
-    responsible for requiring the actor field; this validator is silent
-    rather than double-counting).
+    (per Freddy brief §14.5 semantics). The check FAILS CLOSED (audit finding
+    cross-record-authority-5): when `authority_granted: true` is claimed but
+    authority_class is missing, not a non-empty string, or not one of the
+    five recognized §14.5 classes, ACEF-080 is emitted — mirroring the
+    matrix's own defensive-deny default. A silent skip is legitimate ONLY
+    when no authority is claimed (no `authority_granted: true`).
+
+    The actor URN is read from `payload.authority_check.actor_ref` (the
+    disposition's explicitly claimed authorizing actor — single-actor
+    semantics). If actor_ref is absent, EVERY `entity_refs.actor_refs` URN
+    is evaluated (audit finding cross-record-authority-6): ANY denied or
+    undeclared actor emits ACEF-080, so ordering a permitted actor first
+    cannot hide a denied one. A granted disposition naming no resolvable
+    actor at all is itself a §14.5 violation (ACEF-080).
     """
     actor_role = _actor_role_map(manifest)
     diags: list[ValidationDiagnostic] = []
@@ -510,57 +518,117 @@ def enforce_disposition_authority(
             # case can violate the matrix.
             continue
 
+        rec_id = _record_id_of(rec)
+
         ac = auth.get("authority_class")
         if not isinstance(ac, str) or not ac:
-            continue
-
-        actor_ref = auth.get("actor_ref")
-        if not isinstance(actor_ref, str) or not actor_ref:
-            # Fall back to first entity_refs.actor_refs URN.
-            er = rec.get("entity_refs", {})
-            if isinstance(er, dict):
-                actors = er.get("actor_refs")
-                if isinstance(actors, list) and actors:
-                    first = actors[0]
-                    if isinstance(first, str):
-                        actor_ref = first
-
-        role = actor_role.get(actor_ref) if isinstance(actor_ref, str) else None
-        if role is None:
-            # Unknown actor — emit ACEF-080 (the matrix lookup defaults to
-            # denied for unknown actor types; a granted disposition with no
-            # resolvable actor is itself a §14.5 violation).
-            rec_id = _record_id_of(rec)
+            # Fail closed: a granted disposition with no usable
+            # authority_class discriminator would otherwise escape the
+            # matrix entirely (the V3 oneOf payload schema is deferred, so
+            # nothing else validates the authority_check shape).
             diags.append(
                 ValidationDiagnostic(
                     "ACEF-080",
                     (
-                        f"disposition_record {rec_id!r} grants authority_class="
-                        f"{ac!r} but the authorizing actor "
-                        f"({actor_ref!r}) is not declared in "
-                        "manifest.entities.actors. Per §14.5, authority "
-                        "grants require a mapped actor with an explicit "
-                        "role."
+                        f"disposition_record {rec_id!r} claims "
+                        "authority_granted: true but "
+                        "authority_check.authority_class is missing or not "
+                        "a non-empty string. Per §14.5, a granted "
+                        "disposition MUST declare a recognized "
+                        "authority_class; fail closed (deny)."
+                    ),
+                )
+            )
+            continue
+        if ac not in AUTHORITY_CLASSES:
+            # Fail closed with a PRECISE diagnostic: the matrix's own
+            # lookup would deny an unrecognized class anyway, but the
+            # caller deserves to know the class itself is unknown rather
+            # than a (class × role) cell being denied.
+            diags.append(
+                ValidationDiagnostic(
+                    "ACEF-080",
+                    (
+                        f"disposition_record {rec_id!r} claims "
+                        "authority_granted: true with unrecognized "
+                        f"authority_class={ac!r}. Recognized §14.5 classes: "
+                        f"{list(AUTHORITY_CLASSES)!r}. Fail closed (deny)."
                     ),
                 )
             )
             continue
 
-        if _matrix_lookup(ac, role):
-            continue  # cell is granted — OK
+        # Resolve the actor set to evaluate. An explicit
+        # authority_check.actor_ref is the producer's explicit claim →
+        # single-actor semantics. Otherwise EVERY entity_refs.actor_refs
+        # URN is evaluated; ANY denied actor fails the record.
+        actor_ref = auth.get("actor_ref")
+        if isinstance(actor_ref, str) and actor_ref:
+            candidate_refs = [actor_ref]
+        else:
+            candidate_refs = []
+            er = rec.get("entity_refs", {})
+            if isinstance(er, dict):
+                actors = er.get("actor_refs")
+                if isinstance(actors, list):
+                    # Deduplicate while preserving order; non-string
+                    # entries are the schema phase's concern.
+                    candidate_refs = list(dict.fromkeys(a for a in actors if isinstance(a, str) and a))
 
-        rec_id = _record_id_of(rec)
-        diags.append(
-            ValidationDiagnostic(
-                "ACEF-080",
-                (
-                    f"disposition_record {rec_id!r} grants authority_class="
-                    f"{ac!r} to actor {actor_ref!r} (role={role!r}), but the "
-                    "§14.5 authority matrix denies that "
-                    "(authority_class × actor_role) pair. Reject."
-                ),
+        if not candidate_refs:
+            # Fail closed: a granted disposition with no resolvable
+            # authorizing actor is itself a §14.5 violation.
+            diags.append(
+                ValidationDiagnostic(
+                    "ACEF-080",
+                    (
+                        f"disposition_record {rec_id!r} grants authority_class="
+                        f"{ac!r} but names no authorizing actor (no "
+                        "authority_check.actor_ref and no "
+                        "entity_refs.actor_refs). Per §14.5, authority "
+                        "grants require a mapped actor with an explicit "
+                        "role; fail closed (deny)."
+                    ),
+                )
             )
-        )
+            continue
+
+        for candidate in candidate_refs:
+            role = actor_role.get(candidate)
+            if role is None:
+                # Unknown actor — emit ACEF-080 (the matrix lookup defaults
+                # to denied for unknown actor types; a granted disposition
+                # referencing an undeclared actor is itself a §14.5
+                # violation).
+                diags.append(
+                    ValidationDiagnostic(
+                        "ACEF-080",
+                        (
+                            f"disposition_record {rec_id!r} grants "
+                            f"authority_class={ac!r} but the authorizing "
+                            f"actor ({candidate!r}) is not declared in "
+                            "manifest.entities.actors. Per §14.5, authority "
+                            "grants require a mapped actor with an explicit "
+                            "role."
+                        ),
+                    )
+                )
+                continue
+
+            if _matrix_lookup(ac, role):
+                continue  # cell is granted — OK for this actor
+
+            diags.append(
+                ValidationDiagnostic(
+                    "ACEF-080",
+                    (
+                        f"disposition_record {rec_id!r} grants authority_class="
+                        f"{ac!r} to actor {candidate!r} (role={role!r}), but the "
+                        "§14.5 authority matrix denies that "
+                        "(authority_class × actor_role) pair. Reject."
+                    ),
+                )
+            )
     return diags
 
 
