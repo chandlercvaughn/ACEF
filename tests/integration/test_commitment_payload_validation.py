@@ -318,3 +318,66 @@ def test_supported_method_sets_do_not_drift() -> None:
     from acef.validation.schema_validator import _SUPPORTED_COMMITMENT_METHODS
 
     assert _SUPPORTED_COMMITMENT_METHODS == _SUPPORTED_REDACTION_METHODS
+
+
+# --------------------------------------------------------------------------- #
+# 6. Version gate: the commitment concept is v1.1-ONLY (roborev Medium fix)   #
+#                                                                             #
+# X1 (redaction_policy_version) / X2 (redaction_attestation_ref) are v1.1     #
+# EXTENSION fields. In a v1.0 (core_version 1.0.0 -> schema-dir "v1") bundle  #
+# they are preserved but MUST NOT change validation: a hash-committed /       #
+# redacted v1.0 record carrying X1/X2 + a commitment-shaped payload (no       #
+# risk_id/description/category) must still be validated against its           #
+# per-record-type payload schema. Before the fix the commitment route fired   #
+# for EVERY schema version, so such a record skipped per-type validation and  #
+# avoided the ACEF-004 it previously (correctly) emitted — a version leak.    #
+# --------------------------------------------------------------------------- #
+
+
+def _diags_v1(record: dict[str, Any]) -> list[Any]:
+    return validate_record_schemas([record], "v1")
+
+
+def test_v1_0_commitment_shaped_payload_still_runs_per_type_validation() -> None:
+    """RED (the leak): a v1.0 hash-committed/redacted record carrying X1/X2 and
+    a commitment-shaped payload (no risk_id/description/category) must FALL
+    THROUGH to per-record-type payload validation — X1/X2 must NOT suppress it.
+    A commitment payload is missing every required risk_register field, so the
+    v1.0 per-type schema fires ACEF-004. The commitment concept is v1.1-only."""
+    record = _record(_commitment_payload())
+    codes = _codes(_diags_v1(record))
+    assert "ACEF-004" in codes, (
+        "A v1.0 hash-committed record carrying v1.1 extension fields (X1/X2) "
+        "must keep per-record-type payload validation (the commitment route is "
+        f"v1.1-only); got {codes!r}"
+    )
+
+
+def test_v1_0_valid_cleartext_payload_under_hash_committed_label_is_clean() -> None:
+    """A v1.0 hash-committed record whose payload IS a valid risk_register (and
+    which carries X1/X2) passes per-type validation: the v1.0 path treats X1/X2
+    purely as extension fields, never engaging the commitment route."""
+    record = _record(dict(_VALID_RISK_REGISTER_PAYLOAD))
+    diagnostics = _diags_v1(record)
+    assert diagnostics == [], (
+        f"A v1.0 record with a valid risk_register payload must pass per-type "
+        f"validation regardless of X1/X2; got {[(d.code, d.message) for d in diagnostics]!r}"
+    )
+
+
+def test_v1_1_commitment_route_still_active_positive_guard() -> None:
+    """Positive guard: gating the route to v1.1 must NOT regress v1.1 — a
+    conformant v1.1 commitment record still validates cleanly (no spurious
+    ACEF-004)."""
+    diagnostics = _diags(_record(_commitment_payload()))
+    assert diagnostics == [], (
+        f"v1.1 commitment routing must remain active; got {[(d.code, d.message) for d in diagnostics]!r}"
+    )
+
+
+def test_v1_1_commitment_missing_x1_x2_still_fails_closed() -> None:
+    """Positive guard: v1.1 fail-closed behaviour is unchanged — a v1.1 record
+    LABELED hash-committed but missing X1/X2 still gets per-type validation and
+    fails on a commitment-shaped (non-risk_register) payload."""
+    record = _record(_commitment_payload(), x1=None, x2=None)
+    assert "ACEF-004" in _codes(_diags(record))

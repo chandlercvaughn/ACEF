@@ -63,12 +63,24 @@ _COMMITMENT_REQUIRED_KEYS = frozenset({"redaction_method", "redacted_payload_has
 _COMMITMENT_OPTIONAL_KEYS = frozenset({"access_policy"})
 
 
-def _is_commitment_routed(record: dict[str, Any]) -> bool:
+def _is_commitment_routed(record: dict[str, Any], version: str) -> bool:
     """True when this record's payload must be the apply_redaction commitment.
 
-    Requires the transform-class confidentiality label AND both X1 and X2 as
-    non-empty strings on the envelope (fail-closed — see module comment).
+    The commitment concept (hash-commitment payloads carrying X1
+    ``redaction_policy_version`` / X2 ``redaction_attestation_ref``) is
+    v1.1-ONLY. For a v1.0 (schema-dir ``"v1"``) bundle X1/X2 are simply
+    preserved EXTENSION fields that MUST NOT alter validation — such a record
+    falls through to per-record-type payload validation exactly as before
+    F-M2-REDACTION. Without this version gate a v1.0 hash-committed/redacted
+    record carrying X1/X2 would skip its per-type schema and dodge the
+    ACEF-004 it correctly emitted (the roborev version-leak finding).
+
+    Requires the v1.1 schema dir AND the transform-class confidentiality label
+    AND both X1 and X2 as non-empty strings on the envelope (fail-closed — see
+    module comment).
     """
+    if version != "v1.1":
+        return False
     if record.get("confidentiality") not in _COMMITMENT_CONFIDENTIALITY:
         return False
     x1 = record.get("redaction_policy_version")
@@ -253,11 +265,12 @@ def validate_record_schemas(
             )
             continue
 
-        # Commitment route (fail-closed — see module comment): a
-        # hash-committed/redacted record carrying BOTH X1 and X2 stores the
+        # Commitment route (fail-closed, v1.1-ONLY — see module comment): a
+        # v1.1 hash-committed/redacted record carrying BOTH X1 and X2 stores the
         # apply_redaction commitment, not the cleartext payload. Validate
-        # the commitment shape itself; per-type validation does not apply.
-        if _is_commitment_routed(record):
+        # the commitment shape itself; per-type validation does not apply. A
+        # v1.0 record (where X1/X2 are mere extension fields) never routes here.
+        if _is_commitment_routed(record, version):
             for message, relative_pointer in _commitment_shape_problems(payload):
                 diagnostics.append(
                     ValidationDiagnostic(
