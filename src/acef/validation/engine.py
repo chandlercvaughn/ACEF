@@ -456,7 +456,10 @@ def _run_validation_phases(
     # Phase 3b: Cross-record validation (v1.1 only)
     # Gated on schema_version so v1.0 bundles are byte-equivalent to pre-v0.4
     # validator behavior (VAL-REGRESSION-001).  Reads verified-signature
-    # count from get_signature_info for the causation_chain check.
+    # count from get_signature_info for the causation_chain check, under the
+    # SAME trust_anchors configuration as the Phase-2 integrity check — a
+    # signature Phase 2 rejected (ACEF-012, unanchored x5c) must not vouch
+    # for causation chains here (cross-phase consistency).
     if schema_version == "v1.1":
         # Importing the bundled_freddy submodule auto-registers the
         # ``x-freddy/voice-rubric-emission`` lint pattern (WS3.10 /
@@ -468,7 +471,7 @@ def _run_validation_phases(
         from acef.validation.namespace_lints import run_namespace_lints
         from acef.validation.v1_1_rules import run_v1_1_rules
 
-        _xr_sig_count, _ = get_signature_info(bundle_path)
+        _xr_sig_count, _ = get_signature_info(bundle_path, trust_anchors=trust_anchors)
         cross_record_diagnostics = run_cross_record_validation(
             manifest_data,
             all_records_data,
@@ -561,6 +564,7 @@ def _run_validation_phases(
             evaluation_instant=evaluation_instant,
             package_timestamp=package_timestamp,
             bundle_dir=bundle_path,
+            trust_anchors=trust_anchors,
         )
 
     # Compute bundle digest for evidence_bundle_ref
@@ -717,14 +721,23 @@ def _evaluate_profiles(
     evaluation_instant: str,
     package_timestamp: str,
     bundle_dir: Path,
+    trust_anchors: list[Certificate] | None = None,
 ) -> None:
-    """Evaluate template rules for all specified profiles."""
+    """Evaluate template rules for all specified profiles.
+
+    ``trust_anchors`` is the SAME trust configuration the Phase-2
+    integrity check ran under; the verified-signature count feeding
+    ``bundle_signed`` rules must agree with Phase 2's verdict (an
+    unanchored x5c signature rejected there with ACEF-012 must not
+    satisfy ``bundle_signed`` here). Default ``None`` preserves the
+    historical self-attested behavior exactly.
+    """
     # ``subjects`` is untrusted external JSON; coerce a non-list to an empty
     # list so the per-subject loop below cannot crash on iteration.
     subjects = manifest_data.get("subjects")
     if not isinstance(subjects, list):
         subjects = []
-    sig_count, sig_algs = get_signature_info(bundle_dir)
+    sig_count, sig_algs = get_signature_info(bundle_dir, trust_anchors=trust_anchors)
 
     for profile_id in profile_ids:
         try:

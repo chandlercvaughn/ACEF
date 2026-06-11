@@ -22,7 +22,14 @@ from cryptography.exceptions import InvalidSignature, UnsupportedAlgorithm
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, padding, rsa, utils
 from cryptography.hazmat.primitives.asymmetric.types import PrivateKeyTypes, PublicKeyTypes
-from cryptography.x509 import Certificate, load_der_x509_certificate, load_pem_x509_certificate
+from cryptography.x509 import (
+    BasicConstraints,
+    Certificate,
+    ExtensionNotFound,
+    KeyUsage,
+    load_der_x509_certificate,
+    load_pem_x509_certificate,
+)
 
 from acef.errors import ACEFSigningError
 
@@ -189,6 +196,48 @@ def _verify_cert_signed_by(child: Certificate, parent: Certificate) -> bool:
     return True
 
 
+def _issuer_constraint_violation(issuer: Certificate, *, ca_certs_below: int) -> str | None:
+    """Return a violation description if ``issuer`` may not act as a CA, else None.
+
+    RFC 5280 §4.2.1.9 / §6.1.4: every certificate that ISSUES another
+    certificate in a path MUST be a CA. Concretely:
+
+    - it MUST carry a BasicConstraints extension with ``ca=True`` (a
+      missing extension means end-entity — fail closed);
+    - when a KeyUsage extension is present, it MUST assert
+      ``keyCertSign`` (absent KeyUsage is permitted — BasicConstraints
+      alone then governs);
+    - when ``path_length`` (pathLenConstraint) is set, at most that many
+      CA certificates may follow it in the path toward the leaf.
+      ``ca_certs_below`` is that count for the position being checked.
+
+    Without these checks a CA-issued END-ENTITY certificate could act as
+    an intermediate and sign a forged leaf that would then verify as
+    anchored. The LEAF itself is exempt — it never issues, so callers
+    only invoke this for certificates in the issuer role.
+    """
+    try:
+        bc_ext = issuer.extensions.get_extension_for_class(BasicConstraints)
+    except ExtensionNotFound:
+        return "no BasicConstraints extension (end-entity certificate, not a CA)"
+    except Exception as exc:  # noqa: BLE001 — malformed/duplicate extensions on an untrusted cert: fail closed
+        return f"certificate extensions could not be parsed: {exc}"
+    if not bc_ext.value.ca:
+        return "not a CA (BasicConstraints ca=False)"
+    path_length = bc_ext.value.path_length
+    if path_length is not None and ca_certs_below > path_length:
+        return f"BasicConstraints path_length={path_length} exceeded ({ca_certs_below} CA cert(s) below it in the path)"
+    try:
+        ku_ext = issuer.extensions.get_extension_for_class(KeyUsage)
+    except ExtensionNotFound:
+        return None  # KeyUsage absent — BasicConstraints alone governs
+    except Exception as exc:  # noqa: BLE001 — malformed/duplicate extensions on an untrusted cert: fail closed
+        return f"certificate extensions could not be parsed: {exc}"
+    if not ku_ext.value.key_cert_sign:
+        return "KeyUsage extension present but keyCertSign not asserted"
+    return None
+
+
 def verify_x5c_chain(
     x5c: list[str],
     *,
@@ -204,6 +253,14 @@ def verify_x5c_chain(
       etc.). The final entry is either self-signed (when chaining to a
       trust anchor present in ``trust_anchors``) or signed by a cert in
       ``trust_anchors``.
+    - Every certificate in the ISSUER role (each cert that signs another,
+      including a trust anchor matched via the signed-by rule) MUST
+      satisfy the X.509 path constraints of RFC 5280: BasicConstraints
+      ``ca=True``, ``keyCertSign`` when a KeyUsage extension is present,
+      issuer/subject name chaining, and ``path_length`` when set. The
+      LEAF is exempt (it never issues). These constraints apply in BOTH
+      anchored and self-attested modes — a non-CA issuer is an invalid
+      X.509 path regardless of anchoring.
     - Certificate expiry MUST be checked against the bundle's
       ``manifest.timestamp`` (NOT wall-clock). This gives reproducible
       verification: a bundle signed before its cert expired still
@@ -262,16 +319,41 @@ def verify_x5c_chain(
                 )
 
     # Walk chain links: each cert (except the last) must be signed by the
-    # next one in the list.
+    # next one in the list, names must chain (child.issuer == issuer.subject),
+    # and every ISSUER must satisfy the RFC 5280 path constraints — see
+    # _issuer_constraint_violation. The LEAF (x5c[0]) is exempt from CA
+    # requirements; it never issues. These checks run in BOTH anchored and
+    # self-attested (no-anchors) modes: a non-CA issuer is an invalid X.509
+    # path regardless of anchoring.
     for idx in range(len(chain) - 1):
-        if not _verify_cert_signed_by(chain[idx], chain[idx + 1]):
+        child = chain[idx]
+        issuer = chain[idx + 1]
+        if not _verify_cert_signed_by(child, issuer):
             raise ACEFSigningError(
                 f"x5c[{idx}] is not signed by x5c[{idx + 1}] (broken chain)",
                 code="ACEF-012",
             )
+        if child.issuer != issuer.subject:
+            raise ACEFSigningError(
+                f"x5c[{idx}] issuer name does not match x5c[{idx + 1}] subject (broken name chaining)",
+                code="ACEF-012",
+            )
+        # The issuer at index idx+1 has the certs chain[1..idx] (idx CA
+        # certs) between itself and the leaf — that is its pathLenConstraint
+        # exposure.
+        violation = _issuer_constraint_violation(issuer, ca_certs_below=idx)
+        if violation is not None:
+            raise ACEFSigningError(
+                f"x5c[{idx + 1}] cannot act as an issuer: {violation}",
+                code="ACEF-012",
+            )
 
     # Anchor termination. If trust_anchors supplied, the chain MUST end at
-    # one of them (by DER equality) OR be signed by one of them.
+    # one of them (by DER equality) OR be signed by one of them. An anchor
+    # matched via the signed-by rule acts as the ISSUER of the chain tail,
+    # so it must satisfy the same X.509 issuer constraints (CA bits + name
+    # chaining + path_length over the len(chain)-1 CA certs below it); an
+    # anchor failing them simply does not anchor this chain.
     if trust_anchors is not None:
         if not trust_anchors:
             raise ACEFSigningError(
@@ -284,7 +366,12 @@ def verify_x5c_chain(
         if tail_der in anchor_ders:
             anchored = True
         else:
-            anchored = any(_verify_cert_signed_by(tail, anchor) for anchor in trust_anchors)
+            anchored = any(
+                _verify_cert_signed_by(tail, anchor)
+                and tail.issuer == anchor.subject
+                and _issuer_constraint_violation(anchor, ca_certs_below=len(chain) - 1) is None
+                for anchor in trust_anchors
+            )
         if not anchored:
             raise ACEFSigningError(
                 "x5c chain does not terminate at any configured trust anchor",

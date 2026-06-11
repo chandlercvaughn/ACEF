@@ -346,7 +346,11 @@ def _check_signatures(
     return diagnostics
 
 
-def get_signature_info(bundle_dir: Path) -> tuple[int, list[str]]:
+def get_signature_info(
+    bundle_dir: Path,
+    *,
+    trust_anchors: list[Certificate] | None = None,
+) -> tuple[int, list[str]]:
     """Get count and algorithms of CRYPTOGRAPHICALLY VERIFIED signatures.
 
     Counts only signatures that pass full JWS verification against the
@@ -356,8 +360,22 @@ def get_signature_info(bundle_dir: Path) -> tuple[int, list[str]]:
     chain, key mismatch) are NOT counted.
 
     This is what ``op_bundle_signed`` relies on to decide whether a
-    bundle is "signed"; counting unverified signatures would let a
-    tampered bundle satisfy ``bundle_signed`` rules.
+    bundle is "signed", and what the v1.1 causation-chain check reads;
+    counting unverified signatures would let a tampered bundle satisfy
+    ``bundle_signed`` rules.
+
+    Args:
+        bundle_dir: Path to the bundle directory.
+        trust_anchors: Locally configured trust-anchor certificates —
+            the SAME trust configuration the Phase-2 integrity check
+            applies. When provided, an x5c signature whose chain does
+            not terminate at any anchor is NOT counted, so the count
+            here always agrees with ``check_integrity``'s verdict on
+            the same bundle (cross-phase consistency: a signature that
+            Phase 2 rejects with ACEF-012 must not satisfy
+            ``bundle_signed`` rules or vouch for causation chains).
+            Default ``None`` preserves the historical self-attested
+            behavior exactly. ``jwk``-only signatures are unaffected.
 
     Returns:
         Tuple of (verified_signature_count, list_of_algorithms).
@@ -426,6 +444,7 @@ def get_signature_info(bundle_dir: Path) -> tuple[int, list[str]]:
                 jws_str,
                 canonical_input,
                 manifest_timestamp=manifest_timestamp,
+                trust_anchors=trust_anchors,
             )
         except ACEFSigningError:
             continue

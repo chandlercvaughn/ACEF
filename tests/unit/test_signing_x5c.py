@@ -54,6 +54,21 @@ def _make_key() -> ec.EllipticCurvePrivateKey:
     return ec.generate_private_key(ec.SECP256R1())
 
 
+def _ca_key_usage(*, key_cert_sign: bool = True, digital_signature: bool = False) -> x509.KeyUsage:
+    """A KeyUsage extension value; defaults to the CA shape (keyCertSign)."""
+    return x509.KeyUsage(
+        digital_signature=digital_signature,
+        content_commitment=False,
+        key_encipherment=False,
+        data_encipherment=False,
+        key_agreement=False,
+        key_cert_sign=key_cert_sign,
+        crl_sign=key_cert_sign,
+        encipher_only=False,
+        decipher_only=False,
+    )
+
+
 def _make_cert(
     subject_cn: str,
     *,
@@ -62,16 +77,20 @@ def _make_cert(
     issuer_cn: str | None = None,
     not_before: datetime = DEFAULT_NOT_BEFORE,
     not_after: datetime = DEFAULT_NOT_AFTER,
+    basic_constraints: x509.BasicConstraints | None = None,
+    key_usage: x509.KeyUsage | None = None,
 ) -> x509.Certificate:
     """Build an X.509 cert for ``public_key`` signed by ``signing_key``.
 
     When ``issuer_cn`` is None the cert is self-issued (subject == issuer),
     which combined with ``signing_key`` being the subject's own key yields a
-    self-SIGNED certificate.
+    self-SIGNED certificate. ``basic_constraints`` / ``key_usage`` are added
+    as critical extensions when provided; ``None`` omits the extension
+    entirely (the pre-CA-enforcement cert shape).
     """
     subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, subject_cn)])
     issuer = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, issuer_cn or subject_cn)])
-    return (
+    builder = (
         x509.CertificateBuilder()
         .subject_name(subject)
         .issuer_name(issuer)
@@ -79,8 +98,12 @@ def _make_cert(
         .serial_number(x509.random_serial_number())
         .not_valid_before(not_before)
         .not_valid_after(not_after)
-        .sign(signing_key, hashes.SHA256())
     )
+    if basic_constraints is not None:
+        builder = builder.add_extension(basic_constraints, critical=True)
+    if key_usage is not None:
+        builder = builder.add_extension(key_usage, critical=True)
+    return builder.sign(signing_key, hashes.SHA256())
 
 
 def _b64(cert: x509.Certificate) -> str:
@@ -97,6 +120,11 @@ def _build_chain(
 ) -> tuple[ec.EllipticCurvePrivateKey, list[x509.Certificate]]:
     """Build a real 3-cert chain: leaf <- intermediate <- root.
 
+    The intermediate and root are PROPER CA certificates (BasicConstraints
+    ca=True + KeyUsage keyCertSign) — verify_x5c_chain enforces RFC 5280
+    issuer path constraints, so a constraint-less 'intermediate' would be
+    rejected as an end-entity cert.
+
     Returns (leaf_private_key, [leaf, intermediate, root]).
     """
     root_key = _make_key()
@@ -108,6 +136,8 @@ def _build_chain(
         signing_key=root_key,
         not_before=not_before,
         not_after=not_after,
+        basic_constraints=x509.BasicConstraints(ca=True, path_length=None),
+        key_usage=_ca_key_usage(),
     )
     inter = _make_cert(
         "acef-test-intermediate",
@@ -116,6 +146,8 @@ def _build_chain(
         issuer_cn="acef-test-root",
         not_before=not_before,
         not_after=not_after,
+        basic_constraints=x509.BasicConstraints(ca=True, path_length=0),
+        key_usage=_ca_key_usage(),
     )
     leaf = _make_cert(
         "acef-test-leaf",
@@ -213,7 +245,7 @@ class TestChainLinks:
         """If x5c[0] is not signed by x5c[1], the chain MUST be rejected even
         when the tail IS a configured anchor (full-chain validation, not just
         anchor membership)."""
-        leaf_key, chain = _build_chain()
+        _, chain = _build_chain()
         leaf, _inter, root = chain
         # Splice out the intermediate: leaf was signed by the INTERMEDIATE
         # key, so root does not verify it -> broken link.
@@ -226,7 +258,7 @@ class TestChainLinks:
     def test_broken_link_raises_even_without_anchors(self) -> None:
         """Chain-link verification is unconditional — it applies even in the
         anchor-less (self-attested) mode."""
-        leaf_key, chain = _build_chain()
+        _, chain = _build_chain()
         leaf, _inter, root = chain
         with pytest.raises(ACEFSigningError) as excinfo:
             verify_x5c_chain([_b64(leaf), _b64(root)], manifest_timestamp=MANIFEST_TS)
@@ -330,6 +362,235 @@ class TestSelfAttestedMode:
         self_signed = _make_cert("acef-self-issued", public_key=key.public_key(), signing_key=key)
         result = verify_x5c_chain([_b64(self_signed)], manifest_timestamp=MANIFEST_TS)
         assert result.public_numbers() == key.public_key().public_numbers()  # type: ignore[union-attr]
+
+
+# --------------------------------------------------------------------------
+# X.509 path constraints on ISSUERS (roborev High finding on d80198be):
+# every cert that signs another cert in the path MUST be a real CA.
+# Without this, a CA-issued END-ENTITY cert (BasicConstraints ca=False,
+# no keyCertSign) can act as an intermediate and sign a forged leaf that
+# is then accepted as anchored. The LEAF is exempt — it never issues.
+# --------------------------------------------------------------------------
+
+_CA = x509.BasicConstraints(ca=True, path_length=None)
+_NOT_CA = x509.BasicConstraints(ca=False, path_length=None)
+
+
+def _build_constrained_chain(
+    *,
+    intermediate_bc: x509.BasicConstraints | None,
+    intermediate_ku: x509.KeyUsage | None,
+    leaf_issuer_cn: str = "constrained-intermediate",
+    root_path_length: int | None = None,
+) -> tuple[ec.EllipticCurvePrivateKey, list[x509.Certificate]]:
+    """leaf <- intermediate <- root where the ROOT is always a proper CA and
+    the INTERMEDIATE's constraints are caller-controlled.
+
+    Returns (leaf_private_key, [leaf, intermediate, root]).
+    """
+    root_key = _make_key()
+    inter_key = _make_key()
+    leaf_key = _make_key()
+    root = _make_cert(
+        "constrained-root",
+        public_key=root_key.public_key(),
+        signing_key=root_key,
+        basic_constraints=x509.BasicConstraints(ca=True, path_length=root_path_length),
+        key_usage=_ca_key_usage(),
+    )
+    inter = _make_cert(
+        "constrained-intermediate",
+        public_key=inter_key.public_key(),
+        signing_key=root_key,
+        issuer_cn="constrained-root",
+        basic_constraints=intermediate_bc,
+        key_usage=intermediate_ku,
+    )
+    leaf = _make_cert(
+        "constrained-leaf",
+        public_key=leaf_key.public_key(),
+        signing_key=inter_key,
+        issuer_cn=leaf_issuer_cn,
+    )
+    return leaf_key, [leaf, inter, root]
+
+
+class TestIssuerPathConstraints:
+    def test_ca_false_intermediate_rejected_when_anchored(self) -> None:
+        """THE exploit (RED-first): a CA-issued END-ENTITY cert (ca=False)
+        acting as intermediate signs a forged leaf. Before the fix this chain
+        VERIFIED as anchored; it MUST raise ACEF-012."""
+        _, chain = _build_constrained_chain(
+            intermediate_bc=_NOT_CA,
+            intermediate_ku=_ca_key_usage(key_cert_sign=False, digital_signature=True),
+        )
+        with pytest.raises(ACEFSigningError) as excinfo:
+            verify_x5c_chain(
+                [_b64(c) for c in chain],
+                manifest_timestamp=MANIFEST_TS,
+                trust_anchors=[chain[-1]],
+            )
+        assert excinfo.value.code == "ACEF-012"
+        assert "cannot act as an issuer" in str(excinfo.value)
+
+    def test_ca_false_intermediate_rejected_without_anchors(self) -> None:
+        """A non-CA issuer is an invalid X.509 path REGARDLESS of anchoring —
+        the constraint applies in self-attested (no-anchors) mode too."""
+        _, chain = _build_constrained_chain(intermediate_bc=_NOT_CA, intermediate_ku=None)
+        with pytest.raises(ACEFSigningError) as excinfo:
+            verify_x5c_chain([_b64(c) for c in chain], manifest_timestamp=MANIFEST_TS)
+        assert excinfo.value.code == "ACEF-012"
+        assert "not a CA" in str(excinfo.value)
+
+    def test_issuer_missing_basic_constraints_rejected(self) -> None:
+        """An issuer WITHOUT a BasicConstraints extension is not a CA and
+        MUST be rejected (fail closed)."""
+        _, chain = _build_constrained_chain(intermediate_bc=None, intermediate_ku=None)
+        with pytest.raises(ACEFSigningError) as excinfo:
+            verify_x5c_chain([_b64(c) for c in chain], manifest_timestamp=MANIFEST_TS)
+        assert excinfo.value.code == "ACEF-012"
+        assert "no BasicConstraints" in str(excinfo.value)
+
+    def test_issuer_key_usage_without_key_cert_sign_rejected(self) -> None:
+        """ca=True but a KeyUsage extension lacking keyCertSign — the issuer
+        is not authorized to sign certificates. MUST be rejected."""
+        _, chain = _build_constrained_chain(
+            intermediate_bc=_CA,
+            intermediate_ku=_ca_key_usage(key_cert_sign=False, digital_signature=True),
+        )
+        with pytest.raises(ACEFSigningError) as excinfo:
+            verify_x5c_chain([_b64(c) for c in chain], manifest_timestamp=MANIFEST_TS)
+        assert excinfo.value.code == "ACEF-012"
+        assert "keyCertSign" in str(excinfo.value)
+
+    def test_issuer_subject_name_mismatch_rejected(self) -> None:
+        """The leaf's issuer NAME does not match the intermediate's subject
+        even though the SIGNATURE verifies (signed by the intermediate's
+        key) — broken name chaining MUST be rejected."""
+        _, chain = _build_constrained_chain(
+            intermediate_bc=_CA,
+            intermediate_ku=_ca_key_usage(),
+            leaf_issuer_cn="somebody-else-entirely",
+        )
+        with pytest.raises(ACEFSigningError) as excinfo:
+            verify_x5c_chain([_b64(c) for c in chain], manifest_timestamp=MANIFEST_TS)
+        assert excinfo.value.code == "ACEF-012"
+        assert "name" in str(excinfo.value)
+
+    def test_path_length_zero_root_above_intermediate_rejected(self) -> None:
+        """A root with pathLenConstraint=0 may issue only end-entity certs;
+        an intermediate CA below it violates the constraint."""
+        _, chain = _build_constrained_chain(
+            intermediate_bc=_CA,
+            intermediate_ku=_ca_key_usage(),
+            root_path_length=0,
+        )
+        with pytest.raises(ACEFSigningError) as excinfo:
+            verify_x5c_chain([_b64(c) for c in chain], manifest_timestamp=MANIFEST_TS)
+        assert excinfo.value.code == "ACEF-012"
+        assert "path_length" in str(excinfo.value)
+
+    def test_non_ca_anchor_cannot_anchor_via_signed_by_rule(self) -> None:
+        """An anchor used via the 'chain signed BY an anchor' rule acts as an
+        ISSUER and must satisfy the same CA constraints. An end-entity cert
+        configured as anchor must NOT anchor a chain it signed."""
+        ee_key = _make_key()
+        ee_cert = _make_cert(
+            "ee-as-anchor",
+            public_key=ee_key.public_key(),
+            signing_key=ee_key,
+            basic_constraints=_NOT_CA,
+        )
+        leaf_key = _make_key()
+        leaf = _make_cert(
+            "leaf-under-ee",
+            public_key=leaf_key.public_key(),
+            signing_key=ee_key,
+            issuer_cn="ee-as-anchor",
+        )
+        with pytest.raises(ACEFSigningError) as excinfo:
+            verify_x5c_chain(
+                [_b64(leaf)],
+                manifest_timestamp=MANIFEST_TS,
+                trust_anchors=[ee_cert],
+            )
+        assert excinfo.value.code == "ACEF-012"
+        assert "trust anchor" in str(excinfo.value)
+
+    # ---- positive cases: proper CA paths remain valid ----
+
+    def test_proper_ca_chain_with_path_lengths_verifies(self) -> None:
+        """root(pl=1) <- inter(pl=0, keyCertSign) <- leaf is a fully
+        constraint-compliant path and MUST verify."""
+        root_key = _make_key()
+        inter_key = _make_key()
+        leaf_key = _make_key()
+        root = _make_cert(
+            "pl-root",
+            public_key=root_key.public_key(),
+            signing_key=root_key,
+            basic_constraints=x509.BasicConstraints(ca=True, path_length=1),
+            key_usage=_ca_key_usage(),
+        )
+        inter = _make_cert(
+            "pl-inter",
+            public_key=inter_key.public_key(),
+            signing_key=root_key,
+            issuer_cn="pl-root",
+            basic_constraints=x509.BasicConstraints(ca=True, path_length=0),
+            key_usage=_ca_key_usage(),
+        )
+        leaf = _make_cert(
+            "pl-leaf",
+            public_key=leaf_key.public_key(),
+            signing_key=inter_key,
+            issuer_cn="pl-inter",
+        )
+        result = verify_x5c_chain(
+            [_b64(leaf), _b64(inter), _b64(root)],
+            manifest_timestamp=MANIFEST_TS,
+            trust_anchors=[root],
+        )
+        assert result.public_numbers() == leaf_key.public_key().public_numbers()  # type: ignore[union-attr]
+
+    def test_issuer_without_key_usage_extension_accepted(self) -> None:
+        """KeyUsage is OPTIONAL: an issuer carrying only BasicConstraints
+        ca=True (no KeyUsage extension at all) is a valid CA."""
+        leaf_key, chain = _build_constrained_chain(intermediate_bc=_CA, intermediate_ku=None)
+        result = verify_x5c_chain(
+            [_b64(c) for c in chain],
+            manifest_timestamp=MANIFEST_TS,
+            trust_anchors=[chain[-1]],
+        )
+        assert result.public_numbers() == leaf_key.public_key().public_numbers()  # type: ignore[union-attr]
+
+    def test_leaf_with_ca_false_basic_constraints_accepted(self) -> None:
+        """The LEAF is exempt from CA requirements — a typical end-entity
+        leaf (BasicConstraints ca=False, digitalSignature-only KeyUsage)
+        under a proper CA verifies."""
+        ca_key = _make_key()
+        ca_cert = _make_cert(
+            "leaf-exempt-ca",
+            public_key=ca_key.public_key(),
+            signing_key=ca_key,
+            basic_constraints=_CA,
+            key_usage=_ca_key_usage(),
+        )
+        leaf_key = _make_key()
+        leaf = _make_cert(
+            "leaf-exempt-leaf",
+            public_key=leaf_key.public_key(),
+            signing_key=ca_key,
+            issuer_cn="leaf-exempt-ca",
+            basic_constraints=_NOT_CA,
+            key_usage=_ca_key_usage(key_cert_sign=False, digital_signature=True),
+        )
+        result = verify_x5c_chain(
+            [_b64(leaf), _b64(ca_cert)],
+            manifest_timestamp=MANIFEST_TS,
+            trust_anchors=[ca_cert],
+        )
+        assert result.public_numbers() == leaf_key.public_key().public_numbers()  # type: ignore[union-attr]
 
 
 # --------------------------------------------------------------------------
