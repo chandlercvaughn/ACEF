@@ -15,6 +15,16 @@ Covers audit findings signing-jws-2..5:
 - VAL-FIX-SIGNING-005 (signing-jws-5): ES256 high-S malleability is PINNED as
   documented-accepted behavior (not an RFC violation; low-S enforcement would
   diverge from the TS SDK verify path).
+- roborev follow-up (Medium, commit 81af8553): segments with length ≡ 1
+  (mod 4) pass the alphabet regex yet NO valid base64url encoding has that
+  length class (a single trailing character carries only 6 bits — less than
+  one byte). They are rejected explicitly BEFORE padding restoration with a
+  precise length-class ACEF-012 diagnostic, never by handing the stdlib
+  decoder structurally invalid padded input (e.g. "A" -> "A===") and relying
+  on exception wrapping. The decode call is additionally backstopped with
+  ``except (binascii.Error, ValueError)`` so no raw decoder exception can
+  ever escape, even on a hypothetical platform where ``binascii.Error`` is
+  not a ``ValueError`` subclass.
 """
 
 from __future__ import annotations
@@ -29,6 +39,7 @@ from cryptography.hazmat.primitives.asymmetric import ec, padding, rsa, utils
 
 from acef.errors import ACEFSigningError
 from acef.signing import (
+    _base64url_decode,
     _derive_jwk,
     _detect_algorithm,
     _load_public_key_from_jwk,
@@ -364,6 +375,77 @@ class TestStrictBase64url:
         jws = create_detached_jws(PAYLOAD, rsa_2048, kid="b64url-key")
         header = verify_detached_jws(jws, PAYLOAD, rsa_2048.public_key())
         assert header["alg"] == "RS256"
+
+
+# ---------------------------------------------------------------------------
+# roborev follow-up on VAL-FIX-SIGNING-004 — length ≡ 1 (mod 4) segments
+# rejected explicitly BEFORE padding restoration (no valid base64url encoding
+# has that length class), with a binascii-proof decode backstop.
+# ---------------------------------------------------------------------------
+
+
+class TestLengthOneMod4Rejection:
+    """Segments with len % 4 == 1 pass the alphabet regex but are undecodable.
+
+    Base64url maps 1 byte -> 2 chars, 2 bytes -> 3 chars, 3 bytes -> 4 chars;
+    a lone trailing character carries only 6 bits, so NO byte string encodes
+    to a length ≡ 1 (mod 4). The strict decoder must reject this length class
+    itself — with a precise ACEF-012 length-class diagnostic emitted BEFORE
+    padding restoration — instead of fabricating structurally invalid padded
+    input (``"A"`` -> ``"A==="``) and depending on the stdlib decoder's
+    ``binascii.Error`` text (and on ``binascii.Error`` being a ``ValueError``
+    subclass) for the rejection.
+    """
+
+    def test_decoder_rejects_one_char_segment_with_length_diagnostic(self) -> None:
+        with pytest.raises(ACEFSigningError, match="mod 4") as exc_info:
+            _base64url_decode("A")
+        assert exc_info.value.code == "ACEF-012"
+
+    def test_decoder_rejects_five_char_segment_with_length_diagnostic(self) -> None:
+        with pytest.raises(ACEFSigningError, match="mod 4") as exc_info:
+            _base64url_decode("AAAAA")
+        assert exc_info.value.code == "ACEF-012"
+
+    def test_decoder_never_leaks_raw_decode_errors(self) -> None:
+        """Only ACEFSigningError may escape — a raw binascii.Error would
+        propagate past this handler and fail the test at collection of the
+        raised exception."""
+        for segment in ("A", "AAAAA", "AAAAAAAAA", "_", "-2222"):
+            with pytest.raises(ACEFSigningError) as exc_info:
+                _base64url_decode(segment)
+            assert exc_info.value.code == "ACEF-012"
+
+    def test_one_char_header_segment_rejected(self, ec_p256: ec.EllipticCurvePrivateKey) -> None:
+        jws = create_detached_jws(PAYLOAD, ec_p256, kid="len1-header")
+        _, _, sig = jws.split(".")
+        with pytest.raises(ACEFSigningError, match="mod 4") as exc_info:
+            verify_detached_jws(f"A..{sig}", PAYLOAD, ec_p256.public_key())
+        assert exc_info.value.code == "ACEF-012"
+
+    def test_one_char_signature_segment_rejected(self, ec_p256: ec.EllipticCurvePrivateKey) -> None:
+        jws = create_detached_jws(PAYLOAD, ec_p256, kid="len1-sig")
+        head, _, _ = jws.split(".")
+        with pytest.raises(ACEFSigningError, match="mod 4") as exc_info:
+            verify_detached_jws(f"{head}..A", PAYLOAD, ec_p256.public_key())
+        assert exc_info.value.code == "ACEF-012"
+
+    def test_one_char_jwk_n_rejected(self) -> None:
+        with pytest.raises(ACEFSigningError, match="mod 4") as exc_info:
+            _load_public_key_from_jwk({"kty": "RSA", "n": "A", "e": "AQAB"})
+        assert exc_info.value.code == "ACEF-012"
+
+    def test_valid_length_classes_still_decode(self) -> None:
+        """Lengths ≡ 0, 2, 3 (mod 4) — every valid class — decode unchanged."""
+        assert _base64url_decode("") == b""
+        assert _base64url_decode("QQ") == b"A"
+        assert _base64url_decode("QUE") == b"AA"
+        assert _base64url_decode("QUFB") == b"AAA"
+        assert _base64url_decode("QUJDRA") == b"ABCD"
+
+    def test_canonical_jws_unaffected(self, ec_p256: ec.EllipticCurvePrivateKey) -> None:
+        jws = create_detached_jws(PAYLOAD, ec_p256, kid="len1-ok")
+        assert verify_detached_jws(jws, PAYLOAD, ec_p256.public_key())["alg"] == "ES256"
 
 
 # ---------------------------------------------------------------------------

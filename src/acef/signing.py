@@ -12,6 +12,7 @@ Implements bundle and record signing per spec Section 3.1.3:
 from __future__ import annotations
 
 import base64
+import binascii
 import json
 import re
 from datetime import UTC, datetime
@@ -102,13 +103,31 @@ def _base64url_decode(s: str) -> bytes:
             "'=' padding, and whitespace are rejected (RFC 7515 §2)",
             code="ACEF-012",
         )
-    # Restore padding for the decoder (only when length is not a multiple of 4).
+    # No valid base64url encoding has length ≡ 1 (mod 4): the final character
+    # of a segment carries at most 6 bits — less than one byte — so 1 byte
+    # encodes to 2 chars, 2 bytes to 3, 3 bytes to 4. Reject this length
+    # class explicitly BEFORE restoring padding; padding such input (e.g.
+    # "A" -> "A===") would hand the stdlib decoder structurally invalid bytes
+    # and make the diagnostic depend on its internal error text.
     remainder = len(s) % 4
+    if remainder == 1:
+        raise ACEFSigningError(
+            f"Invalid base64url segment: length {len(s)} is congruent to 1 "
+            "(mod 4); no valid base64url encoding has this length class "
+            "(RFC 4648 §5)",
+            code="ACEF-012",
+        )
+    # Restore padding for the decoder (only when length is not a multiple of 4).
     if remainder:
         s = s + "=" * (4 - remainder)
     try:
         return base64.urlsafe_b64decode(s)
-    except ValueError as exc:  # binascii.Error is a ValueError subclass
+    except (binascii.Error, ValueError) as exc:
+        # Defensive backstop only — the alphabet and length-class checks
+        # above should make this unreachable. binascii.Error is a ValueError
+        # subclass in CPython, but it is named explicitly so the contract
+        # ("no raw decoder exception escapes as anything but ACEF-012") does
+        # not silently depend on that subclassing.
         raise ACEFSigningError(
             f"Invalid base64url segment: {exc}",
             code="ACEF-012",
@@ -178,7 +197,7 @@ def _parse_x5c_chain(x5c: list[str]) -> list[Certificate]:
             )
         try:
             cert_der = base64.b64decode(entry, validate=True)
-        except (ValueError, binascii_error_alias) as exc:  # noqa: F821 — defined below
+        except (binascii.Error, ValueError) as exc:
             raise ACEFSigningError(
                 f"x5c entry {idx} is not valid base64: {exc}",
                 code="ACEF-012",
@@ -191,13 +210,6 @@ def _parse_x5c_chain(x5c: list[str]) -> list[Certificate]:
                 code="ACEF-012",
             ) from exc
     return certs
-
-
-# Resolve the actual binascii.Error name for the broad-except above. Doing
-# this without an `import binascii` at the top would forward-reference.
-import binascii as _binascii  # noqa: E402
-
-binascii_error_alias = _binascii.Error
 
 
 def _cert_validity_covers(cert: Certificate, instant: datetime) -> tuple[bool, str | None]:
