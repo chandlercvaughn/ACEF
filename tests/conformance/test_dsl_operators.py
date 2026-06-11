@@ -8,9 +8,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import jsonpointer
+from cryptography.hazmat.primitives.asymmetric import ec
+
+from acef.integrity import canonicalize
 from acef.loader import load
 from acef.models.records import AttachmentRef, Attestation, RecordEnvelope
 from acef.package import Package
+from acef.signing import create_detached_jws
 from acef.validation.operators import (
     OPERATOR_REGISTRY,
     op_attachment_exists,
@@ -307,9 +312,32 @@ class TestBundleSigned:
 
 
 class TestRecordAttested:
-    """record_attested: existential — at least min_count records have valid attestation."""
+    """record_attested: existential — at least min_count records have a VERIFIED attestation.
+
+    Spec §3.5: "a non-null attestation block with a valid JWS signature ...
+    extract the fields listed in signed_fields, canonicalize via RFC 8785,
+    verify the detached JWS." Pass vectors therefore sign with a REAL key;
+    forged signatures are pinned as fail vectors (VAL-FIX-DSL-002).
+    """
 
     def test_pass_when_attested(self) -> None:
+        record = RecordEnvelope(
+            record_type="conformity_declaration",
+            provisions_addressed=["article-11"],
+            payload={"scope": "Full system", "declaration_date": "2025-06-01"},
+        )
+        key = ec.generate_private_key(ec.SECP256R1())
+        subset = {"/payload": jsonpointer.resolve_pointer(record.to_jsonl_dict(), "/payload")}
+        record.attestation = Attestation(
+            method="jws",
+            signer="provider-key",
+            signature=create_detached_jws(canonicalize(subset), key, kid="provider-key"),
+        )
+        passed, refs = op_record_attested({"record_type": "conformity_declaration", "min_count": 1}, [record])
+        assert passed is True
+
+    def test_fail_forged_signature_not_counted(self) -> None:
+        """The pre-fix fixture: a JWS-shaped fake signature MUST NOT count."""
         record = RecordEnvelope(
             record_type="conformity_declaration",
             provisions_addressed=["article-11"],
@@ -321,7 +349,8 @@ class TestRecordAttested:
             ),
         )
         passed, refs = op_record_attested({"record_type": "conformity_declaration", "min_count": 1}, [record])
-        assert passed is True
+        assert passed is False
+        assert refs == []
 
     def test_fail_when_not_attested(self, tmp_dir: Path) -> None:
         pkg = build_minimal_package(record_types=["risk_register"])

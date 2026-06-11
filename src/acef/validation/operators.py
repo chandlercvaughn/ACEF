@@ -19,7 +19,9 @@ from typing import Any
 import jsonpointer  # type: ignore[import-untyped]  # no published stubs / py.typed (no types-jsonpointer on PyPI)
 
 from acef.errors import ACEFEvaluationError
+from acef.integrity import canonicalize
 from acef.models.records import RecordEnvelope
+from acef.signing import verify_detached_jws
 
 # Maximum allowed regex pattern length to mitigate ReDoS.
 # Per ECMA-262 dialect requirement, patterns should be short rule-level matchers.
@@ -554,13 +556,63 @@ def op_bundle_signed(
     return effective_count >= min_signatures, []
 
 
+def _attestation_verifies(rec: RecordEnvelope) -> bool:
+    """Return True iff the record's attestation block cryptographically verifies.
+
+    Normative recipe (spec §3.5 record_attested row + §3.1 attestation block):
+
+    1. ``method`` MUST be ``"jws"`` — v1 restricts record attestation to JWS
+       only (C2PA is deferred to a future profile); any other method does
+       NOT count.
+    2. ``signed_fields`` MUST include ``"/payload"`` (spec §3.1) — a signature
+       scope that excludes the payload attests nothing about the evidence.
+    3. Extract each ``signed_fields`` JSON Pointer (RFC 6901) from the
+       record's serialized form (:meth:`RecordEnvelope.to_jsonl_dict`).
+    4. RFC 8785-canonicalize the ``{pointer: extracted_value}`` object.
+    5. Verify the detached JWS over those canonical bytes.
+       :func:`acef.signing.verify_detached_jws` enforces RS256/ES256 only
+       (ACEF-013 for anything else), requires ``kid``, and resolves the
+       verification key from the header's embedded ``jwk`` / ``x5c``.
+
+    Fail-closed: any failure (forged or tampered signature, unsupported
+    algorithm, unresolvable pointer, non-canonicalizable content) means the
+    record is NOT counted. A forged attestation is a non-match for the
+    existential operator, never an evaluation-engine error, so this helper
+    never raises.
+    """
+    att = rec.attestation
+    if att is None or not att.signature:
+        return False
+    if att.method != "jws":
+        return False
+    if "/payload" not in att.signed_fields:
+        return False
+    try:
+        record_dict = rec.to_jsonl_dict()
+        subset = {pointer: jsonpointer.resolve_pointer(record_dict, pointer) for pointer in att.signed_fields}
+        canonical = canonicalize(subset)
+        verify_detached_jws(att.signature, canonical)
+    except Exception:
+        # Intentionally broad: a record carrying ANY unverifiable attestation
+        # (ACEFSigningError, JsonPointerException, rfc8785 domain errors, …)
+        # must be treated as not-attested rather than crash rule evaluation.
+        return False
+    return True
+
+
 def op_record_attested(
     params: dict[str, Any],
     records: list[RecordEnvelope],
 ) -> tuple[bool, list[str]]:
-    """record_attested: At least min_count records have valid attestation blocks.
+    """record_attested: At least min_count records have VERIFIED attestation blocks.
 
     Existential operator -> FAIL on zero matching.
+
+    Per spec §3.5, a record counts only when its non-null attestation block
+    carries a *valid* JWS signature: extract the fields listed in
+    ``signed_fields``, canonicalize via RFC 8785, verify the detached JWS
+    (see :func:`_attestation_verifies` for the full normative recipe).
+    Presence of a signature string is NOT sufficient.
     """
     record_type = params["record_type"]
     min_count = params.get("min_count", 1)
@@ -569,7 +621,7 @@ def op_record_attested(
 
     evidence_refs: list[str] = []
     for rec in matching:
-        if rec.attestation and rec.attestation.signature:
+        if _attestation_verifies(rec):
             evidence_refs.append(rec.record_id)
 
     return len(evidence_refs) >= min_count, evidence_refs

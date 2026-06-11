@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import jsonpointer
 import pytest
+from cryptography.hazmat.primitives.asymmetric import ec
 
 from acef.errors import ACEFEvaluationError
+from acef.integrity import canonicalize
 from acef.models.enums import ObligationRole
 from acef.models.records import AttachmentRef, Attestation, EntityRefs, RecordEnvelope
+from acef.signing import create_detached_jws
 from acef.validation.operators import (
     OPERATOR_REGISTRY,
     op_attachment_exists,
@@ -406,14 +410,54 @@ class TestBundleSigned:
 
 
 class TestRecordAttested:
-    """record_attested: Existential operator."""
+    """record_attested: Existential operator with REAL JWS verification (spec §3.5).
 
-    def test_pass_with_attestation(self):
-        att = Attestation(method="jws", signer="provider", signature="abc")
-        records = [_make_record("risk_register", attestation=att)]
-        passed, refs = op_record_attested({"record_type": "risk_register"}, records)
+    Per spec §3.5 a record counts only when its attestation carries a valid
+    detached JWS over the RFC 8785-canonicalized signed_fields extraction —
+    a non-empty signature string is NOT sufficient (VAL-FIX-DSL-001/002).
+    """
+
+    @staticmethod
+    def _attach_signed_attestation(record: RecordEnvelope) -> None:
+        """Sign /payload per the normative recipe and attach the attestation."""
+        key = ec.generate_private_key(ec.SECP256R1())
+        record_dict = record.to_jsonl_dict()
+        subset = {"/payload": jsonpointer.resolve_pointer(record_dict, "/payload")}
+        record.attestation = Attestation(
+            method="jws",
+            signer="provider",
+            signature=create_detached_jws(canonicalize(subset), key, kid="attestor-key"),
+        )
+
+    def test_pass_with_verified_attestation(self):
+        rec = _make_record("risk_register", payload={"description": "Identified risk", "score": 42})
+        self._attach_signed_attestation(rec)
+        passed, refs = op_record_attested({"record_type": "risk_register"}, [rec])
         assert passed
         assert len(refs) == 1
+
+    def test_fail_forged_signature(self):
+        """The pre-fix enshrined vector: garbage signature MUST NOT count."""
+        att = Attestation(method="jws", signer="provider", signature="abc")
+        records = [_make_record("risk_register", attestation=att)]
+        passed, _ = op_record_attested({"record_type": "risk_register"}, records)
+        assert not passed
+
+    def test_fail_tampered_payload_after_signing(self):
+        rec = _make_record("risk_register", payload={"description": "Identified risk", "score": 42})
+        self._attach_signed_attestation(rec)
+        rec.payload["score"] = 99  # tamper AFTER signing
+        passed, _ = op_record_attested({"record_type": "risk_register"}, [rec])
+        assert not passed
+
+    def test_fail_non_jws_method(self):
+        """v1 restricts attestation to JWS — other methods do NOT count."""
+        rec = _make_record("risk_register", payload={"description": "Identified risk", "score": 42})
+        self._attach_signed_attestation(rec)
+        assert rec.attestation is not None
+        rec.attestation.method = "c2pa"  # cryptographically valid sig, wrong method
+        passed, _ = op_record_attested({"record_type": "risk_register"}, [rec])
+        assert not passed
 
     def test_fail_no_attestation(self):
         records = [_make_record("risk_register")]
