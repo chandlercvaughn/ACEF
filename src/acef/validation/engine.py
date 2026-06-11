@@ -11,7 +11,10 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from cryptography.x509 import Certificate
 
 from acef.errors import ACEFError, ACEFSchemaError, ValidationDiagnostic
 from acef.models.assessment import (
@@ -62,6 +65,7 @@ def validate_bundle(
     *,
     profiles: list[str] | None = None,
     evaluation_instant: str | None = None,
+    trust_anchors: list[Certificate] | None = None,
 ) -> AssessmentBundle:
     """Validate an ACEF Evidence Bundle and produce an Assessment Bundle.
 
@@ -75,6 +79,18 @@ def validate_bundle(
         bundle_dir: Path to the bundle directory.
         profiles: List of profile IDs to evaluate (e.g., ['eu-ai-act-2024']).
         evaluation_instant: Override evaluation timestamp (ISO 8601).
+        trust_anchors: Locally configured trust-anchor certificates
+            (``cryptography.x509.Certificate``) for x5c chain termination
+            during Phase-2 signature verification. Spec §3.1.3 "Signature
+            trust model": "If x5c is present, verifiers MUST validate the
+            full certificate chain against a locally configured set of
+            trust anchors." Default ``None`` preserves the historical
+            behavior EXACTLY — absent anchors yield self-attested trust
+            per the trust model (chain links and manifest-timestamp
+            expiry are still verified; no external root anchoring is
+            enforced). When anchors ARE configured and a signature
+            carries an x5c header, a chain not terminating at any anchor
+            surfaces as an ACEF-012 signature diagnostic.
 
     Returns:
         An AssessmentBundle with all results.
@@ -227,6 +243,7 @@ def validate_bundle(
             evaluation_instant=evaluation_instant,
             package_timestamp=package_timestamp,
             profiles=profiles,
+            trust_anchors=trust_anchors,
         )
     except Exception as exc:  # noqa: BLE001 — deliberate untrusted-input backstop
         # A not-yet-guarded path raised. Surface it as a FATAL structural
@@ -276,6 +293,7 @@ def _run_validation_phases(
     evaluation_instant: str,
     package_timestamp: str,
     profiles: list[str] | None,
+    trust_anchors: list[Certificate] | None = None,
 ) -> None:
     """Run validation Phases 1–4, appending diagnostics into ``assessment``.
 
@@ -424,8 +442,11 @@ def _run_validation_phases(
     _flush(record_file_type_mismatches)
     _flush(early_load_diagnostics)
 
-    # Phase 2: Integrity verification
-    integrity_diagnostics = check_integrity(bundle_path)
+    # Phase 2: Integrity verification. ``trust_anchors`` (None by default —
+    # self-attested trust per spec §3.1.3) flows from validate_bundle into
+    # the signature checks so x5c chains can be anchored to locally
+    # configured roots (VAL-FIX-LOADER-005).
+    integrity_diagnostics = check_integrity(bundle_path, trust_anchors=trust_anchors)
     _flush(integrity_diagnostics)
 
     # Phase 3: Reference checking

@@ -510,6 +510,17 @@ def verify_detached_jws(
         payload: The original signed data.
         public_key: The verification key (optional if key_data provided).
         key_data: PEM-encoded public key or certificate (alternative to public_key).
+        manifest_timestamp: ISO 8601 ``metadata.timestamp`` from the bundle
+            manifest. When the header carries ``x5c``, certificate validity
+            is checked against THIS instant, not wall-clock time (spec
+            §3.1.3 — reproducible verification).
+        trust_anchors: Locally configured trust-anchor certificates. When
+            the header carries ``x5c``, the chain MUST terminate at one of
+            these (spec §3.1.3 trust model); ``None`` (default) performs
+            chain-link and expiry checks only — self-attested trust, no
+            anchor enforcement. Ignored for ``jwk``-only signatures, which
+            per the trust model prove data integrity but not organizational
+            identity.
 
     Returns:
         The decoded JWS header.

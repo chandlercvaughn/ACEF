@@ -8,6 +8,7 @@ from __future__ import annotations
 import base64
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from acef.errors import ValidationDiagnostic
 from acef.integrity import (
@@ -15,14 +16,33 @@ from acef.integrity import (
     verify_merkle_root,
 )
 
+if TYPE_CHECKING:
+    from cryptography.x509 import Certificate
 
-def check_integrity(bundle_dir: Path) -> list[ValidationDiagnostic]:
+
+def check_integrity(
+    bundle_dir: Path,
+    *,
+    trust_anchors: list[Certificate] | None = None,
+) -> list[ValidationDiagnostic]:
     """Run all integrity checks on a bundle directory.
 
     Steps per spec Section 3.1.3:
     a. Verify content hashes
     b. Verify Merkle root
     c. Verify signatures (if present)
+
+    Args:
+        bundle_dir: Path to the bundle directory.
+        trust_anchors: Locally configured trust-anchor certificates for x5c
+            chain termination (spec §3.1.3 "Signature trust model": "If x5c
+            is present, verifiers MUST validate the full certificate chain
+            against a locally configured set of trust anchors"). Default
+            ``None`` preserves the historical behavior EXACTLY — absent
+            anchors yield self-attested trust per the trust model: chain
+            links and manifest-timestamp expiry are still verified, but no
+            external root anchoring is enforced, so the signature proves
+            data integrity, not organizational identity.
 
     Returns:
         List of diagnostics.
@@ -132,13 +152,22 @@ def check_integrity(bundle_dir: Path) -> list[ValidationDiagnostic]:
                     )
 
     # Check signatures
-    sig_diagnostics = _check_signatures(bundle_dir, content_hashes_path.read_bytes())
+    sig_diagnostics = _check_signatures(
+        bundle_dir,
+        content_hashes_path.read_bytes(),
+        trust_anchors=trust_anchors,
+    )
     diagnostics.extend(sig_diagnostics)
 
     return diagnostics
 
 
-def _check_signatures(bundle_dir: Path, content_hashes_bytes: bytes) -> list[ValidationDiagnostic]:
+def _check_signatures(
+    bundle_dir: Path,
+    content_hashes_bytes: bytes,
+    *,
+    trust_anchors: list[Certificate] | None = None,
+) -> list[ValidationDiagnostic]:
     """Verify all JWS signatures in ``signatures/``.
 
     For every ``.jws`` file:
@@ -157,6 +186,15 @@ def _check_signatures(bundle_dir: Path, content_hashes_bytes: bytes) -> list[Val
        that writes pretty-printed JSON still produces a verifiable
        signature).
     5. On invalid signature, emit ACEF-012.
+
+    When ``trust_anchors`` is provided and a signature carries an ``x5c``
+    header, the chain MUST terminate at one of the configured anchors
+    (spec §3.1.3 trust model); a non-terminating chain surfaces through
+    the existing ACEF-012 signature-failure diagnostic path. ``None``
+    (the default) preserves the historical self-attested behavior: no
+    anchor enforcement. Signatures carrying only a ``jwk`` are unaffected
+    by anchors — per the trust model they prove data integrity, not
+    organizational identity.
     """
     from acef.errors import ACEFSigningError
     from acef.integrity import canonicalize_json_str
@@ -293,6 +331,7 @@ def _check_signatures(bundle_dir: Path, content_hashes_bytes: bytes) -> list[Val
                 jws_str,
                 canonical_input,
                 manifest_timestamp=manifest_timestamp,
+                trust_anchors=trust_anchors,
             )
         except ACEFSigningError as exc:
             code = exc.code if exc.code in ("ACEF-012", "ACEF-013") else "ACEF-012"
