@@ -71,22 +71,77 @@ def _base64url_encode(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
 
 
+# RFC 4648 §5 url-safe alphabet, unpadded. Empty segments are permitted at
+# this layer (the detached-JWS payload slot is empty by construction); callers
+# enforce their own non-emptiness where required.
+_BASE64URL_STRICT_RE = re.compile(r"^[A-Za-z0-9_-]*$")
+
+
 def _base64url_decode(s: str) -> bytes:
-    """Base64url decode with padding restoration."""
-    # Only add padding if needed (when length is not already a multiple of 4)
+    """Strict base64url decode (RFC 4648 §5) with padding restoration.
+
+    RFC 7515 §2 defines JWS segments as BASE64URL: alphabet ``A-Z a-z 0-9 -
+    _`` with NO padding. Python's ``base64.urlsafe_b64decode`` silently
+    conflates the standard-base64 alphabet (``+``, ``/``) with the url-safe
+    one and tolerates ``=`` padding and (via ``b64decode``'s default
+    ``validate=False``) embedded whitespace — so distinct on-wire spellings
+    would decode to identical bytes, breaking canonical-input strictness
+    (audit signing-jws-4). Any deviation is rejected with ACEF-012 BEFORE
+    decoding.
+
+    Scope note: x5c certificate entries are standard base64 per RFC 7515
+    §4.1.6 and are decoded separately in :func:`_parse_x5c_chain` via
+    ``base64.b64decode(validate=True)`` — they MUST NOT flow through this
+    function. JWK parameters (``n``/``e``/``x``/``y``) ARE base64url per
+    RFC 7518 §2 (Base64urlUInt) and correctly share this strict path.
+    """
+    if not _BASE64URL_STRICT_RE.fullmatch(s):
+        raise ACEFSigningError(
+            "Invalid base64url segment: character(s) outside the RFC 4648 §5 "
+            "url-safe alphabet (A-Za-z0-9, '-', '_'); standard-base64 '+'/'/', "
+            "'=' padding, and whitespace are rejected (RFC 7515 §2)",
+            code="ACEF-012",
+        )
+    # Restore padding for the decoder (only when length is not a multiple of 4).
     remainder = len(s) % 4
     if remainder:
         s = s + "=" * (4 - remainder)
-    return base64.urlsafe_b64decode(s)
+    try:
+        return base64.urlsafe_b64decode(s)
+    except ValueError as exc:  # binascii.Error is a ValueError subclass
+        raise ACEFSigningError(
+            f"Invalid base64url segment: {exc}",
+            code="ACEF-012",
+        ) from exc
+
+
+# RFC 7518 §3.3: "A key of size 2048 bits or larger MUST be used with these
+# algorithms" (RS256). Enforced at BOTH sign and verify (audit signing-jws-2):
+# a sub-2048 modulus is factorable at the low end, and accepting one on the
+# verify path would let an attacker present a JWK weak enough to forge
+# RS256 signatures over chosen content-hashes.json bytes.
+_RSA_MIN_KEY_BITS = 2048
+
+
+def _enforce_rsa_min_key_size(bits: int, context: str) -> None:
+    """Reject RSA keys below the RFC 7518 §3.3 floor for RS256 (ACEF-013)."""
+    if bits < _RSA_MIN_KEY_BITS:
+        raise ACEFSigningError(
+            f"RSA key too small for RS256: {bits} bits in {context}. "
+            f"RFC 7518 §3.3 requires a key of {_RSA_MIN_KEY_BITS} bits or larger.",
+            code="ACEF-013",
+        )
 
 
 def _detect_algorithm(private_key: PrivateKeyTypes) -> str:
     """Detect JWS algorithm from private key type.
 
-    For EC keys, validates that the curve is P-256 (NIST secp256r1)
-    since ACEF only allows ES256 per spec Section 3.1.3.
+    For RSA keys, enforces the RFC 7518 §3.3 minimum key size (2048 bits)
+    at the SIGN side. For EC keys, validates that the curve is P-256 (NIST
+    secp256r1) since ACEF only allows ES256 per spec Section 3.1.3.
     """
     if isinstance(private_key, rsa.RSAPrivateKey):
+        _enforce_rsa_min_key_size(private_key.key_size, "private signing key")
         return "RS256"
     elif isinstance(private_key, ec.EllipticCurvePrivateKey):
         curve = private_key.curve
@@ -412,16 +467,24 @@ def _load_private_key(key_path: str) -> PrivateKeyTypes:
 
 
 def _load_public_key_from_pem(key_data: bytes) -> PublicKeyTypes:
-    """Load a PEM-encoded public key or certificate."""
+    """Load a PEM-encoded public key or certificate.
+
+    RSA keys below the RFC 7518 §3.3 floor (2048 bits) are rejected with
+    ACEF-013 — the verify path must never accept a factorable modulus.
+    """
+    key: PublicKeyTypes
     try:
-        return serialization.load_pem_public_key(key_data)
+        key = serialization.load_pem_public_key(key_data)
     except (ValueError, TypeError, UnsupportedAlgorithm):
         # Try loading as certificate
         try:
             cert = load_pem_x509_certificate(key_data)
-            return cert.public_key()
+            key = cert.public_key()
         except (ValueError, TypeError, UnsupportedAlgorithm) as e:
             raise ACEFSigningError(f"Failed to load public key: {e}", code="ACEF-012") from e
+    if isinstance(key, rsa.RSAPublicKey):
+        _enforce_rsa_min_key_size(key.key_size, "PEM public key")
+    return key
 
 
 def _derive_jwk(private_key: PrivateKeyTypes) -> dict[str, str]:
@@ -494,6 +557,10 @@ def _load_public_key_from_jwk(jwk: dict[str, Any]) -> PublicKeyTypes:
         e_bytes = _base64url_decode(e_b64)
         n = int.from_bytes(n_bytes, byteorder="big")
         e = int.from_bytes(e_bytes, byteorder="big")
+        # RFC 7518 §3.3 floor BEFORE key construction: an attacker-supplied
+        # JWK with a tiny/factorable modulus (audit signing-jws-2 repro:
+        # n=0xC0FFEE) must never materialize as a usable verification key.
+        _enforce_rsa_min_key_size(n.bit_length(), "RSA JWK modulus 'n'")
         public_numbers = rsa.RSAPublicNumbers(e=e, n=n)
         return public_numbers.public_key()
 
@@ -635,6 +702,16 @@ def verify_detached_jws(
 
     Raises:
         ACEFSigningError: If verification fails.
+
+    Note:
+        ES256 verification deliberately accepts ECDSA-malleable signatures
+        (audit signing-jws-5): for any valid ``(r, s)`` the variant
+        ``(r, n - s)`` also verifies. RFC 7515/7518 do NOT require low-S
+        canonical form, the payload remains fully authenticated either way,
+        and enforcing low-S here would gratuitously diverge from the TS SDK
+        verify path. Revisit ONLY if dedupe-on-signature-bytes is ever
+        introduced downstream. Pinned by
+        ``test_es256_high_s_documented_behavior``.
     """
     parts = jws_str.split(".")
     if len(parts) != 3:
@@ -663,6 +740,20 @@ def verify_detached_jws(
     if not header.get("kid"):
         raise ACEFSigningError(
             "JWS header missing required 'kid' field (spec §3.1.3)",
+            code="ACEF-013",
+        )
+
+    # RFC 7515 §4.1.11: a recipient MUST reject a JWS whose `crit` header
+    # lists any extension parameter it does not understand. ACEF understands
+    # NO extension header parameters, so the mere PRESENCE of `crit` —
+    # whatever its shape — makes the JWS invalid (audit signing-jws-3).
+    # Malformed shapes (non-array, empty array — itself forbidden by RFC
+    # 7515 — or non-string members) are subsumed by this presence rejection.
+    if "crit" in header:
+        raise ACEFSigningError(
+            "JWS 'crit' header parameter rejected: ACEF understands no "
+            "extension header parameters, so any crit-listed parameter is "
+            "not understood and the JWS is invalid (RFC 7515 §4.1.11)",
             code="ACEF-013",
         )
 
@@ -700,6 +791,14 @@ def verify_detached_jws(
                 code="ACEF-013",
             )
 
+    # RFC 7518 §3.3 floor for RS256, enforced CENTRALLY after key resolution
+    # so EVERY path is covered: explicit ``public_key`` argument, PEM
+    # ``key_data``, x5c leaf key, and embedded jwk (the loaders also guard
+    # their own paths — defense in depth; this check is the backstop for
+    # caller-supplied and x5c-derived keys).
+    if alg == "RS256" and isinstance(public_key, rsa.RSAPublicKey):
+        _enforce_rsa_min_key_size(public_key.key_size, "RS256 verification key")
+
     # Reconstruct signing input
     payload_b64 = _base64url_encode(payload)
     signing_input = f"{header_b64}.{payload_b64}".encode("ascii")
@@ -726,6 +825,16 @@ def verify_detached_jws(
                 )
             r = int.from_bytes(signature[:32], "big")
             s = int.from_bytes(signature[32:], "big")
+            # ECDSA malleability — documented, accepted (audit signing-jws-5):
+            # the cryptography library verifies BOTH s and n-s for the same
+            # message, so a high-S re-encoding of a valid signature also
+            # passes here. This is NOT an RFC violation (RFC 7518 §3.4
+            # requires r,s in [1, n-1] but does not mandate low-S canonical
+            # form) and the content stays authenticated; only the signature
+            # BYTES are non-unique. Low-S is deliberately NOT enforced — it
+            # would diverge from the TS SDK verify path. Revisit only if
+            # dedupe-on-signature-bytes is introduced. Pinned by
+            # test_es256_high_s_documented_behavior.
             der_sig = utils.encode_dss_signature(r, s)
             public_key.verify(
                 der_sig,
