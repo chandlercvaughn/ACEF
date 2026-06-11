@@ -6,9 +6,10 @@ Inspects the raw manifest dict and the raw record dicts (not the
 depend on payload-typed Pydantic models that might themselves reject the
 forbidden values via ``Literal`` constraints.
 
-Three rules are enforced here. Each is also mirrored in
-:mod:`acef.validation.cross_record` so :func:`validate_bundle` emits the
-same ACEF-NNN code via diagnostic for the same input (VAL-LOAD-005).
+Three rules are enforced here. Rules 1 and 2 are mirrored in
+:mod:`acef.validation.cross_record`; rule 3 is delegated to it outright —
+either way :func:`validate_bundle` emits the same ACEF-NNN code via
+diagnostic for the same input (VAL-LOAD-005).
 
 - **VAL-LOAD-001 / 002**: ``harness_attestation.verifier.verifier_class``
   in ``{"persona", "llm"}`` → raise ``LoadRejection(code="ACEF-070")``.
@@ -27,12 +28,20 @@ same ACEF-NNN code via diagnostic for the same input (VAL-LOAD-005).
 
 - **VAL-LOAD-004**: a disposition record with
   ``payload.authority_check.authority_granted: true`` violating the §14.5
-  matrix → ``LoadRejection(code="ACEF-080")``. The matrix lookup is
-  delegated to :func:`acef.validation.authority_matrix.lookup`.
+  matrix → ``LoadRejection(code="ACEF-080")``. The check FAILS CLOSED
+  (audit findings cross-record-authority-5/6): a granted disposition with
+  a missing / non-string / empty / unrecognized ``authority_class`` is
+  rejected, and absent an explicit ``authority_check.actor_ref`` EVERY
+  ``entity_refs.actor_refs`` URN is evaluated — ANY denied or undeclared
+  actor rejects the load (an explicit ``actor_ref`` keeps single-actor
+  semantics). The semantics are delegated wholesale to
+  :func:`acef.validation.cross_record.enforce_disposition_authority` — the
+  validator's canonical implementation — so :func:`acef.load` and
+  :func:`acef.validation.engine.validate_bundle` reject the exact same
+  inputs with the exact same messages (VAL-LOAD-005 parity by
+  construction). The ONLY legitimate silent skip is a record that claims
+  no authority (``authority_granted`` absent or not ``true``).
 
-The hook is also exported for re-use by
-:mod:`acef.validation.cross_record` (one source of truth, one canonical
-predicate implementation).
 """
 
 from __future__ import annotations
@@ -40,7 +49,14 @@ from __future__ import annotations
 from typing import Any
 
 from acef.errors import LoadRejection
-from acef.validation.authority_matrix import lookup as _matrix_lookup
+
+# The §14.5 disposition-authority semantics (VAL-LOAD-004) are delegated to
+# the validator's canonical implementation so load() and validate_bundle()
+# cannot drift (roborev on 1a665671 found the loader mirror had retained
+# both authority bypasses fixed in cross_record). No import cycle:
+# cross_record imports only acef.errors + acef.validation.authority_matrix;
+# the validator engine imports acef.loader strictly inside functions.
+from acef.validation.cross_record import enforce_disposition_authority
 
 # verifier_class values that are forbidden in harness_attestation records.
 # Per brief §3.6, persona and LLM verifiers are non-deterministic and cannot
@@ -63,63 +79,16 @@ def _is_disposition_record(rec: dict[str, Any]) -> bool:
 
     Mirrors :func:`acef.validation.cross_record._is_disposition_record` and
     :func:`acef.validation.v1_1_rules._is_disposition_record` — kept as a
-    duplicate (not imported) only because the loader's rejection path runs
-    BEFORE the validator module is imported (cross-tier import discipline).
-    Whenever the predicate changes in one place it MUST be updated in all
-    three.
+    duplicate (not imported) because both counterparts are module-private.
+    Used here only to gate the VAL-LOAD-003 (ACEF-076) check; the
+    VAL-LOAD-004 (ACEF-080) path delegates to
+    :func:`~acef.validation.cross_record.enforce_disposition_authority`,
+    which applies its own canonical predicate. Whenever the predicate
+    changes in one place it MUST be updated in all three.
     """
     if rec.get("record_type") != "risk_treatment":
         return False
     return _payload(rec).get("treatment_subtype") == "external_disposition"
-
-
-def _actor_role_map(manifest: dict[str, Any]) -> dict[str, str]:
-    """Build actor_id → role mapping from ``manifest.entities.actors``."""
-    out: dict[str, str] = {}
-    entities = manifest.get("entities")
-    if not isinstance(entities, dict):
-        return out
-    actors = entities.get("actors")
-    if not isinstance(actors, list):
-        return out
-    for actor in actors:
-        if not isinstance(actor, dict):
-            continue
-        actor_id = actor.get("actor_id")
-        role = actor.get("role")
-        if isinstance(actor_id, str) and isinstance(role, str):
-            out[actor_id] = role
-    return out
-
-
-def _resolve_disposition_actor_role(
-    rec: dict[str, Any],
-    actor_role_map: dict[str, str],
-) -> tuple[str | None, str | None]:
-    """Return (actor_ref, actor_role) for a disposition record.
-
-    Reads ``payload.authority_check.actor_ref`` first; falls back to the
-    first ``entity_refs.actor_refs`` URN. Returns (None, None) if no
-    resolvable actor can be found.
-    """
-    payload = _payload(rec)
-    auth = payload.get("authority_check") if isinstance(payload, dict) else None
-    actor_ref: str | None = None
-    if isinstance(auth, dict):
-        ar = auth.get("actor_ref")
-        if isinstance(ar, str) and ar:
-            actor_ref = ar
-    if actor_ref is None:
-        er = rec.get("entity_refs")
-        if isinstance(er, dict):
-            actors = er.get("actor_refs")
-            if isinstance(actors, list) and actors:
-                first = actors[0]
-                if isinstance(first, str) and first:
-                    actor_ref = first
-    if actor_ref is None:
-        return (None, None)
-    return (actor_ref, actor_role_map.get(actor_ref))
 
 
 def check_load_rejections(
@@ -133,7 +102,9 @@ def check_load_rejections(
 
     1. harness_attestation verifier_class ∈ {persona, llm} → ACEF-070
     2. disposition_record internal_state_unchanged: false → ACEF-076
-    3. disposition_record §14.5 matrix violation → ACEF-080
+    3. disposition_record §14.5 matrix violation → ACEF-080 (FAIL CLOSED;
+       delegated to the validator's canonical
+       :func:`acef.validation.cross_record.enforce_disposition_authority`)
 
     Args:
         manifest_data: Parsed acef-manifest.json content (dict).
@@ -143,8 +114,6 @@ def check_load_rejections(
         LoadRejection: With ``code`` set to the specific ACEF-NNN that
             named the rule violated.
     """
-    actor_role_map = _actor_role_map(manifest_data)
-
     for rec in records:
         if not isinstance(rec, dict):
             continue
@@ -191,41 +160,33 @@ def check_load_rejections(
                     code="ACEF-076",
                 )
 
-            # VAL-LOAD-004: §14.5 authority matrix. Only the
-            # authority_granted=true case can violate the matrix; granted
-            # =false is always permitted (denying authority on anyone is OK).
-            auth = payload.get("authority_check")
-            if isinstance(auth, dict) and auth.get("authority_granted") is True:
-                ac = auth.get("authority_class")
-                if isinstance(ac, str) and ac:
-                    actor_ref, role = _resolve_disposition_actor_role(rec, actor_role_map)
-                    if role is None:
-                        # Unknown / unresolvable actor with a granted
-                        # disposition is itself a §14.5 violation (the
-                        # matrix lookup defaults to denied for unknown
-                        # actor types).
-                        raise LoadRejection(
-                            (
-                                f"disposition_record {record_id!r} grants "
-                                f"authority_class={ac!r} but the "
-                                f"authorizing actor ({actor_ref!r}) is "
-                                "not declared in manifest.entities.actors. "
-                                "Per §14.5, authority grants require a "
-                                "mapped actor with an explicit role."
-                            ),
-                            code="ACEF-080",
-                        )
-                    if not _matrix_lookup(ac, role):
-                        raise LoadRejection(
-                            (
-                                f"disposition_record {record_id!r} grants "
-                                f"authority_class={ac!r} to actor "
-                                f"{actor_ref!r} (role={role!r}), but the "
-                                "§14.5 authority matrix denies that "
-                                "(authority_class × actor_role) pair."
-                            ),
-                            code="ACEF-080",
-                        )
+            # VAL-LOAD-004: §14.5 authority matrix — FAIL CLOSED. Delegated
+            # wholesale to the validator's canonical implementation
+            # (acef.validation.cross_record.enforce_disposition_authority;
+            # audit findings cross-record-authority-5/6) so load() and
+            # validate_bundle() reject the exact same inputs with the exact
+            # same ACEF-080 messages (VAL-LOAD-005 parity by construction):
+            #
+            # - authority_granted: true with a missing / non-string / empty
+            #   / unrecognized authority_class → ACEF-080 (never a silent
+            #   skip — roborev on 1a665671 found this bypass alive here
+            #   after it was fixed validator-side);
+            # - absent authority_check.actor_ref → EVERY non-empty string
+            #   in entity_refs.actor_refs[] is evaluated; ANY denied or
+            #   undeclared actor rejects (permitted-first ordering cannot
+            #   hide a denied actor); an explicit actor_ref keeps
+            #   single-actor semantics;
+            # - a granted disposition naming no resolvable actor → ACEF-080;
+            # - NO authority claim (authority_granted absent / not true) →
+            #   no rejection (legitimate skip, gated inside the helper).
+            #
+            # Per-record invocation preserves the loader's first-violation-
+            # wins ordering across records and check types; the rejection
+            # raises on the FIRST diagnostic the helper emits.
+            authority_diags = enforce_disposition_authority(manifest_data, [rec])
+            if authority_diags:
+                first = authority_diags[0]
+                raise LoadRejection(first.message, code=first.code)
 
 
 __all__ = ["check_load_rejections"]
