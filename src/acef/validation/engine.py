@@ -60,6 +60,34 @@ def _validate_record_file_path(path_str: str) -> bool:
     return True
 
 
+def _content_hashes_is_str_mapping(content_hashes: object) -> bool:
+    """Return ``True`` only when ``content_hashes`` is a ``dict`` whose keys AND
+    values are all ``str`` (the shape of a well-formed content-hashes.json).
+
+    Used at the bundle-digest site to decide whether ``compute_bundle_digest``
+    may run. A non-string value (number / NaN / list / object) is a structural
+    error already reported upstream as ACEF-014, and feeding it to
+    ``compute_bundle_digest`` would either raise an
+    ``rfc8785.CanonicalizationError`` (NaN / out-of-range number) or canonicalize
+    a meaningless shape (list value) into a bogus digest. Refusing to compute
+    here keeps the digest unset (the authoritative diagnostic stays ACEF-014)
+    instead of duplicating it as the generic ACEF-001 backstop.
+
+    A non-string KEY cannot arise from ``json.loads`` (JSON object keys are
+    always strings), but is checked too so the predicate is total over any
+    in-memory mapping a caller might pass.
+
+    Args:
+        content_hashes: The JSON-decoded content-hashes.json value (any type).
+
+    Returns:
+        ``True`` iff ``content_hashes`` is ``dict[str, str]``.
+    """
+    if not isinstance(content_hashes, dict):
+        return False
+    return all(isinstance(k, str) and isinstance(v, str) for k, v in content_hashes.items())
+
+
 def validate_bundle(
     bundle_dir: str | Path,
     *,
@@ -570,34 +598,53 @@ def _run_validation_phases(
     # Compute bundle digest for evidence_bundle_ref
     content_hashes_path = bundle_path / "hashes" / "content-hashes.json"
     if content_hashes_path.exists():
+        import rfc8785
+
         from acef.integrity import ACEFCanonicalizationError, compute_bundle_digest
 
         try:
             content_hashes = json.loads(content_hashes_path.read_text(encoding="utf-8"))
-            if isinstance(content_hashes, dict):
+            # Only a well-formed dict[str, str] is a computable bundle digest.
+            #
+            # ``compute_bundle_digest`` RFC-8785-canonicalizes the JSON-decoded
+            # content-hashes.json. ``json.loads`` accepts tokens that RFC 8785
+            # REJECTS (a bare/NaN/Infinity number, an out-of-range integer) and
+            # shapes (a list value) that canonicalize to a digest unrelated to a
+            # real content-hashes mapping. A non-string value is ALWAYS a
+            # structural error already reported upstream as ACEF-014 by the
+            # integrity checker (and a list value would otherwise yield a
+            # meaningless digest). So we treat anything that is not dict[str, str]
+            # as having an uncomputable digest: leave ``content_hash`` unset
+            # (``EvidenceBundleRef.content_hash`` defaults to "") and skip the
+            # computation rather than duplicate the structural diagnostic as an
+            # ACEF-001 backstop or emit a digest over malformed input.
+            if _content_hashes_is_str_mapping(content_hashes):
                 assessment.evidence_bundle_ref.content_hash = compute_bundle_digest(content_hashes)
         except (
-            json.JSONDecodeError,
-            UnicodeDecodeError,
+            rfc8785.CanonicalizationError,
             UnicodeEncodeError,
             ACEFCanonicalizationError,
+            json.JSONDecodeError,
+            UnicodeDecodeError,
             OSError,
         ):
-            # The Phase 2 integrity check already emitted a diagnostic for an
-            # invalid content-hashes.json; don't re-emit, just leave the
-            # content_hash field empty (EvidenceBundleRef.content_hash defaults
-            # to "") so callers know it could not be computed.
-            #
-            # ``compute_bundle_digest`` RFC-8785-canonicalizes the SAME
-            # content-hashes.json that the Phase-2 Merkle check already flagged.
-            # A surrogate / non-NFC key (NFC-equal but not UTF-8-encodable) makes
-            # ``rfc8785.dumps`` raise ``UnicodeEncodeError`` (encode-side, NOT the
-            # ``UnicodeDecodeError`` read-side already handled), and the hash
-            # domain's own canonicalization faults surface as
-            # ``ACEFCanonicalizationError``. Both are caught here so the digest is
-            # simply left unset; the authoritative structural ACEF-051 was already
-            # emitted upstream by the integrity checker, and this site must NOT let
-            # the fault escape into validate_bundle()'s generic ACEF-001 backstop.
+            # Belt-and-suspenders catch for ANY canonicalization fault that
+            # survives the dict[str, str] pre-check above. ``compute_bundle_digest``
+            # RFC-8785-canonicalizes the SAME content-hashes.json that the Phase-2
+            # integrity check already flagged. A surrogate / non-NFC key (a valid
+            # ``str`` value that PASSES the dict[str, str] check, yet is NFC-equal
+            # and not UTF-8-encodable) makes ``rfc8785.dumps`` raise
+            # ``UnicodeEncodeError``; the hash domain's own canonicalization faults
+            # surface as ``ACEFCanonicalizationError``; and any other RFC 8785
+            # domain violation surfaces as the BASE
+            # ``rfc8785.CanonicalizationError`` (e.g. ``FloatDomainError`` /
+            # ``IntegerDomainError`` for numeric values that slipped past the
+            # str-value guard). The read-side ``json``/``Unicode``/``OS`` errors
+            # are kept for completeness. All are caught so the digest is simply
+            # left unset; the authoritative structural diagnostic (ACEF-014 /
+            # ACEF-051) was already emitted upstream by the integrity checker, and
+            # this site must NOT let the fault escape into validate_bundle()'s
+            # generic ACEF-001 untrusted-input backstop.
             pass
 
     # ``assessment`` was mutated in place; the caller (validate_bundle) owns it

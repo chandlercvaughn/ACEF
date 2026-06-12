@@ -617,3 +617,199 @@ def test_validate_bundle_well_formed_digest_still_computed(tmp_path: Path) -> No
     assert assessment.evidence_bundle_ref.content_hash.startswith("sha256:"), (
         f"well-formed bundle digest must be computed normally, got: {assessment.evidence_bundle_ref.content_hash!r}"
     )
+
+
+# ---------------------------------------------------------------------------
+# roborev finding (MEDIUM) — the bundle-digest guard was too NARROW.
+#
+# The prior commit (4a699c8) only caught UnicodeEncodeError / UnicodeDecodeError
+# / ACEFCanonicalizationError / json/OS errors at the digest site. But
+# compute_bundle_digest() RFC-8785-canonicalizes the JSON-decoded
+# content-hashes.json, and json.loads accepts JSON tokens that rfc8785 REJECTS:
+#   - a numeric / NaN / Infinity value -> rfc8785.FloatDomainError
+#   - an out-of-range integer value     -> rfc8785.IntegerDomainError
+# Both subclass rfc8785.CanonicalizationError, which the old tuple did NOT cover,
+# so the exception escaped the digest site and re-fired as the generic ACEF-001
+# untrusted-input backstop — duplicating the authoritative structural ACEF-014
+# (non-string content-hashes.json value) emitted upstream by the integrity
+# checker. The fix closes the WHOLE family (not one more exception type):
+#   1. validate that the loaded content_hashes is dict[str, str] before
+#      computing the digest; skip computation (leave content_hash unset) if not.
+#   2. wrap compute_bundle_digest() in the BASE rfc8785.CanonicalizationError
+#      (plus UnicodeEncodeError / ACEFCanonicalizationError) so any present or
+#      future canonicalization fault leaves the digest unset rather than reaching
+#      the ACEF-001 backstop.
+# Each test below asserts: the authoritative structural code is present AND
+# "ACEF-001" not in codes.
+# ---------------------------------------------------------------------------
+
+
+def _write_bundle_with_raw_content_hashes(tmp_path: Path, raw_json: str, name: str) -> Path:
+    """Build a minimal bundle dir whose content-hashes.json is written from a
+    RAW JSON string (so we can inject tokens — NaN, bare numbers, lists — that
+    Python's ``json`` module accepts but ``rfc8785`` rejects).
+
+    Includes a merkle-tree.json so the integrity checker reaches the digest
+    flow, mirroring the surrogate-key fixture.
+    """
+    bundle_dir = tmp_path / name
+    hashes_dir = bundle_dir / "hashes"
+    hashes_dir.mkdir(parents=True)
+    (bundle_dir / "acef-manifest.json").write_text("{}", encoding="utf-8")
+    (hashes_dir / "content-hashes.json").write_text(raw_json, encoding="utf-8")
+    (hashes_dir / "merkle-tree.json").write_text('{"root": "deadbeef"}', encoding="utf-8")
+    return bundle_dir
+
+
+def test_compute_bundle_digest_raises_canonicalization_error_on_nan_value() -> None:
+    """Sanity: compute_bundle_digest() raises a CanonicalizationError (NOT one
+    of the previously-caught types) for a NaN value — this is the exact escape
+    the narrow guard missed.
+    """
+    import rfc8785
+
+    from acef.integrity import compute_bundle_digest
+
+    with pytest.raises(rfc8785.CanonicalizationError):
+        compute_bundle_digest({"acef-manifest.json": float("nan")})
+
+
+def test_validate_bundle_numeric_content_hash_value_not_acef_001_backstop(
+    tmp_path: Path,
+) -> None:
+    """validate_bundle() must NOT fire the ACEF-001 backstop for a numeric
+    (NaN) content-hashes.json value.
+
+    RED before the comprehensive fix: the integrity checker emits the
+    authoritative ACEF-014 (non-string value), but the digest site then calls
+    compute_bundle_digest() which raises rfc8785.FloatDomainError — uncaught by
+    the narrow tuple — so ACEF-001 ALSO appeared. After the fix the digest is
+    simply left unset and only ACEF-014 remains.
+    """
+    from acef.validation.engine import validate_bundle
+
+    # json.loads accepts the bare NaN token (Python extension); rfc8785 rejects
+    # it. The value is a float, so the integrity checker's dict[str,str] guard
+    # emits ACEF-014 upstream.
+    bundle_dir = _write_bundle_with_raw_content_hashes(tmp_path, '{"acef-manifest.json": NaN}', "nan_value_bundle")
+
+    assessment = validate_bundle(str(bundle_dir))
+    codes = {d["code"] for d in assessment.structural_errors}
+    assert "ACEF-014" in codes, (
+        "A non-string (numeric) content-hashes.json value must produce the "
+        f"authoritative structural ACEF-014, got: {sorted(codes)}"
+    )
+    assert "ACEF-001" not in codes, (
+        "The bundle-digest site must not let a numeric content-hash value reach "
+        f"the generic ACEF-001 backstop. Got structural error codes: {sorted(codes)}"
+    )
+    assert assessment.evidence_bundle_ref.content_hash == "", (
+        f"An uncomputable digest must leave content_hash unset, got: {assessment.evidence_bundle_ref.content_hash!r}"
+    )
+
+
+def test_validate_bundle_out_of_range_integer_value_not_acef_001_backstop(
+    tmp_path: Path,
+) -> None:
+    """validate_bundle() must NOT fire ACEF-001 for an out-of-range integer
+    content-hashes.json value (rfc8785.IntegerDomainError — the sibling of the
+    FloatDomainError case, both under CanonicalizationError).
+    """
+    from acef.validation.engine import validate_bundle
+
+    huge_int = "1" + "0" * 400
+    bundle_dir = _write_bundle_with_raw_content_hashes(
+        tmp_path,
+        '{"acef-manifest.json": ' + huge_int + "}",
+        "huge_int_value_bundle",
+    )
+
+    assessment = validate_bundle(str(bundle_dir))
+    codes = {d["code"] for d in assessment.structural_errors}
+    assert "ACEF-014" in codes, (
+        "A non-string (integer) content-hashes.json value must produce the "
+        f"authoritative structural ACEF-014, got: {sorted(codes)}"
+    )
+    assert "ACEF-001" not in codes, (
+        "The bundle-digest site must not let an out-of-range integer content-hash "
+        f"value reach the ACEF-001 backstop. Got: {sorted(codes)}"
+    )
+    assert assessment.evidence_bundle_ref.content_hash == ""
+
+
+def test_validate_bundle_list_content_hash_value_not_acef_001_backstop(
+    tmp_path: Path,
+) -> None:
+    """A non-scalar (list) content-hashes.json value must not reach ACEF-001
+    either. The dict[str, str] guard skips the digest computation entirely so
+    no AttributeError/canonicalization fault escapes.
+    """
+    from acef.validation.engine import validate_bundle
+
+    bundle_dir = _write_bundle_with_raw_content_hashes(
+        tmp_path, '{"acef-manifest.json": ["not", "a", "hash"]}', "list_value_bundle"
+    )
+
+    assessment = validate_bundle(str(bundle_dir))
+    codes = {d["code"] for d in assessment.structural_errors}
+    assert "ACEF-014" in codes, f"A list content-hashes.json value must produce ACEF-014, got: {sorted(codes)}"
+    assert "ACEF-001" not in codes, f"A list content-hash value must not reach ACEF-001. Got: {sorted(codes)}"
+    assert assessment.evidence_bundle_ref.content_hash == ""
+
+
+def test_content_hashes_is_str_mapping_predicate() -> None:
+    """The digest-site dict[str, str] guard accepts only str->str mappings and
+    rejects every non-conformant shape (non-dict, non-str value, non-str key).
+    """
+    from acef.validation.engine import _content_hashes_is_str_mapping
+
+    assert _content_hashes_is_str_mapping({"a.txt": "deadbeef"}) is True
+    assert _content_hashes_is_str_mapping({}) is True
+    assert _content_hashes_is_str_mapping({"a.txt": 123}) is False
+    assert _content_hashes_is_str_mapping({"a.txt": float("nan")}) is False
+    assert _content_hashes_is_str_mapping({"a.txt": ["x"]}) is False
+    assert _content_hashes_is_str_mapping({"a.txt": {"nested": "x"}}) is False
+    assert _content_hashes_is_str_mapping({"a.txt": None}) is False
+    assert _content_hashes_is_str_mapping({1: "deadbeef"}) is False
+    assert _content_hashes_is_str_mapping(["a.txt", "deadbeef"]) is False
+    assert _content_hashes_is_str_mapping("not a dict") is False
+    assert _content_hashes_is_str_mapping(None) is False
+
+
+def test_validate_bundle_string_value_but_non_canonicalizable_not_acef_001(
+    tmp_path: Path,
+) -> None:
+    """Belt-and-suspenders: even a content-hashes.json whose values are all
+    strings (so it passes the dict[str, str] guard) must not reach ACEF-001 if
+    canonicalization were to fault for any reason. Here a surrogate KEY (NFC-
+    equal, valid string, not UTF-8-encodable) re-confirms the base-exception
+    catch keeps ACEF-001 absent while ACEF-051 is the authoritative diagnostic.
+
+    This is the same family as the surrogate-key test but verified through the
+    public validate_bundle() path to lock in that the dict[str, str] guard
+    (which a surrogate key PASSES, since the key is a str) does not regress the
+    exception catch added alongside it.
+    """
+    import json
+
+    from acef.validation.engine import validate_bundle
+
+    bundle_dir = tmp_path / "surrogate_str_value_bundle"
+    hashes_dir = bundle_dir / "hashes"
+    hashes_dir.mkdir(parents=True)
+    (bundle_dir / "acef-manifest.json").write_text("{}", encoding="utf-8")
+    surrogate_key = "artifacts/a\udce9.bin"
+    content_hashes = {"acef-manifest.json": "a" * 64, surrogate_key: "b" * 64}
+    (hashes_dir / "content-hashes.json").write_text(json.dumps(content_hashes), encoding="utf-8")
+    (hashes_dir / "merkle-tree.json").write_text('{"root": "deadbeef"}', encoding="utf-8")
+
+    assessment = validate_bundle(str(bundle_dir))
+    codes = {d["code"] for d in assessment.structural_errors}
+    assert "ACEF-051" in codes, (
+        "A surrogate key (a valid str value passes the dict[str,str] guard) "
+        f"must still produce the structured ACEF-051, got: {sorted(codes)}"
+    )
+    assert "ACEF-001" not in codes, (
+        f"The base-exception catch must keep the surrogate-key fault out of the ACEF-001 backstop. Got: {sorted(codes)}"
+    )
+    assert assessment.evidence_bundle_ref.content_hash == ""
