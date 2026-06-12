@@ -71,10 +71,30 @@ class AssessmentIntegrity(ACEFBaseModel):
 
 
 class AssessmentBundle(ACEFBaseModel):
-    """ACEF Assessment Bundle — validation results for an Evidence Bundle."""
+    """ACEF Assessment Bundle — validation results for an Evidence Bundle.
+
+    Reproducibility note (audit finding assessment-rollup-5): two of the
+    creation-identity scalars below — ``assessment_id`` and ``timestamp`` —
+    default to a fresh random URN and the wall-clock creation time
+    respectively. Because the ENTIRE bundle (including these two fields) is
+    canonicalized and signed by ``sign_assessment``, a default-constructed
+    Assessment Bundle is NOT byte-reproducible even over the same evidence
+    with the same ``evaluation_instant``. This is intentional and is NOT a
+    spec violation: spec §3.7 scopes reproducibility to the evaluation
+    RESULTS (``results``/``provision_summary``), which ARE reproducible and
+    are pinned by ``evaluation_instant``. A caller that needs a
+    byte-reproducible SIGNED assessment must supply explicit ``timestamp`` AND
+    ``assessment_id`` (see ``validate_bundle`` / ``validate``).
+    """
 
     versioning: AssessmentVersioning = Field(default_factory=AssessmentVersioning)
+    # Creation-identity URN. Defaults to a fresh random ``urn:acef:asx:<uuid4>``
+    # per construction → a non-determinism source in the signed bytes. Pin it
+    # explicitly for a byte-reproducible signed assessment (assessment-rollup-5).
     assessment_id: str = Field(default_factory=lambda: generate_urn(URNType.ASSESSMENT))
+    # Creation timestamp (wall-clock). Intentionally non-reproducible; pin it
+    # explicitly (with ``assessment_id``) for a byte-reproducible signed
+    # assessment. Distinct from ``evaluation_instant``, which pins results.
     timestamp: str = Field(default_factory=lambda: datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"))
     evaluation_instant: str = Field(default_factory=lambda: datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"))
     assessor: Assessor = Field(default_factory=Assessor)

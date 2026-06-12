@@ -646,8 +646,22 @@ def create_detached_jws(
         header["jwk"] = _derive_jwk(private_key)
 
     # Encode header. sort_keys=True ensures any two callers building the same
-    # logical header (same alg/kid/x5c-or-jwk) produce byte-identical JWS
-    # output, preserving the determinism contract from spec §3.1.3 / §6.5.
+    # logical header (same alg/kid/x5c-or-jwk) produce a byte-identical JWS
+    # HEADER segment.
+    #
+    # Determinism honesty (audit finding export-determinism-4): a byte-stable
+    # header does NOT make the whole JWS byte-stable. For ES256 the SIGNATURE
+    # segment below is NON-deterministic — ``ec.ECDSA`` draws a fresh random
+    # nonce k per signature (the cryptography library does not implement
+    # RFC 6979 deterministic-k), so two ES256 signatures over identical input
+    # differ. RS256/PKCS1v15 IS deterministic, so an RS256 JWS over identical
+    # input is byte-stable. This is NOT a spec violation: ``signatures/`` is
+    # OUTSIDE the hash domain (spec §3.1.1) and the spec never requires
+    # reproducible signatures (§3.1.3/§6.5 scope byte-identity to the ``.jsonl``
+    # files and the archive of STORED files, and §6.5 is the Conformance Test
+    # Suite, not a signature-determinism clause). Callers relying on
+    # byte-equality of signed bundles MUST use RS256; ES256-signed archives are
+    # not byte-reproducible.
     header_b64 = _base64url_encode(json.dumps(header, separators=(",", ":"), sort_keys=True).encode("utf-8"))
     payload_b64 = _base64url_encode(payload)
 
@@ -665,6 +679,12 @@ def create_detached_jws(
     elif alg == "ES256":
         if not isinstance(private_key, ec.EllipticCurvePrivateKey):
             raise ACEFSigningError("Key type mismatch for ES256", code="ACEF-013")
+        # NON-DETERMINISTIC by design: ``ec.ECDSA`` uses a random per-signature
+        # nonce k (not RFC 6979 deterministic-k), so this signature — and hence
+        # the resulting ``.jws`` and ``.acef.tar.gz`` — differs on every run.
+        # See the header-encoding comment above and export-determinism-4. We do
+        # NOT switch to deterministic-k: that would diverge from the TS verify
+        # path and is out of scope; signatures are outside the hash domain.
         der_sig = private_key.sign(
             signing_input,
             ec.ECDSA(hashes.SHA256()),

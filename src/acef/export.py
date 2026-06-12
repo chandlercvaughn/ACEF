@@ -376,7 +376,22 @@ def export_archive(package: Package, output_path: str) -> Path:
     """Export a package as a .acef.tar.gz archive.
 
     Per spec: deterministic archive with gzip level 6, mtime=0, OS=0xFF,
-    owner 0/0, permissions 0644/0755, lexicographic file order.
+    owner 0/0, permissions 0644/0755, lexicographic file order. Tar member
+    mtimes are set to the manifest ``metadata.timestamp`` (Unix epoch seconds,
+    UTC) per spec §3.1.3.
+
+    Determinism scope (audit finding export-determinism-4): the STORED files
+    (manifest, records, hashes, attachments) and the archive framing are
+    byte-reproducible across runs of the same package to the same output
+    basename (the bundle root name is derived from that basename). However,
+    ``signatures/`` is OUTSIDE the hash domain and signature reproducibility
+    depends on the algorithm: an RS256 (PKCS1v15) signature is deterministic,
+    so an RS256-signed archive IS byte-reproducible; an ES256 signature uses a
+    random ECDSA nonce, so an ES256-signed archive is NOT byte-reproducible
+    (the ``signatures/*.jws`` bytes — and therefore the whole ``.acef.tar.gz``
+    — differ on every export). This is not a spec violation; the spec never
+    requires reproducible signatures. Callers needing byte-equality of signed
+    bundles must use RS256.
 
     Args:
         package: The Package to export.

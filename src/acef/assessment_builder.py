@@ -19,6 +19,8 @@ def validate(
     *,
     profiles: list[str] | None = None,
     evaluation_instant: str | None = None,
+    timestamp: str | None = None,
+    assessment_id: str | None = None,
 ) -> AssessmentBundle:
     """Validate a package or bundle and produce an Assessment Bundle.
 
@@ -27,7 +29,16 @@ def validate(
     Args:
         package_or_path: A Package object or path to a bundle directory/archive.
         profiles: List of profile IDs to evaluate.
-        evaluation_instant: Override evaluation timestamp (ISO 8601).
+        evaluation_instant: Override evaluation timestamp (ISO 8601) — pins the
+            evaluation results per spec §3.7.
+        timestamp: Override the Assessment Bundle's creation ``timestamp``.
+            Default ``None`` keeps the wall-clock creation time (intentionally
+            non-reproducible). Supply an explicit value (with ``assessment_id``)
+            for a byte-reproducible signed assessment; see ``validate_bundle``
+            and audit finding assessment-rollup-5.
+        assessment_id: Override the Assessment Bundle's ``assessment_id`` URN.
+            Default ``None`` mints a fresh random URN per run. Pin it alongside
+            ``timestamp`` for a byte-reproducible signed assessment.
 
     Returns:
         An AssessmentBundle with all results.
@@ -43,6 +54,8 @@ def validate(
                 bundle_dir,
                 profiles=profiles,
                 evaluation_instant=evaluation_instant,
+                timestamp=timestamp,
+                assessment_id=assessment_id,
             )
     else:
         path = Path(package_or_path)
@@ -58,12 +71,16 @@ def validate(
                     bundle_dir,
                     profiles=profiles,
                     evaluation_instant=evaluation_instant,
+                    timestamp=timestamp,
+                    assessment_id=assessment_id,
                 )
         else:
             return validate_bundle(
                 path,
                 profiles=profiles,
                 evaluation_instant=evaluation_instant,
+                timestamp=timestamp,
+                assessment_id=assessment_id,
             )
 
 

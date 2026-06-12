@@ -9,6 +9,7 @@ M-VERIFY-5: Variant registry conformance tests
 from __future__ import annotations
 
 import tarfile
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -121,13 +122,36 @@ class TestArchiveDeterminism:
         assert bytes1 == bytes2, "Archives from the same package must be byte-identical"
 
     def test_archive_tar_member_metadata(self, tmp_dir: Path) -> None:
-        """Tar members must have deterministic modes, mtimes, uid/gid."""
+        """Tar members must have deterministic modes, mtimes, uid/gid.
+
+        Spec §3.1.3 line 568: "Timestamps MUST be set to the
+        ``metadata.timestamp`` value from the manifest (Unix epoch seconds,
+        UTC)." This finding (export-determinism-2) is a COVERAGE gap: the
+        production ``export_archive`` path already sets every tar member's
+        ``mtime`` to the parsed manifest timestamp (export.py:420 → applied at
+        490/504/521), but no test pinned the ``mtime`` VALUE against the
+        manifest timestamp — only that it was intra-run consistent. A
+        regression silently falling back to ``mtime=0`` (the ValueError except
+        at export.py:421-422) or to any wrong-but-consistent value would pass
+        the byte-identity test. This asserts the exact spec value for EVERY
+        member so that fallback is caught.
+        """
         pkg = build_minimal_package()
         archive = tmp_dir / "meta.acef.tar.gz"
         export_archive(pkg, str(archive))
 
+        # Derive the expected tar mtime from the package's own manifest
+        # timestamp using the SAME parse the exporter performs (export.py:420).
+        manifest_ts = pkg.build_manifest().to_dict()["metadata"]["timestamp"]
+        expected_mtime = int(datetime.fromisoformat(manifest_ts.replace("Z", "+00:00")).timestamp())
+        # A non-zero manifest timestamp is required for this test to actually
+        # distinguish the manifest-timestamp value from the mtime=0 fallback.
+        assert expected_mtime != 0, "Test precondition: manifest timestamp must be non-epoch"
+
         with tarfile.open(str(archive), "r:gz") as tar:
-            for member in tar.getmembers():
+            members = tar.getmembers()
+            assert members, "Archive must contain members"
+            for member in members:
                 if member.isdir():
                     assert member.mode == 0o755, f"Dir {member.name} mode != 0755"
                 elif member.isfile():
@@ -136,16 +160,33 @@ class TestArchiveDeterminism:
                 assert member.gid == 0, f"{member.name} gid != 0"
                 assert member.uname == "", f"{member.name} uname not empty"
                 assert member.gname == "", f"{member.name} gname not empty"
+                # Spec §3.1.3 line 568: tar member mtime MUST equal the
+                # manifest timestamp (Unix epoch seconds, UTC).
+                assert member.mtime == expected_mtime, (
+                    f"{member.name} mtime {member.mtime} != manifest timestamp {expected_mtime}"
+                )
 
-    def test_archive_gzip_os_byte(self, tmp_dir: Path) -> None:
-        """Gzip OS byte must be 0xFF (unknown) per spec."""
+    def test_archive_gzip_header_mtime_and_os(self, tmp_dir: Path) -> None:
+        """Gzip header mtime MUST be 0 and OS byte MUST be 0xFF per spec.
+
+        Spec §3.1.3 line 571: "The gzip header MUST set mtime to 0 and OS to
+        0xFF (unknown)." export-determinism-2 flagged that no test pinned the
+        gzip header mtime field ``raw[4:8]`` on the production
+        ``export_archive`` output (only the standalone ``deterministic_gzip``
+        helper header was byte-pinned in ``test_gzip_determinism.py``). The
+        production path sets ``mtime=0`` (export.py:535) and patches OS to 0xFF
+        (export.py:543-545); this pins both header bytes on the real output so
+        a regression on either MUST is caught.
+        """
         pkg = build_minimal_package()
         archive = tmp_dir / "os.acef.tar.gz"
         export_archive(pkg, str(archive))
 
         raw = archive.read_bytes()
-        # Gzip header: bytes[0:2]=magic, [2]=method, [9]=OS
+        # Gzip header: bytes[0:2]=magic, [2]=method, [3]=flags,
+        #              [4:8]=mtime (little-endian), [8]=xfl, [9]=OS
         assert raw[0:2] == b"\x1f\x8b", "Not a gzip file"
+        assert raw[4:8] == b"\x00\x00\x00\x00", f"Gzip header mtime must be 0, got {raw[4:8]!r}"
         assert raw[9] == 0xFF, f"OS byte must be 0xFF, got 0x{raw[9]:02X}"
 
 

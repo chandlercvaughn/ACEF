@@ -93,6 +93,8 @@ def validate_bundle(
     *,
     profiles: list[str] | None = None,
     evaluation_instant: str | None = None,
+    timestamp: str | None = None,
+    assessment_id: str | None = None,
     trust_anchors: list[Certificate] | None = None,
 ) -> AssessmentBundle:
     """Validate an ACEF Evidence Bundle and produce an Assessment Bundle.
@@ -106,7 +108,28 @@ def validate_bundle(
     Args:
         bundle_dir: Path to the bundle directory.
         profiles: List of profile IDs to evaluate (e.g., ['eu-ai-act-2024']).
-        evaluation_instant: Override evaluation timestamp (ISO 8601).
+        evaluation_instant: Override evaluation timestamp (ISO 8601). This is
+            the spec §3.7 "Canonical evaluation instant" that pins the
+            evaluation RESULTS (results[]/provision_summary[]); it does not
+            pin the assessment's creation-identity scalars below.
+        timestamp: Override the Assessment Bundle's CREATION ``timestamp``
+            (ISO 8601). Default ``None`` preserves the historical behavior:
+            the field falls back to ``datetime.now(UTC)`` (wall-clock creation
+            time), which is intentionally non-reproducible. Because the entire
+            Assessment Bundle — including ``timestamp`` — is canonicalized and
+            signed (``sign_assessment``), a caller wanting a BYTE-REPRODUCIBLE
+            signed assessment MUST supply an explicit ``timestamp`` (and
+            ``assessment_id``); see audit finding assessment-rollup-5. Note
+            this is distinct from ``evaluation_instant``, which the engine
+            already pins from ``metadata.timestamp`` for reproducible results.
+        assessment_id: Override the Assessment Bundle's ``assessment_id`` URN.
+            Default ``None`` mints a fresh random URN per run
+            (``urn:acef:asx:<uuid4>``), which — like ``timestamp`` — perturbs
+            the signed bytes. Supply an explicit value alongside ``timestamp``
+            to obtain a byte-reproducible signed assessment. The default
+            random URN is the SECOND creation-identity non-determinism source
+            (beyond the one named in assessment-rollup-5) that must be pinned
+            for reproducibility.
         trust_anchors: Locally configured trust-anchor certificates
             (``cryptography.x509.Certificate``) for x5c chain termination
             during Phase-2 signature verification. Spec §3.1.3 "Signature
@@ -125,6 +148,21 @@ def validate_bundle(
     """
     bundle_path = Path(bundle_dir)
 
+    # Creation-identity overrides. Each scalar is applied AFTER construction
+    # only when the caller supplied a non-None value, so an unset scalar falls
+    # through to its default factory (wall-clock ``timestamp`` / random
+    # ``assessment_id``), preserving the historical default behavior EXACTLY.
+    # When BOTH are supplied (together with a pinned ``evaluation_instant``)
+    # the resulting signed assessment is byte-reproducible — see audit finding
+    # assessment-rollup-5. Applied via a typed helper (not a ``**dict`` spread)
+    # so the per-field types stay statically checkable.
+    def _pin_identity(bundle: AssessmentBundle) -> AssessmentBundle:
+        if timestamp is not None:
+            bundle.timestamp = timestamp
+        if assessment_id is not None:
+            bundle.assessment_id = assessment_id
+        return bundle
+
     # Load manifest first so we can derive a deterministic evaluation_instant
     # from metadata.timestamp when the caller did not supply one. Spec §3.7
     # forbids using wall-clock time during evaluation — a default of
@@ -136,7 +174,7 @@ def validate_bundle(
         # short-circuits below.
         if evaluation_instant is None:
             evaluation_instant = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-        assessment = AssessmentBundle(evaluation_instant=evaluation_instant)
+        assessment = _pin_identity(AssessmentBundle(evaluation_instant=evaluation_instant))
         assessment.structural_errors.append(ValidationDiagnostic("ACEF-002", "acef-manifest.json not found").to_dict())
         return assessment
 
@@ -147,7 +185,7 @@ def validate_bundle(
         # crash the validator before any other phase runs.
         if evaluation_instant is None:
             evaluation_instant = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-        assessment = AssessmentBundle(evaluation_instant=evaluation_instant)
+        assessment = _pin_identity(AssessmentBundle(evaluation_instant=evaluation_instant))
         assessment.structural_errors.append(
             ValidationDiagnostic(
                 "ACEF-050",
@@ -159,7 +197,7 @@ def validate_bundle(
     if not isinstance(manifest_data, dict):
         if evaluation_instant is None:
             evaluation_instant = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-        assessment = AssessmentBundle(evaluation_instant=evaluation_instant)
+        assessment = _pin_identity(AssessmentBundle(evaluation_instant=evaluation_instant))
         assessment.structural_errors.append(
             ValidationDiagnostic(
                 "ACEF-002",
@@ -209,7 +247,7 @@ def validate_bundle(
     try:
         schema_version = schema_version_for_core_version(core_version)
     except ACEFSchemaError as exc:
-        assessment = AssessmentBundle(evaluation_instant=evaluation_instant)
+        assessment = _pin_identity(AssessmentBundle(evaluation_instant=evaluation_instant))
         assessment.structural_errors.append(
             ValidationDiagnostic(
                 exc.code,
@@ -221,7 +259,7 @@ def validate_bundle(
     try:
         core_major = int(core_version.split(".")[0])
         if core_major != 1:
-            assessment = AssessmentBundle(evaluation_instant=evaluation_instant)
+            assessment = _pin_identity(AssessmentBundle(evaluation_instant=evaluation_instant))
             assessment.structural_errors.append(
                 ValidationDiagnostic(
                     "ACEF-001",
@@ -257,10 +295,12 @@ def validate_bundle(
     # The shared ``assessment`` is created up-front so partial diagnostics
     # gathered before any failure are preserved alongside the fatal one.
     package_id, package_timestamp = _resolve_package_scalars(manifest_data)
-    assessment = AssessmentBundle(
-        evaluation_instant=evaluation_instant,
-        assessor=Assessor(name="acef-validator", version="0.1.0", organization="AI Commons"),
-        evidence_bundle_ref=EvidenceBundleRef(package_id=package_id),
+    assessment = _pin_identity(
+        AssessmentBundle(
+            evaluation_instant=evaluation_instant,
+            assessor=Assessor(name="acef-validator", version="0.1.0", organization="AI Commons"),
+            evidence_bundle_ref=EvidenceBundleRef(package_id=package_id),
+        )
     )
     try:
         _run_validation_phases(
