@@ -82,9 +82,21 @@ class AssessmentBundle(ACEFBaseModel):
     with the same ``evaluation_instant``. This is intentional and is NOT a
     spec violation: spec §3.7 scopes reproducibility to the evaluation
     RESULTS (``results``/``provision_summary``), which ARE reproducible and
-    are pinned by ``evaluation_instant``. A caller that needs a
-    byte-reproducible SIGNED assessment must supply explicit ``timestamp`` AND
-    ``assessment_id`` (see ``validate_bundle`` / ``validate``).
+    are pinned by ``evaluation_instant``.
+
+    Pinning ``timestamp`` AND ``assessment_id`` (via ``validate_bundle`` /
+    ``validate``) stabilizes the assessment PAYLOAD — the canonical RFC-8785
+    bytes that ``sign_assessment`` signs become byte-identical across runs.
+    That alone makes an UNSIGNED assessment byte-reproducible. Byte equality
+    of the SIGNED artifact (the exported ``.acef-assessment.json`` INCLUDING
+    its JWS) ALSO requires a DETERMINISTIC signing algorithm: RS256
+    (PKCS1v15) is deterministic, so an RS256-signed assessment over a pinned
+    payload is byte-reproducible; ES256 draws a fresh random ECDSA nonce (no
+    RFC 6979 deterministic-k), so an ES256-signed assessment is NOT
+    byte-reproducible even with both identity scalars pinned — the payload
+    bytes match but the signature bytes differ on every export. This mirrors
+    the ES256 archive honesty note (audit finding export-determinism-4);
+    callers needing a byte-reproducible signed assessment must use RS256.
     """
 
     versioning: AssessmentVersioning = Field(default_factory=AssessmentVersioning)

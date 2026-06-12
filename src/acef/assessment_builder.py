@@ -34,11 +34,17 @@ def validate(
         timestamp: Override the Assessment Bundle's creation ``timestamp``.
             Default ``None`` keeps the wall-clock creation time (intentionally
             non-reproducible). Supply an explicit value (with ``assessment_id``)
-            for a byte-reproducible signed assessment; see ``validate_bundle``
-            and audit finding assessment-rollup-5.
+            to stabilize the assessment PAYLOAD — the canonical RFC-8785 bytes
+            signed by ``sign_assessment`` become byte-identical across runs.
+            Byte equality of the SIGNED ``.acef-assessment.json`` ALSO requires
+            a deterministic signing algorithm: an RS256-signed export of the
+            pinned payload is byte-reproducible, but an ES256-signed export is
+            NOT (random ECDSA nonce). See ``validate_bundle`` and audit
+            findings assessment-rollup-5 and export-determinism-4.
         assessment_id: Override the Assessment Bundle's ``assessment_id`` URN.
             Default ``None`` mints a fresh random URN per run. Pin it alongside
-            ``timestamp`` for a byte-reproducible signed assessment.
+            ``timestamp`` to stabilize the payload; the resulting signed
+            assessment is byte-reproducible only under RS256, not ES256.
 
     Returns:
         An AssessmentBundle with all results.

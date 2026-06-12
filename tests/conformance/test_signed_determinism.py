@@ -190,6 +190,98 @@ class TestSignedAssessmentReproducibility:
         # non-reproducibility of the creation-identity scalars).
         assert a1.assessment_id != a2.assessment_id
 
+    def test_es256_signed_assessment_payload_identical_signature_differs(self, tmp_dir: Path) -> None:
+        """ES256 honesty mirror: pinned identity stabilizes the PAYLOAD only.
+
+        Pinning ``timestamp`` + ``assessment_id`` makes the canonical
+        assessment PAYLOAD (the RFC-8785 bytes ``sign_assessment`` signs)
+        byte-identical across runs. But byte-equality of the SIGNED artifact
+        (``.acef-assessment.json`` including its JWS) ALSO requires a
+        DETERMINISTIC signing algorithm. ES256 draws a fresh random ECDSA
+        nonce (no RFC 6979 deterministic-k), so two ES256-signed exports over
+        the identical pinned payload have IDENTICAL payload bytes but DIFFERENT
+        signature bytes — and therefore different file bytes. This mirrors the
+        archive ES256 honesty test and the qualified docstrings on
+        ``AssessmentBundle`` / ``validate_bundle`` / ``assessment_builder.validate``.
+
+        If this assertion ever flips (signed files become identical), the
+        signing path switched to deterministic-k and the reproducibility
+        docstrings must be revisited.
+        """
+        ec_key = _write_ec_key(tmp_dir)
+        pkg = build_minimal_package()
+        bundle_dir = tmp_dir / "es_bundle.acef"
+        pkg.export(str(bundle_dir))
+
+        fixed_instant = "2026-01-01T00:00:00Z"
+        fixed_ts = "2026-01-01T00:00:00Z"
+        fixed_id = "urn:acef:asx:33333333-3333-4333-8333-333333333333"
+
+        a1 = validate_bundle(
+            bundle_dir,
+            evaluation_instant=fixed_instant,
+            timestamp=fixed_ts,
+            assessment_id=fixed_id,
+        )
+        a2 = validate_bundle(
+            bundle_dir,
+            evaluation_instant=fixed_instant,
+            timestamp=fixed_ts,
+            assessment_id=fixed_id,
+        )
+
+        # PAYLOAD (unsigned canonical bytes) is byte-identical — pinned identity
+        # fully stabilizes the assessment content that ``sign_assessment`` signs.
+        payload1 = export_assessment(a1, str(tmp_dir / "es_payload1.json"))
+        payload2 = export_assessment(a2, str(tmp_dir / "es_payload2.json"))
+        assert payload1.read_bytes() == payload2.read_bytes(), (
+            "Unsigned assessment payload must be byte-identical with pinned identity"
+        )
+
+        # SIGNED artifact differs: ES256 random nonce perturbs the JWS bytes.
+        signed1 = export_assessment(a1, str(tmp_dir / "es_signed1.json"), key_path=str(ec_key))
+        signed2 = export_assessment(a2, str(tmp_dir / "es_signed2.json"), key_path=str(ec_key))
+        assert signed1.read_bytes() != signed2.read_bytes(), (
+            "ES256-signed assessments are expected to differ (random ECDSA nonce); "
+            "pinned identity stabilizes the payload, NOT the signature"
+        )
+
+    def test_rs256_signed_assessment_is_byte_reproducible(self, tmp_dir: Path) -> None:
+        """RS256 counterpart: deterministic signing → identical signed file.
+
+        Explicit RS256-key companion to the ES256 honesty test above, making
+        the (a)symmetry between RS256 (deterministic, byte-reproducible) and
+        ES256 (random nonce, NOT byte-reproducible) signed-assessment exports
+        unambiguous — mirroring the archive RS256/ES256 pair.
+        """
+        rsa_key = _write_rsa_key(tmp_dir)
+        pkg = build_minimal_package()
+        bundle_dir = tmp_dir / "rs_bundle.acef"
+        pkg.export(str(bundle_dir))
+
+        fixed_instant = "2026-01-01T00:00:00Z"
+        fixed_ts = "2026-01-01T00:00:00Z"
+        fixed_id = "urn:acef:asx:44444444-4444-4444-8444-444444444444"
+
+        a1 = validate_bundle(
+            bundle_dir,
+            evaluation_instant=fixed_instant,
+            timestamp=fixed_ts,
+            assessment_id=fixed_id,
+        )
+        a2 = validate_bundle(
+            bundle_dir,
+            evaluation_instant=fixed_instant,
+            timestamp=fixed_ts,
+            assessment_id=fixed_id,
+        )
+
+        signed1 = export_assessment(a1, str(tmp_dir / "rs_signed1.json"), key_path=str(rsa_key))
+        signed2 = export_assessment(a2, str(tmp_dir / "rs_signed2.json"), key_path=str(rsa_key))
+        assert signed1.read_bytes() == signed2.read_bytes(), (
+            "RS256-signed assessment with pinned identity must be byte-reproducible (PKCS1v15 is deterministic)"
+        )
+
     def test_explicit_timestamp_propagates_through_builder_validate(self, tmp_dir: Path) -> None:
         """The high-level ``validate()`` builder forwards explicit identity scalars."""
         pkg = build_minimal_package()

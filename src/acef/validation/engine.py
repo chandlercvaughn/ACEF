@@ -117,19 +117,29 @@ def validate_bundle(
             the field falls back to ``datetime.now(UTC)`` (wall-clock creation
             time), which is intentionally non-reproducible. Because the entire
             Assessment Bundle — including ``timestamp`` — is canonicalized and
-            signed (``sign_assessment``), a caller wanting a BYTE-REPRODUCIBLE
-            signed assessment MUST supply an explicit ``timestamp`` (and
-            ``assessment_id``); see audit finding assessment-rollup-5. Note
+            signed (``sign_assessment``), pinning ``timestamp`` (with
+            ``assessment_id``) stabilizes the assessment PAYLOAD: the canonical
+            RFC-8785 bytes become byte-identical across runs, so an UNSIGNED
+            assessment is byte-reproducible. Byte equality of the SIGNED
+            artifact (the exported ``.acef-assessment.json`` INCLUDING its JWS)
+            ALSO requires a deterministic signing algorithm — RS256 (PKCS1v15)
+            is deterministic; ES256 uses a random ECDSA nonce and is therefore
+            NOT byte-reproducible even with both identity scalars pinned (the
+            payload bytes match, the signature bytes differ). See audit
+            findings assessment-rollup-5 and export-determinism-4; callers
+            needing a byte-reproducible signed assessment must use RS256. Note
             this is distinct from ``evaluation_instant``, which the engine
             already pins from ``metadata.timestamp`` for reproducible results.
         assessment_id: Override the Assessment Bundle's ``assessment_id`` URN.
             Default ``None`` mints a fresh random URN per run
             (``urn:acef:asx:<uuid4>``), which — like ``timestamp`` — perturbs
             the signed bytes. Supply an explicit value alongside ``timestamp``
-            to obtain a byte-reproducible signed assessment. The default
-            random URN is the SECOND creation-identity non-determinism source
-            (beyond the one named in assessment-rollup-5) that must be pinned
-            for reproducibility.
+            to stabilize the assessment PAYLOAD; an RS256-signed export of that
+            pinned payload is then byte-reproducible, while an ES256-signed
+            export is not (random ECDSA nonce). The default random URN is the
+            SECOND creation-identity non-determinism source (beyond the one
+            named in assessment-rollup-5) that must be pinned before the
+            payload — and hence an RS256-signed assessment — is reproducible.
         trust_anchors: Locally configured trust-anchor certificates
             (``cryptography.x509.Certificate``) for x5c chain termination
             during Phase-2 signature verification. Spec §3.1.3 "Signature
