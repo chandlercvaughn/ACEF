@@ -33,6 +33,8 @@ from pathlib import Path
 
 import pytest
 
+from acef import export as export_module
+from acef.errors import ACEFExportError
 from acef.export import export_archive
 from acef.package import Package
 
@@ -194,6 +196,136 @@ def test_non_ascii_archive_is_deterministic(tmp_dir: Path) -> None:
     h1 = hashlib.sha256(out1.read_bytes()).hexdigest()
     h2 = hashlib.sha256(out2.read_bytes()).hexdigest()
     assert h1 == h2, "non-ASCII archive export is not byte-reproducible across runs"
+
+
+@pytest.mark.conformance
+def test_member_name_encoding_is_utf8_regardless_of_process_default(
+    tmp_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """RED→GREEN (Finding 1): member-name bytes are UTF-8 even on a non-UTF-8 default.
+
+    ``tarfile.open(...)`` without an explicit ``encoding`` falls back to
+    ``TarFile.encoding`` — the class attribute bound to ``tarfile.ENCODING``
+    (derived from the filesystem encoding) at interpreter start. On a non-UTF-8
+    locale that default is e.g. ``latin-1``, so a non-ASCII member name is
+    written with latin-1 bytes (``b"caf\\xe9..."``) instead of the
+    §3.1.1-required UTF-8 (``b"caf\\xc3\\xa9..."``). The TS USTAR writer always
+    emits ``Buffer.from(name, "utf-8")``, so a latin-1 default here breaks the
+    §3.1.3 byte-identical-archive MUST in an environment-dependent way.
+
+    This test simulates a non-UTF-8 process default by patching
+    ``tarfile.TarFile.encoding`` (the class-attribute fallback ``tarfile.open``
+    reads when no explicit ``encoding`` is supplied — patching the module-level
+    ``tarfile.ENCODING`` would NOT change it because the class attribute was
+    bound at class-definition time) to ``latin-1`` BEFORE export. Pre-fix
+    (``tarfile.open`` has no explicit ``encoding``) the non-ASCII member is
+    written as latin-1 bytes and this assertion fails; pinning
+    ``encoding="utf-8", errors="strict"`` makes the output UTF-8 regardless of
+    the patched default.
+    """
+    # Simulate a non-UTF-8 default locale: the class-attribute fallback that
+    # tarfile.open() reads when no explicit encoding is supplied.
+    monkeypatch.setattr(export_module.tarfile.TarFile, "encoding", "latin-1")
+
+    pkg = _build_package_with_artifact(NON_ASCII_NAME)
+    out = tmp_dir / "locale.acef.tar.gz"
+    export_archive(pkg, str(out))
+
+    tar_bytes = _tar_bytes(out)
+    expected_member = f"locale.acef/artifacts/{NON_ASCII_NAME}".encode()  # UTF-8
+    latin1_member = f"locale.acef/artifacts/{NON_ASCII_NAME}".encode("latin-1")
+    assert expected_member != latin1_member, "test premise: name must differ across codecs"
+
+    found = False
+    for block in _iter_header_blocks(tar_bytes):
+        name_field = block[NAME_FIELD].rstrip(b"\x00")
+        if name_field == expected_member:
+            found = True
+            break
+        assert name_field != latin1_member, (
+            "member name was written with the (patched) latin-1 process default "
+            f"instead of UTF-8: {name_field!r} — locale-dependent encoding breaks "
+            "cross-language byte parity with the TS UTF-8 writer."
+        )
+    assert found, (
+        f"expected UTF-8 member name {expected_member!r} not found — encoding was "
+        "not pinned to UTF-8 independent of the process default."
+    )
+
+
+@pytest.mark.conformance
+def test_member_name_at_or_over_100_utf8_bytes_is_rejected_like_ts(tmp_dir: Path) -> None:
+    """RED→GREEN (Finding 2): a >=100-UTF-8-byte member name is rejected, not split.
+
+    The TS ``buildArchive`` ``assertShortName`` REJECTS any full member name
+    (the ``<bundleName>/<relpath>`` string, trailing ``/`` for dirs) whose UTF-8
+    length is ``>= 100`` bytes, throwing rather than emitting GNU/PAX long-name
+    machinery. Python's ``tarfile`` instead either prefix-splits the name across
+    the USTAR ``name``/``prefix`` fields (silent byte-divergence from TS) or
+    raises a raw ``ValueError("name is too long")`` when the leaf alone is too
+    long — both break parity. ``export_archive`` must mirror TS exactly: a
+    structured ``ACEFExportError`` for any member name ``>= 100`` UTF-8 bytes.
+
+    A leaf of 120 ``a`` bytes makes the full member path ~146 UTF-8 bytes, well
+    over the 100-byte USTAR short-name domain.
+    """
+    long_leaf = "a" * 120 + ".txt"
+    pkg = _build_package_with_artifact(long_leaf)
+    out = tmp_dir / "longleaf.acef.tar.gz"
+    with pytest.raises(ACEFExportError) as exc_info:
+        export_archive(pkg, str(out))
+    msg = str(exc_info.value)
+    assert "100" in msg, f"rejection must cite the 100-byte USTAR domain: {msg!r}"
+
+
+@pytest.mark.conformance
+def test_long_bundle_name_prefix_pushes_member_over_100_is_rejected(tmp_dir: Path) -> None:
+    """RED→GREEN (Finding 2): the ``<bundleName>/`` prefix counts toward the 100.
+
+    A long ``bundle_name`` plus an otherwise-short artifact can push the FULL
+    member path to ``>= 100`` UTF-8 bytes even though the leaf is tiny. Python's
+    ``tarfile`` would prefix-split this across ``name``/``prefix`` (the TS writer
+    rejects it), so the full member path — including the ``<bundleName>/``
+    prefix — must be the rejection domain, identical to TS ``assertShortName``.
+
+    ``export_archive`` derives ``bundle_name`` from the output filename, so an
+    80-byte output basename yields an ~83-byte ``<bundleName>/`` prefix; with
+    ``artifacts/report.txt`` (20 bytes) the full member exceeds 100 bytes.
+    """
+    long_basename = "b" * 80
+    out = tmp_dir / f"{long_basename}.acef.tar.gz"
+    full_member = f"{long_basename}.acef/artifacts/report.txt"
+    assert len(full_member.encode("utf-8")) >= 100, "test premise: full member >= 100 bytes"
+
+    pkg = _build_package_with_artifact("report.txt")
+    with pytest.raises(ACEFExportError) as exc_info:
+        export_archive(pkg, str(out))
+    assert "100" in str(exc_info.value)
+
+
+@pytest.mark.conformance
+def test_member_name_just_under_100_bytes_exports_fine(tmp_dir: Path) -> None:
+    """Negative control (Finding 2): a member name < 100 UTF-8 bytes still exports.
+
+    The boundary mirrors TS: ``>= 100`` rejects, ``< 100`` passes. A full member
+    path of exactly 99 UTF-8 bytes must export successfully and round-trip.
+    """
+    # Full member path target: "<basename>.acef/artifacts/<leaf>" == 99 bytes.
+    # Choose a basename whose ".acef/artifacts/" + leaf totals 99.
+    basename = "shortpkg"  # 8 bytes
+    prefix = f"{basename}.acef/artifacts/"  # 8 + 16 = 24 bytes
+    leaf_len = 99 - len(prefix.encode("utf-8"))  # 75 bytes leaf
+    leaf = ("c" * (leaf_len - 4)) + ".txt"
+    full_member = f"{prefix}{leaf}"
+    assert len(full_member.encode("utf-8")) == 99, len(full_member.encode("utf-8"))
+
+    pkg = _build_package_with_artifact(leaf)
+    out = tmp_dir / f"{basename}.acef.tar.gz"
+    export_archive(pkg, str(out))
+    tar_bytes = _tar_bytes(out)
+    expected = full_member.encode("utf-8")
+    names = {b[NAME_FIELD].rstrip(b"\x00") for b in _iter_header_blocks(tar_bytes)}
+    assert expected in names, f"99-byte member {expected!r} should export as a plain USTAR member; got {names!r}"
 
 
 @pytest.mark.conformance

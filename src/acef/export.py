@@ -90,6 +90,46 @@ def _validate_export_attachment_path(att_path: str) -> None:
         )
 
 
+# USTAR (POSIX.1-1988) caps the ``name`` field at 100 bytes. The
+# cross-language TypeScript writer
+# (packages/sdk-typescript/src/bundle_export.ts ``assertShortName``) REJECTS
+# any FULL member name (the ``<bundle_name>/<relpath>`` string, with a trailing
+# ``/`` for directories) whose UTF-8 length is ``>= 100`` bytes rather than
+# emitting GNU/PAX long-name machinery. Python's ``tarfile`` would instead
+# either split such a name across the USTAR ``name``/``prefix`` fields (silent
+# byte-divergence from the TS writer) or raise a raw ``ValueError`` when the
+# leaf alone is too long. To preserve the §3.1.3 byte-identical-archive MUST we
+# mirror the TS domain EXACTLY: a structured ``ACEFExportError`` for any full
+# member name ``>= 100`` UTF-8 bytes, applied to the root dir, every
+# subdirectory, and every file.
+_USTAR_NAME_MAX_BYTES = 100
+
+
+def _validate_ustar_member_name(member_name: str) -> None:
+    """Reject a tar member name that exceeds the USTAR short-name domain.
+
+    Mirrors the TS ``assertShortName`` boundary: the FULL member name
+    (including the ``<bundle_name>/`` prefix and any trailing ``/``) must be
+    ``< 100`` UTF-8 bytes. ``>= 100`` is rejected, identical to the TS writer,
+    so both runtimes share one permitted member-name domain.
+
+    Args:
+        member_name: The full tar member name as it will be written.
+
+    Raises:
+        ACEFExportError: If the UTF-8 byte length is ``>= 100``.
+    """
+    byte_len = len(member_name.encode("utf-8"))
+    if byte_len >= _USTAR_NAME_MAX_BYTES:
+        raise ACEFExportError(
+            "Tar member name reaches the 100-byte USTAR short-name limit "
+            f"({byte_len} UTF-8 bytes); long-name (GNU/PAX) extension handling "
+            "is not portable across the ACEF reference writers and would break "
+            f"cross-language byte parity: {member_name!r}",
+            code="ACEF-052",
+        )
+
+
 def export_directory(package: Package, output_path: str) -> Path:
     """Export a package as a directory bundle.
 
@@ -246,10 +286,31 @@ def export_archive(package: Package, output_path: str) -> Path:
             # writer. USTAR caps member names at 100 bytes (prefix 155); the TS
             # writer rejects names >= 100 bytes, so both runtimes share the same
             # permitted member-name domain and produce byte-identical output
-            # within it.
-            with tarfile.open(str(tar_tmp_path), mode="w", format=tarfile.USTAR_FORMAT) as tar:
+            # within it. ``_validate_ustar_member_name`` enforces that shared
+            # domain here so Python never silently prefix-splits (or raises a
+            # raw ValueError for) a name the TS writer would reject.
+            #
+            # Pin ``encoding="utf-8", errors="strict"`` explicitly. Without it
+            # tarfile falls back to ``TarFile.encoding`` — the process default
+            # derived from the filesystem encoding at interpreter start — so on
+            # a non-UTF-8 locale a non-ASCII member name would be written with
+            # latin-1 (or other) bytes, diverging from the TS writer (which
+            # always emits ``Buffer.from(name, "utf-8")``) and breaking the
+            # §3.1.1 UTF-8-NFC-path / §3.1.3 byte-identical-archive MUSTs in an
+            # environment-dependent way. ``errors="strict"`` fails loudly rather
+            # than silently substituting bytes if a name is somehow non-encodable
+            # (NFC paths are already validated upstream).
+            with tarfile.open(
+                str(tar_tmp_path),
+                mode="w",
+                format=tarfile.USTAR_FORMAT,
+                encoding="utf-8",
+                errors="strict",
+            ) as tar:
                 # Add root directory
-                root_info = tarfile.TarInfo(name=bundle_name + "/")
+                root_member = bundle_name + "/"
+                _validate_ustar_member_name(root_member)
+                root_info = tarfile.TarInfo(name=root_member)
                 root_info.type = tarfile.DIRTYPE
                 root_info.mode = 0o755
                 root_info.mtime = mtime
@@ -261,7 +322,9 @@ def export_archive(package: Package, output_path: str) -> Path:
 
                 # Add directories
                 for d in all_dirs:
-                    dir_info = tarfile.TarInfo(name=f"{bundle_name}/{d}/")
+                    dir_member = f"{bundle_name}/{d}/"
+                    _validate_ustar_member_name(dir_member)
+                    dir_info = tarfile.TarInfo(name=dir_member)
                     dir_info.type = tarfile.DIRTYPE
                     dir_info.mode = 0o755
                     dir_info.mtime = mtime
@@ -276,7 +339,9 @@ def export_archive(package: Package, output_path: str) -> Path:
                     full_path = bundle_dir / f
                     file_size = full_path.stat().st_size
 
-                    file_info = tarfile.TarInfo(name=f"{bundle_name}/{f}")
+                    file_member = f"{bundle_name}/{f}"
+                    _validate_ustar_member_name(file_member)
+                    file_info = tarfile.TarInfo(name=file_member)
                     file_info.size = file_size
                     file_info.mode = 0o644
                     file_info.mtime = mtime
