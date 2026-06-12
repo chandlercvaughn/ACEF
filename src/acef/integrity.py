@@ -38,6 +38,48 @@ class ACEFCanonicalizationError(ValueError):
         self.path = path
 
 
+def path_nfc_utf8_problem(value: str) -> str | None:
+    """Return a human-readable reason if ``value`` violates the hash-domain
+    path text contract (spec §3.1.1), else ``None``.
+
+    Single source of truth for the two text constraints every hash-domain path
+    MUST satisfy, reused at all four enforcement sites (the two
+    :mod:`acef.package` attachment validators, the :mod:`acef.export`
+    export-time validator, and the discovered-key check in
+    :func:`compute_content_hashes`). Each caller maps the returned reason to its
+    own module-specific error type/code; centralizing the *logic* here keeps the
+    rule identical everywhere.
+
+    Two checks, in order:
+
+    1. **Strict UTF-8.** A Python ``str`` may hold lone UTF-16 surrogates (e.g.
+       ``"a\\udce9.txt"`` from a POSIX filename decoded with ``surrogateescape``,
+       or a caller-supplied literal). Such a string can be *already NFC*
+       (``unicodedata.normalize("NFC", value) == value``) yet is NOT encodable
+       as UTF-8. Spec §3.1.1 requires hash-domain paths to be UTF-8; an
+       un-encodable path could never be written to ``content-hashes.json`` /
+       a tar member name consistently, so reject it before the NFC test (which
+       would otherwise pass it through).
+    2. **NFC normalization.** Reject paths whose NFC form differs from the
+       supplied form (e.g. an HFS+ NFD-decomposed name) so a conformant
+       NFC-normalizing exporter and this one produce identical keys.
+
+    Args:
+        value: The hash-domain path string to validate.
+
+    Returns:
+        ``None`` when the path is strict-UTF-8 and NFC; otherwise a reason
+        string describing the first violation found.
+    """
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError:
+        return "path is not valid UTF-8 (contains surrogate or un-encodable code points)"
+    if unicodedata.normalize("NFC", value) != value:
+        return "path is not UTF-8 NFC normalized"
+    return None
+
+
 def canonicalize(data: Any) -> bytes:
     """Canonicalize a Python object to RFC 8785 (JCS) bytes.
 
@@ -283,18 +325,22 @@ def compute_content_hashes(bundle_dir: Path) -> dict[str, str]:
                 path=file_path,
             ) from exc
         rel = file_path.relative_to(bundle_dir).as_posix()
-        # Spec §3.1.1: paths in the manifest AND hashes MUST use UTF-8 NFC
+        # Spec §3.1.1: paths in the manifest AND hashes MUST be UTF-8 with NFC
         # normalization. Files are discovered here by rglob and the on-disk
-        # relative path is used directly as the content-hashes.json key and
-        # the Merkle leaf path. Unlike manifest-declared paths (NFC-enforced in
-        # loader/package), these discovered keys would otherwise bypass NFC
-        # enforcement, so a non-NFC filename (e.g. an HFS+ NFD-decomposed name)
-        # could enter the hash domain and produce a different bundle digest
-        # than an NFC-normalizing producer. Reject it as a structured
-        # diagnostic (ACEF-051) mirroring the content-side NFC checks above.
-        if unicodedata.normalize("NFC", rel) != rel:
+        # relative path is used directly as the content-hashes.json key and the
+        # Merkle leaf path. Unlike manifest-declared paths (NFC-enforced in
+        # loader/package), these discovered keys would otherwise bypass NFC and
+        # strict-UTF-8 enforcement, so a non-NFC filename (e.g. an HFS+
+        # NFD-decomposed name) or a surrogate-bearing name (POSIX bytes decoded
+        # via surrogateescape) could enter the hash domain and produce a
+        # different bundle digest than a conformant producer. We share the rule
+        # with the package/export validators via ``path_nfc_utf8_problem`` and
+        # surface it as a structured diagnostic (ACEF-051) mirroring the
+        # content-side NFC checks above.
+        problem = path_nfc_utf8_problem(rel)
+        if problem is not None:
             raise ACEFCanonicalizationError(
-                f"File path in hash domain is not UTF-8 NFC normalized (spec §3.1.1): {rel!r}",
+                f"File path in hash domain violates spec §3.1.1 ({problem}): {rel!r}",
                 path=file_path,
             )
         hashes[rel] = sha256_file(file_path)

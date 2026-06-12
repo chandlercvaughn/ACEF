@@ -8,7 +8,6 @@ from __future__ import annotations
 import hashlib
 import re
 import secrets
-import unicodedata
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -17,7 +16,7 @@ from typing import TYPE_CHECKING, Any
 from pydantic import ValidationError
 
 from acef.errors import ACEFError, ACEFSchemaError
-from acef.integrity import canonicalize, sha256_hex
+from acef.integrity import canonicalize, path_nfc_utf8_problem, sha256_hex
 from acef.models.agent_reliability import (
     AuthorizedTestScopePayload,
     DeliveryVerdictPayload,
@@ -2055,13 +2054,15 @@ def _validate_raw_attachment_path(path: str) -> None:
             code="ACEF-052",
         )
 
-    # Spec §3.1.1: paths in the manifest and hashes MUST use UTF-8 NFC
-    # normalization. Reject non-NFC (e.g. an HFS+ NFD-decomposed name) so the
-    # determinism contract holds: a conformant NFC-normalizing exporter and
-    # this one must produce identical content-hashes.json keys and tar members.
-    if unicodedata.normalize("NFC", path) != path:
+    # Spec §3.1.1: paths in the manifest and hashes MUST be UTF-8 with NFC
+    # normalization. Reject non-UTF-8 (surrogate-bearing) or non-NFC (e.g. an
+    # HFS+ NFD-decomposed name) paths via the shared rule so the determinism
+    # contract holds: a conformant NFC-normalizing exporter and this one must
+    # produce identical content-hashes.json keys and tar members.
+    problem = path_nfc_utf8_problem(path)
+    if problem is not None:
         raise ACEFError(
-            f"Attachment path is not UTF-8 NFC normalized: {path!r}",
+            f"Attachment path violates spec §3.1.1 ({problem}): {path!r}",
             code="ACEF-052",
         )
 
@@ -2108,12 +2109,14 @@ def _validate_attachment_path(path: str) -> None:
             code="ACEF-052",
         )
 
-    # Spec §3.1.1: paths in the manifest and hashes MUST use UTF-8 NFC
-    # normalization. Reject non-NFC here too (defense in depth alongside the
-    # raw-path check) so a non-NFC artifact key can never reach the hash domain.
-    if unicodedata.normalize("NFC", path) != path:
+    # Spec §3.1.1: paths in the manifest and hashes MUST be UTF-8 with NFC
+    # normalization. Reject non-UTF-8 (surrogate-bearing) or non-NFC paths here
+    # too (defense in depth alongside the raw-path check) via the shared rule so
+    # such an artifact key can never reach the hash domain.
+    problem = path_nfc_utf8_problem(path)
+    if problem is not None:
         raise ACEFError(
-            f"Attachment path is not UTF-8 NFC normalized: {path!r}",
+            f"Attachment path violates spec §3.1.1 ({problem}): {path!r}",
             code="ACEF-052",
         )
 

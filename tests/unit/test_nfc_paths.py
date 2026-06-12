@@ -40,6 +40,25 @@ from acef.package import (
 _NFD_NAME = "café.txt"
 _NFC_NAME = unicodedata.normalize("NFC", _NFD_NAME)
 
+# A lone UTF-16 low surrogate (U+DCE9). This arises when a POSIX filename is
+# decoded with the surrogateescape error handler, or from a caller-supplied
+# str literal. It is *already NFC* (unicodedata.normalize("NFC", s) == s) yet it
+# is NOT valid UTF-8 (str.encode("utf-8") raises UnicodeEncodeError), so it must
+# never enter the UTF-8 hash-domain path contract (spec §3.1.1). roborev finding
+# 2 (MEDIUM): such a string previously slipped past every NFC-only check.
+_SURROGATE_NAME = "a\udce9.txt"
+
+
+def _assert_surrogate_is_nfc_but_not_utf8(name: str) -> None:
+    assert unicodedata.normalize("NFC", name) == name, "fixture must be NFC to prove the NFC-only check is insufficient"
+    with pytest.raises(UnicodeEncodeError):
+        name.encode("utf-8")
+
+
+def test_surrogate_fixture_sanity() -> None:
+    """The surrogate fixture is NFC-equal yet invalid UTF-8 (the exact bypass)."""
+    _assert_surrogate_is_nfc_but_not_utf8(_SURROGATE_NAME)
+
 
 def _assert_is_nfd(name: str) -> None:
     assert unicodedata.normalize("NFC", name) != name, f"test fixture {name!r} is unexpectedly already NFC"
@@ -87,11 +106,16 @@ def test_validate_attachment_path_accepts_nfc() -> None:
 
 
 def test_validate_export_attachment_path_rejects_nfd() -> None:
-    """Export-time validator rejects an NFD path."""
+    """Export-time validator rejects an NFD path with ACEF-052.
+
+    roborev finding 1 (LOW): the export-time NFC rejection must carry the
+    designated path code ACEF-052, not the ACEFExportError default (ACEF-050).
+    """
     from acef.export import _validate_export_attachment_path
 
-    with pytest.raises(ACEFExportError):
+    with pytest.raises(ACEFExportError) as exc_info:
         _validate_export_attachment_path(f"artifacts/{_NFD_NAME}")
+    assert exc_info.value.code == "ACEF-052"
 
 
 def test_validate_export_attachment_path_accepts_nfc() -> None:
@@ -99,6 +123,36 @@ def test_validate_export_attachment_path_accepts_nfc() -> None:
     from acef.export import _validate_export_attachment_path
 
     _validate_export_attachment_path(f"artifacts/{_NFC_NAME}")
+
+
+# ---------------------------------------------------------------------------
+# roborev finding 2 (MEDIUM) — strict UTF-8: surrogate paths are NFC-equal but
+# invalid UTF-8 and must be rejected at all four hash-domain path sites with
+# the right ACEF code, while valid NFC UTF-8 still passes.
+# ---------------------------------------------------------------------------
+
+
+def test_validate_raw_attachment_path_rejects_surrogate() -> None:
+    """Raw validator rejects a surrogate (NFC-equal, invalid UTF-8) with ACEF-052."""
+    with pytest.raises(ACEFError) as exc_info:
+        _validate_raw_attachment_path(_SURROGATE_NAME)
+    assert exc_info.value.code == "ACEF-052"
+
+
+def test_validate_attachment_path_rejects_surrogate() -> None:
+    """Final validator rejects a surrogate (NFC-equal, invalid UTF-8) with ACEF-052."""
+    with pytest.raises(ACEFError) as exc_info:
+        _validate_attachment_path(f"artifacts/{_SURROGATE_NAME}")
+    assert exc_info.value.code == "ACEF-052"
+
+
+def test_validate_export_attachment_path_rejects_surrogate() -> None:
+    """Export validator rejects a surrogate (NFC-equal, invalid UTF-8) with ACEF-052."""
+    from acef.export import _validate_export_attachment_path
+
+    with pytest.raises(ACEFExportError) as exc_info:
+        _validate_export_attachment_path(f"artifacts/{_SURROGATE_NAME}")
+    assert exc_info.value.code == "ACEF-052"
 
 
 def test_add_attachment_rejects_nfd_via_public_api() -> None:
@@ -180,3 +234,62 @@ def test_compute_content_hashes_ascii_bundle_unaffected(tmp_path: Path) -> None:
     }
     for key in hashes:
         assert unicodedata.normalize("NFC", key) == key
+
+
+# ---------------------------------------------------------------------------
+# Centralized helper — single source of truth for strict-UTF-8 + NFC on
+# hash-domain paths, reused at all four sites (package raw/final, export,
+# integrity discovered-key). roborev finding 2 (MEDIUM).
+# ---------------------------------------------------------------------------
+
+
+def test_path_problem_helper_flags_surrogate() -> None:
+    """The shared helper returns a non-None reason for an NFC-equal surrogate."""
+    from acef.integrity import path_nfc_utf8_problem
+
+    assert path_nfc_utf8_problem(_SURROGATE_NAME) is not None
+
+
+def test_path_problem_helper_flags_nfd() -> None:
+    """The shared helper returns a non-None reason for an NFD (non-NFC) path."""
+    from acef.integrity import path_nfc_utf8_problem
+
+    assert path_nfc_utf8_problem(_NFD_NAME) is not None
+
+
+def test_path_problem_helper_accepts_valid_nfc_utf8() -> None:
+    """The shared helper returns None for a valid NFC UTF-8 path."""
+    from acef.integrity import path_nfc_utf8_problem
+
+    assert path_nfc_utf8_problem(_NFC_NAME) is None
+    assert path_nfc_utf8_problem("artifacts/eval-report.txt") is None
+
+
+def test_compute_content_hashes_rejects_surrogate_discovered_key(tmp_path: Path) -> None:
+    """A discovered on-disk filename that is NFC-equal but invalid UTF-8 must be
+    rejected at the integrity site (ACEFCanonicalizationError), not admitted as
+    a hash-domain key. Skipped if the host filesystem cannot create the name."""
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    (bundle / "acef-manifest.json").write_text("{}", encoding="utf-8")
+    artifacts = bundle / "artifacts"
+    artifacts.mkdir()
+    try:
+        (artifacts / _SURROGATE_NAME).write_bytes(b"hi")
+    except (OSError, UnicodeEncodeError, ValueError):
+        pytest.skip("host filesystem cannot create a surrogate-bearing filename")
+
+    on_disk_names = [p.name for p in artifacts.iterdir()]
+    if not any(unicodedata.normalize("NFC", n) == n and _is_invalid_utf8(n) for n in on_disk_names):
+        pytest.skip("host filesystem normalized away the surrogate filename")
+
+    with pytest.raises(ACEFCanonicalizationError):
+        compute_content_hashes(bundle)
+
+
+def _is_invalid_utf8(name: str) -> bool:
+    try:
+        name.encode("utf-8")
+    except UnicodeEncodeError:
+        return True
+    return False

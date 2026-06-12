@@ -15,13 +15,17 @@ import os
 import shutil
 import tarfile
 import tempfile
-import unicodedata
 from datetime import datetime
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
 from acef.errors import ACEFExportError
-from acef.integrity import build_merkle_tree, canonicalize, compute_content_hashes
+from acef.integrity import (
+    build_merkle_tree,
+    canonicalize,
+    compute_content_hashes,
+    path_nfc_utf8_problem,
+)
 from acef.records_util import canonicalize_record, compute_shard_boundaries, sort_records
 
 if TYPE_CHECKING:
@@ -54,17 +58,25 @@ def _validate_export_attachment_path(att_path: str) -> None:
     if "\\" in att_path:
         raise ACEFExportError(
             f"Backslash separators not allowed in attachment path during export: {att_path!r}",
+            code="ACEF-052",
         )
     if att_path.startswith("/"):
         raise ACEFExportError(
             f"Absolute attachment path not allowed during export: {att_path!r}",
+            code="ACEF-052",
         )
-    # Spec §3.1.1: hash-domain paths MUST use UTF-8 NFC normalization. Reject
-    # a non-NFC path at export time so a non-NFC tar member name / content-hash
-    # key can never be written even if upstream validation was bypassed.
-    if unicodedata.normalize("NFC", att_path) != att_path:
+    # Spec §3.1.1: hash-domain paths MUST be UTF-8 with NFC normalization.
+    # Reject a non-UTF-8 (surrogate-bearing) or non-NFC path at export time so
+    # such a tar member name / content-hash key can never be written even if
+    # upstream validation was bypassed. Shares the rule with the package
+    # validators and the integrity discovered-key check via
+    # ``path_nfc_utf8_problem``; carries ACEF-052 (the designated path code)
+    # rather than the ACEFExportError default.
+    problem = path_nfc_utf8_problem(att_path)
+    if problem is not None:
         raise ACEFExportError(
-            f"Attachment path is not UTF-8 NFC normalized during export: {att_path!r}",
+            f"Attachment path violates spec §3.1.1 during export ({problem}): {att_path!r}",
+            code="ACEF-052",
         )
     segments = att_path.split("/")
     for segment in segments:
