@@ -105,6 +105,129 @@ def _validate_export_attachment_path(att_path: str) -> None:
 _USTAR_NAME_MAX_BYTES = 100
 
 
+# The MANDATORY managed members every directory bundle / archive contains,
+# expressed as bundle-root-relative POSIX paths. Directory members carry a
+# trailing "/" (they are written as USTAR DIRTYPE entries); file members do not.
+# These are the FIXED (content-independent) members the build loop in
+# ``export_directory`` always writes:
+#   * the four managed subdirectories (export_directory lines creating
+#     records/ artifacts/ hashes/ signatures/),
+#   * ``acef-manifest.json`` (always written),
+#   * ``hashes/content-hashes.json`` and ``hashes/merkle-tree.json`` (always
+#     written).
+# Factored into a single module-level tuple so the entry-point preflight and the
+# documented member set cannot drift; the worst-case fixed suffix is
+# ``hashes/content-hashes.json`` (the longest), which is what makes an ~80-byte
+# basename overflow the 100-byte USTAR domain even when ``<bundle_name>/`` alone
+# passes. Record-shard, attachment, and signature members are content-derived
+# and are computed from the package alongside these (see
+# ``_iter_mandatory_member_relpaths``).
+_MANDATORY_FIXED_MEMBER_RELPATHS: tuple[str, ...] = (
+    "records/",
+    "artifacts/",
+    "hashes/",
+    "signatures/",
+    "acef-manifest.json",
+    "hashes/content-hashes.json",
+    "hashes/merkle-tree.json",
+)
+
+# Default signature filename kid (export_directory calls ``sign_bundle`` without
+# an explicit kid, so the default applies). Kept in sync with
+# ``signing.sign_bundle``'s ``kid`` default and its ``safe_kid`` sanitization so
+# the preflight derives the SAME ``signatures/<safe_kid>.jws`` member the build
+# loop will write when the package is signed.
+_DEFAULT_SIGNATURE_KID = "provider-key"
+
+
+def _record_shard_relpaths(package: Package) -> list[str]:
+    """Derive the record-shard member relpaths the build loop will write.
+
+    Mirrors ``export_directory``'s record-writing block EXACTLY (same grouping
+    by ``record_type``, same ``sort_records`` / ``compute_shard_boundaries``,
+    same single-vs-multi-shard naming) so the preflight validates the precise
+    member names the loop produces — they cannot drift from the loop. Returns
+    bundle-root-relative POSIX paths (file members; no trailing slash). For a
+    multi-shard record type the per-type shard SUBDIRECTORY member
+    (``records/<type>/``) is included too so an over-long shard-dir name is
+    also rejected up front.
+    """
+    relpaths: list[str] = []
+    records_by_type: dict[str, list[Any]] = {}
+    for rec in package.records:
+        records_by_type.setdefault(rec.record_type, []).append(rec)
+
+    for record_type, recs in sorted(records_by_type.items()):
+        sorted_recs = sort_records(recs)
+        shards = compute_shard_boundaries(sorted_recs)
+        if len(shards) == 1:
+            relpaths.append(f"records/{record_type}.jsonl")
+        else:
+            relpaths.append(f"records/{record_type}/")
+            for i in range(len(shards)):
+                shard_num = str(i + 1).zfill(4)
+                relpaths.append(f"records/{record_type}/{record_type}.{shard_num}.jsonl")
+    return relpaths
+
+
+def _iter_mandatory_member_relpaths(package: Package) -> list[str]:
+    """Every DETERMINISTIC bundle-root-relative member the build loop emits.
+
+    Combines the fixed managed members
+    (``_MANDATORY_FIXED_MEMBER_RELPATHS``), the record-shard members derived
+    from the package exactly as the loop derives them
+    (``_record_shard_relpaths``), the attachment members
+    (the ``artifacts/...`` keys the loop writes), and — when the package is
+    signed — the ``signatures/<safe_kid>.jws`` member. Used by the entry-point
+    preflight so both public surfaces reject an over-long member up front
+    instead of building an unarchivable directory bundle / failing deep in the
+    tar loop.
+    """
+    import re
+
+    relpaths: list[str] = list(_MANDATORY_FIXED_MEMBER_RELPATHS)
+    relpaths.extend(_record_shard_relpaths(package))
+    # Attachment members: the loop writes each ``att_path`` key verbatim under
+    # the bundle root; they are already ``artifacts/...`` relpaths.
+    relpaths.extend(package.attachments.keys())
+    # Signature member: only written when the package is signed; mirror
+    # signing.sign_bundle's safe_kid sanitization on the default kid.
+    if package.is_signed and package.signing_key:
+        safe_kid = re.sub(r"[^A-Za-z0-9_\-.]", "-", _DEFAULT_SIGNATURE_KID)
+        relpaths.append(f"signatures/{safe_kid}.jws")
+    return relpaths
+
+
+def _preflight_member_names(bundle_name: str, package: Package) -> None:
+    """Validate every mandatory archive member name BEFORE any filesystem work.
+
+    Validates not only the tar-root member ``<bundle_name>/`` but
+    ``<bundle_name>/<relpath>`` for every deterministic managed member the build
+    loop will emit (fixed files/dirs, record shards, attachments, signature).
+    A basename whose root passes the 100-byte USTAR domain can still push a
+    mandatory CHILD member (e.g. ``<bundle_name>/hashes/content-hashes.json``)
+    over the limit — building an UNARCHIVABLE directory bundle, or making
+    ``export_archive`` fail deep in the tar loop after a full temp export. By
+    preflighting the worst-case member at the entry point, ``export_directory``
+    only ever produces archivable bundles and ``export_archive`` rejects early
+    with the structured ``ACEF-052`` code, matching the TS writer domain exactly.
+
+    Args:
+        bundle_name: The tar-root bundle name (output basename).
+        package: The package whose content-derived members are preflighted.
+
+    Raises:
+        ACEFExportError: If the root or any mandatory member name is not strict
+            UTF-8 / NFC or its full ``<bundle_name>/<relpath>`` exceeds the
+            100-byte USTAR domain. Carries code ``ACEF-052``.
+    """
+    # Root member first (also surfaces a surrogate/non-NFC basename as ACEF-052
+    # before it can reach the host FS encoder).
+    _validate_ustar_member_name(bundle_name + "/")
+    for relpath in _iter_mandatory_member_relpaths(package):
+        _validate_ustar_member_name(f"{bundle_name}/{relpath}")
+
+
 def _validate_ustar_member_name(member_name: str) -> None:
     """Reject a tar member name that exceeds the USTAR short-name domain.
 
@@ -166,14 +289,18 @@ def export_directory(package: Package, output_path: str) -> Path:
     # path component right here and becomes the tar-root member name
     # ("<bundle_name>/") of any archive later built from this directory, so
     # both public export surfaces must share one permitted name domain.
-    # Validate it at the entry point, BEFORE any filesystem work: a
-    # surrogate-bearing basename (a valid Python str the FS encoder rejects)
-    # must surface as the structured designated path code ACEF-052 — never a
-    # raw UnicodeEncodeError (strict-encoder hosts) or a host-dependent
-    # OSError("Illegal byte sequence") wrapped as generic ACEF-050 (macOS) —
-    # and a >= 100-UTF-8-byte basename must be rejected up front instead of
-    # silently producing a directory bundle the archive writers would refuse.
-    _validate_ustar_member_name(bundle_dir.name + "/")
+    # Preflight EVERY mandatory managed member at the entry point, BEFORE any
+    # filesystem work — not just the root "<bundle_name>/". A basename whose
+    # root passes the 100-byte USTAR domain can still push a mandatory CHILD
+    # member (e.g. "<bundle_name>/hashes/content-hashes.json", or a record-shard
+    # / attachment member) over the limit, producing a directory bundle the
+    # archive writers would refuse. _preflight_member_names validates the root
+    # AND every deterministic child member derived from the same logic the build
+    # loop uses, surfacing a surrogate/non-NFC or over-long name as the
+    # structured designated path code ACEF-052 — never a raw UnicodeEncodeError
+    # (strict-encoder hosts), a host-dependent OSError("Illegal byte sequence")
+    # wrapped as generic ACEF-050 (macOS), or an unarchivable bundle.
+    _preflight_member_names(bundle_dir.name, package)
 
     try:
         bundle_dir.mkdir(parents=True, exist_ok=True)
@@ -263,17 +390,22 @@ def export_archive(package: Package, output_path: str) -> Path:
     """
     try:
         bundle_name = Path(output_path).name.replace(".tar.gz", "").replace(".acef", "") + ".acef"
-        # Validate the derived bundle name as the tar-root member name
-        # IMMEDIATELY after deriving it, BEFORE any filesystem work (tempdir
-        # creation, bundle_dir mkdir/export). Without this ordering a
-        # surrogate-bearing output basename reaches the host FS encoder inside
-        # export_directory first and surfaces as a raw UnicodeEncodeError
-        # (strict-encoder hosts) or OSError("Illegal byte sequence") wrapped as
-        # generic ACEF-050 (macOS), and a >= 100-UTF-8-byte basename is only
-        # caught deep in the tar loop after the full directory bundle was
-        # already built. The public surface must raise the structured
-        # designated path code ACEF-052 for every invalid output basename.
-        _validate_ustar_member_name(bundle_name + "/")
+        # Preflight EVERY mandatory archive member name IMMEDIATELY after
+        # deriving the bundle name, BEFORE any filesystem work (tempdir creation,
+        # the full export_directory temp export, the tar build loop). Validating
+        # only the tar-root "<bundle_name>/" here is insufficient: a basename
+        # whose root passes the 100-byte USTAR domain can still push a mandatory
+        # CHILD member (e.g. "<bundle_name>/hashes/content-hashes.json", a
+        # record-shard, or an attachment member) over the limit — and the
+        # over-long child member is only caught DEEP in the tar loop, after the
+        # full directory bundle was already built in the temp dir. Without this
+        # full preflight a surrogate-bearing basename also reaches the host FS
+        # encoder inside export_directory first (raw UnicodeEncodeError on
+        # strict-encoder hosts, or OSError("Illegal byte sequence") wrapped as
+        # generic ACEF-050 on macOS). _preflight_member_names raises the
+        # structured designated path code ACEF-052 for the root AND every
+        # deterministic managed member up front, before the temp export runs.
+        _preflight_member_names(bundle_name, package)
 
         # First export as directory to a temp location
         with tempfile.TemporaryDirectory() as tmpdir:

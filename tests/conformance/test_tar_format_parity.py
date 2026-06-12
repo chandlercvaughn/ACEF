@@ -577,3 +577,212 @@ def test_export_directory_normal_output_basename_exports_fine(tmp_dir: Path) -> 
     assert result == out
     assert (out / "acef-manifest.json").exists()
     assert (out / "records").is_dir()
+
+
+# ---------------------------------------------------------------------------
+# roborev Medium: entry-point preflight must validate every MANDATORY CHILD
+# member, not just the root ``<bundle_name>/``.
+#
+# A bundle_name whose root member (``<bundle_name>/``, the basename + a trailing
+# ``/``) is < 100 UTF-8 bytes can STILL push a mandatory child member over the
+# USTAR 100-byte domain. The worst-case FIXED managed member is
+# ``hashes/content-hashes.json`` (26 bytes), so an ~80-byte basename gives a
+# 81-byte root (OK) but a ``<bundle_name>/hashes/content-hashes.json`` member of
+# 107 bytes (>= 100, unarchivable). Record-shard members
+# (``records/<type>.jsonl``) and attachment members (``artifacts/<path>``) are
+# likewise child-derived. Pre-fix, ``export_directory`` builds an UNARCHIVABLE
+# directory bundle and ``export_archive`` does the full temp export before
+# failing DEEP in the tar loop. After the fix BOTH preflight every mandatory
+# member at the entry point and raise ACEF-052 before any filesystem work.
+# ---------------------------------------------------------------------------
+
+# An 80-byte basename: ``<base>/`` root member = 81 bytes (< 100, passes the
+# root-only check) but ``<base>/hashes/content-hashes.json`` = 107 bytes
+# (>= 100, breaches the USTAR domain). This is the finding's exact example.
+_CHILD_OVERFLOW_BASE = "b" * 80
+
+
+@pytest.mark.conformance
+def test_export_directory_basename_passing_root_but_overflowing_child_member_rejected(
+    tmp_dir: Path,
+) -> None:
+    """RED→GREEN (Medium): a basename that passes the ROOT check but overflows a
+    mandatory CHILD member is rejected up front — no unarchivable bundle built.
+
+    ``<base>/`` (81 bytes) passes the root-only check, but
+    ``<base>/hashes/content-hashes.json`` (107 bytes) breaches USTAR's 100-byte
+    domain. Pre-fix ``export_directory`` SUCCEEDS, writing an unarchivable
+    directory bundle (``content-hashes.json`` member > 100 bytes) that
+    ``export_archive`` / the TS writer would refuse. The fix must preflight every
+    mandatory child member and reject with ACEF-052 BEFORE any FS work, leaving
+    no bundle directory behind.
+    """
+    # Premise: the root member alone passes the existing root-only check.
+    _validate_ustar_member_name(_CHILD_OVERFLOW_BASE + "/")
+    # but the worst-case fixed child member breaches the domain.
+    child = _CHILD_OVERFLOW_BASE + "/hashes/content-hashes.json"
+    assert len(child.encode("utf-8")) >= 100
+
+    out = tmp_dir / _CHILD_OVERFLOW_BASE
+    with pytest.raises(ACEFExportError) as exc_info:
+        export_directory(_build_simple_package(), str(out))
+    assert exc_info.value.code == "ACEF-052"
+    assert "100" in str(exc_info.value), "rejection must cite the 100-byte USTAR domain"
+    assert not out.exists(), (
+        "preflight must run BEFORE any filesystem work — no unarchivable bundle "
+        "directory may be created when a mandatory child member breaches the domain"
+    )
+
+
+@pytest.mark.conformance
+def test_export_archive_basename_passing_root_but_overflowing_child_member_rejected(
+    tmp_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """RED→GREEN (Medium): export_archive rejects a child-overflowing basename at
+    entry, BEFORE the temp export runs (export_directory is never called).
+
+    Pre-fix ``export_archive`` validates only ``<bundle_name>/`` at entry, then
+    runs the FULL temp ``export_directory`` (bundle dir, manifest, hashes, Merkle)
+    and only fails when ``_validate_ustar_member_name`` runs against the over-long
+    child member DEEP inside the tar build loop. The fix must reject the basename
+    at the entry point with ACEF-052 BEFORE the temp export.
+
+    This is proven by a spy on ``export.export_directory``: if the preflight runs
+    first, the spy is never invoked. (The deep-tar-loop pre-fix path DOES call
+    export_directory, so this assertion is what makes the test RED before the fix —
+    the bare ``pytest.raises`` alone passes pre-fix because the deep loop also
+    raises ACEF-052, just too late.)
+    """
+    called: list[str] = []
+    real_export_directory = export_module.export_directory
+
+    def spy_export_directory(pkg: object, path: str) -> object:
+        called.append(path)
+        return real_export_directory(pkg, path)
+
+    monkeypatch.setattr(export_module, "export_directory", spy_export_directory)
+
+    out = tmp_dir / f"{_CHILD_OVERFLOW_BASE}.acef.tar.gz"
+    with pytest.raises(ACEFExportError) as exc_info:
+        export_module.export_archive(_build_simple_package(), str(out))
+    assert exc_info.value.code == "ACEF-052"
+    assert "100" in str(exc_info.value), (
+        "rejection must cite the 100-byte USTAR domain (entry-point preflight), "
+        "not surface as a deep tar-loop error after the full temp export"
+    )
+    assert called == [], (
+        "export_archive performed the temp export (export_directory was invoked) "
+        "before failing deep in the tar loop — the preflight must reject the "
+        "child-overflowing basename at the entry point, before any FS work"
+    )
+    assert not out.exists(), "no archive may be produced for a rejected basename"
+
+
+@pytest.mark.conformance
+def test_export_archive_long_basename_overflows_record_shard_member_rejected(
+    tmp_dir: Path,
+) -> None:
+    """RED→GREEN (Medium): a record-shard CHILD member pushed over 100 bytes by a
+    long bundle_name is rejected up front.
+
+    The record shard member is ``records/<record_type>.jsonl``. For
+    ``evaluation_report`` that suffix is ``records/evaluation_report.jsonl``
+    (34 bytes). A basename sized so the root passes but
+    ``<base>/records/evaluation_report.jsonl`` breaches 100 bytes must be rejected
+    at entry. ``export_archive`` derives ``bundle_name`` by appending ``.acef``.
+    """
+    # root member "<base>.acef/" must be < 100, but
+    # "<base>.acef/records/evaluation_report.jsonl" must be >= 100.
+    # suffix "/records/evaluation_report.jsonl" = 32 bytes; "<base>.acef" prefix.
+    base = "s" * 80  # bundle_name "<base>.acef" = 85 bytes; root "<...>/" = 86 (< 100)
+    bundle_name = base + ".acef"
+    shard_member = f"{bundle_name}/records/evaluation_report.jsonl"
+    # sanity on the test's own arithmetic
+    assert len((bundle_name + "/").encode("utf-8")) < 100
+    assert len(shard_member.encode("utf-8")) >= 100
+
+    out = tmp_dir / f"{base}.acef.tar.gz"
+    with pytest.raises(ACEFExportError) as exc_info:
+        export_archive(_build_simple_package(), str(out))
+    assert exc_info.value.code == "ACEF-052"
+    assert not out.exists()
+
+
+@pytest.mark.conformance
+def test_export_directory_long_basename_overflows_attachment_member_rejected(
+    tmp_dir: Path,
+) -> None:
+    """RED→GREEN (Medium): an attachment CHILD member pushed over 100 bytes by a
+    long bundle_name is rejected up front.
+
+    Attachment members are ``artifacts/<att_path-tail>``. A package whose only
+    variable is the (short) basename and which carries a normal artifact must be
+    rejected when ``<base>/artifacts/<file>`` breaches the domain — proving the
+    preflight derives the attachment members from the package, not just a fixed
+    suffix list.
+    """
+    filename = "report.txt"  # artifact member tail "artifacts/report.txt" = 20 bytes
+    # root "<base>/" must be < 100, but "<base>/artifacts/report.txt" must be >= 100.
+    base = "a" * 85  # root "<base>/" = 86 bytes (< 100)
+    member = f"{base}/artifacts/{filename}"
+    assert len((base + "/").encode("utf-8")) < 100
+    assert len(member.encode("utf-8")) >= 100
+
+    pkg = _build_package_with_artifact(filename)
+    out = tmp_dir / base
+    with pytest.raises(ACEFExportError) as exc_info:
+        export_directory(pkg, str(out))
+    assert exc_info.value.code == "ACEF-052"
+    assert not out.exists()
+
+
+@pytest.mark.conformance
+def test_export_directory_basename_near_but_under_worst_case_limit_exports(
+    tmp_dir: Path,
+) -> None:
+    """Negative control (Medium): a basename near but UNDER the worst-case
+    mandatory-member limit still exports.
+
+    For ``_build_simple_package`` the LONGEST mandatory member suffix is the
+    record shard ``/records/evaluation_report.jsonl`` (32 bytes incl. the
+    leading ``/``) — longer than the longest fixed file
+    ``/hashes/content-hashes.json`` (27 bytes). A basename sized so even that
+    worst-case member is < 100 bytes must export cleanly — guarding the
+    preflight against over-rejection. (The earlier draft of this test sized to
+    ``content-hashes.json`` and was correctly REJECTED by the preflight because
+    the record-shard member overflowed; that proved the preflight derives the
+    real worst-case member, not just the fixed suffixes.)
+    """
+    shard_suffix = "/records/evaluation_report.jsonl"
+    assert len(shard_suffix.encode("utf-8")) == 32
+    # 67-byte basename: worst-case "<base>/records/evaluation_report.jsonl" =
+    # 67 + 32 = 99 bytes (< 100). Must export.
+    base = "u" * 67
+    worst = base + shard_suffix
+    assert len(worst.encode("utf-8")) == 99
+    out = tmp_dir / base
+    result = export_directory(_build_simple_package(), str(out))
+    assert result == out
+    assert (out / "hashes" / "content-hashes.json").exists()
+    assert (out / "records" / "evaluation_report.jsonl").exists()
+
+
+@pytest.mark.conformance
+def test_export_archive_basename_near_but_under_worst_case_limit_exports(
+    tmp_dir: Path,
+) -> None:
+    """Negative control (Medium): export_archive with a near-limit basename whose
+    every mandatory member stays < 100 bytes exports a valid archive.
+    """
+    # bundle_name "<base>.acef"; the LONGEST mandatory member is the record
+    # shard "<base>.acef/records/evaluation_report.jsonl" (32-byte suffix),
+    # longer than "/hashes/content-hashes.json" (27 bytes). Keep it < 100.
+    base = "v" * 60  # "<base>.acef" = 65; worst member = 65 + 32 = 97 (< 100)
+    bundle_name = base + ".acef"
+    worst = bundle_name + "/records/evaluation_report.jsonl"
+    assert len(worst.encode("utf-8")) < 100
+    out = tmp_dir / f"{base}.acef.tar.gz"
+    result = export_archive(_build_simple_package(), str(out))
+    assert result == out
+    assert out.exists()
