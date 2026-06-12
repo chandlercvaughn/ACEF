@@ -35,7 +35,7 @@ import pytest
 
 from acef import export as export_module
 from acef.errors import ACEFExportError
-from acef.export import _validate_ustar_member_name, export_archive
+from acef.export import _validate_ustar_member_name, export_archive, export_directory
 from acef.package import Package
 
 # A non-ASCII NFC artifact filename, 36 UTF-8 bytes incl. the ``artifacts/``
@@ -415,3 +415,165 @@ def test_validator_member_name_at_99_bytes_is_accepted() -> None:
     assert len(member.encode("utf-8")) == 99
     # Must not raise.
     _validate_ustar_member_name(member)
+
+
+def _build_simple_package() -> Package:
+    """A minimal valid package with no artifacts (basename is the only variable)."""
+    pkg = Package(producer={"name": "test-tool", "version": "1.0.0"})
+    system = pkg.add_subject(
+        "ai_system",
+        name="Test System",
+        risk_classification="high-risk",
+        modalities=["text"],
+        lifecycle_phase="deployment",
+    )
+    pkg.record(
+        "evaluation_report",
+        provisions=["article-9"],
+        payload={"result": "pass"},
+        obligation_role="provider",
+        entity_refs={"subject_refs": [system.id]},
+    )
+    return pkg
+
+
+@pytest.mark.conformance
+def test_export_archive_surrogate_output_basename_raises_structured_acef_052(
+    tmp_dir: Path,
+) -> None:
+    """RED→GREEN (Finding 1, ORDERING): the PUBLIC surface raises ACEF-052.
+
+    ``export_archive`` derives ``bundle_name`` from the ``output_path`` basename
+    and constructs/creates ``bundle_dir`` (via ``export_directory``) BEFORE the
+    in-tar ``_validate_ustar_member_name`` runs. For a surrogate-bearing output
+    basename — a valid Python ``str`` that the host filesystem encoder rejects —
+    the FS work happens FIRST: on a strict-encoder host the basename raises a raw
+    ``UnicodeEncodeError``; on a ``surrogateescape``-tolerant host (e.g. macOS)
+    the directory ``mkdir`` fails with ``OSError`` ("Illegal byte sequence")
+    re-wrapped as the GENERIC ``ACEF-050`` ("Failed to export bundle"). Either
+    way the public surface does NOT surface the designated path code ACEF-052 —
+    the structured-error contract is wrong and the validator never runs.
+
+    The fix validates the derived ``bundle_name`` as a USTAR member name at the
+    entry point, BEFORE any FS work, so the public surface deterministically
+    raises ``ACEFExportError`` code ACEF-052 for a surrogate basename on every
+    host.
+    """
+    # Premise: this str is NOT UTF-8 encodable, so any FS / encode path on it
+    # would throw a raw / generic error before the path domain is checked.
+    surrogate_base = "a\udce9"
+    with pytest.raises(UnicodeEncodeError):
+        surrogate_base.encode("utf-8")
+
+    out = tmp_dir / f"{surrogate_base}.acef.tar.gz"
+    with pytest.raises(ACEFExportError) as exc_info:
+        export_archive(_build_simple_package(), str(out))
+    assert exc_info.value.code == "ACEF-052", (
+        "a surrogate output basename must surface the designated path code "
+        f"ACEF-052 through the public export_archive surface, not {exc_info.value.code!r} "
+        "(ACEF-050 generic / raw UnicodeEncodeError) — entry-point validation must "
+        "run before any filesystem work"
+    )
+
+
+@pytest.mark.conformance
+def test_export_directory_surrogate_output_basename_raises_structured_acef_052(
+    tmp_dir: Path,
+) -> None:
+    """RED→GREEN (Finding 1, ORDERING): export_directory public surface → ACEF-052.
+
+    ``export_directory`` is the other public entry point: it derives a
+    bundle_name (the output-path basename) and ``mkdir``-s ``bundle_dir`` from it
+    BEFORE any member-name validation. A surrogate-bearing basename therefore
+    fails inside ``mkdir`` (raw ``UnicodeEncodeError`` on a strict-encoder host,
+    or ``OSError`` "Illegal byte sequence" → generic ``ACEF-050`` on macOS)
+    instead of the designated path code. The entry-point validation must run on
+    BOTH surfaces so neither leaks a raw / generic error.
+    """
+    surrogate_base = "a\udce9"
+    out = tmp_dir / f"{surrogate_base}.acef"
+    with pytest.raises(ACEFExportError) as exc_info:
+        export_directory(_build_simple_package(), str(out))
+    assert exc_info.value.code == "ACEF-052", (
+        "a surrogate output basename must surface ACEF-052 through the public "
+        f"export_directory surface, not {exc_info.value.code!r}"
+    )
+
+
+@pytest.mark.conformance
+def test_export_directory_too_long_output_basename_raises_acef_052_before_fs_work(
+    tmp_dir: Path,
+) -> None:
+    """RED→GREEN (Finding 1, ORDERING): export_directory >=100-byte basename → ACEF-052.
+
+    A directory bundle's basename IS the bundle name: it becomes the tar-root
+    member (``<bundle_name>/``) of any archive later built from the directory,
+    so both public surfaces must share one permitted name domain. Pre-fix
+    ``export_directory`` performs NO name validation at all — a
+    >=100-UTF-8-byte basename silently SUCCEEDS, producing a directory bundle
+    that ``export_archive`` (and the TS writer) would reject. The entry-point
+    validation must reject it as ACEF-052 BEFORE any FS work, leaving no bundle
+    directory behind (the ordering proof).
+    """
+    long_base = "z" * 110  # "<base>/" root member is 111 bytes >= 100
+    out = tmp_dir / long_base
+    with pytest.raises(ACEFExportError) as exc_info:
+        export_directory(_build_simple_package(), str(out))
+    assert exc_info.value.code == "ACEF-052"
+    assert "100" in str(exc_info.value), "rejection must cite the 100-byte USTAR domain, not a generic export error"
+    assert not out.exists(), (
+        "validation must run BEFORE any filesystem work — no bundle directory may be created for a rejected basename"
+    )
+
+
+@pytest.mark.conformance
+def test_export_archive_too_long_output_basename_raises_acef_052_before_fs_work(
+    tmp_dir: Path,
+) -> None:
+    """RED→GREEN (Finding 1, ORDERING): a >=100-byte basename → ACEF-052 at entry.
+
+    A ``>= 100``-UTF-8-byte output basename makes the tar-root member
+    (``<bundle_name>/``) breach the USTAR short-name domain on its own (no
+    artifact needed). Pre-fix this is only caught DEEP in the tar loop after
+    ``export_directory`` already created the bundle dir, manifest, hashes and
+    Merkle tree. The entry-point validation must reject it as ACEF-052 BEFORE any
+    of that FS work — a structured path error, never a deep tar error.
+    """
+    long_base = "z" * 110  # 110 bytes; "<base>.acef/" root member is ~116 bytes
+    out = tmp_dir / f"{long_base}.acef.tar.gz"
+    with pytest.raises(ACEFExportError) as exc_info:
+        export_archive(_build_simple_package(), str(out))
+    assert exc_info.value.code == "ACEF-052"
+    assert "100" in str(exc_info.value), "rejection must cite the 100-byte USTAR domain, not a generic export error"
+
+
+@pytest.mark.conformance
+def test_export_archive_normal_output_basename_exports_fine(tmp_dir: Path) -> None:
+    """Negative control (Finding 1, ORDERING): a normal basename still exports.
+
+    The entry-point validation must NOT perturb the happy path: a normal
+    (short, ASCII, NFC) output basename exports a valid archive that exists and
+    round-trips. Guards against an over-eager entry-point check.
+    """
+    out = tmp_dir / "normal-bundle.acef.tar.gz"
+    result = export_archive(_build_simple_package(), str(out))
+    assert result == out
+    assert out.exists()
+    # The archive is a valid gzip tar with the expected root member present.
+    tar_bytes = _tar_bytes(out)
+    names = {b[NAME_FIELD].rstrip(b"\x00") for b in _iter_header_blocks(tar_bytes)}
+    assert b"normal-bundle.acef/" in names
+
+
+@pytest.mark.conformance
+def test_export_directory_normal_output_basename_exports_fine(tmp_dir: Path) -> None:
+    """Negative control (Finding 1, ORDERING): export_directory happy path intact.
+
+    A normal output basename must still produce a populated directory bundle.
+    Guards the second public surface against an over-eager entry-point check.
+    """
+    out = tmp_dir / "normal-dir-bundle.acef"
+    result = export_directory(_build_simple_package(), str(out))
+    assert result == out
+    assert (out / "acef-manifest.json").exists()
+    assert (out / "records").is_dir()

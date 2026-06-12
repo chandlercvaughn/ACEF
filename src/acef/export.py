@@ -162,6 +162,19 @@ def export_directory(package: Package, output_path: str) -> Path:
     """
     bundle_dir = Path(output_path)
 
+    # The output basename IS the bundle name: it is used as a host-filesystem
+    # path component right here and becomes the tar-root member name
+    # ("<bundle_name>/") of any archive later built from this directory, so
+    # both public export surfaces must share one permitted name domain.
+    # Validate it at the entry point, BEFORE any filesystem work: a
+    # surrogate-bearing basename (a valid Python str the FS encoder rejects)
+    # must surface as the structured designated path code ACEF-052 — never a
+    # raw UnicodeEncodeError (strict-encoder hosts) or a host-dependent
+    # OSError("Illegal byte sequence") wrapped as generic ACEF-050 (macOS) —
+    # and a >= 100-UTF-8-byte basename must be rejected up front instead of
+    # silently producing a directory bundle the archive writers would refuse.
+    _validate_ustar_member_name(bundle_dir.name + "/")
+
     try:
         bundle_dir.mkdir(parents=True, exist_ok=True)
 
@@ -249,9 +262,21 @@ def export_archive(package: Package, output_path: str) -> Path:
         ACEFExportError: If archive creation fails.
     """
     try:
+        bundle_name = Path(output_path).name.replace(".tar.gz", "").replace(".acef", "") + ".acef"
+        # Validate the derived bundle name as the tar-root member name
+        # IMMEDIATELY after deriving it, BEFORE any filesystem work (tempdir
+        # creation, bundle_dir mkdir/export). Without this ordering a
+        # surrogate-bearing output basename reaches the host FS encoder inside
+        # export_directory first and surfaces as a raw UnicodeEncodeError
+        # (strict-encoder hosts) or OSError("Illegal byte sequence") wrapped as
+        # generic ACEF-050 (macOS), and a >= 100-UTF-8-byte basename is only
+        # caught deep in the tar loop after the full directory bundle was
+        # already built. The public surface must raise the structured
+        # designated path code ACEF-052 for every invalid output basename.
+        _validate_ustar_member_name(bundle_name + "/")
+
         # First export as directory to a temp location
         with tempfile.TemporaryDirectory() as tmpdir:
-            bundle_name = Path(output_path).name.replace(".tar.gz", "").replace(".acef", "") + ".acef"
             bundle_dir = Path(tmpdir) / bundle_name
             export_directory(package, str(bundle_dir))
 
