@@ -12,10 +12,13 @@ Covers two audit findings:
   Bundle carries wall-clock ``timestamp`` and a random ``assessment_id`` as
   default-factory fields, both of which land inside the RFC-8785 bytes that
   ``sign_assessment`` signs. Without an explicit, reproducibility-pinning
-  input a signed assessment is NOT byte-reproducible. ``validate_bundle``
+  input the assessment PAYLOAD is NOT byte-stable. ``validate_bundle``
   must accept explicit ``timestamp``/``assessment_id`` so a caller CAN
-  produce a byte-reproducible signed assessment, while preserving the
-  wall-clock/random default for callers who do not pass them.
+  produce a byte-identical assessment PAYLOAD, while preserving the
+  wall-clock/random default for callers who do not pass them. Byte equality
+  of the SIGNED artifact additionally requires a deterministic signing
+  algorithm — RS256 (PKCS1v15); ES256 draws a fresh random ECDSA nonce and
+  is therefore NOT byte-reproducible even with both identity scalars pinned.
 """
 
 from __future__ import annotations
@@ -125,12 +128,16 @@ class TestSignedArchiveReproducibility:
 
 
 class TestSignedAssessmentReproducibility:
-    """A signed Assessment Bundle is reproducible IFF identity scalars are pinned.
+    """Pinned identity scalars stabilize the assessment PAYLOAD; a byte-reproducible
+    SIGNED assessment additionally requires RS256 (not ES256).
 
     ``AssessmentBundle.timestamp`` (wall-clock) and ``assessment_id`` (random
     URN) are both default-factory fields inside the RFC-8785 bytes that
     ``sign_assessment`` signs. ``validate_bundle`` accepts explicit values for
-    both so a caller can produce a byte-reproducible signed assessment.
+    both so a caller can produce a byte-identical assessment PAYLOAD; byte
+    equality of the SIGNED artifact additionally requires a deterministic
+    signing algorithm — RS256 (PKCS1v15), since ES256 draws a fresh random
+    ECDSA nonce per export and is therefore NOT byte-reproducible.
     """
 
     def test_explicit_identity_yields_byte_identical_signed_assessment(self, tmp_dir: Path) -> None:
@@ -166,7 +173,7 @@ class TestSignedAssessmentReproducibility:
         out2 = export_assessment(a2, str(tmp_dir / "a2.json"), key_path=str(key_path))
 
         assert out1.read_bytes() == out2.read_bytes(), (
-            "Signed assessment with pinned identity scalars must be byte-reproducible"
+            "RS256-signed assessment with pinned identity scalars must be byte-reproducible (PKCS1v15 is deterministic)"
         )
 
     def test_default_timestamp_is_creation_time_and_documented_nonreproducible(self, tmp_dir: Path) -> None:

@@ -102,11 +102,14 @@ class AssessmentBundle(ACEFBaseModel):
     versioning: AssessmentVersioning = Field(default_factory=AssessmentVersioning)
     # Creation-identity URN. Defaults to a fresh random ``urn:acef:asx:<uuid4>``
     # per construction → a non-determinism source in the signed bytes. Pin it
-    # explicitly for a byte-reproducible signed assessment (assessment-rollup-5).
+    # explicitly (with ``timestamp``) to stabilize the assessment PAYLOAD; a
+    # byte-reproducible SIGNED assessment additionally requires RS256, not
+    # ES256 (random ECDSA nonce) — assessment-rollup-5.
     assessment_id: str = Field(default_factory=lambda: generate_urn(URNType.ASSESSMENT))
     # Creation timestamp (wall-clock). Intentionally non-reproducible; pin it
-    # explicitly (with ``assessment_id``) for a byte-reproducible signed
-    # assessment. Distinct from ``evaluation_instant``, which pins results.
+    # explicitly (with ``assessment_id``) to stabilize the assessment PAYLOAD —
+    # a byte-reproducible SIGNED assessment additionally requires RS256, not
+    # ES256. Distinct from ``evaluation_instant``, which pins results.
     timestamp: str = Field(default_factory=lambda: datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"))
     evaluation_instant: str = Field(default_factory=lambda: datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"))
     assessor: Assessor = Field(default_factory=Assessor)

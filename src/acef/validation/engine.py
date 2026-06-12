@@ -163,8 +163,11 @@ def validate_bundle(
     # through to its default factory (wall-clock ``timestamp`` / random
     # ``assessment_id``), preserving the historical default behavior EXACTLY.
     # When BOTH are supplied (together with a pinned ``evaluation_instant``)
-    # the resulting signed assessment is byte-reproducible — see audit finding
-    # assessment-rollup-5. Applied via a typed helper (not a ``**dict`` spread)
+    # the assessment PAYLOAD (canonical RFC-8785 bytes) is byte-reproducible;
+    # byte equality of the SIGNED artifact additionally requires a
+    # deterministic signing algorithm — RS256 (PKCS1v15), not ES256 (random
+    # ECDSA nonce) — see audit finding assessment-rollup-5. Applied via a
+    # typed helper (not a ``**dict`` spread)
     # so the per-field types stay statically checkable.
     def _pin_identity(bundle: AssessmentBundle) -> AssessmentBundle:
         if timestamp is not None:
