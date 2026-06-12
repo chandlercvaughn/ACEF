@@ -544,10 +544,21 @@ def test_validate_bundle_surrogate_merkle_key_not_acef_001_backstop(
 ) -> None:
     """validate_bundle() surfaces the structured ACEF-051 (via the integrity
     checker) rather than falling into the generic ACEF-001 untrusted-input
-    backstop for a surrogate content-hashes.json key in the Merkle step.
+    backstop for a surrogate content-hashes.json key.
 
     RED before the wrapper: the raw ACEFCanonicalizationError propagated up to
     validate_bundle()'s ``except Exception`` backstop -> ACEF-001.
+
+    roborev finding (MEDIUM): the assertion below was originally only
+    ``"ACEF-051" in codes``. But ``_run_validation_phases()`` LATER re-loads the
+    SAME content-hashes.json and calls ``compute_bundle_digest()`` (the
+    evidence_bundle_ref digest), whose RFC-8785 canonicalization raises on the
+    surrogate key. That digest site's ``except`` tuple did not cover the
+    canonicalization fault, so the exception escaped to the ACEF-001 backstop —
+    meaning ACEF-051 AND ACEF-001 BOTH appeared for the same malformed key. The
+    structural ACEF-051 emitted upstream is the authoritative diagnostic; the
+    generic ACEF-001 backstop MUST NOT fire for it. Assert both: ACEF-051
+    present, ACEF-001 absent.
     """
     from acef.validation.engine import validate_bundle
 
@@ -558,4 +569,51 @@ def test_validate_bundle_surrogate_merkle_key_not_acef_001_backstop(
     assert "ACEF-051" in codes, (
         "Surrogate Merkle key must produce a structured ACEF-051 via the "
         f"integrity checker, got structural error codes: {sorted(codes)}"
+    )
+    assert "ACEF-001" not in codes, (
+        "The bundle-digest canonicalization site must not let the surrogate key "
+        "reach the generic ACEF-001 backstop; ACEF-051 is the authoritative "
+        f"diagnostic. Got structural error codes: {sorted(codes)}"
+    )
+
+
+def _write_well_formed_digest_bundle(tmp_path: Path) -> Path:
+    """Build a minimal but well-formed bundle: a real artifact on disk, a
+    matching content-hashes.json, and a correct merkle-tree.json. Used to prove
+    the bundle-digest happy path is unchanged by the surrogate guard.
+    """
+    import json
+
+    from acef.integrity import build_merkle_tree, compute_content_hashes
+
+    bundle_dir = tmp_path / "wellformed_bundle"
+    hashes_dir = bundle_dir / "hashes"
+    hashes_dir.mkdir(parents=True)
+    (bundle_dir / "acef-manifest.json").write_text("{}", encoding="utf-8")
+    artifacts = bundle_dir / "artifacts"
+    artifacts.mkdir()
+    (artifacts / "eval-report.txt").write_bytes(b"hi")
+
+    content_hashes = compute_content_hashes(bundle_dir)
+    (hashes_dir / "content-hashes.json").write_text(json.dumps(content_hashes), encoding="utf-8")
+    (hashes_dir / "merkle-tree.json").write_text(json.dumps(build_merkle_tree(content_hashes)), encoding="utf-8")
+    return bundle_dir
+
+
+def test_validate_bundle_well_formed_digest_still_computed(tmp_path: Path) -> None:
+    """Negative control: the surrogate guard must not break the happy path — a
+    well-formed (all-ASCII, like every golden) bundle still gets its
+    evidence_bundle_ref.content_hash computed (a ``sha256:`` digest), with no
+    ACEF-051 and no ACEF-001.
+    """
+    from acef.validation.engine import validate_bundle
+
+    bundle_dir = _write_well_formed_digest_bundle(tmp_path)
+
+    assessment = validate_bundle(str(bundle_dir))
+    codes = {d["code"] for d in assessment.structural_errors}
+    assert "ACEF-051" not in codes, f"unexpected ACEF-051 on a well-formed bundle: {sorted(codes)}"
+    assert "ACEF-001" not in codes, f"unexpected ACEF-001 on a well-formed bundle: {sorted(codes)}"
+    assert assessment.evidence_bundle_ref.content_hash.startswith("sha256:"), (
+        f"well-formed bundle digest must be computed normally, got: {assessment.evidence_bundle_ref.content_hash!r}"
     )

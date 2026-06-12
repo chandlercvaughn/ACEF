@@ -570,17 +570,34 @@ def _run_validation_phases(
     # Compute bundle digest for evidence_bundle_ref
     content_hashes_path = bundle_path / "hashes" / "content-hashes.json"
     if content_hashes_path.exists():
-        from acef.integrity import compute_bundle_digest
+        from acef.integrity import ACEFCanonicalizationError, compute_bundle_digest
 
         try:
             content_hashes = json.loads(content_hashes_path.read_text(encoding="utf-8"))
             if isinstance(content_hashes, dict):
                 assessment.evidence_bundle_ref.content_hash = compute_bundle_digest(content_hashes)
-        except (json.JSONDecodeError, UnicodeDecodeError, OSError):
-            # The Phase 2 integrity check already emitted a diagnostic for
-            # an invalid content-hashes.json; don't re-emit, just leave the
-            # content_hash field empty so callers know it could not be
-            # computed.
+        except (
+            json.JSONDecodeError,
+            UnicodeDecodeError,
+            UnicodeEncodeError,
+            ACEFCanonicalizationError,
+            OSError,
+        ):
+            # The Phase 2 integrity check already emitted a diagnostic for an
+            # invalid content-hashes.json; don't re-emit, just leave the
+            # content_hash field empty (EvidenceBundleRef.content_hash defaults
+            # to "") so callers know it could not be computed.
+            #
+            # ``compute_bundle_digest`` RFC-8785-canonicalizes the SAME
+            # content-hashes.json that the Phase-2 Merkle check already flagged.
+            # A surrogate / non-NFC key (NFC-equal but not UTF-8-encodable) makes
+            # ``rfc8785.dumps`` raise ``UnicodeEncodeError`` (encode-side, NOT the
+            # ``UnicodeDecodeError`` read-side already handled), and the hash
+            # domain's own canonicalization faults surface as
+            # ``ACEFCanonicalizationError``. Both are caught here so the digest is
+            # simply left unset; the authoritative structural ACEF-051 was already
+            # emitted upstream by the integrity checker, and this site must NOT let
+            # the fault escape into validate_bundle()'s generic ACEF-001 backstop.
             pass
 
     # ``assessment`` was mutated in place; the caller (validate_bundle) owns it
