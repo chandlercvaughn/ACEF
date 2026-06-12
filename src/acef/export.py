@@ -233,7 +233,21 @@ def export_archive(package: Package, output_path: str) -> Path:
 
             # Write tar to a temp file first, then gzip with deterministic settings (M-SCOUT-2)
             tar_tmp_path = Path(tmpdir) / "_archive.tar"
-            with tarfile.open(str(tar_tmp_path), mode="w") as tar:
+            # Pin USTAR_FORMAT explicitly. Python's tarfile default is
+            # PAX_FORMAT (tarfile.DEFAULT_FORMAT == 2); PAX emits an extended
+            # header ("x" typeflag) block for any member name with non-ASCII
+            # UTF-8 bytes — which §3.1.1 permits (paths use UTF-8 NFC, so
+            # non-ASCII names are valid). The cross-language TypeScript writer
+            # (packages/sdk-typescript/src/bundle_export.ts) emits POSIX.1-1988
+            # USTAR headers only, so a PAX default here would diverge from it
+            # for any non-ASCII artifact name, breaking the §3.1.3 byte-
+            # identical-archive MUST. USTAR stores the raw UTF-8 bytes directly
+            # in the name[0:100] field (no extended header), matching the TS
+            # writer. USTAR caps member names at 100 bytes (prefix 155); the TS
+            # writer rejects names >= 100 bytes, so both runtimes share the same
+            # permitted member-name domain and produce byte-identical output
+            # within it.
+            with tarfile.open(str(tar_tmp_path), mode="w", format=tarfile.USTAR_FORMAT) as tar:
                 # Add root directory
                 root_info = tarfile.TarInfo(name=bundle_name + "/")
                 root_info.type = tarfile.DIRTYPE

@@ -554,8 +554,12 @@ function writeString(header: Buffer, offset: number, value: string, width: numbe
 
 /**
  * Build one 512-byte USTAR header. Mirrors the bytes Python's `tarfile`
- * emits in DEFAULT (GNU) format for short names — which is byte-identical to
- * USTAR for names < 100 chars and prefix unused.
+ * emits. Python's `export_archive` pins `format=tarfile.USTAR_FORMAT`
+ * explicitly (Python's library DEFAULT is PAX_FORMAT, not GNU — PAX would
+ * emit an `x` extended-header block for any non-ASCII UTF-8 member name and
+ * diverge from this writer). With both runtimes on USTAR, the bytes are
+ * identical for every member name < 100 bytes (ASCII or non-ASCII): USTAR
+ * stores the raw UTF-8 name directly in name[0:100] with the prefix unused.
  *
  * Field layout (POSIX.1-1988 USTAR):
  *   name[100] mode[8] uid[8] gid[8] size[12] mtime[12] chksum[8] typeflag[1]
