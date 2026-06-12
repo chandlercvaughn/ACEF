@@ -142,14 +142,36 @@ def check_integrity(
                 )
             else:
                 expected_root = merkle_data.get("root", "")
-                if not verify_merkle_root(expected_hashes, expected_root):
+                # verify_merkle_root() -> build_merkle_tree() raises
+                # ACEFCanonicalizationError when a content-hashes.json key
+                # violates spec §3.1.1 (surrogate / non-NFC), because the key is
+                # encoded as UTF-8 to build the leaf. Catch and map to ACEF-051
+                # (the key text, not the Merkle root, is the canonicalization
+                # fault) — mirroring the content-hash verification above — so
+                # callers get a structured diagnostic rather than a raw
+                # exception, and validate_bundle() does not fall into its generic
+                # ACEF-001 backstop. The faulting key lives in
+                # content-hashes.json; build_merkle_tree raises with path=None,
+                # so the diagnostic path is that file.
+                try:
+                    merkle_ok = verify_merkle_root(expected_hashes, expected_root)
+                except _CanonErr as exc:
                     diagnostics.append(
                         ValidationDiagnostic(
-                            "ACEF-011",
-                            "Merkle root mismatch",
-                            path="/hashes/merkle-tree.json",
+                            "ACEF-051",
+                            str(exc),
+                            path="/hashes/content-hashes.json",
                         )
                     )
+                else:
+                    if not merkle_ok:
+                        diagnostics.append(
+                            ValidationDiagnostic(
+                                "ACEF-011",
+                                "Merkle root mismatch",
+                                path="/hashes/merkle-tree.json",
+                            )
+                        )
 
     # Check signatures
     sig_diagnostics = _check_signatures(

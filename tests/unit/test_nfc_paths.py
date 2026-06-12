@@ -465,3 +465,97 @@ def test_merkle_verify_surrogate_key_is_structured_not_raw_unicode(
         pytest.fail("verify_merkle_root leaked a raw UnicodeEncodeError")
     except ACEFCanonicalizationError:
         pass
+
+
+# ---------------------------------------------------------------------------
+# roborev finding (MEDIUM) — integrity-checker wrapper for the Merkle-verify
+# ACEFCanonicalizationError.
+#
+# verify_merkle_root() (above) now raises ACEFCanonicalizationError for an
+# invalid content-hashes.json key (surrogate / non-NFC). But the Merkle check in
+# integrity_checker.check_integrity() did NOT wrap that call in the same _CanonErr
+# try/except the content-hash verification already uses. Consequence:
+#   - direct check_integrity() callers got a RAW ACEFCanonicalizationError, and
+#   - validate_bundle() caught it in its generic ACEF-001 untrusted-input backstop
+#     instead of surfacing the intended structured ACEF-051 diagnostic.
+# The fix wraps verify_merkle_root() in the SAME _CanonErr try/except, appending
+# an ACEF-051 ValidationDiagnostic at /hashes/content-hashes.json (the surrogate
+# key lives in content-hashes.json; build_merkle_tree raises with path=None, so
+# the path is the content-hashes.json file, matching the existing ACEF-051
+# construction in this file).
+# ---------------------------------------------------------------------------
+
+
+def _write_surrogate_keyed_bundle(tmp_path: Path) -> Path:
+    """Build a minimal bundle dir whose content-hashes.json carries a surrogate
+    key, plus a merkle-tree.json, so check_integrity() reaches the Merkle branch.
+
+    The surrogate key is escaped by ``json.dumps`` and decoded back into a lone
+    surrogate by the consumer's ``json.loads`` — the real untrusted-input shape.
+    It is *not present on disk*, so the on-disk content-hash verification raises
+    no canonicalization error (only an ACEF-014 "not found"); the
+    ACEFCanonicalizationError originates in the Merkle-root verification step.
+    """
+    import hashlib
+    import json
+
+    bundle_dir = tmp_path / "surrogate_bundle"
+    hashes_dir = bundle_dir / "hashes"
+    hashes_dir.mkdir(parents=True)
+
+    manifest_path = bundle_dir / "acef-manifest.json"
+    manifest_path.write_text("{}", encoding="utf-8")
+    manifest_hash = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+
+    surrogate_key = "artifacts/a\udce9.bin"
+    content_hashes = {"acef-manifest.json": manifest_hash, surrogate_key: "a" * 64}
+    (hashes_dir / "content-hashes.json").write_text(json.dumps(content_hashes), encoding="utf-8")
+    (hashes_dir / "merkle-tree.json").write_text(json.dumps({"root": "deadbeef"}), encoding="utf-8")
+    return bundle_dir
+
+
+def test_check_integrity_surrogate_merkle_key_is_structured_acef_051(
+    tmp_path: Path,
+) -> None:
+    """check_integrity() returns a STRUCTURED ACEF-051 diagnostic (not a raw
+    exception) for a surrogate content-hashes.json key encountered during
+    Merkle-root verification.
+
+    RED before the wrapper: verify_merkle_root() -> build_merkle_tree() raised a
+    raw ACEFCanonicalizationError that escaped check_integrity() entirely.
+    """
+    from acef.validation.integrity_checker import check_integrity
+
+    bundle_dir = _write_surrogate_keyed_bundle(tmp_path)
+
+    # Must NOT raise a raw exception out of check_integrity.
+    diagnostics = check_integrity(bundle_dir)
+
+    acef_051 = [d for d in diagnostics if d.code == "ACEF-051"]
+    assert acef_051, (
+        "Surrogate Merkle key must surface a structured ACEF-051 diagnostic, "
+        f"got: {[(d.code, d.message) for d in diagnostics]}"
+    )
+    assert acef_051[0].path == "/hashes/content-hashes.json"
+
+
+def test_validate_bundle_surrogate_merkle_key_not_acef_001_backstop(
+    tmp_path: Path,
+) -> None:
+    """validate_bundle() surfaces the structured ACEF-051 (via the integrity
+    checker) rather than falling into the generic ACEF-001 untrusted-input
+    backstop for a surrogate content-hashes.json key in the Merkle step.
+
+    RED before the wrapper: the raw ACEFCanonicalizationError propagated up to
+    validate_bundle()'s ``except Exception`` backstop -> ACEF-001.
+    """
+    from acef.validation.engine import validate_bundle
+
+    bundle_dir = _write_surrogate_keyed_bundle(tmp_path)
+
+    assessment = validate_bundle(str(bundle_dir))
+    codes = {d["code"] for d in assessment.structural_errors}
+    assert "ACEF-051" in codes, (
+        "Surrogate Merkle key must produce a structured ACEF-051 via the "
+        f"integrity checker, got structural error codes: {sorted(codes)}"
+    )
