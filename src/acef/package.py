@@ -8,6 +8,7 @@ from __future__ import annotations
 import hashlib
 import re
 import secrets
+import unicodedata
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -2054,6 +2055,16 @@ def _validate_raw_attachment_path(path: str) -> None:
             code="ACEF-052",
         )
 
+    # Spec §3.1.1: paths in the manifest and hashes MUST use UTF-8 NFC
+    # normalization. Reject non-NFC (e.g. an HFS+ NFD-decomposed name) so the
+    # determinism contract holds: a conformant NFC-normalizing exporter and
+    # this one must produce identical content-hashes.json keys and tar members.
+    if unicodedata.normalize("NFC", path) != path:
+        raise ACEFError(
+            f"Attachment path is not UTF-8 NFC normalized: {path!r}",
+            code="ACEF-052",
+        )
+
     segments = path.split("/")
     for segment in segments:
         if segment == "..":
@@ -2094,6 +2105,15 @@ def _validate_attachment_path(path: str) -> None:
     if path.startswith("/"):
         raise ACEFError(
             f"Absolute attachment path not allowed: {path!r}",
+            code="ACEF-052",
+        )
+
+    # Spec §3.1.1: paths in the manifest and hashes MUST use UTF-8 NFC
+    # normalization. Reject non-NFC here too (defense in depth alongside the
+    # raw-path check) so a non-NFC artifact key can never reach the hash domain.
+    if unicodedata.normalize("NFC", path) != path:
+        raise ACEFError(
+            f"Attachment path is not UTF-8 NFC normalized: {path!r}",
             code="ACEF-052",
         )
 

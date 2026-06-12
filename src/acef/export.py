@@ -15,6 +15,7 @@ import os
 import shutil
 import tarfile
 import tempfile
+import unicodedata
 from datetime import datetime
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
@@ -57,6 +58,13 @@ def _validate_export_attachment_path(att_path: str) -> None:
     if att_path.startswith("/"):
         raise ACEFExportError(
             f"Absolute attachment path not allowed during export: {att_path!r}",
+        )
+    # Spec §3.1.1: hash-domain paths MUST use UTF-8 NFC normalization. Reject
+    # a non-NFC path at export time so a non-NFC tar member name / content-hash
+    # key can never be written even if upstream validation was bypassed.
+    if unicodedata.normalize("NFC", att_path) != att_path:
+        raise ACEFExportError(
+            f"Attachment path is not UTF-8 NFC normalized during export: {att_path!r}",
         )
     segments = att_path.split("/")
     for segment in segments:

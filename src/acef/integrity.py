@@ -234,6 +234,16 @@ def compute_content_hashes(bundle_dir: Path) -> dict[str, str]:
     - Everything in records/
     - Everything in artifacts/
 
+    UTF-8 NFC enforcement is consistent across the hash domain (spec §3.1.1 and
+    §3.1.3 #1): file CONTENT is NFC-verified for text-bearing JSON/JSONL (see
+    ``sha256_file`` / ``sha256_jsonl_file``), and file PATHS (the
+    content-hashes.json keys and the Merkle leaf paths derived from them) are
+    NFC-verified here in ``_add_if_real_file``. Binary artifacts are hashed
+    byte-for-byte as-is (no content NFC check applies to non-text bytes), but
+    their path keys are still NFC-checked. A non-NFC path or non-NFC text
+    content raises :class:`ACEFCanonicalizationError` (ACEF-051) so no non-NFC
+    bytes can silently enter the bundle digest.
+
     Args:
         bundle_dir: Path to the bundle root directory.
 
@@ -273,6 +283,20 @@ def compute_content_hashes(bundle_dir: Path) -> dict[str, str]:
                 path=file_path,
             ) from exc
         rel = file_path.relative_to(bundle_dir).as_posix()
+        # Spec §3.1.1: paths in the manifest AND hashes MUST use UTF-8 NFC
+        # normalization. Files are discovered here by rglob and the on-disk
+        # relative path is used directly as the content-hashes.json key and
+        # the Merkle leaf path. Unlike manifest-declared paths (NFC-enforced in
+        # loader/package), these discovered keys would otherwise bypass NFC
+        # enforcement, so a non-NFC filename (e.g. an HFS+ NFD-decomposed name)
+        # could enter the hash domain and produce a different bundle digest
+        # than an NFC-normalizing producer. Reject it as a structured
+        # diagnostic (ACEF-051) mirroring the content-side NFC checks above.
+        if unicodedata.normalize("NFC", rel) != rel:
+            raise ACEFCanonicalizationError(
+                f"File path in hash domain is not UTF-8 NFC normalized (spec §3.1.1): {rel!r}",
+                path=file_path,
+            )
         hashes[rel] = sha256_file(file_path)
 
     # Check is_symlink BEFORE exists() — a broken symlink reports
