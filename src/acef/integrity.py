@@ -406,6 +406,19 @@ def build_merkle_tree(content_hashes: dict[str, str]) -> dict[str, Any]:
     current_level: list[bytes] = []
 
     for path, hash_hex in sorted_entries:
+        # Validate the key text before encoding it as UTF-8. content-hashes.json
+        # is untrusted input on the consumer side: a JSON-decoded lone surrogate
+        # key (e.g. an escaped "\udce9") is NFC-equal yet NOT encodable as UTF-8,
+        # so ``path.encode("utf-8")`` below would raise a RAW UnicodeEncodeError.
+        # Surface a structured diagnostic (mapped to ACEF-051 by the integrity
+        # checker) instead, reusing the same strict-UTF-8+NFC rule as every other
+        # hash-domain path site. This is a key-text check only; leaf ordering is
+        # unchanged.
+        problem = path_nfc_utf8_problem(path)
+        if problem is not None:
+            raise ACEFCanonicalizationError(
+                f"content-hashes.json key violates spec §3.1.1 ({problem}): {path!r}",
+            )
         leaves.append({"path": path, "hash": hash_hex})
         path_bytes = path.encode("utf-8")
         hash_bytes = hash_hex.encode("utf-8")

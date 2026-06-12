@@ -46,12 +46,20 @@ def _validate_path(path: str) -> None:
     - Absolute paths (starting with '/')
     - Backslash separators (must use forward slash)
     - Embedded NUL bytes
-    - Paths not normalized to UTF-8 NFC (spec §3.1.1)
+    - Paths that are not strict UTF-8 (e.g. a JSON-decoded lone surrogate such
+      as an escaped ``\\udce9`` — NFC-equal yet un-encodable as UTF-8) or not
+      NFC-normalized (spec §3.1.1)
+
+    The strict-UTF-8 + NFC text contract is delegated to the single source of
+    truth :func:`acef.integrity.path_nfc_utf8_problem`, the same helper the
+    producer-side validators use, so the consumer (load/validate) side cannot
+    admit a surrogate-bearing manifest ``record_files`` path or record
+    attachment path that the producer would reject.
 
     Raises:
         ACEFFormatError: If path violates normalization rules.
     """
-    import unicodedata
+    from acef.integrity import path_nfc_utf8_problem
 
     if not isinstance(path, str) or path == "":
         raise ACEFFormatError(
@@ -80,12 +88,16 @@ def _validate_path(path: str) -> None:
             code="ACEF-052",
         )
 
-    # Spec §3.1.1: paths MUST use UTF-8 NFC normalization. Reject non-NFC
-    # so the determinism contract holds across producers on different
-    # filesystems (HFS+ NFD vs ext4 NFC).
-    if unicodedata.normalize("NFC", path) != path:
+    # Spec §3.1.1: paths MUST be strict UTF-8 AND NFC-normalized. Delegate to
+    # the shared helper so the consumer side rejects the same inputs the
+    # producer does: a JSON-decoded lone surrogate is NFC-equal but NOT
+    # encodable as UTF-8, so an NFC-only check would let it through. Reject non
+    # strict-UTF-8 (surrogate) and non-NFC (HFS+ NFD vs ext4 NFC) alike so the
+    # determinism contract holds.
+    problem = path_nfc_utf8_problem(path)
+    if problem is not None:
         raise ACEFFormatError(
-            f"Path is not UTF-8 NFC normalized: {path!r}",
+            f"Path violates spec §3.1.1 ({problem}): {path!r}",
             code="ACEF-052",
         )
 

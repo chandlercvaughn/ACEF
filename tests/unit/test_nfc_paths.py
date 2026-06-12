@@ -26,6 +26,7 @@ import pytest
 from acef.errors import ACEFError, ACEFExportError
 from acef.integrity import (
     ACEFCanonicalizationError,
+    build_merkle_tree,
     compute_content_hashes,
 )
 from acef.package import (
@@ -293,3 +294,174 @@ def _is_invalid_utf8(name: str) -> bool:
     except UnicodeEncodeError:
         return True
     return False
+
+
+# ---------------------------------------------------------------------------
+# roborev finding 1 (MEDIUM) — consumer-side loader._validate_path.
+#
+# The load/validation path checker did NFC-only validation; a JSON-decoded
+# lone surrogate (e.g. an escaped "\udce9" in a manifest record_files path or
+# a record attachment path) is NFC-equal and therefore bypassed ACEF-052 at
+# this site even though the producer-side helper rejects it. The fix routes
+# _validate_path through the shared path_nfc_utf8_problem() helper so the
+# strict-UTF-8 check (which the NFC-only test cannot make) is applied on the
+# consumer side too. Regression for both manifest record_files paths and
+# record attachment paths.
+# ---------------------------------------------------------------------------
+
+# A surrogate-bearing relative path under records/ (the manifest record_files
+# shape) and under artifacts/ (the record attachment shape). Both are NFC-equal
+# but invalid UTF-8 — the exact bypass roborev flagged.
+_SURROGATE_RECORD_PATH = "records/a\udce9.jsonl"
+_SURROGATE_ATTACHMENT_PATH = "artifacts/a\udce9.bin"
+
+
+def test_loader_validate_path_rejects_surrogate_record_file() -> None:
+    """loader._validate_path rejects a surrogate manifest record_files path.
+
+    RED before the fix: the NFC-only check passes the (NFC-equal) surrogate
+    path and _validate_path returns None, so an un-encodable record file path
+    loads/validates. After: ACEF-052.
+    """
+    from acef.loader import _validate_path
+
+    _assert_surrogate_is_nfc_but_not_utf8("a\udce9.jsonl")
+    with pytest.raises(ACEFError) as exc_info:
+        _validate_path(_SURROGATE_RECORD_PATH)
+    assert exc_info.value.code == "ACEF-052"
+
+
+def test_loader_validate_path_rejects_surrogate_attachment_path() -> None:
+    """loader._validate_path rejects a surrogate record attachment path.
+
+    Same bypass class as the record_files case but for an artifacts/-prefixed
+    attachment path referenced from a record. After the fix: ACEF-052.
+    """
+    from acef.loader import _validate_path
+
+    _assert_surrogate_is_nfc_but_not_utf8("a\udce9.bin")
+    with pytest.raises(ACEFError) as exc_info:
+        _validate_path(_SURROGATE_ATTACHMENT_PATH)
+    assert exc_info.value.code == "ACEF-052"
+
+
+def test_loader_validate_path_rejects_nfd_record_file() -> None:
+    """loader._validate_path still rejects an NFD (non-NFC) path with ACEF-052.
+
+    Pre-existing NFC enforcement must remain after routing through the helper.
+    """
+    from acef.loader import _validate_path
+
+    with pytest.raises(ACEFError) as exc_info:
+        _validate_path(f"records/{_NFD_NAME}")
+    assert exc_info.value.code == "ACEF-052"
+
+
+def test_loader_validate_path_accepts_valid_nfc_utf8() -> None:
+    """loader._validate_path accepts ordinary NFC UTF-8 relative paths.
+
+    Negative control: ASCII and composed-NFC paths (like every golden) still
+    pass after the helper is applied.
+    """
+    from acef.loader import _validate_path
+
+    _validate_path("records/records-0001.jsonl")
+    _validate_path(f"artifacts/{_NFC_NAME}")
+
+
+# ---------------------------------------------------------------------------
+# roborev finding 2 (MEDIUM) — Merkle / content-hash-key verification.
+#
+# content-hashes.json keys are encoded directly during Merkle verification.
+# An untrusted escaped-surrogate key passes JSON load + value-type checks
+# then raised a RAW UnicodeEncodeError at path.encode("utf-8") in
+# build_merkle_tree instead of a structured path diagnostic. The fix validates
+# the keys with path_nfc_utf8_problem() before encoding, raising a structured
+# ACEFCanonicalizationError (ACEF-051/052) that the integrity checker maps to a
+# diagnostic — never a raw exception.
+# ---------------------------------------------------------------------------
+
+
+def test_build_merkle_tree_rejects_surrogate_key_structured() -> None:
+    """build_merkle_tree raises a structured ACEFCanonicalizationError (not a
+    raw UnicodeEncodeError) for an NFC-equal but invalid-UTF-8 key.
+
+    RED before: ``{'a\\udce9.txt': <hex>}`` leaks
+    ``UnicodeEncodeError('utf-8', ..., 'surrogates not allowed')`` at
+    ``path.encode('utf-8')``.
+    """
+    key = "a\udce9.txt"
+    _assert_surrogate_is_nfc_but_not_utf8(key)
+    content_hashes = {key: "a" * 64}
+    with pytest.raises(ACEFCanonicalizationError):
+        build_merkle_tree(content_hashes)
+
+
+def test_build_merkle_tree_rejects_nfd_key_structured() -> None:
+    """build_merkle_tree raises a structured diagnostic for an NFD (non-NFC) key."""
+    content_hashes = {_NFD_NAME: "a" * 64}
+    with pytest.raises(ACEFCanonicalizationError):
+        build_merkle_tree(content_hashes)
+
+
+def test_verify_merkle_root_surrogate_key_no_raw_unicode_error() -> None:
+    """verify_merkle_root surfaces a structured ACEFCanonicalizationError for a
+    surrogate key rather than letting a raw UnicodeEncodeError escape."""
+    from acef.integrity import verify_merkle_root
+
+    content_hashes = {"a\udce9.txt": "a" * 64}
+    with pytest.raises(ACEFCanonicalizationError):
+        verify_merkle_root(content_hashes, "deadbeef")
+
+
+def test_build_merkle_tree_accepts_valid_nfc_utf8_keys() -> None:
+    """Negative control: ordinary NFC UTF-8 keys build a tree (no regression)."""
+    content_hashes = {
+        "acef-manifest.json": "a" * 64,
+        f"artifacts/{_NFC_NAME}": "b" * 64,
+    }
+    tree = build_merkle_tree(content_hashes)
+    assert "root" in tree
+    assert len(tree["leaves"]) == 2
+
+
+def test_merkle_verify_surrogate_key_is_structured_not_raw_unicode(
+    tmp_path: Path,
+) -> None:
+    """The Merkle-verify path raises a STRUCTURED ACEFCanonicalizationError (an
+    ACEF exception carrying a §3.1.1 message) for a JSON-decoded surrogate
+    content-hashes.json key, instead of leaking a raw UnicodeEncodeError.
+
+    This exercises the real untrusted-input shape: an attacker-supplied
+    content-hashes.json whose key is an escaped lone surrogate, JSON-decoded by
+    the consumer, reaching verify_merkle_root. The key-text guard lives in
+    build_merkle_tree (this feature's boundary); the consumer wrapper that maps
+    the structured error to an ACEF-051 ValidationDiagnostic lives in the
+    integrity checker (owned by another feature). Asserting the structured type
+    here proves the raw-exception leak is closed at this feature's boundary.
+    """
+    import json
+
+    from acef.integrity import verify_merkle_root
+
+    hashes_dir = tmp_path / "hashes"
+    hashes_dir.mkdir()
+    surrogate_key = "artifacts/a\udce9.bin"
+    content_hashes_text = json.dumps({surrogate_key: "a" * 64})
+    (hashes_dir / "content-hashes.json").write_text(content_hashes_text, encoding="utf-8")
+
+    # Reload exactly as the consumer does (json.loads decodes the \udce9 escape
+    # back into a lone surrogate string key).
+    reloaded = json.loads((hashes_dir / "content-hashes.json").read_text(encoding="utf-8"))
+    bad_key = next(iter(reloaded))
+    _assert_surrogate_is_nfc_but_not_utf8(bad_key)
+
+    with pytest.raises(ACEFCanonicalizationError):
+        verify_merkle_root(reloaded, "deadbeef")
+    # And specifically NOT a raw UnicodeEncodeError.
+    try:
+        verify_merkle_root(reloaded, "deadbeef")
+    except UnicodeEncodeError:  # pragma: no cover - regression guard
+        pytest.fail("verify_merkle_root leaked a raw UnicodeEncodeError")
+    except ACEFCanonicalizationError:
+        pass
