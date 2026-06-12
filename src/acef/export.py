@@ -117,8 +117,25 @@ def _validate_ustar_member_name(member_name: str) -> None:
         member_name: The full tar member name as it will be written.
 
     Raises:
-        ACEFExportError: If the UTF-8 byte length is ``>= 100``.
+        ACEFExportError: If the member name is not strict UTF-8 (e.g. a lone
+            surrogate) or its UTF-8 byte length is ``>= 100``.
     """
+    # ``bundle_name`` is derived directly from the export ``output_path``
+    # basename (``export_archive``) and is NOT routed through the attachment
+    # path validator, so a surrogate-bearing basename (a valid Python ``str``
+    # that is not UTF-8 encodable) would reach the byte-length encode below and
+    # raise a RAW ``UnicodeEncodeError`` — bypassing the documented
+    # ``ACEFExportError`` surface. Route every member name through the shared
+    # strict-UTF-8 / NFC path check first so such a name surfaces as the
+    # designated path error code ``ACEF-052`` (identical to
+    # ``_validate_export_attachment_path``), and so ``member_name.encode`` below
+    # is guaranteed to succeed.
+    problem = path_nfc_utf8_problem(member_name)
+    if problem is not None:
+        raise ACEFExportError(
+            f"Tar member name violates spec §3.1.1 ({problem}): {member_name!r}",
+            code="ACEF-052",
+        )
     byte_len = len(member_name.encode("utf-8"))
     if byte_len >= _USTAR_NAME_MAX_BYTES:
         raise ACEFExportError(

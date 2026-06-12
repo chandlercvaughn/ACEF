@@ -35,7 +35,7 @@ import pytest
 
 from acef import export as export_module
 from acef.errors import ACEFExportError
-from acef.export import export_archive
+from acef.export import _validate_ustar_member_name, export_archive
 from acef.package import Package
 
 # A non-ASCII NFC artifact filename, 36 UTF-8 bytes incl. the ``artifacts/``
@@ -347,3 +347,71 @@ def test_ascii_only_archive_is_byte_neutral_under_format_pin(tmp_dir: Path) -> N
     # heuristic, so we deliberately do NOT assert tf.format for the ASCII case;
     # byte-neutrality is established by the absence of any extended header.
     assert not _has_pax_extended_header(tar_bytes)
+
+
+@pytest.mark.conformance
+def test_validator_surrogate_member_name_raises_structured_acef_052() -> None:
+    """RED→GREEN (Finding 1): a surrogate-bearing member name raises ACEF-052.
+
+    ``bundle_name`` is derived directly from the export ``output_path`` basename
+    (``export_archive`` line ~237) and flows unvalidated into
+    ``_validate_ustar_member_name`` as the root/dir/file member prefix. A
+    basename holding a lone UTF-16 surrogate (e.g. a POSIX filename decoded with
+    ``surrogateescape``) is a valid Python ``str`` but is NOT encodable as
+    UTF-8, so the validator's ``name.encode("utf-8")`` byte-length check raises a
+    RAW ``UnicodeEncodeError`` — bypassing the documented ``ACEFExportError``
+    surface every other export path-rejection uses.
+
+    Pre-fix the validator raises ``UnicodeEncodeError``; the fix must route the
+    member name through the strict-UTF-8 path check first and raise a structured
+    ``ACEFExportError`` with the designated path code ``ACEF-052`` (consistent
+    with ``_validate_export_attachment_path``), matching the §3.1.1 UTF-8 path
+    contract.
+    """
+    member = "a\udce9.acef/"  # lone surrogate in the bundle-name prefix
+    # Premise: this str is NOT UTF-8 encodable, so the raw encode would throw.
+    with pytest.raises(UnicodeEncodeError):
+        member.encode("utf-8")
+    with pytest.raises(ACEFExportError) as exc_info:
+        _validate_ustar_member_name(member)
+    assert exc_info.value.code == "ACEF-052", (
+        "surrogate-bearing member name must raise the designated path code "
+        f"ACEF-052, not {exc_info.value.code!r} or a raw UnicodeEncodeError"
+    )
+
+
+@pytest.mark.conformance
+def test_validator_member_name_at_exactly_100_bytes_is_rejected() -> None:
+    """RED→GREEN (Finding 2): the EXACT 100-byte boundary is rejected (``>= 100``).
+
+    The TS ``assertShortName`` rejects any full member name whose UTF-8 length is
+    ``>= 100`` bytes, so 100 is INCLUSIVE. The other Finding-2 cases use 99 bytes
+    (pass) and well-over-100 bytes (reject); neither pins the exact boundary, so
+    an off-by-one regression (``> 100`` instead of ``>= 100``) would slip through.
+    This case exercises a full member name of EXACTLY 100 UTF-8 bytes — measured
+    the way the validator measures it: the complete member string including the
+    ``<bundle_name>/`` prefix and trailing ``/`` for a directory member — and
+    asserts ``ACEFExportError`` (ACEF-052) is raised, locking the inclusive
+    boundary.
+    """
+    # 100 ASCII bytes == 100 UTF-8 bytes; a trailing "/" makes it a dir member.
+    member = "x" * 99 + "/"
+    assert len(member.encode("utf-8")) == 100, len(member.encode("utf-8"))
+    with pytest.raises(ACEFExportError) as exc_info:
+        _validate_ustar_member_name(member)
+    assert exc_info.value.code == "ACEF-052"
+    assert "100" in str(exc_info.value)
+
+
+@pytest.mark.conformance
+def test_validator_member_name_at_99_bytes_is_accepted() -> None:
+    """Negative control (Finding 2): exactly 99 UTF-8 bytes is accepted.
+
+    Pairs with the exact-100 boundary case: ``< 100`` passes, ``>= 100`` rejects.
+    A 99-byte full member name must NOT raise, proving the boundary is at 100 and
+    not at 99 (which would be an over-strict off-by-one in the other direction).
+    """
+    member = "y" * 99
+    assert len(member.encode("utf-8")) == 99
+    # Must not raise.
+    _validate_ustar_member_name(member)
