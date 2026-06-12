@@ -220,10 +220,15 @@ class TestComputeContentHashes:
 class TestBuildMerkleTree:
     """Test Merkle tree construction."""
 
-    def test_empty_hashes(self):
-        tree = build_merkle_tree({})
-        assert tree["leaves"] == []
-        assert tree["root"] == sha256_hex(b"")
+    def test_empty_hashes_rejected(self):
+        # An empty hash domain is not a valid bundle: every bundle has at least
+        # acef-manifest.json (spec §3.1.3 #3), and the Merkle root of zero leaves
+        # is undefined (§3.1.3 #4). Reject it so the previous implementation-
+        # defined SHA-256("") sentinel is never load-bearing for interop.
+        from acef.integrity import ACEFCanonicalizationError
+
+        with pytest.raises(ACEFCanonicalizationError, match="acef-manifest.json"):
+            build_merkle_tree({})
 
     def test_single_entry(self):
         hashes = {"file.json": "abcd1234" * 8}

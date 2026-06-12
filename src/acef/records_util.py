@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from acef.integrity import canonicalize
+from acef.integrity import canonicalize, utf16_collation_key
 
 if TYPE_CHECKING:
     from acef.models.records import RecordEnvelope
@@ -33,9 +33,21 @@ def canonicalize_record(record_dict: dict[str, Any]) -> bytes:
 def sort_records(records: list[RecordEnvelope]) -> list[RecordEnvelope]:
     """Sort records by timestamp ascending, then record_id ascending.
 
-    Per spec: deterministic ordering for conformance.
+    Per spec §3.1.1 (record ordering, normative for conformance): records are
+    sorted by ``timestamp`` ascending and sub-sorted by ``record_id`` ascending,
+    using the **RFC 8785 UTF-16 code-unit collation** (:func:`utf16_collation_key`)
+    — the same order the canonical JSON used everywhere else in the hash domain
+    sorts strings by. For the ASCII ``record_id`` URNs (``urn:acef:rec:...``) and
+    the ISO-8601 ASCII ``timestamp`` values that conformant bundles carry this is
+    byte-identical to code-point order, so existing (ASCII) JSONL ordering is
+    unchanged; using the shared collation key guarantees the JSONL record order
+    cannot diverge from a UTF-16-collating producer even if a record_id ever
+    contained a supplementary-plane (U+10000+) character.
     """
-    return sorted(records, key=lambda r: (r.timestamp, r.record_id))
+    return sorted(
+        records,
+        key=lambda r: (utf16_collation_key(r.timestamp), utf16_collation_key(r.record_id)),
+    )
 
 
 def compute_shard_boundaries(records: list[RecordEnvelope]) -> list[list[RecordEnvelope]]:

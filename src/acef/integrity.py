@@ -38,6 +38,41 @@ class ACEFCanonicalizationError(ValueError):
         self.path = path
 
 
+def utf16_collation_key(value: str) -> bytes:
+    """Return the RFC 8785 object-key collation key for ``value``.
+
+    RFC 8785 §3.2.3 mandates that canonical-JSON object keys be sorted by their
+    **UTF-16 code units**, which is exactly the order :func:`rfc8785.dumps`
+    emits. Python's built-in ``sorted`` / ``str`` comparison orders by Unicode
+    **code point** instead. The two collations are IDENTICAL for the Basic
+    Multilingual Plane (U+0000..U+FFFF, which includes all ASCII), but DIVERGE
+    for supplementary-plane characters (U+10000 and above): such a character
+    encodes as a UTF-16 surrogate pair whose first code unit lies in
+    0xD800..0xDBFF, so it sorts *before* any BMP character at or above U+E000
+    under UTF-16 collation, yet *after* it under code-point collation.
+
+    Encoding the string as big-endian UTF-16 yields a byte sequence whose
+    lexicographic order is precisely the UTF-16 code-unit order (each code unit
+    becomes two bytes, most-significant first), so ``sorted(keys,
+    key=utf16_collation_key)`` reproduces ``rfc8785.dumps``'s key order exactly.
+
+    This is the single source of truth for the hash-domain collation, reused by
+    both :func:`build_merkle_tree` (leaf order) and :func:`compute_content_hashes`
+    (content-hashes.json key order) so the Merkle leaves can never drift from the
+    canonical content-hashes.json they are built from. The strings reaching this
+    function are already strict-UTF-8 NFC paths (validated via
+    :func:`path_nfc_utf8_problem` before they are used), so the UTF-16 encoding
+    below cannot encounter a lone surrogate.
+
+    Args:
+        value: A hash-domain path / key string (strict UTF-8, NFC).
+
+    Returns:
+        The big-endian UTF-16 byte encoding, usable directly as a sort key.
+    """
+    return value.encode("utf-16-be")
+
+
 def path_nfc_utf8_problem(value: str) -> str | None:
     """Return a human-readable reason if ``value`` violates the hash-domain
     path text contract (spec §3.1.1), else ``None``.
@@ -83,6 +118,16 @@ def path_nfc_utf8_problem(value: str) -> str | None:
 def canonicalize(data: Any) -> bytes:
     """Canonicalize a Python object to RFC 8785 (JCS) bytes.
 
+    Raises the raw :class:`rfc8785.CanonicalizationError` (subclasses
+    ``IntegerDomainError`` / ``FloatDomainError``) for values outside the
+    RFC 8785 / I-JSON domain. The hash-domain *file* readers
+    (:func:`canonicalize_json_str`, :func:`sha256_file`,
+    :func:`sha256_jsonl_file`) wrap this in :class:`ACEFCanonicalizationError`
+    so a malformed artifact yields a structured ACEF-051 rather than crashing
+    the validator (spec §3.1.3 #6f). Callers that pass already-validated
+    in-memory structures (e.g. :func:`compute_bundle_digest` over a
+    ``dict[str, str]``) keep the raw RFC 8785 exception contract.
+
     Args:
         data: Any JSON-serializable Python object.
 
@@ -92,17 +137,62 @@ def canonicalize(data: Any) -> bytes:
     return rfc8785.dumps(data)
 
 
-def canonicalize_json_str(json_str: str) -> bytes:
-    """Parse a JSON string and re-canonicalize via RFC 8785.
+def _canonicalize_hash_domain(data: Any, *, path: Path | None = None) -> bytes:
+    """Canonicalize hash-domain JSON, mapping RFC 8785 domain faults to ACEF-051.
+
+    ``json.loads`` accepts tokens that RFC 8785 REJECTS: an integer whose
+    magnitude exceeds 2^53 and the non-standard ``NaN`` / ``Infinity`` float
+    literals. Feeding such a value to ``rfc8785.dumps`` raises a
+    :class:`rfc8785.CanonicalizationError` (``IntegerDomainError`` /
+    ``FloatDomainError``), which is NOT an :class:`ACEFCanonicalizationError`,
+    so without this wrapper a malicious or malformed hash-domain artifact like
+    ``{"big":100000000000000000000}`` would leak the raw exception and crash the
+    validator — an availability/DoS defect and a violation of the "report ALL
+    errors" MUST (spec §3.1.3 #6f). Wrapping it as
+    :class:`ACEFCanonicalizationError` routes it to the integrity checker's
+    existing ACEF-051 handler.
 
     Args:
-        json_str: A JSON string.
+        data: The JSON-decoded hash-domain value to canonicalize.
+        path: Optional source path, attached to the raised diagnostic.
 
     Returns:
         RFC 8785 canonicalized bytes.
+
+    Raises:
+        ACEFCanonicalizationError: If ``data`` contains a number outside the
+            RFC 8785 domain (>2^53, NaN, or Infinity).
+    """
+    try:
+        return rfc8785.dumps(data)
+    except rfc8785.CanonicalizationError as exc:
+        raise ACEFCanonicalizationError(
+            f"JSON not canonicalizable per RFC 8785 (out-of-domain number / NaN / Infinity): {exc}",
+            path=path,
+        ) from exc
+
+
+def canonicalize_json_str(json_str: str, *, path: Path | None = None) -> bytes:
+    """Parse a JSON string and re-canonicalize via RFC 8785.
+
+    Used on hash-domain JSON, so an out-of-domain number / NaN / Infinity is
+    surfaced as a structured :class:`ACEFCanonicalizationError` (mapped to
+    ACEF-051) rather than a raw ``rfc8785.CanonicalizationError``.
+
+    Args:
+        json_str: A JSON string.
+        path: Optional source path, attached to a raised
+            :class:`ACEFCanonicalizationError` for diagnostics.
+
+    Returns:
+        RFC 8785 canonicalized bytes.
+
+    Raises:
+        ACEFCanonicalizationError: If the parsed JSON contains a number outside
+            the RFC 8785 domain (>2^53, NaN, or Infinity).
     """
     data = json.loads(json_str)
-    return canonicalize(data)
+    return _canonicalize_hash_domain(data, path=path)
 
 
 def sha256_hex(data: bytes) -> str:
@@ -158,7 +248,7 @@ def sha256_file(path: Path) -> str:
                 f"JSON file is not UTF-8 NFC normalized (spec §3.1.3 #1): {path}",
                 path=path,
             )
-        canonical = canonicalize_json_str(content)
+        canonical = canonicalize_json_str(content, path=path)
         return sha256_hex(canonical)
     elif path.suffix == ".jsonl":
         return sha256_jsonl_file(path)
@@ -262,7 +352,7 @@ def sha256_jsonl_file(path: Path) -> str:
                 f"JSONL line {line_number} is not valid JSON (spec §3.1.3 #2): {path}: {exc}",
                 path=path,
             ) from exc
-        canonical = canonicalize(data)
+        canonical = _canonicalize_hash_domain(data, path=path)
         hasher.update(canonical)
         hasher.update(b"\n")
     return hasher.hexdigest()
@@ -379,7 +469,15 @@ def compute_content_hashes(bundle_dir: Path) -> dict[str, str]:
         for file_path in sorted(artifacts_dir.rglob("*")):
             _add_if_real_file(file_path)
 
-    return dict(sorted(hashes.items()))
+    # Order keys by RFC 8785 UTF-16 collation (the same order ``rfc8785.dumps``
+    # writes content-hashes.json in) via the shared ``utf16_collation_key``
+    # helper, so the returned dict's iteration order is byte-identical to the
+    # canonical content-hashes.json key order AND to the Merkle leaf order built
+    # from it. ``sorted`` (code-point) and the UTF-16 collation coincide for all
+    # ASCII/BMP paths but diverge for supplementary-plane (U+10000+) paths; using
+    # the shared key keeps content-hashes.json, the returned dict, and the Merkle
+    # leaves provably in one order.
+    return dict(sorted(hashes.items(), key=lambda kv: utf16_collation_key(kv[0])))
 
 
 def build_merkle_tree(content_hashes: dict[str, str]) -> dict[str, Any]:
@@ -391,34 +489,66 @@ def build_merkle_tree(content_hashes: dict[str, str]) -> dict[str, Any]:
     - Odd leaf: promoted unchanged (NOT duplicated)
     - Root: single remaining hash
 
+    Leaf order is the **RFC 8785 UTF-16 code-unit collation** of the paths (via
+    :func:`utf16_collation_key`), i.e. the exact key order ``rfc8785.dumps``
+    writes ``content-hashes.json`` in. This is what spec §3.1.3 #4 means by
+    "the sorted entries of content-hashes.json": the Merkle tree is built over
+    the entries IN THE ORDER they appear in the canonical content-hashes.json,
+    not Python's default code-point order. The two orders coincide for all
+    ASCII/BMP paths but diverge for supplementary-plane (U+10000+) paths; using
+    code-point order there would make the leaves[] disagree with their own
+    content-hashes.json and make this exporter compute a different root than any
+    other spec-conformant exporter (a determinism / round-trip break).
+
     Args:
-        content_hashes: Dict mapping paths to hex SHA-256 hashes.
+        content_hashes: Dict mapping paths to hex SHA-256 hashes. MUST be
+            non-empty — every valid bundle has at least ``acef-manifest.json``
+            in its hash domain (spec §3.1.3 #3).
 
     Returns:
         Dict with 'leaves' and 'root' keys matching spec JSON shape.
+
+    Raises:
+        ACEFCanonicalizationError: If ``content_hashes`` is empty. The spec's
+            Merkle construction (§3.1.3 #4: "the single remaining hash is the
+            Merkle root") assumes at least one leaf and defines no zero-leaf
+            root, so an empty hash domain is not a valid bundle. Raising here
+            (mapped to ACEF-051 by the integrity checker) keeps the previous
+            implementation-defined ``SHA-256("")`` sentinel from ever being
+            load-bearing for interop. Reached only for a malformed bundle whose
+            content-hashes.json is ``{}`` (no real export path produces one).
     """
     if not content_hashes:
-        empty_root = sha256_hex(b"")
-        return {"leaves": [], "root": empty_root}
+        raise ACEFCanonicalizationError(
+            "Empty hash domain: a valid ACEF bundle MUST contain at least "
+            "acef-manifest.json (spec §3.1.3 #3); the Merkle root of an empty "
+            "domain is undefined.",
+        )
 
-    sorted_entries = sorted(content_hashes.items())
-    leaves: list[dict[str, str]] = []
-    current_level: list[bytes] = []
-
-    for path, hash_hex in sorted_entries:
-        # Validate the key text before encoding it as UTF-8. content-hashes.json
-        # is untrusted input on the consumer side: a JSON-decoded lone surrogate
-        # key (e.g. an escaped "\udce9") is NFC-equal yet NOT encodable as UTF-8,
-        # so ``path.encode("utf-8")`` below would raise a RAW UnicodeEncodeError.
-        # Surface a structured diagnostic (mapped to ACEF-051 by the integrity
-        # checker) instead, reusing the same strict-UTF-8+NFC rule as every other
-        # hash-domain path site. This is a key-text check only; leaf ordering is
-        # unchanged.
+    # Validate every key's text BEFORE the collation sort. content-hashes.json
+    # is untrusted input on the consumer side: a JSON-decoded lone surrogate key
+    # (e.g. an escaped "\udce9") is NFC-equal yet NOT encodable as UTF-8 — and,
+    # critically, NOT encodable as UTF-16 either, so ``utf16_collation_key``
+    # (which calls ``str.encode("utf-16-be")``) would itself raise a RAW
+    # UnicodeEncodeError during the sort, before any per-leaf check could run.
+    # Validating up front with the shared strict-UTF-8+NFC rule
+    # (:func:`path_nfc_utf8_problem`) guarantees the sort key and the leaf
+    # ``path.encode("utf-8")`` below both see only encodable keys, and surfaces a
+    # structured diagnostic (mapped to ACEF-051 by the integrity checker) instead
+    # of a raw exception. This is a key-text check only; it does not affect leaf
+    # ordering.
+    for path in content_hashes:
         problem = path_nfc_utf8_problem(path)
         if problem is not None:
             raise ACEFCanonicalizationError(
                 f"content-hashes.json key violates spec §3.1.1 ({problem}): {path!r}",
             )
+
+    sorted_entries = sorted(content_hashes.items(), key=lambda kv: utf16_collation_key(kv[0]))
+    leaves: list[dict[str, str]] = []
+    current_level: list[bytes] = []
+
+    for path, hash_hex in sorted_entries:
         leaves.append({"path": path, "hash": hash_hex})
         path_bytes = path.encode("utf-8")
         hash_bytes = hash_hex.encode("utf-8")
