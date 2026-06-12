@@ -197,3 +197,69 @@ class TestOutOfDomainNumberStructured:
         assert "ACEF-051" in codes
         # And the validator did not crash — it returned a diagnostic list.
         assert all(isinstance(d.code, str) for d in diags)
+
+
+class TestSurrogateObjectKeyStructured:
+    """Finding integrity-jcs-merkle-5 sibling: an escaped lone-surrogate *object
+    KEY* in hash-domain JSON/JSONL -> ACEF-051, not a raw UnicodeEncodeError.
+
+    A hash-domain JSON object whose KEY is an escaped lone surrogate (e.g.
+    ``{"\\udce9":1}``) is valid UTF-8, NFC, BOM-free TEXT on disk, so it passes
+    every byte-level check in ``sha256_file`` / ``sha256_jsonl_file``. But when
+    ``rfc8785.dumps`` sorts the object keys by UTF-16 code units it must encode
+    that key as ``utf-16-be``, which CANNOT encode a lone surrogate and raises a
+    raw ``UnicodeEncodeError`` — NOT an ``rfc8785.CanonicalizationError``. Without
+    catching it in ``_canonicalize_hash_domain`` the exception leaks through
+    ``check_integrity()`` and crashes the validator (availability/DoS defect and a
+    "report ALL errors" MUST violation, spec §3.1.3 #6f). It MUST surface as a
+    structured ACEF-051 like every other canonicalization fault.
+    """
+
+    # An escaped lone surrogate as an object KEY. The file bytes are
+    # ``{"\udce9":1}`` (the six ASCII characters backslash-u-d-c-e-9), which is
+    # valid UTF-8 NFC text; json.loads decodes the escape into a Python str key
+    # holding the lone surrogate U+DCE9 that utf-16-be cannot encode.
+    _SURROGATE_KEY_JSON = '{"\\udce9":1}'
+
+    def test_json_surrogate_object_key_raises_structured(self, tmp_path: Path) -> None:
+        p = tmp_path / "artifacts" / "surrogate_key.json"
+        p.parent.mkdir(parents=True)
+        p.write_text(self._SURROGATE_KEY_JSON, encoding="utf-8")
+        with pytest.raises(ACEFCanonicalizationError, match="RFC 8785"):
+            sha256_file(p)
+
+    def test_jsonl_surrogate_object_key_raises_structured(self, tmp_path: Path) -> None:
+        p = tmp_path / "records" / "surrogate_key.jsonl"
+        p.parent.mkdir(parents=True)
+        p.write_text(self._SURROGATE_KEY_JSON + "\n", encoding="utf-8")
+        with pytest.raises(ACEFCanonicalizationError, match="RFC 8785"):
+            sha256_file(p)
+
+    def test_canonicalize_json_str_surrogate_object_key_raises_structured(self) -> None:
+        with pytest.raises(ACEFCanonicalizationError, match="RFC 8785"):
+            canonicalize_json_str(self._SURROGATE_KEY_JSON)
+
+    def test_check_integrity_emits_acef051_not_crash(self, tmp_path: Path) -> None:
+        # End-to-end: a surrogate-object-key hash-domain artifact must surface as
+        # a structured ACEF-051 from check_integrity, NOT propagate a raw
+        # UnicodeEncodeError out of rfc8785's UTF-16 key sort.
+        from acef.integrity import compute_content_hashes
+        from acef.validation.integrity_checker import check_integrity
+
+        bundle = tmp_path / "bundle"
+        (bundle / "artifacts").mkdir(parents=True)
+        (bundle / "hashes").mkdir()
+        (bundle / "acef-manifest.json").write_text("{}", encoding="utf-8")
+        manifest_hash = compute_content_hashes(bundle)["acef-manifest.json"]
+        (bundle / "artifacts" / "evil.json").write_text(self._SURROGATE_KEY_JSON, encoding="utf-8")
+        content_hashes = {
+            "acef-manifest.json": manifest_hash,
+            "artifacts/evil.json": "0" * 64,
+        }
+        (bundle / "hashes" / "content-hashes.json").write_bytes(rfc8785.dumps(content_hashes))
+
+        diags = check_integrity(bundle)
+        codes = [d.code for d in diags]
+        assert "ACEF-051" in codes
+        # And the validator did not crash — it returned a diagnostic list.
+        assert all(isinstance(d.code, str) for d in diags)

@@ -152,6 +152,17 @@ def _canonicalize_hash_domain(data: Any, *, path: Path | None = None) -> bytes:
     :class:`ACEFCanonicalizationError` routes it to the integrity checker's
     existing ACEF-051 handler.
 
+    A second, distinct escape is an object **KEY** that holds a lone UTF-16
+    surrogate, e.g. the file bytes ``{"\\udce9":1}`` (an escaped ``\\udce9``).
+    Those bytes are valid UTF-8, NFC, and BOM-free, so every text-level check in
+    :func:`sha256_file` / :func:`sha256_jsonl_file` passes; but ``rfc8785.dumps``
+    sorts object keys by UTF-16 code units and must ``str.encode("utf-16-be")``
+    each key, which CANNOT encode a lone surrogate and raises a raw
+    :class:`UnicodeEncodeError` (NOT an :class:`rfc8785.CanonicalizationError`).
+    Without catching it here that exception leaks through
+    :func:`check_integrity` and crashes the validator — the same availability/DoS
+    and "report ALL errors" defect — so it is wrapped as ACEF-051 too.
+
     Args:
         data: The JSON-decoded hash-domain value to canonicalize.
         path: Optional source path, attached to the raised diagnostic.
@@ -161,13 +172,21 @@ def _canonicalize_hash_domain(data: Any, *, path: Path | None = None) -> bytes:
 
     Raises:
         ACEFCanonicalizationError: If ``data`` contains a number outside the
-            RFC 8785 domain (>2^53, NaN, or Infinity).
+            RFC 8785 domain (>2^53, NaN, or Infinity), or an object key holding a
+            lone UTF-16 surrogate (not encodable for RFC 8785's UTF-16 key sort).
     """
     try:
         return rfc8785.dumps(data)
     except rfc8785.CanonicalizationError as exc:
         raise ACEFCanonicalizationError(
             f"JSON not canonicalizable per RFC 8785 (out-of-domain number / NaN / Infinity): {exc}",
+            path=path,
+        ) from exc
+    except UnicodeEncodeError as exc:
+        raise ACEFCanonicalizationError(
+            f"JSON not canonicalizable per RFC 8785 "
+            f"(object key holds a lone UTF-16 surrogate, not encodable for the "
+            f"UTF-16 key sort): {exc}",
             path=path,
         ) from exc
 
