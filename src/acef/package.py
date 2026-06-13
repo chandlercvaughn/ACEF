@@ -740,15 +740,18 @@ class Package:
         self,
         profile_id: str,
         *,
-        provisions: list[str],
+        provisions: list[str] | tuple[str, ...],
         template_version: str = "1.0.0",
     ) -> ProfileEntry:
         """Declare a regulation profile for this package.
 
         Args:
             profile_id: The profile identifier (e.g. ``"eu-ai-act-2024"``).
-            provisions: The applicable provisions this profile covers. MUST be
-                non-empty: the frozen manifest schema pins
+            provisions: A ``list`` or ``tuple`` of the applicable provision ids
+                this profile covers — both are concrete, ordered sequences and
+                are accepted; element order is preserved verbatim into
+                ``applicable_provisions`` (a tuple is normalized to a list).
+                MUST be non-empty: the frozen manifest schema pins
                 ``profiles[].applicable_provisions`` to ``minItems: 1``, so a
                 profile with no provisions produces a manifest the spec's
                 §3.1.3 step-(a) schema gate rejects (ACEF-002). The builder
