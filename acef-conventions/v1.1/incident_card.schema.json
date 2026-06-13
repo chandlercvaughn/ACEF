@@ -148,6 +148,7 @@
     },
     "harm_distribution_basis": {
       "type": "array",
+      "uniqueItems": true,
       "items": {
         "type": "string",
         "enum": [
@@ -165,7 +166,7 @@
           "other"
         ]
       },
-      "description": "Closed CSETv1 axis (§5.2). GDPR Art.9 special-category; §5.11 governs publishability (regulator-only by default; a *_commitment field carries the hash-committed form)."
+      "description": "Closed CSETv1 protected-attribute axis (§5.2). A SET (uniqueItems: true) — a duplicate ['race','race'] is rejected — aligning the §5.10 order-insensitive (sorted-before-hash) axis array with the protected-attribute-axis set intent and the eu_ai_act_facts trigger-set precedent. GDPR Art.9 special-category; §5.11 governs publishability (regulator-only by default; a *_commitment field carries the hash-committed form)."
     },
     "taxonomy_crosswalk": {
       "$ref": "taxonomy_crosswalk.schema.json",

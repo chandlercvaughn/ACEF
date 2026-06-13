@@ -1,0 +1,14 @@
+{
+  "public_incident_id": "AIIC-OPENAI-2026-0123456789ABCDEFGHJKMNPQRS",
+  "id_grade": "self-asserted",
+  "harm_core": {
+    "realization": "harm_event",
+    "causality": {
+      "entity": "ai",
+      "intent": "unintentional",
+      "timing": "post_deployment"
+    },
+    "harm_class": "discrimination"
+  },
+  "harm_distribution_basis": ["race", "race"]
+}

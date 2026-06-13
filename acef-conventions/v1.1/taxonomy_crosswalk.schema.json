@@ -61,7 +61,8 @@
         },
         "serious_incident_triggers": {
           "type": "array",
-          "description": "Art. 3(49)(a-d) trigger letters; order-insensitive, sorted per §5.10. These `3.49.*` TRIGGER codes are crosswalk values, NOT harm_class names (§5.2).",
+          "description": "Art. 3(49)(a-d) trigger letters; order-insensitive, sorted per §5.10. These `3.49.*` TRIGGER codes are crosswalk values, NOT harm_class names (§5.2). The triggers are a SET (uniqueItems: true) — a duplicate ['3.49.a','3.49.a'] is rejected — matching the source-backed twin (card_source.eu_ai_act_facts.serious_incident_triggers) and the §5.5 set semantics; §5.7 reads this same array from the public card to compute the ACEF-084 shortest-applicable clock, so a sorted-set-with-duplicate would be self-contradictory. minItems stays optional here because the whole eu_ai_act member is profile-conditional.",
+          "uniqueItems": true,
           "items": {
             "type": "string",
             "enum": [
