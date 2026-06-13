@@ -208,7 +208,7 @@ def _build_report(perm: Callable[[Sequence[Any]], list[Any]]) -> dict[str, Any]:
     env = pkg.report_incident(
         public_incident_id=_PUBLIC_ID,
         harm_core=dict(_HARM_CORE),
-        incident_type="malfunction",
+        incident_type="operational_failure",
         description="d",
         awareness_date=_AWARENESS,
         eu_ai_act_facts={
@@ -218,6 +218,42 @@ def _build_report(perm: Callable[[Sequence[Any]], list[Any]]) -> dict[str, Any]:
         },
     )
     return dict(env.payload)
+
+
+def _valid_report_payload(perm: Callable[[Sequence[Any]], list[Any]]) -> dict[str, Any]:
+    """A SCHEMA-VALID source-backed ``incident_report`` payload for the GENERIC
+    ``Package.record('incident_report', payload=...)`` path, with its
+    order-insensitive ``card_source.eu_ai_act_facts.serious_incident_triggers``
+    permuted by ``perm``.
+
+    Every field is valid against acef-conventions/v1.1/incident_report.schema.json
+    + incident_report.card_source.schema.json (roborev Low on 103bd03b — the prior
+    fixture was schema-INVALID: ``incident_type:'malfunction'`` is outside the v1.1
+    enum, the root ``severity`` was missing, and ``card_source`` omitted its
+    required ``id_grade``/``id_state``/``publishability_map`` and the
+    ``eu_ai_act_facts.edition`` const). Because it carries ``card_source`` it is a
+    v1.1-only payload — recording it MUST route the package to 1.1.0 so the v1.1
+    schema set + incident rules actually run (the Medium fix). The chosen trigger
+    order diverges from the §5.10 canonical sort so the WRONG order is detectable.
+    """
+    return {
+        "incident_type": "operational_failure",
+        "description": "d",
+        "severity": "major",
+        "card_source": {
+            "public_incident_id": _PUBLIC_ID,
+            "id_grade": "self-asserted",
+            "id_state": "RESERVED",
+            "harm_core": dict(_HARM_CORE),
+            "publishability_map": {},
+            "eu_ai_act_facts": {
+                "edition": "reg-2024-1689",
+                "serious_incident_triggers": perm(_TRIGGERS),
+                "widespread": False,
+                "death_involved": False,
+            },
+        },
+    }
 
 
 class TestOrderInsensitiveArraysAreDeterministic:
@@ -313,23 +349,13 @@ class TestGenericRecordPathNormalizesIncidentArrays:
         assert cats == sorted(_NIST_CATEGORIES, key=canonicalize)
 
     def test_record_report_byte_identical_across_shuffled_inputs(self) -> None:
-        # The incident_report type is normalized through the generic path too.
+        # The incident_report type is normalized through the generic path too. The
+        # fixture is SCHEMA-VALID (roborev Low): so this proves real emission-path
+        # bytes on a card_source the v1.1 schema accepts, not a private-sorter
+        # artifact on a schema-invalid payload.
         def _emit_report(perm: Callable[[Sequence[Any]], list[Any]]) -> dict[str, Any]:
             pkg = _new_pkg()
-            payload = {
-                "public_incident_id": _PUBLIC_ID,
-                "harm_core": dict(_HARM_CORE),
-                "incident_type": "malfunction",
-                "description": "d",
-                "card_source": {
-                    "eu_ai_act_facts": {
-                        "serious_incident_triggers": perm(_TRIGGERS),
-                        "widespread": False,
-                        "death_involved": False,
-                    },
-                },
-            }
-            return dict(pkg.record("incident_report", payload=payload).payload)
+            return dict(pkg.record("incident_report", payload=_valid_report_payload(perm)).payload)
 
         a = canonicalize(_emit_report(_identity))
         b = canonicalize(_emit_report(_reverse))
@@ -337,6 +363,44 @@ class TestGenericRecordPathNormalizesIncidentArrays:
         card_source = _emit_report(_reverse)["card_source"]
         triggers = card_source["eu_ai_act_facts"]["serious_incident_triggers"]
         assert triggers == sorted(set(_TRIGGERS), key=canonicalize)
+
+    def test_record_emitted_report_validates_against_v1_1_schema(self) -> None:
+        # roborev Low: the emitted source-backed incident_report passes the v1.1
+        # schema (card_source schema-checked, not swallowed as an unchecked
+        # additionalProperty under a v1.0 manifest).
+        pkg = _new_pkg()
+        env = pkg.record("incident_report", payload=_valid_report_payload(_reverse))
+        errors = validate_record_payload(dict(env.payload), "incident_report", "v1.1")
+        assert errors == [], f"emitted incident_report failed v1.1 schema validation: {errors}"
+
+    def test_record_source_backed_report_routes_to_v1_1(self) -> None:
+        # roborev Medium: a default (v1.0) Package recording an incident_report
+        # whose payload carries the v1.1-only card_source block MUST bump
+        # core_version to 1.1.0 — exactly as the typed report_incident() builder
+        # does via _ensure_v1_1(). RED before the fix: the generic record() path
+        # left a default package at core_version 1.0.0, so the FROZEN v1.0 schema
+        # (additionalProperties:true, no card_source property) swallowed card_source
+        # as an UNCHECKED additionalProperty and v1.1 card_source validation +
+        # incident rules were SILENTLY BYPASSED.
+        pkg = _new_pkg()
+        assert pkg._versioning.core_version == "1.0.0"
+        pkg.record("incident_report", payload=_valid_report_payload(_identity))
+        assert pkg._versioning.core_version == "1.1.0"
+
+    def test_record_v1_0_only_report_stays_v1_0(self) -> None:
+        # Backward-compat guard (do NOT over-gate): a plain v1.0 incident_report
+        # WITHOUT any v1.1-only member (no card_source) keeps core_version 1.0.0.
+        # Only a v1.1-content payload triggers the bump.
+        pkg = Package(producer={"name": "test", "version": "1.0"})
+        assert pkg._versioning.core_version == "1.0.0"
+        env = pkg.record(
+            "incident_report",
+            payload={"incident_type": "operational_failure", "description": "d", "severity": "major"},
+            obligation_role="provider",
+        )
+        assert pkg._versioning.core_version == "1.0.0"
+        # The v1.0-only payload validates against the v1.0 incident_report schema.
+        assert validate_record_payload(dict(env.payload), "incident_report", "v1") == []
 
     def test_record_notification_timeline_is_order_significant(self) -> None:
         # notification_timeline[] stays order-SIGNIFICANT even through the generic

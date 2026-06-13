@@ -58,6 +58,7 @@ from acef.models.subjects import LifecycleEntry, Subject
 from acef.models.urns import URNType, generate_urn
 from acef.schemas.registry import (
     list_record_type_schemas,
+    load_schema,
     parse_core_version_minor,
 )
 
@@ -382,6 +383,37 @@ def _v1_1_only_record_types() -> frozenset[str]:
     v1_types = set(list_record_type_schemas("v1"))
     v1_1_types = set(list_record_type_schemas("v1.1"))
     return frozenset((v1_1_types - v1_types) - _ASSESSMENT_ONLY_RECORD_TYPES)
+
+
+@lru_cache(maxsize=1)
+def _v1_1_only_incident_report_fields() -> frozenset[str]:
+    """Top-level ``incident_report`` payload fields that exist ONLY in v1.1.
+
+    ``incident_report`` is one of the FEW v1.1 incident record types that is ALSO
+    a v1.0 Core record type (it predates RFC-0002): its schema lives in BOTH
+    ``acef-conventions/v1/`` and ``v1.1/``, so it is NOT caught by
+    :func:`_v1_1_only_record_types`. The v1.1 overlay adds the private
+    ``card_source`` block (RFC-0002 §5.1) as a declared property; the FROZEN v1.0
+    schema keeps ``additionalProperties: true`` and does NOT declare it. A default
+    (v1.0) Package emitting ``record('incident_report', {…card_source…})`` would
+    therefore stay on a v1.0 manifest, where the v1.0 schema swallows
+    ``card_source`` as an UNCHECKED additionalProperty — silently bypassing v1.1
+    card_source schema validation AND the incident rules keyed on it (roborev
+    Medium on 103bd03b). Recording such a payload MUST bump ``core_version`` to
+    1.1.0 so the v1.1 schema set + incident validation resolve, exactly as the
+    typed ``report_incident()`` builder does via ``_ensure_v1_1()``.
+
+    The trigger set is DERIVED from the schema-property diff (v1.1 declared
+    properties minus v1.0 declared properties) — the same drift-proof,
+    data-driven approach as :func:`_v1_1_only_record_types` — so a future v1.1
+    field added to the incident_report overlay is picked up automatically without
+    a hand-maintained literal. Currently this resolves to ``{'card_source'}``.
+    Memoized (``lru_cache(maxsize=1)``): the on-disk schemas are frozen for the
+    process lifetime, so the diff is computed once.
+    """
+    v1_props = set(load_schema("incident_report", "v1").get("properties", {}).keys())
+    v1_1_props = set(load_schema("incident_report", "v1.1").get("properties", {}).keys())
+    return frozenset(v1_1_props - v1_props)
 
 
 # Open-core v1.1 manifest-field (X5/X6) builder authoring constraints. These
@@ -1472,6 +1504,29 @@ class Package:
         # schema set resolves, exactly as the typed incident/agent-reliability
         # builders do via _ensure_v1_1().
         if record_type in _v1_1_only_record_types():
+            self._ensure_v1_1()
+
+        # incident_report is ALSO a v1.0 Core record type, so the type-level gate
+        # above does NOT catch it. Its v1.1 overlay adds the private ``card_source``
+        # block (RFC-0002 §5.1) as a DECLARED property; the FROZEN v1.0 schema keeps
+        # ``additionalProperties: true`` and does not declare it. A default (v1.0)
+        # Package emitting ``record('incident_report', {…card_source…})`` would
+        # therefore stay on a v1.0 manifest, where the v1.0 schema swallows
+        # ``card_source`` as an UNCHECKED additionalProperty — silently bypassing
+        # v1.1 card_source schema validation AND the incident rules keyed on it
+        # (roborev Medium on 103bd03b). So when the payload carries any v1.1-only
+        # incident_report member, bump to 1.1.0 — exactly the same decision the
+        # typed ``report_incident()`` builder makes via ``_ensure_v1_1()`` (it
+        # always emits ``card_source``, so it always gates). The trigger set is the
+        # SCHEMA-derived field diff (:func:`_v1_1_only_incident_report_fields`), not
+        # a parallel hand-rolled version check. A plain v1.0 incident_report WITHOUT
+        # any v1.1-only member is left at 1.0.0 (backward-compat: only v1.1 content
+        # triggers the bump — no over-gating).
+        if (
+            record_type == "incident_report"
+            and isinstance(payload, dict)
+            and not _v1_1_only_incident_report_fields().isdisjoint(payload)
+        ):
             self._ensure_v1_1()
 
         # Resolve the schema-required envelope fields when callers omit
