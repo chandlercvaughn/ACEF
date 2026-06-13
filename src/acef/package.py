@@ -1183,14 +1183,23 @@ class Package:
         # The gate parses ``(major, minor)`` numerically via
         # :func:`parse_core_version_minor` (audit redaction-5) rather than a
         # lexicographic ``core_v >= "1.1"`` comparison, which is not
-        # semver-correct (e.g. it would treat ``"1.1abc"`` as v1.1). A bundle is
-        # v1.1+ when ``(major, minor) >= (1, 1)``; an unparseable version is
-        # NOT v1.1+ (suppress auto-population).
+        # semver-correct (e.g. it would treat ``"1.1abc"`` as v1.1). X1/X2 are
+        # v1.1 (major-1) additions, so a bundle is v1.1+ ONLY when it declares
+        # ``major == 1`` AND a numeric ``minor >= 1``. A malformed minor
+        # (``(1, None)`` for "1.1abc"), an unsupported major (``(2, None)`` for
+        # "2.x", or ``(2, 0)`` for "2.0"), or a fully-unparseable version
+        # (``None``) is NOT v1.1+ — suppress auto-population. (Comparing
+        # ``parsed_core >= (1, 1)`` directly is wrong on both counts: it raises
+        # ``TypeError`` on a ``None`` minor AND a non-1 major like ``(2, None)``
+        # would short-circuit as "True" and wrongly auto-populate X1/X2 on an
+        # unsupported-major bundle; roborev finding 1.)
         try:
             parsed_core = parse_core_version_minor(self._versioning.core_version)
         except AttributeError:
             parsed_core = None
-        v1_1_or_later = parsed_core is not None and parsed_core >= (1, 1)
+        v1_1_or_later = (
+            parsed_core is not None and parsed_core[0] == 1 and parsed_core[1] is not None and parsed_core[1] >= 1
+        )
 
         if is_non_public and v1_1_or_later:
             policy = self._redaction_policy
@@ -1830,12 +1839,32 @@ class Package:
         The gate parses ``(major, minor)`` numerically via
         :func:`parse_core_version_minor` (audit records-payloads-6) instead of a
         lexicographic ``current >= "1.1"`` string comparison, which is not
-        semver-correct: an unparseable/odd value (e.g. ``"1.1abc"``) is treated
-        as not-yet-v1.1 and repaired to the canonical ``"1.1.0"`` rather than
-        being mistaken for a valid v1.1 declaration.
+        semver-correct: an unparseable/odd MAJOR-1 value (e.g. ``"1.1abc"``) is
+        treated as not-yet-v1.1 and repaired to the canonical ``"1.1.0"`` rather
+        than being mistaken for a valid v1.1 declaration.
+
+        An UNSUPPORTED-MAJOR version (e.g. ``"2.x"``, ``"2.abc"``, ``"2.0"``) is
+        left UNTOUCHED — it must NOT be silently clobbered to ``"1.1.0"``
+        (roborev finding 1). The parse preserves the major even when the minor
+        is malformed, so a non-1 major is detected and skipped here; the
+        validator surfaces the unsupported major as ACEF-001 downstream
+        (:func:`acef.schemas.registry.schema_version_for_core_version`).
         """
         parsed = parse_core_version_minor(self._versioning.core_version)
-        if parsed is None or parsed < (1, 1):
+        if parsed is None:
+            # No parseable major (legacy/odd/absent) — default a fresh bundle to
+            # the v1.1 floor so the incident schema set + rules apply.
+            self._versioning.core_version = "1.1.0"
+            return
+        major, minor = parsed
+        if major != 1:
+            # Unsupported major (2.x, 2.0, …) — do NOT rewrite; leave the
+            # declared version so the validator rejects it (ACEF-001) instead of
+            # masking a forged/typo'd major as a self-inconsistent v1.1 bundle.
+            return
+        if minor is None or minor < 1:
+            # major == 1 with a malformed minor ("1.1abc") or below the v1.1
+            # floor (1.0.x) — repair to the canonical v1.1.0.
             self._versioning.core_version = "1.1.0"
 
     def _declare_art73_profile(self) -> None:

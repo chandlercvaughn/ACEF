@@ -136,8 +136,8 @@ _COMPANION_SUBSCHEMAS: frozenset[str] = frozenset(
 )
 
 
-def parse_core_version_minor(core_version: str | None) -> tuple[int, int] | None:
-    """Parse ``core_version`` into a numeric ``(major, minor)`` tuple.
+def parse_core_version_minor(core_version: str | None) -> tuple[int, int | None] | None:
+    """Parse ``core_version`` into a numeric ``(major, minor)`` result.
 
     This is the single, semver-correct parse for every ``core_version``
     minor-gating decision (schema selection, the v1.1 version gate, the X1/X2
@@ -146,17 +146,30 @@ def parse_core_version_minor(core_version: str | None) -> tuple[int, int] | None
     semver-correct (e.g. it accepts ``"1.1abc"`` and is fragile across widening
     version strings; audit records-payloads-6 / redaction-5).
 
+    The result PRESERVES the major whenever it is numeric, so callers can
+    distinguish "no parseable major at all" from "major=N, minor malformed"
+    (roborev finding 1). Previously a malformed minor collapsed to ``None`` and
+    DISCARDED the major, so an unsupported-major version with a bad minor (e.g.
+    ``"2.x"``) was silently mishandled — :func:`schema_version_for_core_version`
+    fell back to ``"v1"`` instead of rejecting the unsupported major, and
+    ``Package._ensure_v1_1`` rewrote it to ``"1.1.0"``.
+
     Args:
         core_version: The value of ``manifest.versioning.core_version`` (or
             ``None`` if absent).
 
     Returns:
-        ``(major, minor)`` when both the major segment and (when present) the
-        minor segment parse as integers. Returns ``None`` when the version is
-        absent/empty or the major/minor segment is non-numeric (e.g.
-        ``"garbage"``, ``"1.1abc"``) — callers treat ``None`` as "not parseable
-        as a v1.1+ declaration" and route to their established floor/error.
-        A bare major (``"1"``) yields ``(1, 0)`` — minor defaults to 0.
+        - ``None`` when there is NO parseable major at all (the version is
+          absent/empty or the major segment is non-numeric, e.g. ``"garbage"``).
+          Callers treat ``None`` as a legacy/unparseable bundle and route to
+          their established lenient floor.
+        - ``(major, None)`` when the major segment parses but the minor segment
+          is present and non-numeric (e.g. ``"1.x"``, ``"2.abc"``,
+          ``"1.1abc"``). Callers MUST NOT treat a ``None`` minor as a valid v1.1
+          declaration; they decide per major whether to reject or floor.
+        - ``(major, minor)`` when both the major and the (present) minor parse
+          as integers. A bare major (``"1"``) yields ``(1, 0)`` — minor
+          defaults to 0.
     """
     if core_version is None or core_version == "":
         return None
@@ -165,6 +178,7 @@ def parse_core_version_minor(core_version: str | None) -> tuple[int, int] | None
     try:
         major = int(parts[0])
     except (ValueError, IndexError):
+        # No parseable major at all — a fully-unparseable / legacy version.
         return None
 
     if len(parts) < 2:
@@ -173,10 +187,12 @@ def parse_core_version_minor(core_version: str | None) -> tuple[int, int] | None
     try:
         minor = int(parts[1])
     except ValueError:
-        # A non-numeric minor segment (e.g. "1.x", "1.1abc") is NOT a valid
-        # numeric minor — signal unparseable rather than silently flooring to
-        # 0, so the v1.1 gate does not accept "1.1abc" as a v1.1 declaration.
-        return None
+        # A non-numeric minor segment (e.g. "1.x", "1.1abc", "2.x") is NOT a
+        # valid numeric minor. Preserve the major and signal the malformed
+        # minor as ``None`` so the major-1 v1.1 gate does not accept "1.1abc"
+        # as a v1.1 declaration AND an unsupported major (2.x) is still
+        # rejectable by the major check rather than masked as fully-unparseable.
+        return (major, None)
 
     return (major, minor)
 
@@ -190,27 +206,43 @@ def schema_version_for_core_version(core_version: str | None) -> str:
             absent.
 
     Returns:
-        ``"v1"`` for 1.0.x (or absent/empty/unparseable — backwards-compat
-        for legacy bundles), ``"v1.1"`` for 1.1.x and any future v1.y where
-        y > 1 (falls through to the most-recent known minor schema dir; the
-        v1.1 → v1 fallback in :func:`load_schema` ensures unchanged record
-        types still resolve).
+        ``"v1"`` for 1.0.x (or absent/empty/fully-unparseable — backwards-compat
+        for legacy bundles whose version string lacks a numeric major),
+        ``"v1.1"`` for 1.1.x and any future v1.y where y > 1 (falls through to
+        the most-recent known minor schema dir; the v1.1 → v1 fallback in
+        :func:`load_schema` ensures unchanged record types still resolve).
 
     Raises:
-        ACEFSchemaError: code ACEF-001, when the major version is not 1
-            (validator does not support core 2.x).
+        ACEFSchemaError: code ACEF-001, when the major version is parseable but
+            not 1 (validator does not support core 2.x — REGARDLESS of whether
+            the minor parses, so ``"2.x"``/``"2.abc"``/``"2.0"`` all reject), or
+            when the major is 1 but the minor segment is malformed (e.g.
+            ``"1.x"``) — a v1.* bundle with an unparseable minor MUST NOT be
+            silently routed to v1 or v1.1.
     """
     parsed = parse_core_version_minor(core_version)
     if parsed is None:
-        # Garbage like "garbage", "", a non-numeric minor ("1.x"), or absent
-        # — lenient fallback. Phase 1 schema validation diagnoses the malformed
-        # version string itself; we just route through v1.
+        # No parseable major at all ("garbage", "", absent) — lenient fallback
+        # for legacy/odd bundles. Phase 1 schema validation diagnoses the
+        # malformed version string itself; we just route through v1.
         return "v1"
 
     major, minor = parsed
     if major != 1:
+        # An unsupported major is rejected even when the minor is malformed
+        # ("2.x"): the major is preserved through the parse, so we never fall
+        # back to v1 for an unsupported-major bundle (roborev finding 1).
         raise ACEFSchemaError(
             f"Incompatible core_version: {core_version!r} (validator supports 1.x only)",
+            code="ACEF-001",
+        )
+
+    if minor is None:
+        # Major is 1 but the minor segment is malformed ("1.x"). We MUST NOT
+        # silently route a v1.* bundle with an unparseable minor to v1 or v1.1;
+        # the version string is malformed and is rejected with ACEF-001.
+        raise ACEFSchemaError(
+            f"Incompatible core_version: {core_version!r} (malformed minor segment)",
             code="ACEF-001",
         )
 

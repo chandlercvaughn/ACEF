@@ -1,6 +1,6 @@
 """Pydantic payload models for the v1.1 agent-reliability record types.
 
-These six payload models mirror the JSON Schemas under
+These five payload models mirror the JSON Schemas under
 ``acef-conventions/v1.1/`` for the new record types introduced in ACEF
 v0.4 per brief ``planning/freddy-on-acef-requirements-v0.1.md`` §3.1-§3.6:
 

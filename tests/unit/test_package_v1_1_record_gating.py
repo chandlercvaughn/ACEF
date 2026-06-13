@@ -17,8 +17,9 @@ from __future__ import annotations
 import pytest
 
 from acef.errors import ACEFSchemaError
-from acef.models.enums import RECORD_TYPES
+from acef.models.enums import RECORD_TYPES, Confidentiality
 from acef.package import Package
+from acef.redaction import RedactionPolicy
 from acef.schemas.registry import schema_version_for_core_version
 from acef.validation.schema_validator import validate_record_schemas
 
@@ -157,13 +158,100 @@ def test_ensure_v1_1_numeric_gate_leaves_1_2() -> None:
 
 
 def test_ensure_v1_1_numeric_gate_non_numeric_minor_bumps() -> None:
-    """A non-numeric/odd value (e.g. '1.1abc') is treated as below the gate.
+    """A major-1 non-numeric/odd value (e.g. '1.1abc') is below the gate.
 
-    Lexicographic '1.1abc' >= '1.1' is True (would NOT bump), but '1.1abc' is
-    not a valid v1.1 declaration; the numeric gate cannot parse the minor and
-    falls through to the bump, repairing the version to the canonical '1.1.0'.
+    The minor '1abc' is unparseable, so '1.1abc' is NOT a valid v1.1
+    declaration; the numeric gate falls through to the bump, repairing the
+    version to the canonical '1.1.0'. (Major stays 1, so no unsupported-major
+    concern here.)
     """
     package = Package()
     package._versioning.core_version = "1.1abc"
     package._ensure_v1_1()
     assert package.build_manifest().versioning.core_version == "1.1.0"
+
+
+# ---------------------------------------------------------------------------
+# roborev finding 1 — _ensure_v1_1 MUST NOT rewrite an UNSUPPORTED-MAJOR version
+# (e.g. '2.x', '2.abc') to '1.1.0'. Previously the malformed minor masked the
+# major, the gate saw None, and silently clobbered an unsupported core 2.x
+# bundle down to a self-inconsistent '1.1.0'. The parse now preserves the major
+# so the gate leaves a non-1 major untouched (the validator surfaces ACEF-001).
+# ---------------------------------------------------------------------------
+
+
+def test_ensure_v1_1_does_not_rewrite_unsupported_major_malformed_minor() -> None:
+    """'2.x' (unsupported major, malformed minor) MUST NOT become '1.1.0'."""
+    package = Package()
+    package._versioning.core_version = "2.x"
+    package._ensure_v1_1()
+    assert package.build_manifest().versioning.core_version == "2.x"
+
+
+def test_ensure_v1_1_does_not_rewrite_unsupported_major_alpha_minor() -> None:
+    """'2.abc' (unsupported major) MUST NOT be clobbered to '1.1.0'."""
+    package = Package()
+    package._versioning.core_version = "2.abc"
+    package._ensure_v1_1()
+    assert package.build_manifest().versioning.core_version == "2.abc"
+
+
+def test_ensure_v1_1_does_not_rewrite_unsupported_major_valid_minor() -> None:
+    """'2.0' (unsupported major, valid minor) MUST NOT be clobbered."""
+    package = Package()
+    package._versioning.core_version = "2.0"
+    package._ensure_v1_1()
+    assert package.build_manifest().versioning.core_version == "2.0"
+
+
+# ---------------------------------------------------------------------------
+# redaction-5 (VAL-FIX-REDACT-005) regression — the X1/X2 auto-population gate
+# in Package.record() must NOT crash on the new (major, None) parse result. The
+# gate compares ``parsed_core >= (1, 1)``; a ``(1, None)`` minor (malformed,
+# e.g. '1.1abc') would TypeError on ``None >= 1``. The gate must treat a
+# malformed/unsupported-major version as NOT v1.1+ (suppress auto-population)
+# rather than raising.
+# ---------------------------------------------------------------------------
+
+
+def _non_public_record_on(core_version: str) -> Package:
+    package = Package(
+        producer={"name": "t", "version": "1.0"},
+        redaction_policy=RedactionPolicy(version="1.0.0"),
+    )
+    package._versioning.core_version = core_version
+    package.add_subject("ai_system", name="System")
+    package.record(
+        "risk_register",
+        payload={"secret": "S"},
+        confidentiality=Confidentiality.HASH_COMMITTED,
+    )
+    return package
+
+
+def test_redaction_gate_major1_malformed_minor_does_not_crash() -> None:
+    """'1.1abc' (major 1, malformed minor) does NOT raise in the X1/X2 gate.
+
+    The gate compares the parsed result to ``(1, 1)``; a ``(1, None)`` minor
+    must be treated as NOT-v1.1+ (auto-population suppressed) rather than
+    raising ``TypeError: '>=' not supported between 'NoneType' and 'int'``.
+    """
+    package = _non_public_record_on("1.1abc")
+    # Auto-population suppressed -> no X1 set by the gate (malformed minor is
+    # not a valid v1.1 declaration). The record still exists.
+    rec = next(r for r in package._records if r.record_type == "risk_register")
+    assert rec.redaction_policy_version is None
+
+
+def test_redaction_gate_unsupported_major_malformed_minor_does_not_crash() -> None:
+    """'2.x' (unsupported major) does NOT raise in the X1/X2 gate."""
+    package = _non_public_record_on("2.x")
+    rec = next(r for r in package._records if r.record_type == "risk_register")
+    assert rec.redaction_policy_version is None
+
+
+def test_redaction_gate_v1_1_still_auto_populates() -> None:
+    """A genuine 1.1.0 bundle still auto-populates X1 (gate unchanged)."""
+    package = _non_public_record_on("1.1.0")
+    rec = next(r for r in package._records if r.record_type == "risk_register")
+    assert rec.redaction_policy_version == "1.0.0"
