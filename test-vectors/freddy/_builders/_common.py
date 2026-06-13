@@ -228,13 +228,27 @@ def write_bundle(
 
     # content-hashes.json lives under hashes/ per spec §3.1 and
     # integrity_checker.py:33. Explicit hashes win over auto-computation.
+    #
+    # Every bundle that carries hashes/content-hashes.json MUST also carry
+    # hashes/merkle-tree.json: spec §3.1.3 #4 lists merkle-tree.json as a
+    # required layout file and step (d) makes the root comparison a
+    # MANDATORY verification step. The validator (integrity_checker.py)
+    # now emits a FATAL ACEF-011 when content-hashes.json is present but
+    # merkle-tree.json is absent (the §3.1.3.d check cannot be silently
+    # skipped). The Merkle tree is built from the SAME content_hashes dict
+    # that was written, so the recomputed root matches: a pass bundle stays
+    # clean, and the deliberately-wrong-hash fail bundle still fails on its
+    # intended content-hash diagnostic (ACEF-010/ACEF-014), NOT on a Merkle
+    # mismatch (the root is self-consistent with its own content-hashes.json).
     hashes_dir = bundle_dir / "hashes"
     hashes_dir.mkdir(parents=True, exist_ok=True)
+    written_hashes: dict[str, str] | None = None
     if content_hashes is not None:
         (hashes_dir / "content-hashes.json").write_text(
             json.dumps(content_hashes, sort_keys=True, indent=2) + "\n",
             encoding="utf-8",
         )
+        written_hashes = content_hashes
     elif auto_hashes:
         # Lazy import — avoids a hard dependency on acef at module load
         # time so this helper module can be imported in isolation.
@@ -244,6 +258,16 @@ def write_bundle(
         # Write canonicalized so the file content is byte-deterministic
         # across runs (matches the export.py convention at export.py:138).
         (hashes_dir / "content-hashes.json").write_bytes(canonicalize(computed))
+        written_hashes = computed
+
+    if written_hashes is not None:
+        # Build and write the Merkle tree over the entries that were just
+        # written to content-hashes.json (matches export.py:358-361).
+        # Canonicalized for byte-determinism across runs.
+        from acef.integrity import build_merkle_tree, canonicalize
+
+        merkle_tree = build_merkle_tree(written_hashes)
+        (hashes_dir / "merkle-tree.json").write_bytes(canonicalize(merkle_tree))
 
     (bundle_dir / "README.md").write_text(readme, encoding="utf-8")
 

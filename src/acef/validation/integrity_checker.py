@@ -118,9 +118,33 @@ def check_integrity(
         else:
             diagnostics.append(ValidationDiagnostic("ACEF-014", error_msg))
 
-    # Check Merkle tree
+    # Check Merkle tree.
+    #
+    # Spec §3.1.3 step (d) mandates recomputing the Merkle tree from
+    # content-hashes.json and comparing the root against merkle-tree.json
+    # ("Mismatch is FATAL (ACEF-011)"); §3.1.3 layout (line 501/528) lists
+    # hashes/merkle-tree.json as a required bundle file. Because the file
+    # lives OUTSIDE the hash domain, content-hashes.json does NOT list it,
+    # so deleting it is otherwise undetectable. If we only verified the
+    # root when the file happens to be present, a malicious or buggy
+    # producer could strip merkle-tree.json to bypass step (d) entirely
+    # with zero diagnostics. We therefore require the file's presence
+    # whenever content-hashes.json exists (i.e. this is a real bundle with
+    # an integrity layer — the no-content-hashes case already returned an
+    # ACEF-014 above and never reaches here, so this branch never
+    # double-reports). A missing required Merkle file cannot satisfy the
+    # mandatory root comparison, so it is the step-(d) FATAL code ACEF-011.
     merkle_path = bundle_dir / "hashes" / "merkle-tree.json"
-    if merkle_path.exists():
+    if not merkle_path.exists():
+        diagnostics.append(
+            ValidationDiagnostic(
+                "ACEF-011",
+                "merkle-tree.json not found in hashes/ — mandatory Merkle root "
+                "comparison (spec §3.1.3 step d) cannot be performed",
+                path="/hashes/merkle-tree.json",
+            )
+        )
+    else:
         try:
             merkle_data = json.loads(merkle_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, UnicodeDecodeError, OSError) as e:
