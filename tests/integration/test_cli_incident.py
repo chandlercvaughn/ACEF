@@ -289,7 +289,7 @@ class TestInspectIncidentStreamsRecordsNoFullLoad:
     def test_directory_enrichment_does_not_call_loader_load(
         self, runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        bundle_dir, public_id = _build_source_backed_report_bundle(tmp_path)
+        bundle_dir, _ = _build_source_backed_report_bundle(tmp_path)
 
         import acef.loader as loader_mod
 
@@ -317,7 +317,7 @@ class TestInspectIncidentStreamsRecordsNoFullLoad:
     def test_archive_not_extracted_twice(
         self, runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        bundle_dir, public_id = _build_source_backed_report_bundle(tmp_path)
+        bundle_dir, _ = _build_source_backed_report_bundle(tmp_path)
         archive = tmp_path / "report.acef.tar.gz"
         _build_raw_archive(bundle_dir, archive)
 
@@ -452,6 +452,61 @@ class TestExportArgHandling:
 
         assert result.exit_code == 0, result.output
         assert out.exists()
+
+
+class TestInspectNonUtf8ManifestCleanError:
+    """``inspect`` must surface a non-UTF-8 ``acef-manifest.json`` as a CLEAN
+    ACEF-050-style error + non-zero exit, NEVER an uncaught ``UnicodeDecodeError``
+    traceback — roborev Medium.
+
+    The streaming manifest read uses ``read_text(encoding="utf-8")``, whose decode
+    raises ``UnicodeDecodeError`` (a ``ValueError`` subclass, NOT ``OSError`` and
+    NOT ``json.JSONDecodeError``). Before the fix that exception escaped both the
+    directory path (``except OSError`` only) AND the archive path
+    (``except (ACEFError, OSError)`` only), producing an empty user output and an
+    uncaught traceback. RED proof (pre-fix, BOTH paths):
+    ``UnicodeDecodeError('utf-8', b'\\xff\\xfe...', 0, 1, 'invalid start byte')``.
+    The Unicode-decode failure MUST converge on the SAME user-facing error path the
+    invalid-JSON case (``json.JSONDecodeError``) already produces: a clean
+    ``Error: ... [ACEF-050]`` message on stderr and the documented exit code 1.
+    """
+
+    # 0xFF/0xFE are invalid UTF-8 lead bytes — a deterministic non-UTF-8 manifest.
+    _NON_UTF8_MANIFEST = b'\xff\xfe{"format_version": "1.0"}'
+
+    def _assert_clean_acef050(self, result: Any) -> None:
+        # No traceback escaped (only a clean SystemExit from the CLI error path).
+        assert result.exception is None or isinstance(result.exception, SystemExit), (
+            f"inspect leaked an uncaught exception on a non-UTF-8 manifest: {result.exception!r}"
+        )
+        # Documented non-zero exit code (same as the invalid-JSON path).
+        assert result.exit_code == 1, result.output
+        # The clean ACEF-050-style diagnostic reaches the user on stderr.
+        assert "Error:" in result.output, result.output
+        assert "ACEF-050" in result.output, result.output
+
+    def test_directory_non_utf8_manifest_clean_error(self, runner: CliRunner, tmp_path: Path) -> None:
+        bundle_dir = tmp_path / "bad-dir.acef"
+        bundle_dir.mkdir()
+        (bundle_dir / "acef-manifest.json").write_bytes(self._NON_UTF8_MANIFEST)
+
+        result = runner.invoke(cli, ["inspect", str(bundle_dir)])
+
+        self._assert_clean_acef050(result)
+
+    def test_archive_non_utf8_manifest_clean_error(self, runner: CliRunner, tmp_path: Path) -> None:
+        arc_src = tmp_path / "bad-arc"
+        arc_src.mkdir()
+        (arc_src / "acef-manifest.json").write_bytes(self._NON_UTF8_MANIFEST)
+        archive = tmp_path / "bad.acef.tar.gz"
+        with tarfile.open(str(archive), "w:gz") as tar:
+            for path in sorted(arc_src.rglob("*")):
+                arcname = path.relative_to(arc_src.parent).as_posix()
+                tar.add(str(path), arcname=arcname, recursive=False)
+
+        result = runner.invoke(cli, ["inspect", str(archive)])
+
+        self._assert_clean_acef050(result)
 
 
 class TestValidateArgHandling:

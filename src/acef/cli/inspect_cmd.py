@@ -201,9 +201,13 @@ def _read_directory_inputs(bundle_path: Path, path: str) -> tuple[dict[str, Any]
         raise SystemExit(1)
     try:
         manifest_data = json.loads(manifest_file.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
-        # Surface the parse error as a structured ACEF-050 message rather than
-        # letting the raw traceback escape.
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        # Surface a malformed manifest (invalid JSON OR non-UTF-8 bytes — the
+        # ``read_text(encoding="utf-8")`` decode raises ``UnicodeDecodeError``,
+        # which is a ``ValueError`` subclass distinct from ``json.JSONDecodeError``
+        # and is NOT an ``OSError``) as a structured ACEF-050 message rather than
+        # letting the raw traceback escape. Both failures converge on this single
+        # user-facing error path.
         click.echo(
             f"Error: acef-manifest.json is not valid JSON [ACEF-050]: {exc}",
             err=True,
@@ -247,7 +251,12 @@ def _read_archive_inputs(path: str) -> tuple[dict[str, Any], list[dict[str, Any]
                 raise SystemExit(1)
             try:
                 manifest_data = json.loads(manifest_file.read_text(encoding="utf-8"))
-            except json.JSONDecodeError as exc:
+            except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+                # A malformed archive manifest (invalid JSON OR non-UTF-8 bytes)
+                # converges on the SAME ACEF-050 clean-error path as the directory
+                # read. ``UnicodeDecodeError`` (a ``ValueError`` subclass, NOT an
+                # ``OSError``) would otherwise escape the outer
+                # ``except (ACEFError, OSError)`` as an uncaught traceback.
                 click.echo(
                     f"Error: acef-manifest.json is not valid JSON [ACEF-050]: {exc}",
                     err=True,
