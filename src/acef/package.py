@@ -307,7 +307,15 @@ def compute_incident_dedupe_key_hmac(
     date_utc = _occurrence_date_utc(occurrence_date, detection_date)
     if date_utc is None:
         return None
-    key_bytes = pepper.encode("utf-8") if isinstance(pepper, str) else pepper
+    # §5.5 — this helper is the SINGLE authoritative gate for the keyed variant:
+    # every path (the builders AND any direct caller) reaches it before an hmac is
+    # ever emitted. Enforce the 256-bit pepper floor HERE, using the validated
+    # bytes it returns, so a direct caller can never mint a falsely-protective
+    # hmac from an empty/short pepper. The check is placed after the
+    # preimage-derivability guards so the link-only ``None`` degrade (no derivable
+    # preimage -> emit nothing) is preserved and a weak pepper is only rejected
+    # when an hmac would actually be produced.
+    key_bytes = _validate_pepper_strength(pepper)
     preimage = _incident_dedupe_preimage(
         value_chain_role=value_chain_role,
         subject_identity=_normalize_subject_identity(*parts),
@@ -2281,7 +2289,10 @@ class Package:
         # them via extra_card_source (which merges below). Reject before any work.
         _reject_reserved_dedupe_fields(extra_card_source, block_name="extra_card_source")
         # §5.5 — a supplied pepper MUST meet the 256-bit entropy floor (else the
-        # keyed hmac is falsely protective). Validate up front (fail fast).
+        # keyed hmac is falsely protective). The AUTHORITATIVE gate is inside
+        # compute_incident_dedupe_key_hmac (every path reaches it); this up-front
+        # call is a fast-fail so a weak pepper is rejected before any record work
+        # even on inputs where the dedupe preimage would not be derivable.
         if pepper is not None:
             _validate_pepper_strength(pepper)
 
@@ -2454,8 +2465,11 @@ class Package:
         # them via extra_payload (which merges below, AFTER the public-only gate).
         # Reject before any work so a forged key cannot reach a non-public card.
         _reject_reserved_dedupe_fields(extra_payload, block_name="extra_payload")
-        # §5.5 — a supplied pepper MUST meet the 256-bit entropy floor. Validate up
-        # front (fail fast) so a weak pepper never yields a falsely-protective hmac.
+        # §5.5 — a supplied pepper MUST meet the 256-bit entropy floor. The
+        # AUTHORITATIVE gate is inside compute_incident_dedupe_key_hmac (every path
+        # reaches it before an hmac is emitted); this up-front call is a fast-fail
+        # so a weak pepper never yields a falsely-protective hmac and is rejected
+        # before any record work.
         if pepper is not None:
             _validate_pepper_strength(pepper)
 

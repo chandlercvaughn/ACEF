@@ -39,7 +39,7 @@ import pytest
 
 from acef.integrity import canonicalize
 from acef.models.enums import Confidentiality
-from acef.package import Package
+from acef.package import Package, compute_incident_dedupe_key_hmac
 from acef.redaction import RedactionPolicy
 
 _DEDUPE_KEY_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -671,3 +671,103 @@ class TestPepperStrengthFloor:
                 confidentiality=Confidentiality.PUBLIC,
                 pepper=pepper_str,
             )
+
+
+# ---------------------------------------------------------------------------
+# roborev follow-up — the pepper-strength floor MUST be enforced at the single
+# authoritative funnel: ``compute_incident_dedupe_key_hmac`` itself. Before this
+# fix the builders validated the pepper but a DIRECT caller of the helper could
+# still mint a falsely-protective hmac from an empty/short pepper (the helper
+# used the supplied pepper bytes verbatim). The helper is the lowest-level gate
+# every path (builders AND direct calls) traverses, so the floor lives there.
+# ---------------------------------------------------------------------------
+
+
+class TestComputeIncidentDedupeKeyHmacDirectPepperGate:
+    """The helper enforces the §5.5 256-bit pepper floor on EVERY direct call."""
+
+    @pytest.mark.parametrize("weak", ["", b"", "short", b"too-short", b"x" * 31])
+    def test_direct_helper_rejects_weak_pepper(self, weak: str | bytes) -> None:
+        # Before the fix these returned an offline-enumerable hmac (e.g. pepper=""
+        # -> "hmac-sha256:64bf898e..."); the helper is now the authoritative gate.
+        with pytest.raises(ValueError, match="pepper"):
+            compute_incident_dedupe_key_hmac(
+                pepper=weak,
+                value_chain_role="foundation_model",
+                subject_identity=("OpenAI", "GPT-X", "4.0"),
+                harm_class="physical_health",
+                occurrence_date="2026-07-15T00:00:00Z",
+            )
+
+    def test_direct_helper_rejects_short_multibyte_str_pepper(self) -> None:
+        # A str pepper is measured by UTF-8 byte length: 15 two-byte chars = 30
+        # bytes, below the 32-byte floor -> rejected even at the helper level.
+        pepper_str = "é" * 15  # 30 UTF-8 bytes
+        assert len(pepper_str.encode("utf-8")) == 30
+        with pytest.raises(ValueError, match="pepper"):
+            compute_incident_dedupe_key_hmac(
+                pepper=pepper_str,
+                value_chain_role="foundation_model",
+                subject_identity=("OpenAI", "GPT-X", "4.0"),
+                harm_class="physical_health",
+                occurrence_date="2026-07-15T00:00:00Z",
+            )
+
+    def test_direct_helper_strong_pepper_unchanged_output(self) -> None:
+        # A >=32-byte pepper is accepted and yields the SAME hmac as the §5.5
+        # oracle (no behavior change for valid peppers).
+        out = compute_incident_dedupe_key_hmac(
+            pepper=_STRONG_PEPPER,
+            value_chain_role="foundation_model",
+            subject_identity=("OpenAI", "GPT-X", "4.0"),
+            harm_class="physical_health",
+            occurrence_date="2026-07-15T00:00:00Z",
+        )
+        expected = _expected_dedupe_hmac(
+            pepper=_STRONG_PEPPER,
+            value_chain_role="foundation_model",
+            provider="OpenAI",
+            name="GPT-X",
+            version="4.0",
+            harm_class="physical_health",
+            occurrence_date_utc="2026-07-15",
+        )
+        assert out == expected
+
+    def test_direct_helper_strong_multibyte_str_pepper_accepted(self) -> None:
+        # 16 two-byte chars = 32 bytes -> exactly meets the floor; the str pepper
+        # is UTF-8 encoded and matches its bytes form.
+        pepper_str = "é" * 16  # 32 UTF-8 bytes
+        assert len(pepper_str.encode("utf-8")) == 32
+        out_str = compute_incident_dedupe_key_hmac(
+            pepper=pepper_str,
+            value_chain_role="foundation_model",
+            subject_identity=("OpenAI", "GPT-X", "4.0"),
+            harm_class="physical_health",
+            occurrence_date="2026-07-15T00:00:00Z",
+        )
+        out_bytes = compute_incident_dedupe_key_hmac(
+            pepper=pepper_str.encode("utf-8"),
+            value_chain_role="foundation_model",
+            subject_identity=("OpenAI", "GPT-X", "4.0"),
+            harm_class="physical_health",
+            occurrence_date="2026-07-15T00:00:00Z",
+        )
+        assert out_str is not None
+        assert _DEDUPE_HMAC_PATTERN.match(out_str)
+        assert out_str == out_bytes
+
+    def test_direct_helper_returns_none_before_pepper_check_when_preimage_underivable(
+        self,
+    ) -> None:
+        # When the preimage is not derivable (e.g. no value_chain_role) the helper
+        # returns None (link-only degrade) WITHOUT consulting the pepper — the
+        # pepper floor only applies once an hmac would actually be emitted.
+        out = compute_incident_dedupe_key_hmac(
+            pepper="",  # weak, but never reached
+            value_chain_role=None,
+            subject_identity=("OpenAI", "GPT-X", "4.0"),
+            harm_class="physical_health",
+            occurrence_date="2026-07-15T00:00:00Z",
+        )
+        assert out is None
