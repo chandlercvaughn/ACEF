@@ -43,7 +43,7 @@ from typing import Any
 
 import click
 
-from acef.cli.validate_cmd import extract_archive_raw
+from acef.loader import extract_archive_raw
 from acef.validation.engine import validate_bundle
 
 # Baseline downgrade table.
@@ -228,12 +228,13 @@ def verify_cmd(path: str, fmt: str, quiet: bool) -> None:
     with ExitStack() as stack:
         if is_archive:
             # Resolve the archive to a RAW-extracted directory and verify that.
-            # ``extract_archive_raw`` extracts the bytes verbatim (no load→export
-            # round-trip), so the integrity check sees the archive's real
-            # on-disk state and detects tampering. The temp dir is alive until
-            # this ``with`` block exits, after the validator has run.
+            # The shared ``loader.extract_archive_raw`` context manager extracts
+            # the bytes verbatim (no load→export round-trip), so the integrity
+            # check sees the archive's real on-disk state and detects tampering.
+            # Entering it on ``stack`` keeps the temp dir alive until this
+            # ``with`` block exits, after the validator has run.
             try:
-                target = extract_archive_raw(bundle_path, stack)
+                target = stack.enter_context(extract_archive_raw(bundle_path))
             except Exception as e:  # noqa: BLE001 — surface any extraction fault as a clean exit, never crash
                 click.echo(f"ERROR: archive could not be extracted: {e}", err=True)
                 sys.exit(2)

@@ -11,6 +11,8 @@ import json
 import sys
 import tarfile
 import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -259,6 +261,69 @@ def _safe_tar_extract(tar: tarfile.TarFile, dest: Path) -> None:
         tar.extract(member, dest)
 
 
+def _resolve_bundle_root(extract_dir: Path) -> Path:
+    """Resolve the bundle root inside a freshly extracted archive directory.
+
+    The canonical archive layout nests the whole bundle under a single root
+    directory; in that case the root is that nested directory. Otherwise the
+    extraction directory itself is the bundle root. Single source of truth for
+    the bundle-root rule shared by ``_load_archive`` (load path) and
+    :func:`extract_archive_raw` (validate/verify path).
+    """
+    extracted = list(extract_dir.iterdir())
+    if len(extracted) == 1 and extracted[0].is_dir():
+        return extracted[0]
+    return extract_dir
+
+
+@contextmanager
+def extract_archive_raw(archive_path: str | Path) -> Iterator[Path]:
+    """Safely extract an ``.acef.tar.gz`` archive VERBATIM and yield its bundle
+    root directory for the duration of the ``with`` block.
+
+    This is the single shared raw-safe-extract primitive used by every consumer
+    that must validate the archive's bytes AS RECEIVED — the public
+    ``acef.validate`` archive path and the ``validate`` / ``verify`` CLI
+    commands. It reuses the loader's vetted safety primitives
+    (:func:`_validate_tar_safety` + :func:`_safe_tar_extract`), the SAME
+    safe-extract path :func:`load` uses, so no second, unsafe extractor exists.
+
+    Crucially it extracts the archive bytes EXACTLY as received: it does NOT
+    round-trip through :func:`load` + :meth:`acef.package.Package.export`, which
+    would regenerate ``hashes/content-hashes.json`` / ``hashes/merkle-tree.json``
+    from the loaded records and SILENTLY HEAL any tampering (a stripped Merkle
+    tree, a content-hash mismatch) before the integrity verifier ran. Validating
+    the raw extracted directory makes archive inputs produce the SAME integrity
+    verdict as the equivalent directory bundle (ACEF-010 hash mismatch, ACEF-011
+    missing/invalid Merkle tree, etc.).
+
+    The temporary directory is removed when the ``with`` block exits, so callers
+    MUST run validation against the yielded path inside the block.
+
+    Raises:
+        ACEFFormatError: If the archive is malformed/corrupt or fails a tar
+            safety check (ACEF-050 / ACEF-052).
+    """
+    archive = Path(archive_path)
+    if not archive.exists():
+        raise ACEFFormatError(f"Archive not found: {archive}", code="ACEF-050")
+
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            extract_dir = Path(tmpdir)
+            with tarfile.open(str(archive), "r:gz") as tar:
+                _validate_tar_safety(tar)
+                _safe_tar_extract(tar, extract_dir)
+            yield _resolve_bundle_root(extract_dir)
+    except ACEFFormatError:
+        raise
+    except (tarfile.TarError, gzip.BadGzipFile, OSError) as e:
+        raise ACEFFormatError(
+            f"Malformed or corrupt archive: {archive}: {e}",
+            code="ACEF-050",
+        ) from e
+
+
 def _parse_jsonl(path: Path) -> list[dict[str, Any]]:
     """Parse a JSONL file into a list of record dicts.
 
@@ -326,12 +391,8 @@ def _load_archive(archive_path: Path) -> Package:
                 _validate_tar_safety(tar)
                 _safe_tar_extract(tar, Path(tmpdir))
 
-            # Find the bundle root (first directory)
-            extracted = list(Path(tmpdir).iterdir())
-            if len(extracted) == 1 and extracted[0].is_dir():
-                bundle_dir = extracted[0]
-            else:
-                bundle_dir = Path(tmpdir)
+            # Find the bundle root via the shared resolver.
+            bundle_dir = _resolve_bundle_root(Path(tmpdir))
 
             return _load_directory(bundle_dir)
 

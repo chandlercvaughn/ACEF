@@ -66,13 +66,21 @@ def validate(
     else:
         path = Path(package_or_path)
         if path.suffix == ".gz" or str(path).endswith(".tar.gz"):
-            # Extract archive first
-            from acef.loader import load
+            # Archive input: safely extract the archive bytes VERBATIM and
+            # validate the extracted directory as-received. We deliberately do
+            # NOT round-trip through ``load`` → ``Package.export`` here: that
+            # regenerates ``hashes/content-hashes.json`` / ``hashes/merkle-tree.json``
+            # from the loaded records and SILENTLY HEALS any tampering (a
+            # stripped Merkle tree, a content-hash mismatch) before the integrity
+            # verifier ran — so SDK callers never received the FATAL integrity
+            # verdict (ACEF-010 / ACEF-011) the equivalent directory bundle
+            # produces. ``extract_archive_raw`` (the shared loader primitive, the
+            # SAME one the ``validate`` / ``verify`` CLI commands use) extracts
+            # the raw bytes so archive and directory inputs agree. Validation
+            # runs INSIDE the ``with`` block, while the extracted files exist.
+            from acef.loader import extract_archive_raw
 
-            pkg = load(str(path))
-            with tempfile.TemporaryDirectory() as tmpdir:
-                bundle_dir = Path(tmpdir) / "bundle.acef"
-                pkg.export(str(bundle_dir))
+            with extract_archive_raw(path) as bundle_dir:
                 return validate_bundle(
                     bundle_dir,
                     profiles=profiles,
