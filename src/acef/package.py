@@ -11,6 +11,7 @@ import re
 import secrets
 import unicodedata
 from collections.abc import Callable, Iterable
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from functools import lru_cache
@@ -19,7 +20,7 @@ from typing import TYPE_CHECKING, Any
 from pydantic import ValidationError
 
 from acef.errors import ACEFError, ACEFSchemaError
-from acef.integrity import canonicalize, path_nfc_utf8_problem, sha256_hex, utf16_collation_key
+from acef.integrity import canonicalize, path_nfc_utf8_problem, sha256_hex
 from acef.models.agent_reliability import (
     AuthorizedTestScopePayload,
     DeliveryVerdictPayload,
@@ -82,6 +83,15 @@ _ROLE_SPLIT_RECORD_TYPES: frozenset[str] = frozenset({"transparency_marking", "d
 # front (audit records-payloads-3) rather than authoring a record the SDK's own
 # validator later rejects ACEF-003.
 _ASSESSMENT_ONLY_RECORD_TYPES: frozenset[str] = frozenset({"coverage_cell"})
+
+# The two RFC-0002 incident record types whose payloads carry the §5.10
+# order-insensitive arrays that MUST be sorted by the RFC-8785 canonical byte
+# sequence before hashing/serialization (RFC-0002 §5.10 / Q26). The typed
+# builders (incident_card / report_incident) normalize before delegating to
+# Package.record(); the generic Package.record() path normalizes these types
+# itself (single source of truth: Package._sort_incident_arrays) so the two
+# emission paths produce byte-identical hash-domain output.
+_INCIDENT_RECORD_TYPES: frozenset[str] = frozenset({"incident_card", "incident_report"})
 
 
 # ---------------------------------------------------------------------------
@@ -560,9 +570,18 @@ def _normalize_stix_object_refs(object_refs: list[str] | None) -> list[str] | No
     each against the STIX 2.1 id grammar (:data:`_STIX_OBJECT_REF_PATTERN`,
     mirrored from the closed v1.1 schema), de-duplicates them, and sorts them
     ascending by the RFC-8785 canonical byte sequence of each element (§5.10),
-    REUSING :func:`acef.integrity.utf16_collation_key` — the same canonical-byte
-    collation the Merkle/content-hash key order uses (F-M3-MERKLE-SORT). Two
-    builds from the same (unsorted) input therefore emit byte-identical output.
+    REUSING the SINGLE incident-array ordering primitive
+    :meth:`Package._sorted_canonical` (which keys on
+    :func:`acef.integrity.canonicalize`). This is the SAME primitive every other
+    §5.10 array uses via :meth:`Package._sort_incident_arrays`, so the optional
+    builder-time sort here can never drift from the emission-time re-sort that
+    :meth:`Package._sort_incident_scope` applies to ``stix.object_refs`` last.
+    (Both this and the earlier ``utf16_collation_key`` collation are byte-IDENTICAL
+    for valid STIX ids — the grammar pins them to ASCII ``<type>--<uuidv4>`` tokens,
+    and ASCII lies entirely in the BMP where UTF-16-code-unit and JCS-canonical-byte
+    order agree — so unifying onto one primitive is behavior-preserving and removes
+    the dual-primitive.) Two builds from the same (unsorted) input therefore emit
+    byte-identical output.
 
     Args:
         object_refs: The caller-supplied STIX 2.1 ids, or ``None``.
@@ -586,8 +605,9 @@ def _normalize_stix_object_refs(object_refs: list[str] | None) -> list[str] | No
                 "the builder validates producer-asserted refs against the v1.1 "
                 "taxonomy_crosswalk.stix.object_refs schema pattern (§5.8)."
             )
-    # De-dup then §5.10-sort by the RFC-8785 canonical byte sequence.
-    return sorted(set(object_refs), key=utf16_collation_key)
+    # De-dup then §5.10-sort by the SINGLE canonical-byte primitive (the same one
+    # _sort_incident_arrays re-applies at emission, so the two never diverge).
+    return Package._sorted_canonical(set(object_refs))
 
 
 def _parse_iso_instant(value: str) -> datetime:
@@ -1537,6 +1557,25 @@ class Package:
         # hash-committed) on the auto-attestation path below, this is
         # REPLACED with the redacted commitment payload (VAL-FIX-REDACT-001).
         resolved_payload: dict[str, Any] = payload or {}
+
+        # §5.10 array-determinism — normalize order-insensitive incident arrays
+        # on the GENERIC record() path too (roborev Medium on 8826e7f7). The
+        # typed builders (incident_card / report_incident) call
+        # _sort_incident_arrays before delegating here, but a producer using the
+        # public Package.record("incident_card"/"incident_report", payload=...)
+        # API directly would otherwise emit caller-ordered arrays — so two
+        # logically identical incident records would hash to DIFFERENT
+        # hash-domain bytes. Normalize here so both paths produce byte-identical
+        # output. This runs BEFORE redaction/attestation/serialization below, so
+        # the hash-committed commitment and the stored bytes are computed over
+        # the normalized payload. _sort_incident_arrays mutates in place and is
+        # idempotent (re-sorting the builders' already-sorted payload is a
+        # no-op), so we operate on a deep copy to never reorder the caller's
+        # input dict destructively (the typed builders already pass a fresh dict
+        # they own; the generic caller may reuse theirs). notification_timeline[]
+        # stays order-significant — _sort_incident_arrays never touches it.
+        if record_type in _INCIDENT_RECORD_TYPES and resolved_payload:
+            resolved_payload = self._sort_incident_arrays(deepcopy(resolved_payload))
 
         # ------------------------------------------------------------------
         # VAL-REDACTION-003 — auto-populate X1/X2 on non-public records.
