@@ -68,13 +68,26 @@ def _build_incident_bundle(
     payload: dict[str, Any],
     profiles: list[str] | None = None,
     name: str = "inc.acef",
+    sign_record: bool = False,
+    tamper_after_sign: bool = False,
 ) -> Path:
     """Build an on-disk bundle directory carrying ONE incident record.
 
     Exports a real v1.0 bundle via the SDK (production manifest / hashes), then
     rewrites versioning.core_version, substitutes the incident records file,
     recomputes content-hashes.json, and (optionally) declares profiles.
+
+    When ``sign_record`` is True, a self-consistent record-envelope ``attestation``
+    JWS over ``/payload`` is attached (ES256, key embedded in the JWS header). When
+    ``tamper_after_sign`` is also True, the payload is mutated AFTER signing so the
+    JWS no longer self-verifies (the §5.3(ii) self-inconsistency).
     """
+    import jsonpointer
+    from cryptography.hazmat.primitives.asymmetric import ec
+
+    from acef.integrity import canonicalize
+    from acef.signing import create_detached_jws
+
     pkg = Package(producer={"name": "test", "version": "1.0"})
     pkg.add_subject("ai_system", name="Sys", risk_classification="high-risk")
     pkg.record("risk_register", payload={"description": "seed"})
@@ -86,13 +99,25 @@ def _build_incident_bundle(
     for existing in records_dir.glob("*.jsonl"):
         existing.unlink()
 
-    rec = {
+    rec: dict[str, Any] = {
         "record_id": f"urn:acef:record:{record_type}-1",
         "record_type": record_type,
         "timestamp": "2026-08-10T00:00:00Z",
         "confidentiality": "public",
         "payload": payload,
     }
+    if sign_record:
+        key = ec.generate_private_key(ec.SECP256R1())
+        subset = {"/payload": jsonpointer.resolve_pointer(rec, "/payload")}
+        rec["attestation"] = {
+            "method": "jws",
+            "signer": "provider",
+            "signed_fields": ["/payload"],
+            "signature": create_detached_jws(canonicalize(subset), key, kid="card-key"),
+        }
+        if tamper_after_sign:
+            # Mutate the payload AFTER signing -> the JWS no longer self-verifies.
+            rec["payload"]["id_grade"] = "tampered-after-signing"
     rec_path = records_dir / f"{record_type}.jsonl"
     _write_jsonl(rec_path, [rec])
 
@@ -405,6 +430,41 @@ class TestOfflineId083Engine:
         bundle = _build_incident_bundle(tmp_path, core_version="1.1.0", record_type="incident_card", payload=payload)
         assessment = validate_bundle(bundle)
         assert "ACEF-083" not in _codes(assessment)
+
+    def test_signed_card_self_consistent_jws_passes(self, tmp_path: Path) -> None:
+        # A signed incident_card whose JWS self-verifies -> no ACEF-083 through the
+        # production engine (the §5.3(ii) sub-check is satisfied).
+        payload = {
+            "public_incident_id": _VALID_ID,
+            "id_grade": "self-asserted",
+            "harm_core": dict(_VALID_HARM_CORE),
+        }
+        bundle = _build_incident_bundle(
+            tmp_path, core_version="1.1.0", record_type="incident_card", payload=payload, sign_record=True
+        )
+        assessment = validate_bundle(bundle)
+        assert "ACEF-083" not in _codes(assessment)
+
+    def test_signed_card_tampered_jws_raises_083(self, tmp_path: Path) -> None:
+        # Tamper the payload AFTER signing -> JWS self-inconsistency -> ACEF-083
+        # (class:offline-deterministic) reaches structural_errors through the engine.
+        payload = {
+            "public_incident_id": _VALID_ID,
+            "id_grade": "self-asserted",
+            "harm_core": dict(_VALID_HARM_CORE),
+        }
+        bundle = _build_incident_bundle(
+            tmp_path,
+            core_version="1.1.0",
+            record_type="incident_card",
+            payload=payload,
+            sign_record=True,
+            tamper_after_sign=True,
+        )
+        assessment = validate_bundle(bundle)
+        errors = _errors_for(assessment, "ACEF-083")
+        assert errors, "tampered signed card must raise ACEF-083 via the engine"
+        assert any("offline-deterministic" in e.get("message", "") for e in errors)
 
 
 # ---------------------------------------------------------------------------

@@ -48,8 +48,11 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+import jsonpointer  # type: ignore[import-untyped]  # no published stubs / py.typed (no types-jsonpointer on PyPI)
+
 from acef.errors import ACEFProfileError, Severity, ValidationDiagnostic
 from acef.integrity import canonicalize, sha256_hex
+from acef.signing import verify_detached_jws
 from acef.templates.registry import load_template
 
 # ---------------------------------------------------------------------------
@@ -333,16 +336,34 @@ def check_art73_clock(
         # widespread/death_involved) must NOT silently default the missing booleans
         # to false and pass a wrong 15-day deadline — raise ACEF-084 (missing facts).
         if not _art73_facts_complete(facts):
+            # INCVAL-005: the public taxonomy_crosswalk.eu_ai_act subschema requires
+            # only `edition` (widespread/death_involved are schema-OPTIONAL), but a
+            # COMPLETE Art.73 fact block is needed to compute the shortest clock. The
+            # validator enforces presence even though the schema permits omission —
+            # defaulting the missing booleans to false would be a dangerous
+            # false-green that silently accepts a wrong 15-day clock. The message
+            # makes this schema-permits-vs-validator-enforces tension explicit so a
+            # producer building from the schema alone understands the requirement.
+            schema_tension = (
+                "the public taxonomy_crosswalk.eu_ai_act SCHEMA requires only 'edition' "
+                "(widespread/death_involved are schema-optional), but the VALIDATOR "
+                "additionally ENFORCES presence of these booleans here — it MUST NOT "
+                "default the missing booleans to false (that would silently accept a "
+                "wrong 15-day clock)"
+                if kind == "taxonomy_crosswalk"
+                else "the VALIDATOR ENFORCES presence of these facts — it MUST NOT default "
+                "the missing booleans to false (that would silently accept a wrong "
+                "15-day clock)"
+            )
             diags.append(
                 ValidationDiagnostic(
                     "ACEF-084",
                     (
                         f"Record {_record_id_of(rec)!r}: eu-ai-act-art73-2026 declared and the Art.73 "
-                        f"fact block (read from {kind}) is INCOMPLETE — it must carry at least one "
-                        f"serious_incident_triggers member AND boolean 'widespread' AND boolean "
-                        f"'death_involved' (the shortest-clock inputs, §5.7). The clock MUST NOT "
-                        f"default the missing booleans to false. Add the missing widespread / "
-                        f"death_involved facts at {kind}."
+                        f"fact block (read from {kind}) is INCOMPLETE — a public Art.73 fact block MUST "
+                        f"carry at least one 'serious_incident_triggers' member AND boolean 'widespread' "
+                        f"AND boolean 'death_involved' (the shortest-clock inputs, §5.7). {schema_tension}. "
+                        f"Add the missing widespread / death_involved facts at {kind}."
                     ),
                     path=f"/{_record_id_of(rec)}/{kind}",
                 )
@@ -360,8 +381,22 @@ def check_art73_clock(
             stated_deadline = _parse_instant(entry.get("deadline"))
             if awareness is None:
                 continue  # schema phase diagnoses the missing/invalid awareness_date
-            expected = awareness + timedelta(days=clock_days)
-            if stated_deadline is None or stated_deadline != expected:
+            # §5.7 legal clock relation (NOT exact-instant equality). The Art.73
+            # clock is a CEILING — the report must be filed "not later than N days
+            # from awareness" (§5.1/Appendix), not at the same wall-clock second as
+            # awareness+N. Both fields are schema format:date-time, so a producer may
+            # legitimately carry a time-of-day on awareness while stating the
+            # legally-natural midnight/end-of-day-N deadline; comparing on the exact
+            # instant false-rejected that conformant case (INCVAL-004). The chosen
+            # rule: the deadline is consistent iff it falls WITHIN the clock window —
+            #   awareness <= stated_deadline <= awareness + N days
+            # The upper bound keeps rejecting a genuinely-too-late deadline (after
+            # awareness+N still raises); the lower bound rejects an incoherent
+            # deadline before awareness (a clock cannot expire before it starts). A
+            # deadline EARLIER than the ceiling (reported more promptly) is conformant.
+            clock_ceiling = awareness + timedelta(days=clock_days)
+            within_clock = stated_deadline is not None and awareness <= stated_deadline <= clock_ceiling
+            if not within_clock:
                 diags.append(
                     ValidationDiagnostic(
                         "ACEF-084",
@@ -370,7 +405,8 @@ def check_art73_clock(
                             f"stated regulatory_timeline deadline "
                             f"({entry.get('deadline')!r}) is inconsistent with the shortest "
                             f"applicable clock ({clock_days} days from awareness_date "
-                            f"{entry.get('awareness_date')!r} -> {expected.isoformat()}; trigger "
+                            f"{entry.get('awareness_date')!r}; the deadline MUST fall on or before "
+                            f"{clock_ceiling.isoformat()} and not before awareness; trigger "
                             f"facts read from {kind}). death_involved -> 10 days; 3.49.b or "
                             f"widespread -> 2 days; else 15 days (§5.7)."
                         ),
@@ -752,10 +788,73 @@ def _bundled_assigner_snapshot(manifest: dict[str, Any]) -> list[dict[str, Any]]
     return None
 
 
+def _attestation_self_inconsistent(rec: dict[str, Any], *, manifest_timestamp: str | None) -> bool:
+    """True iff ``rec`` carries a JWS ``attestation`` that does NOT verify against
+    its OWN embedded/referenced key — the §5.3(ii) JWS self-inconsistency.
+
+    The signed incident card carries its signature in the record-envelope
+    ``attestation`` block (record-envelope.schema.json: ``{method, signer,
+    signed_fields, signature}``). The detached JWS embeds its verification key in
+    its OWN header (jwk or x5c), so verification is fully self-contained:
+
+    1. Only ``method == "jws"`` with a non-empty ``signature`` carries a JWS to
+       check; an absent / non-jws / empty attestation is NOT a self-inconsistency
+       (the card is simply unsigned for this purpose) -> returns ``False``.
+    2. Extract each ``signed_fields`` JSON Pointer (RFC 6901) from the serialized
+       record dict, RFC 8785-canonicalize the ``{pointer: value}`` subset, and
+       verify the detached JWS over those canonical bytes via
+       :func:`acef.signing.verify_detached_jws` (which enforces RS256/ES256 only,
+       requires ``kid``, and resolves the key from the header's embedded jwk/x5c).
+       For x5c-backed cards, ``manifest_timestamp`` anchors cert-validity (§3.1.3).
+
+    ATTRIBUTION-FREE (critical honesty discipline): this verifies the signature
+    ONLY against the key EMBEDDED IN / REFERENCED BY the card's own JWS. It does
+    NOT resolve the key to a domain, performs NO network access, and never
+    attributes the id to an assigner. A FORGED-assigner card whose JWS is
+    SELF-CONSISTENT (signed by SOME key embedded in its own header) returns
+    ``False`` here — it passes offline by design; only a JWS that fails to verify
+    against its own embedded key (tampered payload, or a grafted signature that
+    does not cover this card's signed fields) returns ``True`` -> ACEF-083.
+
+    Fail-closed honesty: a non-verifying signature (any cryptographic failure,
+    unsupported alg, unresolvable pointer, non-canonicalizable content) is a
+    self-inconsistency -> ``True``. This never raises (a malformed attestation is
+    treated as self-inconsistent, not a crash).
+    """
+    att = rec.get("attestation")
+    if not isinstance(att, dict):
+        return False
+    method = att.get("method")
+    signature = att.get("signature")
+    if method != "jws" or not isinstance(signature, str) or not signature:
+        return False
+    signed_fields = att.get("signed_fields")
+    if not isinstance(signed_fields, list) or not signed_fields:
+        # A jws attestation with a signature but no signed_fields cannot be
+        # verified against any subtree — treat as self-inconsistent (the signature
+        # attests nothing resolvable). Fail-closed.
+        return True
+    pointers = [p for p in signed_fields if isinstance(p, str)]
+    if len(pointers) != len(signed_fields):
+        return True  # a non-string pointer entry is malformed -> self-inconsistent
+    try:
+        subset = {pointer: jsonpointer.resolve_pointer(rec, pointer) for pointer in pointers}
+        canonical = canonicalize(subset)
+        verify_detached_jws(signature, canonical, manifest_timestamp=manifest_timestamp)
+    except Exception:
+        # Any failure (ACEFSigningError on a non-verifying/forged signature,
+        # unsupported algorithm, JsonPointerException, rfc8785 domain error, …)
+        # means the JWS does not self-verify -> self-inconsistency. Intentionally
+        # broad: this must never crash offline validation.
+        return True
+    return False
+
+
 def check_public_incident_id_offline(
     records: list[dict[str, Any]],
     *,
     manifest: dict[str, Any],
+    manifest_timestamp: str | None = None,
 ) -> list[ValidationDiagnostic]:
     """ACEF-083 ``class: offline-deterministic`` (§5.3 / §7).
 
@@ -764,16 +863,25 @@ def check_public_incident_id_offline(
     1. **pattern** — ``public_incident_id`` matches ``AIIC-{assigner}-{year}-{suffix}``
        (assigner 2-8 uppercase alphanumerics, year 4 digits, suffix >=26
        Crockford-base32 chars).
-    2. **bundled-snapshot membership** — ONLY IF the bundle embeds a
+    2. **JWS self-consistency** — when the record carries a JWS ``attestation``
+       block (record-envelope ``{method:"jws", signed_fields, signature}``), the
+       detached signature MUST verify against the key EMBEDDED IN / REFERENCED BY
+       its own JWS header (jwk/x5c), over the RFC-8785 canonicalization of the
+       signed fields. A self-INconsistent JWS (tampered card, or a signature not
+       covering this card) raises ACEF-083 (§5.3(ii)). ATTRIBUTION-FREE: verified
+       ONLY against the embedded key, never resolved to a domain, never networked.
+    3. **bundled-snapshot membership** — ONLY IF the bundle embeds a
        ``{assigner, public_key}`` snapshot, ``{assigner}`` MUST be locally listed.
        Skipped entirely when no snapshot is bundled.
 
     HONESTY DISCIPLINE: this NEVER attributes the id to the assigner domain and
     performs NO network call, central allocation, registry admission, or
     global-uniqueness attestation. A forged ``AIIC-OPENAI-…`` card with a valid
-    pattern and no contradicting snapshot PASSES offline by design — attribution
-    is the OPTIONAL online domain-control verifier's job (F-M3-DOMAIN-CONTROL),
-    not this offline rule.
+    pattern, a SELF-CONSISTENT JWS, and no contradicting snapshot PASSES offline by
+    design — attribution is the OPTIONAL online domain-control verifier's job
+    (F-M3-DOMAIN-CONTROL), not this offline rule. ``manifest_timestamp`` anchors
+    x5c certificate-validity for the JWS sub-check (spec §3.1.3, reproducible
+    verification); it is threaded from the engine's ``metadata.timestamp``.
     """
     snapshot = _bundled_assigner_snapshot(manifest)
     snapshot_assigners: set[str] | None = None
@@ -789,6 +897,40 @@ def check_public_incident_id_offline(
         if _record_type_of(rec) not in ("incident_card", "incident_report"):
             continue
         payload = _payload_of(rec)
+
+        # §5.3(ii) JWS self-consistency: a SIGNED card (JWS attestation block)
+        # whose signature does not verify against its OWN embedded/referenced key
+        # is a self-inconsistency (tampered card, or a grafted signature not
+        # covering this card) -> ACEF-083 (class:offline-deterministic). Checked
+        # once per record (the attestation covers the whole record, not a single
+        # container), and ONLY for a record that carries a public_incident_id (the
+        # JWS sub-check is part of the id-trust surface; a non-incident-id record
+        # with an unverifiable attestation is the generic record_attested operator's
+        # concern, not ACEF-083). ATTRIBUTION-FREE: verified ONLY against the
+        # embedded key; an unsigned card, or a forged-assigner card with a
+        # SELF-CONSISTENT JWS, never raises here.
+        _root_pid = payload.get("public_incident_id")
+        _cs_pid = _as_dict(payload.get("card_source")).get("public_incident_id")
+        _carries_incident_id = bool(isinstance(_root_pid, str) and _root_pid) or bool(
+            isinstance(_cs_pid, str) and _cs_pid
+        )
+        if _carries_incident_id and _attestation_self_inconsistent(rec, manifest_timestamp=manifest_timestamp):
+            diags.append(
+                ValidationDiagnostic(
+                    "ACEF-083",
+                    (
+                        f"Record {_record_id_of(rec)!r}: public_incident_id id-trust failure "
+                        f"(class: offline-deterministic) — the card's JWS attestation does not "
+                        f"self-verify (JWS self-inconsistency): the detached signature fails to "
+                        f"verify against the key embedded in / referenced by its own JWS header "
+                        f"over the RFC-8785 canonicalization of signed_fields (§5.3(ii); this is "
+                        f"an attribution-free self-consistency check, never a domain-control "
+                        f"proof). Re-sign the card so the JWS verifies, or remove the attestation."
+                    ),
+                    path=f"/{_record_id_of(rec)}/attestation/signature",
+                )
+            )
+
         for container, where in ((payload, ""), (_as_dict(payload.get("card_source")), "/card_source")):
             pid = container.get("public_incident_id")
             if pid is None:
@@ -1306,6 +1448,49 @@ def check_publishability(
                     )
                 )
 
+        # Disposition-honored check (INCVAL-003): §5.11 source-backed mode MUST
+        # verify the publishability_map dispositions were HONORED in the public
+        # projection. For a field disposed 'omitted' or 'regulator-only', the source
+        # field MUST NOT appear on the public incident_card. The card schema's
+        # additionalProperties:false closes most leak surfaces, but 'severity' is
+        # the one field shared between the incident_report root and the
+        # incident_card root — a producer declaring /severity 'regulator-only' yet
+        # copying severity onto the public card dishonors the disposition.
+        #
+        # This runs ONLY when ``rec`` is a genuine ``incident_card`` (the PUBLIC
+        # projection, distinct from its source report). It is NOT run on the source
+        # incident_report itself: the private report legitimately carries the very
+        # fields it disposes regulator-only/omitted (it IS the regulator-only
+        # source) — comparing the source against its own map would be a guaranteed
+        # false-positive. ``card_payload`` here is the incident_card's payload.
+        #
+        # The pointer's LAST token is the field name; a single-segment top-level
+        # pointer (``/<field>``) names a card-root property directly, and a deeper
+        # pointer (``/a/b``) keys on its leaf token so a card-root field of that
+        # name is still checked.
+        if rtype == "incident_card":
+            for pointer, disposition in pub_map.items():
+                if not isinstance(pointer, str) or disposition not in ("omitted", "regulator-only"):
+                    continue
+                field_name = pointer.split("/")[-1].replace("~1", "/").replace("~0", "~")
+                if not field_name:
+                    continue
+                if field_name in card_payload:
+                    diags.append(
+                        ValidationDiagnostic(
+                            "ACEF-086",
+                            (
+                                f"Record {_record_id_of(rec)!r}: source field {pointer!r} is disposed "
+                                f"{disposition!r} in card_source.publishability_map but the field "
+                                f"{field_name!r} IS present on the public incident_card — the disposition "
+                                f"was NOT honored (§5.11). A {disposition!r} field MUST NOT appear in the "
+                                f"public projection. Remove {field_name!r} from the public card, or change "
+                                f"its disposition to 'public'/'anonymized'/'hash-committed'."
+                            ),
+                            path=f"/{_record_id_of(rec)}/{field_name}",
+                        )
+                    )
+
         # Commitment linkage: every *_commitment card key MUST correspond to a
         # source field whose disposition is hash-committed, with a matching
         # sha256(JCS(source_value)) preimage.
@@ -1676,6 +1861,7 @@ def run_incident_rules(
     records: list[dict[str, Any]],
     *,
     requested_profiles: list[str] | None = None,
+    manifest_timestamp: str | None = None,
 ) -> list[ValidationDiagnostic]:
     """Run all offline incident rule families and return a merged diagnostic list.
 
@@ -1694,6 +1880,12 @@ def run_incident_rules(
     incident_report with a ``card_source`` (the producer/holder-of-both context);
     otherwise it is **card-only** (a standalone public card). This mirrors the
     §5.11 two-mode split and the §6 conformance-class boundary.
+
+    ``manifest_timestamp`` is the bundle's ``metadata.timestamp`` (threaded from
+    the engine). It anchors the x5c certificate-validity check in the ACEF-083 JWS
+    self-consistency sub-check (spec §3.1.3 — cert expiry against the manifest
+    timestamp, NOT wall-clock, for reproducible verification). The JWS sub-check is
+    otherwise computed wholly from bundle bytes (attribution-free, no network).
     """
     if not isinstance(manifest, dict):
         manifest = {}
@@ -1721,7 +1913,7 @@ def run_incident_rules(
     diags.extend(check_crosswalk_mandatory_members(records, profiles=profiles))
     diags.extend(check_oecd_mandatory_core_completeness(records, profiles=profiles))
     diags.extend(check_severity_vector_parse(records))
-    diags.extend(check_public_incident_id_offline(records, manifest=manifest))
+    diags.extend(check_public_incident_id_offline(records, manifest=manifest, manifest_timestamp=manifest_timestamp))
     diags.extend(check_art73_clock(records, profiles=profiles))
     diags.extend(check_art73_existential(records, profiles=profiles))
     diags.extend(check_crosswalk_harm_core_consistency(records))

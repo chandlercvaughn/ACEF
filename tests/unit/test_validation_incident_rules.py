@@ -23,8 +23,14 @@ Determinism: every fixture is a static literal; no wall-clock / random values.
 
 from __future__ import annotations
 
+import copy
 from typing import Any
 
+import jsonpointer
+from cryptography.hazmat.primitives.asymmetric import ec
+
+from acef.integrity import canonicalize
+from acef.signing import create_detached_jws
 from acef.validation import incident_rules as ir
 
 # A 26-char Crockford-base32 suffix (>=128 bits, the pattern minimum).
@@ -40,6 +46,29 @@ _VALID_HARM_CORE: dict[str, Any] = {
 
 def _codes(diags: list[Any]) -> list[str]:
     return [d.code for d in diags]
+
+
+def _sign_incident_record(rec: dict[str, Any], *, signed_fields: tuple[str, ...] = ("/payload",)) -> dict[str, Any]:
+    """Attach a self-consistent record-envelope ``attestation`` block to ``rec``.
+
+    Mirrors the §3.1 / §3.5 detached-JWS recipe (the same one
+    ``_attestation_verifies`` checks): extract each ``signed_fields`` pointer from
+    the record dict, RFC 8785-canonicalize the ``{pointer: value}`` subset, and
+    detached-JWS-sign it with an ES256 key whose public JWK is embedded in the
+    JWS header. The returned record verifies against its OWN embedded key — that
+    is the §5.3(ii) attribution-free self-consistency the offline class checks.
+    Returns a new dict (the caller's ``rec`` is not mutated).
+    """
+    rec = copy.deepcopy(rec)
+    key = ec.generate_private_key(ec.SECP256R1())
+    subset = {pointer: jsonpointer.resolve_pointer(rec, pointer) for pointer in signed_fields}
+    rec["attestation"] = {
+        "method": "jws",
+        "signer": "provider",
+        "signed_fields": list(signed_fields),
+        "signature": create_detached_jws(canonicalize(subset), key, kid="card-key"),
+    }
+    return rec
 
 
 # ---------------------------------------------------------------------------
@@ -203,6 +232,76 @@ class TestACEF084:
         diags = ir.check_art73_clock([_report_record(cs)], profiles=[])
         assert "ACEF-084" not in _codes(diags)
 
+    # --- INCVAL-004: within-clock deadline relation (not exact-instant) ---
+
+    def test_awareness_with_time_midnight_deadline_passes(self) -> None:
+        # CONFORMANT: awareness carries a time-of-day (09:30Z) and the deadline is
+        # the legally-natural midnight of day N (within the 10-day clock). Under
+        # strict-instant equality this spuriously raised ACEF-084; under the
+        # within-clock relation (awareness <= deadline <= awareness + N) it passes.
+        cs = _good_card_source(
+            triggers=["3.49.a"],
+            widespread=False,
+            death=True,  # 10-day clock
+            awareness="2026-08-01T09:30:00Z",
+            deadline="2026-08-11T00:00:00Z",  # midnight day 10 (before awareness+10d=09:30Z)
+        )
+        diags = ir.check_art73_clock([_report_record(cs)], profiles=["eu-ai-act-art73-2026"])
+        assert "ACEF-084" not in _codes(diags)
+
+    def test_timezone_offset_equivalent_instants_pass(self) -> None:
+        # awareness as +02:00 offset and deadline as the equivalent Zulu instant
+        # exactly N days later: the two parse to instants whose delta is exactly
+        # the clock, so the deadline is within the clock -> no ACEF-084.
+        cs = _good_card_source(
+            triggers=["3.49.a"],
+            widespread=False,
+            death=True,  # 10-day clock
+            awareness="2026-08-01T11:30:00+02:00",  # == 2026-08-01T09:30:00Z
+            deadline="2026-08-11T09:30:00Z",  # exactly awareness + 10d
+        )
+        diags = ir.check_art73_clock([_report_record(cs)], profiles=["eu-ai-act-art73-2026"])
+        assert "ACEF-084" not in _codes(diags)
+
+    def test_earlier_than_clock_deadline_passes(self) -> None:
+        # A deadline EARLIER than the ceiling (reported more promptly) is legally
+        # consistent: the clock is a "not later than N days" ceiling, not a target.
+        cs = _good_card_source(
+            triggers=["3.49.a"],
+            widespread=False,
+            death=True,  # 10-day clock
+            awareness="2026-08-01T00:00:00Z",
+            deadline="2026-08-05T00:00:00Z",  # day 4, well within the 10-day ceiling
+        )
+        diags = ir.check_art73_clock([_report_record(cs)], profiles=["eu-ai-act-art73-2026"])
+        assert "ACEF-084" not in _codes(diags)
+
+    def test_genuinely_late_deadline_with_time_still_raises_084(self) -> None:
+        # A deadline AFTER awareness + N (even by a representation-natural amount)
+        # is genuinely too late and MUST still raise ACEF-084.
+        cs = _good_card_source(
+            triggers=["3.49.a"],
+            widespread=False,
+            death=True,  # 10-day clock
+            awareness="2026-08-01T09:30:00Z",
+            deadline="2026-08-12T00:00:00Z",  # day 11 midnight > awareness + 10d
+        )
+        diags = ir.check_art73_clock([_report_record(cs)], profiles=["eu-ai-act-art73-2026"])
+        assert "ACEF-084" in _codes(diags)
+
+    def test_deadline_before_awareness_raises_084(self) -> None:
+        # A deadline BEFORE awareness is incoherent (a clock cannot expire before it
+        # starts) -> ACEF-084.
+        cs = _good_card_source(
+            triggers=["3.49.a"],
+            widespread=False,
+            death=True,
+            awareness="2026-08-10T00:00:00Z",
+            deadline="2026-08-09T00:00:00Z",  # before awareness
+        )
+        diags = ir.check_art73_clock([_report_record(cs)], profiles=["eu-ai-act-art73-2026"])
+        assert "ACEF-084" in _codes(diags)
+
     def test_public_card_clock_from_taxonomy_crosswalk(self) -> None:
         card = {
             "record_id": "rec-card-1",
@@ -273,6 +372,51 @@ class TestACEF084:
         }
         diags = ir.check_art73_clock([card], profiles=["eu-ai-act-art73-2026"])
         assert "ACEF-084" in _codes(diags)
+
+    def test_public_card_incomplete_facts_message_sharpened(self) -> None:
+        # INCVAL-005: a schema-valid public card (eu_ai_act requires only `edition`)
+        # that omits the booleans is validator-rejected by design (no silent
+        # default-to-false). The ACEF-084 message MUST sharpen the guidance: it
+        # must name the three required public-Art.73 facts AND state explicitly
+        # that the VALIDATOR enforces this even though the SCHEMA permits omission.
+        card = {
+            "record_id": "rec-card-incomplete",
+            "record_type": "incident_card",
+            "payload": {
+                "public_incident_id": _VALID_ID,
+                "id_grade": "self-asserted",
+                "harm_core": dict(_VALID_HARM_CORE),
+                "taxonomy_crosswalk": {
+                    "eu_ai_act": {
+                        "edition": "reg-2024-1689",
+                        "serious_incident_triggers": ["3.49.a"],
+                        # widespread / death_involved omitted (schema-valid: only
+                        # `edition` is required on the public eu_ai_act member).
+                    }
+                },
+                "coordinated_disclosure": {
+                    "status": "coordinated",
+                    "regulatory_timeline": [
+                        {
+                            "framework": "eu-ai-act-art73",
+                            "clock_model": "awareness_days",
+                            "awareness_date": "2026-08-01T00:00:00Z",
+                            "deadline": "2026-08-16T00:00:00Z",
+                        }
+                    ],
+                },
+            },
+        }
+        diags = ir.check_art73_clock([card], profiles=["eu-ai-act-art73-2026"])
+        d084 = next(d for d in diags if d.code == "ACEF-084")
+        msg = d084.message
+        # Names the three required public Art.73 facts.
+        assert "serious_incident_triggers" in msg
+        assert "widespread" in msg
+        assert "death_involved" in msg
+        # States the schema-permits-vs-validator-enforces tension explicitly.
+        assert "schema" in msg.lower()
+        assert "validator" in msg.lower() or "enforce" in msg.lower()
 
     def test_public_card_complete_facts_correct_clock_passes(self) -> None:
         # The same public card WITH both widespread + death_involved present and a
@@ -628,6 +772,60 @@ class TestACEF086PublishabilityGate:
         diags = ir.check_publishability([card, report], source_backed=True)
         assert "ACEF-086" in _codes(diags)
 
+    # --- INCVAL-003: source-backed disposition-honored check -------------
+
+    def _report_with_severity_disposition(self, disposition: str) -> dict[str, Any]:
+        """An incident_report whose publishability_map disposes /severity, paired
+        to a public card by public_incident_id. severity is the ONE field shared
+        between the report root and incident_card (the narrow exploit surface)."""
+        report = _report_record(
+            {
+                "public_incident_id": _VALID_ID,
+                "id_grade": "self-asserted",
+                "id_state": "PUBLISHED",
+                "harm_core": dict(_VALID_HARM_CORE),
+                "severity": "major",
+                "publishability_map": {"/severity": disposition},
+                "eu_ai_act_facts": {
+                    "edition": "reg-2024-1689",
+                    "serious_incident_triggers": ["3.49.a"],
+                    "widespread": False,
+                    "death_involved": False,
+                },
+            }
+        )
+        return report
+
+    def test_regulator_only_field_present_on_card_raises_086(self) -> None:
+        # /severity disposed regulator-only in the source map but COPIED onto the
+        # public card -> dishonored disposition -> ACEF-086 (source-backed).
+        report = self._report_with_severity_disposition("regulator-only")
+        card = _published_card({"severity": "major"})
+        diags = ir.check_publishability([card, report], source_backed=True)
+        assert "ACEF-086" in _codes(diags)
+
+    def test_omitted_field_present_on_card_raises_086(self) -> None:
+        # /severity disposed omitted but present on the card -> dishonored -> ACEF-086.
+        report = self._report_with_severity_disposition("omitted")
+        card = _published_card({"severity": "major"})
+        diags = ir.check_publishability([card, report], source_backed=True)
+        assert "ACEF-086" in _codes(diags)
+
+    def test_regulator_only_field_absent_from_card_passes(self) -> None:
+        # /severity disposed regulator-only AND absent from the public card ->
+        # disposition honored -> no ACEF-086.
+        report = self._report_with_severity_disposition("regulator-only")
+        card = _published_card({})  # no severity projected
+        diags = ir.check_publishability([card, report], source_backed=True)
+        assert "ACEF-086" not in _codes(diags)
+
+    def test_regulator_only_dishonored_not_flagged_in_card_only_mode(self) -> None:
+        # The disposition-honored check is source-backed ONLY (§5.11 / §6). In
+        # card-only mode it does NOT fire (no source to read the map from).
+        card = _published_card({"severity": "major"})
+        diags = ir.check_publishability([card], source_backed=False)
+        assert "ACEF-086" not in _codes(diags)
+
 
 # ---------------------------------------------------------------------------
 # ACEF-081 — incident profile declared but crosswalk missing a mandatory member
@@ -923,6 +1121,128 @@ class TestACEF083Offline:
                 "id_grade": "self-asserted",
                 "harm_core": dict(_VALID_HARM_CORE),
             },
+        }
+        diags = ir.check_public_incident_id_offline([card], manifest={})
+        assert "ACEF-083" not in _codes(diags)
+
+    # --- §5.3(ii) JWS self-consistency (INCVAL-001) ------------------------
+
+    def test_signed_card_matching_key_passes(self) -> None:
+        # A card signed with a self-consistent detached JWS over /payload (key
+        # embedded in the JWS header) verifies against its OWN key -> no ACEF-083.
+        card = {
+            "record_id": "r",
+            "record_type": "incident_card",
+            "payload": {
+                "public_incident_id": _VALID_ID,
+                "id_grade": "self-asserted",
+                "harm_core": dict(_VALID_HARM_CORE),
+            },
+        }
+        signed = _sign_incident_record(card)
+        diags = ir.check_public_incident_id_offline([signed], manifest={})
+        assert "ACEF-083" not in _codes(diags)
+
+    def test_signed_card_tampered_payload_raises_083(self) -> None:
+        # Tamper the payload AFTER signing: the detached JWS no longer verifies
+        # against its embedded key -> JWS self-inconsistency -> ACEF-083
+        # (class:offline-deterministic).
+        card = {
+            "record_id": "r",
+            "record_type": "incident_card",
+            "payload": {
+                "public_incident_id": _VALID_ID,
+                "id_grade": "self-asserted",
+                "harm_core": dict(_VALID_HARM_CORE),
+            },
+        }
+        signed = _sign_incident_record(card)
+        signed["payload"]["harm_core"]["harm_class"] = "economic"  # tamper post-sign
+        diags = ir.check_public_incident_id_offline([signed], manifest={})
+        codes = _codes(diags)
+        assert "ACEF-083" in codes
+        d083 = next(d for d in diags if d.code == "ACEF-083")
+        assert "offline-deterministic" in d083.message
+        assert "JWS" in d083.message or "self-consisten" in d083.message.lower()
+
+    def test_signed_card_wrong_key_raises_083(self) -> None:
+        # Re-sign with a DIFFERENT key so the embedded JWK no longer matches the
+        # signature material the original key produced. Achieved by swapping in a
+        # JWS made over a DIFFERENT payload (the signature does not verify against
+        # THIS card's /payload) -> ACEF-083.
+        card = {
+            "record_id": "r",
+            "record_type": "incident_card",
+            "payload": {
+                "public_incident_id": _VALID_ID,
+                "id_grade": "self-asserted",
+                "harm_core": dict(_VALID_HARM_CORE),
+            },
+        }
+        # Sign a DIFFERENT card, then graft its attestation onto this card: the
+        # grafted JWS verifies against its own embedded key but NOT over this
+        # card's /payload (the signed bytes differ) -> self-inconsistent.
+        other = {
+            "record_id": "r",
+            "record_type": "incident_card",
+            "payload": {
+                "public_incident_id": _VALID_ID,
+                "id_grade": "self-asserted",
+                "harm_core": {**_VALID_HARM_CORE, "harm_class": "economic"},
+            },
+        }
+        signed_other = _sign_incident_record(other)
+        card["attestation"] = signed_other["attestation"]
+        diags = ir.check_public_incident_id_offline([card], manifest={})
+        assert "ACEF-083" in _codes(diags)
+
+    def test_forged_assigner_with_self_consistent_jws_still_passes(self) -> None:
+        # HONESTY DISCIPLINE: a FORGED-assigner card (AIIC-OPENAI-...) that is
+        # signed with a SELF-CONSISTENT JWS MUST still pass offline. The offline
+        # class verifies self-consistency ONLY (attribution-free); it never proves
+        # the signer controls openai.com. Only a self-INconsistent JWS raises.
+        forged = {
+            "record_id": "r",
+            "record_type": "incident_card",
+            "payload": {
+                "public_incident_id": f"AIIC-OPENAI-2026-{_SUFFIX}",
+                "id_grade": "self-asserted",
+                "harm_core": dict(_VALID_HARM_CORE),
+            },
+        }
+        signed = _sign_incident_record(forged)
+        diags = ir.check_public_incident_id_offline([signed], manifest={})
+        assert "ACEF-083" not in _codes(diags)
+
+    def test_unsigned_card_no_attestation_passes(self) -> None:
+        # No attestation block -> the JWS sub-check is skipped entirely (the card
+        # is unsigned); pattern still governs. An unsigned valid-pattern card
+        # passes offline.
+        card = {
+            "record_id": "r",
+            "record_type": "incident_card",
+            "payload": {
+                "public_incident_id": _VALID_ID,
+                "id_grade": "self-asserted",
+                "harm_core": dict(_VALID_HARM_CORE),
+            },
+        }
+        diags = ir.check_public_incident_id_offline([card], manifest={})
+        assert "ACEF-083" not in _codes(diags)
+
+    def test_signed_card_non_jws_method_skipped(self) -> None:
+        # A non-jws attestation method does NOT trigger the JWS self-consistency
+        # sub-check (v1 record attestation is jws-only; a non-jws method is not a
+        # self-inconsistent JWS). No ACEF-083 from this branch.
+        card = {
+            "record_id": "r",
+            "record_type": "incident_card",
+            "payload": {
+                "public_incident_id": _VALID_ID,
+                "id_grade": "self-asserted",
+                "harm_core": dict(_VALID_HARM_CORE),
+            },
+            "attestation": {"method": "c2pa", "signer": "provider", "signature": "x"},
         }
         diags = ir.check_public_incident_id_offline([card], manifest={})
         assert "ACEF-083" not in _codes(diags)

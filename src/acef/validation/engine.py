@@ -606,10 +606,19 @@ def _run_validation_phases(
         # validated against ``eu-ai-act-art73-2026`` by argument — but not
         # self-declaring it in ``manifest.profiles`` — would bypass the delegated
         # ACEF-084 checks (the generic template DSL cannot express them).
+        # Thread the bundle's ``metadata.timestamp`` (``package_timestamp``,
+        # resolved by the caller) into the incident rules so the ACEF-083 JWS
+        # self-consistency sub-check (§5.3(ii) / VAL-FIX-INCVAL-001) can anchor x5c
+        # certificate-validity to the manifest timestamp, NOT wall-clock (spec
+        # §3.1.3 reproducible verification). The signature material itself (the
+        # per-record ``attestation`` JWS block) already travels in
+        # ``all_records_data``; only the timestamp anchor needs threading, so this
+        # does not refactor the integrity phase.
         incident_rule_diagnostics = run_incident_rules(
             manifest_data,
             all_records_data,
             requested_profiles=profiles,
+            manifest_timestamp=package_timestamp,
         )
         _flush(incident_rule_diagnostics)
 
