@@ -761,8 +761,25 @@ class Package:
             The created ProfileEntry.
 
         Raises:
-            ACEFSchemaError: If ``provisions`` is empty (ACEF-002).
+            ACEFSchemaError: If ``provisions`` is not a list/sequence of
+                provision strings (ACEF-002). A bare ``str``/``bytes`` is
+                rejected even though it is iterable: ``list("article-9")``
+                would shred it into ``["a", "r", "t", ...]``, authoring a
+                schema-valid but semantically corrupted profile. A single
+                provision MUST be passed as a list (``["article-9"]``). An
+                empty sequence, a non-string element, or an empty-string
+                element is likewise rejected (audit envelope-manifest-3,
+                roborev builder-input-validation).
         """
+        if isinstance(provisions, (str, bytes)):
+            raise ACEFSchemaError(
+                f"Profile {profile_id!r} provisions must be a list of provision "
+                f"strings, not a bare {type(provisions).__name__}: a single "
+                'provision must be passed as a list (e.g. ["article-9"]), not '
+                f"{provisions!r} — a bare string/bytes would be shredded into "
+                "individual characters/bytes.",
+                code="ACEF-002",
+            )
         if not provisions:
             raise ACEFSchemaError(
                 f"Profile {profile_id!r} must declare at least one applicable "
@@ -770,10 +787,20 @@ class Package:
                 "profiles[].applicable_provisions to be non-empty (minItems:1).",
                 code="ACEF-002",
             )
+        normalized: list[str] = []
+        for provision in provisions:
+            if not isinstance(provision, str) or not provision:
+                raise ACEFSchemaError(
+                    f"Profile {profile_id!r} provision {provision!r} must be a "
+                    "non-empty string: the manifest schema pins "
+                    "profiles[].applicable_provisions items to non-empty strings.",
+                    code="ACEF-002",
+                )
+            normalized.append(provision)
         entry = ProfileEntry(
             profile_id=profile_id,
             template_version=template_version,
-            applicable_provisions=list(provisions),
+            applicable_provisions=normalized,
         )
         self._profiles.append(entry)
         return entry
@@ -831,13 +858,26 @@ class Package:
 
         Raises:
             ACEFSchemaError: If ``key`` does not match the frozen schema's
-                x-vendor pattern (ACEF-002).
+                x-vendor pattern, or if ``value`` is not an object/dict
+                (ACEF-002). The v1.1 manifest schema pins each namespace
+                value to ``"type": "object"`` — a non-dict value is rejected
+                here, at the setter, so the builder cannot store invalid
+                package state that would otherwise surface only as a raw
+                Pydantic error at ``build_manifest``/export time (roborev
+                builder-input-validation).
         """
         if not _NAMESPACE_KEY_PATTERN.match(key):
             raise ACEFSchemaError(
                 f"Invalid namespace key {key!r}: top-level namespace keys MUST "
                 "be x-vendor-prefixed, matching the manifest schema pattern "
                 f"'{_NAMESPACE_KEY_PATTERN.pattern}'.",
+                code="ACEF-002",
+            )
+        if not isinstance(value, dict):
+            raise ACEFSchemaError(
+                f"Invalid namespace value for {key!r}: namespace values MUST be "
+                f"an object/dict, not {type(value).__name__}. The v1.1 manifest "
+                "schema pins each namespaces value to 'type: object'.",
                 code="ACEF-002",
             )
         if self._namespaces is None:

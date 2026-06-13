@@ -226,6 +226,77 @@ class TestAddProfile:
         pkg.add_profile("nist-rmf", provisions=["govern-1.1"])
         assert len(pkg.profiles) == 2
 
+    def test_add_profile_rejects_bare_string_provisions(self):
+        # roborev F1: a bare str is iterable, so list("article-9") shreds it
+        # into ['a','r','t','i','c','l','e','-','9'] — a schema-valid but
+        # semantically corrupted profile. The builder MUST reject the bad call.
+        pkg = Package()
+        with pytest.raises(ACEFSchemaError, match="must be a list"):
+            pkg.add_profile("eu-ai-act-2024", provisions="article-9")  # type: ignore[arg-type]
+
+    def test_add_profile_rejects_bare_bytes_provisions(self):
+        pkg = Package()
+        with pytest.raises(ACEFSchemaError, match="must be a list"):
+            pkg.add_profile("eu-ai-act-2024", provisions=b"article-9")  # type: ignore[arg-type]
+
+    def test_add_profile_accepts_single_provision_as_list(self):
+        # A single provision must still be passed as a list, not a bare string.
+        pkg = Package()
+        entry = pkg.add_profile("eu-ai-act-2024", provisions=["article-9"])
+        assert entry.applicable_provisions == ["article-9"]
+
+    def test_add_profile_rejects_non_string_provision_element(self):
+        pkg = Package()
+        with pytest.raises(ACEFSchemaError, match="must be a non-empty string"):
+            pkg.add_profile("eu-ai-act-2024", provisions=[123])  # type: ignore[list-item]
+
+    def test_add_profile_rejects_empty_string_provision_element(self):
+        pkg = Package()
+        with pytest.raises(ACEFSchemaError, match="must be a non-empty string"):
+            pkg.add_profile("eu-ai-act-2024", provisions=[""])
+
+    def test_add_profile_rejects_empty_sequence(self):
+        pkg = Package()
+        with pytest.raises(ACEFSchemaError, match="at least one applicable"):
+            pkg.add_profile("eu-ai-act-2024", provisions=[])
+
+
+class TestAddNamespace:
+    """Test Package.add_namespace — v1.1 vendor-extension (X6) setter."""
+
+    def test_add_namespace_accepts_dict_value(self):
+        pkg = Package()
+        pkg.add_namespace("x-vendor", {"rubric": "voice", "version": 2})
+        manifest = pkg.build_manifest()
+        assert manifest.namespaces == {"x-vendor": {"rubric": "voice", "version": 2}}
+
+    def test_add_namespace_rejects_string_value(self):
+        # roborev F2: add_namespace validated only the KEY; a non-dict value
+        # stored invalid package state and surfaced a raw Pydantic error from
+        # build_manifest() later, not the setter's documented ACEFSchemaError.
+        pkg = Package()
+        with pytest.raises(ACEFSchemaError, match="MUST be an object"):
+            pkg.add_namespace("x-foo", "not-an-object")  # type: ignore[arg-type]
+        # The setter MUST reject BEFORE mutating _namespaces.
+        assert pkg._namespaces is None
+
+    def test_add_namespace_rejects_list_value(self):
+        pkg = Package()
+        with pytest.raises(ACEFSchemaError, match="MUST be an object"):
+            pkg.add_namespace("x-foo", ["a", "b"])  # type: ignore[arg-type]
+        assert pkg._namespaces is None
+
+    def test_add_namespace_rejects_none_value(self):
+        pkg = Package()
+        with pytest.raises(ACEFSchemaError, match="MUST be an object"):
+            pkg.add_namespace("x-foo", None)  # type: ignore[arg-type]
+        assert pkg._namespaces is None
+
+    def test_add_namespace_rejects_invalid_key(self):
+        pkg = Package()
+        with pytest.raises(ACEFSchemaError, match="x-vendor-prefixed"):
+            pkg.add_namespace("vendor", {"k": "v"})
+
 
 class TestRecord:
     """Test Package.record — evidence recording."""
