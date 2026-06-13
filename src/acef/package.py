@@ -485,6 +485,14 @@ class Package:
         self._records: list[RecordEnvelope] = []
         self._audit_trail: list[AuditTrailEntry] = []
         self._attachments: dict[str, bytes] = {}  # path -> content
+        # Open-core v1.1 manifest fields (X5 analysis_mode, X6 namespaces)
+        # and any top-level manifest extras (vendor x-*). A freshly-built
+        # Package leaves these unset (None/empty); the loader populates them
+        # from an inbound manifest so build_manifest() re-emits them on
+        # export, preserving the §6.4/§6.5 lossless round-trip MUST.
+        self._analysis_mode: str | None = None
+        self._namespaces: dict[str, dict[str, Any]] | None = None
+        self._manifest_extras: dict[str, Any] = {}
         self._signed = False
         self._signature_key: str | None = None
         self._signature_method: str | None = None
@@ -1942,6 +1950,20 @@ class Package:
                     path = f"records/{record_type}/{record_type}.{shard_num}.jsonl"
                     record_files.append(RecordFileEntry(path=path, record_type=record_type, count=len(shard)))
 
+        # Re-emit open-core v1.1 manifest fields (X5 analysis_mode, X6
+        # namespaces) and any top-level manifest extras (vendor x-*) that a
+        # loaded bundle carried, so a load→export round-trip is lossless to
+        # the open core (spec §6.4 rule 5 / §6.5). These are passed as
+        # constructor kwargs: analysis_mode/namespaces are declared Manifest
+        # fields; the extras land via Manifest's extra='allow' config and
+        # emit unchanged. A freshly-built Package leaves all of these empty,
+        # so v1.0 manifests are byte-unchanged.
+        manifest_kwargs: dict[str, Any] = dict(self._manifest_extras)
+        if self._analysis_mode is not None:
+            manifest_kwargs["analysis_mode"] = self._analysis_mode
+        if self._namespaces is not None:
+            manifest_kwargs["namespaces"] = self._namespaces
+
         return Manifest(
             metadata=self._metadata,
             versioning=self._versioning,
@@ -1950,6 +1972,7 @@ class Package:
             profiles=self._profiles,
             record_files=record_files,
             audit_trail=self._audit_trail,
+            **manifest_kwargs,
         )
 
     def export(self, path: str) -> None:
@@ -1980,6 +2003,9 @@ class Package:
         records: list[RecordEnvelope],
         audit_trail: list[AuditTrailEntry],
         attachments: dict[str, bytes] | None = None,
+        analysis_mode: str | None = None,
+        namespaces: dict[str, dict[str, Any]] | None = None,
+        manifest_extras: dict[str, Any] | None = None,
     ) -> Package:
         """Create a Package from pre-parsed parts (deserialization path).
 
@@ -1995,6 +2021,15 @@ class Package:
             records: List of RecordEnvelope instances.
             audit_trail: List of AuditTrailEntry instances.
             attachments: Dict mapping artifact paths to bytes content.
+            analysis_mode: Open-core v1.1 manifest field (X5) carried from
+                an inbound manifest, re-emitted by build_manifest() so the
+                load→export round-trip is lossless (spec §6.4/§6.5).
+            namespaces: Open-core v1.1 manifest field (X6) carried from an
+                inbound manifest, re-emitted by build_manifest().
+            manifest_extras: Top-level manifest keys outside the known
+                sections (vendor x-* extensions, future fields) carried from
+                an inbound manifest, re-emitted by build_manifest() so they
+                survive round-trip. Defaults to an empty mapping.
 
         Returns:
             A fully constructed Package.
@@ -2023,6 +2058,13 @@ class Package:
         # do not carry the source-side RedactionPolicy. Seed to None so
         # Package.record() can read the attribute without AttributeError.
         pkg._redaction_policy = None
+        # Open-core v1.1 manifest fields + top-level extras carried from an
+        # inbound manifest so build_manifest() re-emits them losslessly
+        # (spec §6.4/§6.5). Default to empty for callers that don't pass them
+        # (merge.py / redaction.py), keeping their output byte-unchanged.
+        pkg._analysis_mode = analysis_mode
+        pkg._namespaces = namespaces
+        pkg._manifest_extras = dict(manifest_extras) if manifest_extras else {}
         return pkg
 
 

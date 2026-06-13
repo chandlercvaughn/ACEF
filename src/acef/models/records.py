@@ -66,7 +66,12 @@ class RecordEnvelope(ACEFBaseModel):
     provisions_addressed: list[str] = Field(default_factory=list)
     timestamp: str = Field(default_factory=lambda: datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"))
     lifecycle_phase: LifecyclePhase | None = None
-    collector: CollectorInfo | dict[str, str] | None = None
+    # record-envelope.schema.json declares collector as oneOf [object, string].
+    # The string form (e.g. "alice@example.com") is stored verbatim as a bare
+    # ``str`` so it re-exports unchanged; wrapping it in CollectorInfo would
+    # reshape the wire bytes (name/version object) and break the §6.4
+    # lossless-export MUST (records-payloads-1).
+    collector: CollectorInfo | str | dict[str, str] | None = None
     obligation_role: ObligationRole | None = None
     confidentiality: Confidentiality = Confidentiality.PUBLIC
     redaction_method: str | None = None
@@ -207,17 +212,18 @@ def dict_to_record_envelope(data: dict[str, Any]) -> RecordEnvelope:
 
     # Handle collector. record-envelope.schema.json:47-69 declares the
     # collector as oneOf [object, string]. The object form maps to
-    # CollectorInfo; the string form is treated as a free-form name
-    # (e.g., "alice@example.com") and wrapped in a CollectorInfo with
-    # empty version so the typed model can carry it round-trip rather
-    # than silently dropping the field.
-    collector = None
+    # CollectorInfo; the string form (e.g. "alice@example.com") is stored
+    # verbatim as a bare ``str`` so re-export emits the original wire shape.
+    # Wrapping a string into CollectorInfo(name=..., version="") would
+    # reshape the bytes (object instead of string) and break the §6.4
+    # lossless-export MUST (records-payloads-1).
+    collector: CollectorInfo | str | None = None
     if data.get("collector"):
         collector_data = data["collector"]
         if isinstance(collector_data, dict):
             collector = CollectorInfo(**collector_data)
         elif isinstance(collector_data, str):
-            collector = CollectorInfo(name=collector_data, version="")
+            collector = collector_data
 
     # Build kwargs from the data dict, letting Pydantic validate
     # required fields rather than using empty-string defaults

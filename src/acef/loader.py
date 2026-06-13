@@ -358,27 +358,6 @@ def _load_directory(bundle_dir: Path) -> Package:
     except json.JSONDecodeError as e:
         raise ACEFFormatError(f"Invalid JSON in manifest: {e}", code="ACEF-050") from e
 
-    # Parse manifest
-    metadata_raw = manifest_data.get("metadata", {})
-    producer_raw = metadata_raw.get("producer", {})
-    producer = ProducerInfo(**producer_raw)
-
-    retention_raw = metadata_raw.get("retention_policy")
-    retention = RetentionPolicy(**retention_raw) if retention_raw else None
-
-    # Build metadata
-    metadata = PackageMetadata(
-        producer=producer,
-        retention_policy=retention,
-        prior_package_ref=metadata_raw.get("prior_package_ref"),
-    )
-    metadata.package_id = metadata_raw.get("package_id", metadata.package_id)
-    metadata.timestamp = metadata_raw.get("timestamp", metadata.timestamp)
-
-    # Set versioning
-    versioning_raw = manifest_data.get("versioning", {})
-    versioning = Versioning(**versioning_raw)
-
     def _extras(raw: dict[str, Any], known: set[str]) -> dict[str, Any]:
         """Return a dict of keys in ``raw`` that are not in ``known``.
 
@@ -388,6 +367,62 @@ def _load_directory(bundle_dir: Path) -> Package:
         ("ACEF Evidence Bundle export MUST be lossless to the open core").
         """
         return {k: v for k, v in raw.items() if k not in known}
+
+    # Parse manifest
+    metadata_raw = manifest_data.get("metadata", {})
+    producer_raw = metadata_raw.get("producer", {})
+    producer = ProducerInfo(**producer_raw)
+
+    retention_raw = metadata_raw.get("retention_policy")
+    retention = RetentionPolicy(**retention_raw) if retention_raw else None
+
+    # Build metadata. Pass through any unknown metadata-object keys (vendor
+    # x-* extensions, the spec's own metadata.created_at, future fields) via
+    # **_extras so they survive load→export round-trip — PackageMetadata is an
+    # ACEFBaseModel (extra='allow'). Without this passthrough the metadata
+    # layer silently drops vendor extensions (loader-roundtrip-2 / §6.4).
+    metadata_known = {
+        "package_id",
+        "timestamp",
+        "producer",
+        "prior_package_ref",
+        "retention_policy",
+    }
+    metadata = PackageMetadata(
+        producer=producer,
+        retention_policy=retention,
+        prior_package_ref=metadata_raw.get("prior_package_ref"),
+        **_extras(metadata_raw, metadata_known),
+    )
+    metadata.package_id = metadata_raw.get("package_id", metadata.package_id)
+    metadata.timestamp = metadata_raw.get("timestamp", metadata.timestamp)
+
+    # Set versioning
+    versioning_raw = manifest_data.get("versioning", {})
+    versioning = Versioning(**versioning_raw)
+
+    # Capture the v1.1 open-core manifest fields (X5 analysis_mode, X6
+    # namespaces) and every unknown top-level manifest key (vendor x-*
+    # extensions, future fields). The loader rebuilds the Manifest via
+    # Package.build_manifest(), so these must be stored on the Package and
+    # re-emitted there; otherwise they are dropped on re-export, violating
+    # the §6.4/§6.5 lossless round-trip MUST (loader-roundtrip-1,
+    # envelope-manifest-2). analysis_mode is load-bearing — it gates the
+    # v1.1 conditional-required record-type rules.
+    analysis_mode = manifest_data.get("analysis_mode")
+    namespaces = manifest_data.get("namespaces")
+    manifest_top_known = {
+        "metadata",
+        "versioning",
+        "subjects",
+        "entities",
+        "profiles",
+        "record_files",
+        "audit_trail",
+        "analysis_mode",
+        "namespaces",
+    }
+    manifest_extras = _extras(manifest_data, manifest_top_known)
 
     # Parse subjects
     subjects: list[Subject] = []
@@ -550,7 +585,10 @@ def _load_directory(bundle_dir: Path) -> Package:
                 rel_path = file_path.relative_to(bundle_dir).as_posix()
                 attachments[rel_path] = file_path.read_bytes()
 
-    # Construct Package via the public classmethod (M-ARCH-1)
+    # Construct Package via the public classmethod (M-ARCH-1). Thread the
+    # open-core v1.1 manifest fields (X5/X6) and any top-level manifest
+    # extras (vendor x-*) so Package.build_manifest() re-emits them on
+    # export, preserving the §6.4/§6.5 lossless round-trip MUST.
     return Package._init_from_parts(
         metadata=metadata,
         versioning=versioning,
@@ -560,4 +598,7 @@ def _load_directory(bundle_dir: Path) -> Package:
         records=records,
         audit_trail=audit_trail,
         attachments=attachments,
+        analysis_mode=analysis_mode,
+        namespaces=namespaces,
+        manifest_extras=manifest_extras,
     )

@@ -12,11 +12,14 @@ each exporter from the bundle's own ``manifest.metadata.timestamp`` — there is
 a single source of truth, so the two derivations agree by construction).
 
 Why a re-export comparison rather than comparing to the on-disk archive?
-There is no committed on-disk ``.acef.tar.gz`` for these bundles, and
-Python's load → ``Package.build_manifest()`` round-trip is intentionally lossy
-(it drops manifest-level ``analysis_mode``/``namespaces`` and
-``metadata.created_at``). The parity contract is that the TWO SDKs agree, so
-the comparison is ``python_reexport == ts_reexport``.
+There is no committed on-disk ``.acef.tar.gz`` for these bundles. Python's
+load → ``Package.build_manifest()`` round-trip is LOSSLESS to the open core
+(spec §6.4 rule 5 / §6.5): it preserves manifest-level ``analysis_mode`` (X5),
+``namespaces`` (X6), top-level vendor ``x-*`` extensions, and extra metadata
+keys (``metadata.created_at``, vendor ``x-*``). The TypeScript exporter mirrors
+the same preservation, so the parity contract — that the TWO SDKs agree
+byte-for-byte — holds with both sides spec-correct
+(``python_reexport == ts_reexport``).
 
 The TS side is exercised via the built CLI at
 ``packages/sdk-typescript/dist/cli/export-cli.js``. If that artifact has not

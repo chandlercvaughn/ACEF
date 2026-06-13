@@ -9,22 +9,20 @@
  * pipeline emits, plus the raw record objects.
  *
  * Why a bespoke rebuild rather than echoing the on-disk manifest?
- * Python's load → build_manifest path is intentionally lossy in two ways
- * (verified empirically against every Freddy pass bundle + v1.0 golden
- * bundle):
- *   1. The manifest top-level v1.1 fields `analysis_mode` and `namespaces`
- *      are NOT carried through `Package.build_manifest()` (it constructs a
- *      `Manifest` from the loaded parts without passing them), so they are
- *      dropped on re-export.
- *   2. `metadata.created_at` (and any other metadata key the loader does not
- *      extract into `PackageMetadata`) is dropped, because the loader builds
- *      `PackageMetadata(producer=, retention_policy=, prior_package_ref=)` and
- *      sets only `package_id` + `timestamp` — `created_at` is never read.
+ * The rebuild reproduces Python's load → build_manifest → to_dict transform,
+ * which recomputes `record_files` (sharding) and applies each model's
+ * known-field defaults + `model_dump(mode="json", exclude_none=True)`. It is
+ * NOT a verbatim echo of the on-disk manifest.
  *
- * For Python↔TS archive byte-equality the comparison is
- * `python_reexport == ts_reexport`, so this TS loader must reproduce exactly
- * the SAME transform. Each model's known-field set, default value, and
- * `model_dump(mode="json", exclude_none=True)` behavior is mirrored below.
+ * The load → build_manifest path is LOSSLESS to the open core (spec §6.4 rule
+ * 5 / §6.5): the manifest top-level v1.1 fields `analysis_mode` (X5) and
+ * `namespaces` (X6), any top-level vendor x-* extension, and any extra
+ * metadata key (`metadata.created_at`, vendor x-*) are PRESERVED on re-export.
+ * Python carries them via `Package._analysis_mode` / `_namespaces` /
+ * `_manifest_extras` (re-emitted by `build_manifest()`) and via
+ * `PackageMetadata`'s `extra='allow'` passthrough; the TS exporter
+ * (`bundle_export.rebuildManifestForExport` / `rebuildMetadata`) mirrors this
+ * exactly so `python_reexport == ts_reexport` holds byte-for-byte.
  */
 
 import { readFileSync, readdirSync, existsSync, statSync } from "node:fs";

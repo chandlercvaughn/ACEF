@@ -6,9 +6,11 @@
  *   1. Rebuild the manifest dict via `rebuildManifestForExport`, reproducing
  *      Python's `loader.load(...)` → `Package.build_manifest()` →
  *      `Manifest.to_dict()` (= `model_dump(mode="json", exclude_none=True)`)
- *      transform exactly. This drops manifest-level `analysis_mode`/`namespaces`
- *      and `metadata.created_at` (and any other key not read into a model),
- *      and recomputes `record_files` from the records.
+ *      transform exactly. This PRESERVES manifest-level `analysis_mode` (X5),
+ *      `namespaces` (X6), top-level vendor x-* extensions, and extra metadata
+ *      keys (`metadata.created_at`, vendor x-*) so the round-trip is lossless
+ *      to the open core (spec §6.4 rule 5 / §6.5), and recomputes
+ *      `record_files` from the records.
  *   2. Write records as JSONL: group by record_type, sort each group by
  *      (timestamp, record_id), shard per `computeShardBoundaries`, JCS each
  *      record line + trailing "\n".
@@ -64,8 +66,13 @@ function pick(src: Obj, keys: string[]): Obj {
  *
  * Declared metadata fields: package_id, timestamp, producer,
  * prior_package_ref (None→dropped), retention_policy (None→dropped).
- * `created_at` and any other on-disk metadata key are NOT read → dropped.
+ * `created_at` and any other on-disk metadata key (vendor x-*) are preserved
+ * as extras so the metadata layer is lossless (spec §6.4 rule 5), mirroring
+ * Python's `**_extras(metadata_raw, metadata_known)` passthrough into
+ * PackageMetadata (extra='allow').
  */
+const METADATA_KNOWN = ["package_id", "timestamp", "producer", "prior_package_ref", "retention_policy"];
+
 function rebuildMetadata(raw: Obj): Obj {
     const out: Obj = {};
     const producer = asObj(raw["producer"]);
@@ -92,6 +99,13 @@ function rebuildMetadata(raw: Obj): Obj {
             rpOut["personal_data_interplay"] = rp["personal_data_interplay"];
         }
         out["retention_policy"] = rpOut;
+    }
+
+    // Preserve any unknown metadata key (created_at, vendor x-*) so the
+    // metadata layer round-trips losslessly, mirroring the Python loader's
+    // _extras passthrough into PackageMetadata (extra='allow').
+    for (const [k, v] of Object.entries(raw)) {
+        if (!METADATA_KNOWN.includes(k) && v !== undefined && v !== null) out[k] = v;
     }
     return out;
 }
@@ -370,9 +384,12 @@ export function rebuildManifestForExport(manifestRaw: Obj, records: RawRecord[])
     }
 
     // Build the manifest in the SAME shape build_manifest()+to_dict() emits.
-    // Note: analysis_mode + namespaces are intentionally NOT carried (Python's
-    // build_manifest does not pass them to Manifest).
-    return {
+    // Carry the open-core v1.1 fields (analysis_mode X5, namespaces X6) and any
+    // top-level manifest extras (vendor x-*) so the load→export round-trip is
+    // lossless to the open core (spec §6.4 rule 5 / §6.5), mirroring Python's
+    // build_manifest() which re-emits package._analysis_mode / _namespaces /
+    // _manifest_extras. None/null values are omitted (exclude_none parity).
+    const out: Obj = {
         metadata: rebuildMetadata(metadataRaw),
         versioning: rebuildVersioning(versioningRaw),
         subjects: asArr(manifestRaw["subjects"]).map((s) => rebuildSubject(asObj(s))),
@@ -381,6 +398,28 @@ export function rebuildManifestForExport(manifestRaw: Obj, records: RawRecord[])
         record_files: recordFiles,
         audit_trail: asArr(manifestRaw["audit_trail"]).map((a) => rebuildAuditEntry(asObj(a))),
     };
+
+    const manifestTopKnown = [
+        "metadata",
+        "versioning",
+        "subjects",
+        "entities",
+        "profiles",
+        "record_files",
+        "audit_trail",
+        "analysis_mode",
+        "namespaces",
+    ];
+    if (manifestRaw["analysis_mode"] !== undefined && manifestRaw["analysis_mode"] !== null) {
+        out["analysis_mode"] = manifestRaw["analysis_mode"];
+    }
+    if (manifestRaw["namespaces"] !== undefined && manifestRaw["namespaces"] !== null) {
+        out["namespaces"] = manifestRaw["namespaces"];
+    }
+    for (const [k, v] of Object.entries(manifestRaw)) {
+        if (!manifestTopKnown.includes(k) && v !== undefined && v !== null) out[k] = v;
+    }
+    return out;
 }
 
 /** Derive the deterministic mtime from manifest metadata.timestamp. */
