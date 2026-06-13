@@ -597,6 +597,162 @@ class TestKeepAllRelocationTargetCollision:
 
 
 # ---------------------------------------------------------------------------
+# VAL-FIX-LOADER (roborev MEDIUM) — hash-disambiguated relocation target must
+# stay within the USTAR member-name budget so the merged package is exportable.
+#
+# Cross-feature interaction with F-M3-TAR-USTAR: the exporter
+# (_validate_ustar_member_name) caps the FULL tar member name
+# (<bundle_name>/<relpath>, with a trailing '/' for dirs) at < 100 UTF-8 bytes.
+# The pre-fix hash-disambiguation branch inserted the FULL 64-char SHA-256 hex
+# as a path segment:
+#   artifacts/_merged/<36-char-uuid>/<64-char-sha256>/eval.pdf   (128 chars)
+# which exceeds 100 bytes on its OWN, before the <bundle_name>/ prefix. A merge
+# that took that branch produced an UNEXPORTABLE package: Package.export()
+# raised ACEF-052. Post-fix the disambiguator uses a SHORT deterministic token
+# (a prefix of the content sha256, extended only on the astronomically-rare
+# truncated collision), keeping the relocated relpath inside the USTAR domain
+# for realistic bundle names while staying deterministic, idempotent, and
+# collision-free.
+# ---------------------------------------------------------------------------
+
+
+class TestKeepAllRelocationExportable:
+    @staticmethod
+    def _record_att_paths(pkg) -> dict[str, list[str]]:
+        out: dict[str, list[str]] = {}
+        for rec in pkg.records:
+            key = rec.payload.get("k", rec.record_id)
+            out[key] = [att.path for att in rec.attachments]
+        return out
+
+    @staticmethod
+    def _hash_disambiguated_paths(pkg) -> list[str]:
+        """Relocated keys that took the hash-disambiguation branch."""
+        return [k for k in pkg.attachments if k.startswith("artifacts/_merged/") and k.count("/") >= 4]
+
+    @staticmethod
+    def _build_colliding_inputs() -> list[Package]:
+        """THREE inputs sharing a package_id with DIFFERENT bytes at the same
+        path: the first keeps the original path, the second relocates to the
+        base target, and the THIRD is forced onto the hash-disambiguation branch
+        (base target already occupied by the second's different bytes)."""
+        p1 = _make_package(
+            "A", attachment=("eval.pdf", b"BYTES-1"), timestamp="2026-01-01T00:00:00Z", record_refs_attachment=True
+        )
+        p2 = _make_package(
+            "B", attachment=("eval.pdf", b"BYTES-2"), timestamp="2026-01-02T00:00:00Z", record_refs_attachment=True
+        )
+        p3 = _make_package(
+            "C", attachment=("eval.pdf", b"BYTES-3"), timestamp="2026-01-03T00:00:00Z", record_refs_attachment=True
+        )
+        p2.metadata.package_id = p1.metadata.package_id
+        p3.metadata.package_id = p1.metadata.package_id
+        return [p1, p2, p3]
+
+    def test_hash_disambiguated_member_within_ustar_domain(self) -> None:
+        """The relocated relpath that takes the disambiguation branch must keep
+        the FULL member name (<bundle_name>/<relpath>) under the 100-byte USTAR
+        limit for a realistic bundle name. Pre-fix the 64-char sha256 segment
+        alone pushed the relpath to 128 bytes."""
+        from acef.export import _USTAR_NAME_MAX_BYTES
+        from acef.merge import merge_packages
+
+        result = merge_packages(self._build_colliding_inputs(), conflict_strategy="keep_all")
+        disamb = self._hash_disambiguated_paths(result.package)
+        assert disamb, "expected at least one hash-disambiguated relocation"
+        bundle_name = "merged-bundle"
+        for relpath in disamb:
+            full = f"{bundle_name}/{relpath}"
+            byte_len = len(full.encode("utf-8"))
+            assert byte_len < _USTAR_NAME_MAX_BYTES, (
+                f"relocated member {full!r} is {byte_len} UTF-8 bytes, >= USTAR limit {_USTAR_NAME_MAX_BYTES}"
+            )
+
+    def test_merged_package_exports_and_roundtrips(self, tmp_path) -> None:
+        """RED: a merge that takes the hash-disambiguation branch produces an
+        UNEXPORTABLE package (export raises ACEF-052). GREEN: it exports, loads,
+        and every record ref still resolves to its OWN relocated bytes."""
+        import acef
+        from acef.merge import merge_packages
+
+        result = merge_packages(self._build_colliding_inputs(), conflict_strategy="keep_all")
+        assert self._hash_disambiguated_paths(result.package), "test must exercise the disambiguation branch"
+
+        bundle_dir = tmp_path / "merged-bundle"
+        # Pre-fix this raises ACEFExportError (ACEF-052, >= 100-byte member name).
+        result.package.export(str(bundle_dir))
+
+        reloaded = acef.load(str(bundle_dir))
+        att = reloaded.attachments
+        # All three byte streams survived the round-trip.
+        values = list(att.values())
+        assert values.count(b"BYTES-1") == 1
+        assert values.count(b"BYTES-2") == 1
+        assert values.count(b"BYTES-3") == 1
+        # Every record ref resolves to its OWN bytes after export -> load.
+        record_refs = self._record_att_paths(reloaded)
+        att_keys = set(att.keys())
+        for paths in record_refs.values():
+            for p in paths:
+                assert p in att_keys, f"record ref {p!r} does not resolve after round-trip"
+        assert att[record_refs["A"][0]] == b"BYTES-1"
+        assert att[record_refs["B"][0]] == b"BYTES-2"
+        assert att[record_refs["C"][0]] == b"BYTES-3"
+
+    def test_export_of_merged_is_byte_identical_across_runs(self, tmp_path) -> None:
+        """Two merges of the same colliding inputs export to byte-identical
+        archives (deterministic relocation target + deterministic export)."""
+        import copy
+
+        from acef.merge import merge_packages
+
+        # ``Package.add_subject`` / ``Package.record`` mint random-UUID subject /
+        # record URNs, so two independently-built input sets are NOT byte-equal.
+        # Deep-copy a single built set so ``inputs_a`` and ``inputs_b`` are
+        # byte-identical: the ONLY variable across the two merges is then
+        # merge_packages' relocation derivation + the export pipeline under test.
+        inputs_a = self._build_colliding_inputs()
+        inputs_b = copy.deepcopy(inputs_a)
+
+        r1 = merge_packages(inputs_a, conflict_strategy="keep_all")
+        r2 = merge_packages(inputs_b, conflict_strategy="keep_all")
+        # Identical relocation targets + bytes (the relocation derivation under
+        # test is purely content-derived, no random/wall-clock component).
+        assert r1.package.attachments == r2.package.attachments
+        assert self._record_att_paths(r1.package) == self._record_att_paths(r2.package)
+
+        # Export BOTH to the SAME archive basename (in separate dirs) so the tar
+        # root member name <bundle_name>/ is identical — the only remaining
+        # variable is merge_packages' relocation derivation + the export pipeline.
+        d1 = tmp_path / "run1"
+        d2 = tmp_path / "run2"
+        d1.mkdir()
+        d2.mkdir()
+        a1 = d1 / "merged.acef.tar.gz"
+        a2 = d2 / "merged.acef.tar.gz"
+        r1.package.export(str(a1))
+        r2.package.export(str(a2))
+        assert a1.read_bytes() == a2.read_bytes()
+
+    def test_pathologically_long_leaf_fails_closed_not_unexportable(self) -> None:
+        """A relocation whose RELPATH alone reaches the 100-byte USTAR limit
+        (unexportable under ANY bundle name) is surfaced as a structured
+        ACEFMergeError (ACEF-052) at merge time, never returned as a silently
+        unexportable target."""
+        from acef.errors import ACEFMergeError
+        from acef.merge import _resolve_collision_free_target
+
+        long_leaf = "x" * 90 + ".pdf"
+        base = f"artifacts/_merged/12345678-1234-5678-1234-567812345678/{long_leaf}"
+        # base is occupied by DIFFERENT bytes, forcing the disambiguation branch,
+        # whose relpath (base + an inserted token segment) is already > 100 bytes.
+        occupied = {base: (b"OTHER", "urn:acef:pkg:p")}
+        with pytest.raises(ACEFMergeError) as exc:
+            _resolve_collision_free_target(base, b"NEW", occupied)
+        assert exc.value.code == "ACEF-052"
+
+
+# ---------------------------------------------------------------------------
 # VAL-FIX-LOADER-009 — profile provisions union + template_version conflict
 # ---------------------------------------------------------------------------
 

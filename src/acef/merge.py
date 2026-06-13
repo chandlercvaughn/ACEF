@@ -11,6 +11,13 @@ from datetime import UTC, datetime
 from typing import Any
 
 from acef.errors import ACEFMergeError, ValidationDiagnostic
+
+# _USTAR_NAME_MAX_BYTES is the exporter's single-source-of-truth USTAR
+# member-name limit (F-M3-TAR-USTAR): the exporter rejects any FULL tar member
+# name ``<bundle_name>/<relpath>`` of ``>= 100`` UTF-8 bytes. Importing it here
+# keeps the keep_all relocation budget from drifting from the exporter it must
+# satisfy. (export.py does not import merge.py, so this is cycle-free.)
+from acef.export import _USTAR_NAME_MAX_BYTES
 from acef.integrity import sha256_hex
 from acef.models.entities import EntitiesBlock
 from acef.models.enums import AuditEventType
@@ -549,23 +556,41 @@ def _relocate_attachment_path(att_path: str, pkg_id: str) -> str:
     return f"artifacts/_merged/{uuid_segment}/{remainder}"
 
 
-def _hash_disambiguated_target(base_target: str, content: bytes) -> str:
-    """Insert a content-hash segment into ``base_target`` for disambiguation.
+# Initial length (hex chars) of the content-sha256 disambiguation token. Eight
+# hex chars (32 bits) is collision-free across any realistic merge while keeping
+# the relocated relpath far inside the USTAR member-name budget; the
+# collision-loop in :func:`_resolve_collision_free_target` extends it (up to the
+# full 64-char digest) only on the astronomically-rare truncated-prefix
+# collision, so determinism + collision-freedom hold regardless of N.
+_DISAMBIGUATION_TOKEN_INITIAL_LEN = 8
 
-    Splits ``base_target`` into ``<dir>/<leaf>`` and inserts the SHA-256 hex of
-    ``content`` as a path segment before the leaf:
-    ``artifacts/_merged/<uuid>/<sha256>/<leaf>``. The hash is a pure function of
-    the bytes, so identical bytes always derive the SAME path (idempotent) while
-    different bytes derive distinct paths (no SHA-256 second-preimage in
-    practice). The inserted segment is lowercase hex — schema-valid (forward
-    slashes, relative, NFC, no '..').
+
+def _disambiguated_target(base_target: str, digest: str, token_len: int) -> str:
+    """Insert a short content-hash token into ``base_target`` for disambiguation.
+
+    Splits ``base_target`` into ``<head>/<leaf>`` and inserts an ``h``-prefixed
+    prefix of the content sha256 hex (``token_len`` hex chars) as a path segment
+    before the leaf:
+    ``artifacts/_merged/<uuid>/h<token>/<leaf>``. ``digest`` is a pure function
+    of the bytes, so identical bytes at the same ``token_len`` always derive the
+    SAME path (idempotent) while different bytes derive distinct paths. The
+    inserted segment is lowercase hex (``h`` + hex) — schema-valid (forward
+    slashes, relative, NFC, no '..'). The ``h`` prefix keeps the token a
+    non-numeric, non-empty path segment and disjoint from the 36-char UUID
+    segment shape, so a token can never be confused with the package-id segment.
+
+    Unlike the pre-fix scheme (which inserted the FULL 64-char digest and so
+    produced a 128-char relpath that exceeds the USTAR member-name budget BEFORE
+    any ``<bundle_name>/`` prefix — making the merged package unexportable), the
+    token is short (``token_len`` defaults to 8) and grows only on a truncated
+    collision.
     """
-    digest = sha256_hex(content)
+    token = digest[:token_len]
     head, sep, leaf = base_target.rpartition("/")
     if sep:
-        return f"{head}/{digest}/{leaf}"
+        return f"{head}/h{token}/{leaf}"
     # No '/' in base_target (defensive; relocation targets always contain one).
-    return f"{digest}/{base_target}"
+    return f"h{token}/{base_target}"
 
 
 def _resolve_collision_free_target(
@@ -589,11 +614,23 @@ def _resolve_collision_free_target(
     * ``base_target`` free, or already holding IDENTICAL bytes  -> use it
       (idempotent: identical bytes collapse to one artifact).
     * otherwise -> a content-hash-disambiguated path
-      (``.../<sha256>/<leaf>``). Identical bytes always map to the same hashed
-      path (idempotent); different bytes get a distinct path. If even the hashed
-      path is occupied by DIFFERENT bytes (only possible if an input deliberately
-      pre-placed an artifact there), append further hash segments until free —
-      guaranteeing a collision-free target for ANY input.
+      (``.../h<token>/<leaf>``) using a SHORT prefix of the content sha256
+      (``_DISAMBIGUATION_TOKEN_INITIAL_LEN`` hex chars). Identical bytes always
+      map to the same hashed path (idempotent); different bytes get a distinct
+      path. If even that path is occupied by DIFFERENT bytes (a truncated-prefix
+      collision, or an input that deliberately pre-placed an artifact there),
+      EXTEND the token one hex char at a time — re-deriving from the SAME digest,
+      so it stays deterministic — up to the full 64-char digest, guaranteeing a
+      collision-free target for ANY input.
+
+    Budget (cross-feature with F-M3-TAR-USTAR): the relocated relpath is kept
+    short (an 8-char token vs the pre-fix 64-char digest) so the FULL member name
+    ``<bundle_name>/<relpath>`` stays within the exporter's 100-byte USTAR domain
+    for realistic bundle names — the pre-fix branch produced UNEXPORTABLE merged
+    packages. If a pathologically long original leaf makes even the RELPATH alone
+    reach the USTAR limit (``>= 100`` UTF-8 bytes — unexportable under ANY bundle
+    name), surface a structured ``ACEFMergeError`` (``ACEF-052``, consistent with
+    the exporter) rather than returning an unexportable target.
 
     Returns the final target path; the caller stores ``content`` there and maps
     the original ref to this path so record refs resolve to the correct bytes.
@@ -603,13 +640,48 @@ def _resolve_collision_free_target(
         # Free target, or identical bytes already there (idempotent reuse).
         return base_target
 
-    # Different bytes occupy base_target: derive a content-hash-disambiguated
-    # path. Loop only to defend against an input that pre-placed DIFFERENT bytes
-    # at the hashed path itself (a SHA-256 second-preimage otherwise).
-    candidate = _hash_disambiguated_target(base_target, content)
-    while True:
+    # Different bytes occupy base_target: derive a short content-hash token.
+    # Extend the token (deterministically, from the same digest) only to defend
+    # against a truncated-prefix collision or an input that pre-placed DIFFERENT
+    # bytes at the hashed path itself (a full-digest second-preimage otherwise).
+    digest = sha256_hex(content)
+    for token_len in range(_DISAMBIGUATION_TOKEN_INITIAL_LEN, len(digest) + 1):
+        candidate = _disambiguated_target(base_target, digest, token_len)
+        _assert_relocation_within_ustar_domain(candidate)
         occupant = merged_attachments.get(candidate)
         if occupant is None or occupant[0] == content:
             return candidate
-        # Occupied by different bytes — extend deterministically by re-hashing.
-        candidate = _hash_disambiguated_target(candidate, content)
+    # All 64 hex chars exhausted without a free/identical slot. This requires an
+    # adversarial input that pre-placed DIFFERENT bytes at every prefix length of
+    # the FULL digest, i.e. a sha256 second-preimage — not reachable for honest
+    # inputs. Fail closed rather than silently overwrite.
+    raise ACEFMergeError(
+        f"Unable to derive a collision-free keep_all relocation target for {base_target!r}: "
+        "every content-hash-disambiguated path is occupied by different bytes "
+        "(requires a SHA-256 second-preimage collision).",
+        code="ACEF-060",
+    )
+
+
+def _assert_relocation_within_ustar_domain(relpath: str) -> None:
+    """Fail closed if a relocation relpath is unexportable under ANY bundle name.
+
+    The exporter (``export._validate_ustar_member_name``) rejects a FULL tar
+    member name ``<bundle_name>/<relpath>`` of ``>= 100`` UTF-8 bytes. The merge
+    cannot know ``<bundle_name>`` (supplied at ``export()`` time), so it cannot
+    bound the full name here — but if the RELPATH ALONE already reaches the
+    USTAR limit, NO bundle name (not even an empty one) could make it exportable.
+    Surface that as a structured ``ACEFMergeError`` (``ACEF-052`` — the
+    exporter's designated path/USTAR code) at merge time, rather than returning a
+    target that makes the merged package unexportable. For realistic bundle names
+    the bundle-name-dependent over-limit case is still caught by the exporter's
+    own preflight.
+    """
+    if len(relpath.encode("utf-8")) >= _USTAR_NAME_MAX_BYTES:
+        raise ACEFMergeError(
+            "keep_all relocation target reaches the 100-byte USTAR short-name limit "
+            f"({len(relpath.encode('utf-8'))} UTF-8 bytes) before any bundle-name prefix; "
+            "the merged package would be unexportable under any bundle name "
+            f"(pathologically long original attachment path): {relpath!r}",
+            code="ACEF-052",
+        )
