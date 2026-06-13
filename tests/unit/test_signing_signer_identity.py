@@ -21,6 +21,7 @@ import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec, rsa
 
+from acef.errors import ACEFSigningError
 from acef.signing import sign_assessment, verify_assessment
 
 
@@ -44,6 +45,20 @@ def _write_ec_key(tmp_dir: Path) -> Path:
         encryption_algorithm=serialization.NoEncryption(),
     )
     path = tmp_dir / "ec_private.pem"
+    path.write_bytes(pem)
+    return path
+
+
+def _write_ec_p384_key(tmp_dir: Path) -> Path:
+    """An UNSUPPORTED EC key (P-384). ACEF allows only P-256 for ES256, so the
+    sign path must reject it with ACEF-013 — including on the default-kid path."""
+    key = ec.generate_private_key(ec.SECP384R1())
+    pem = key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption(),
+    )
+    path = tmp_dir / "ec_p384_private.pem"
     path.write_bytes(pem)
     return path
 
@@ -234,6 +249,80 @@ class TestSignBundleKid:
         sig_path = sign_bundle(bundle_dir, str(key_path))
         assert Path(sig_path).name == "provider-key.jws"
         assert _jws_header(Path(sig_path).read_text(encoding="utf-8"))["kid"] == "provider-key"
+
+
+class TestDefaultKidValidatesKeyBeforeThumbprint:
+    """roborev follow-up (Medium, commit 70462863): the default-kid path derives
+    the RFC 7638 thumbprint (``_jwk_thumbprint`` -> ``_derive_jwk``) BEFORE
+    ``create_detached_jws`` validates the key algorithm/curve. ``_derive_jwk``
+    assumes P-256 (32-byte coordinates), so an UNSUPPORTED EC key (e.g. P-384,
+    48-byte coordinates) raised a RAW ``OverflowError`` ("int too big to
+    convert") instead of the established ``ACEFSigningError(code="ACEF-013")``
+    that the F-M1 sign-side hardening guarantees for unsupported keys.
+
+    The explicit-kid path was unaffected (it skips thumbprint derivation and
+    reaches ``create_detached_jws`` -> ``_detect_algorithm`` directly), so ONLY
+    the new default-kid path regressed. The fix validates the key's
+    algorithm/curve BEFORE deriving the default-kid thumbprint, so EVERY path
+    surfaces ACEF-013 for an unsupported key — never a raw OverflowError.
+    """
+
+    def test_default_kid_p384_raises_acef013_not_overflowerror(self, tmp_dir: Path) -> None:
+        """sign_assessment with NO explicit kid + an unsupported P-384 EC key
+        must raise ACEFSigningError/ACEF-013 — NOT a raw OverflowError from the
+        32-byte coordinate conversion in _derive_jwk."""
+        key_path = _write_ec_p384_key(tmp_dir)
+        with pytest.raises(ACEFSigningError) as exc_info:
+            sign_assessment(_minimal_assessment(), str(key_path))
+        assert exc_info.value.code == "ACEF-013"
+
+    def test_default_kid_p384_does_not_leak_overflowerror(self, tmp_dir: Path) -> None:
+        """Defense-in-depth: the raw conversion error must not escape as an
+        OverflowError/ValueError under any default-kid call."""
+        key_path = _write_ec_p384_key(tmp_dir)
+        with pytest.raises(ACEFSigningError):
+            sign_assessment(_minimal_assessment(), str(key_path))
+        # An OverflowError is NOT an ACEFSigningError, so the pytest.raises above
+        # would have re-raised it had the fix been absent. Assert the contract
+        # explicitly: ACEFSigningError is the only escaping type.
+
+    def test_explicit_kid_p384_still_raises_acef013_unchanged(self, tmp_dir: Path) -> None:
+        """The explicit-kid path (which never derived the thumbprint) already
+        rejected unsupported keys via create_detached_jws/_detect_algorithm.
+        Confirm that controlled-rejection contract is UNCHANGED."""
+        key_path = _write_ec_p384_key(tmp_dir)
+        with pytest.raises(ACEFSigningError) as exc_info:
+            sign_assessment(_minimal_assessment(), str(key_path), kid="explicit-rotation-key")
+        assert exc_info.value.code == "ACEF-013"
+
+    def test_default_kid_p256_still_works(self, tmp_dir: Path) -> None:
+        """A SUPPORTED P-256 EC key on the default-kid path still produces a
+        valid thumbprint kid and a verifiable signature (no regression)."""
+        key_path = _write_ec_key(tmp_dir)
+        signed = sign_assessment(_minimal_assessment(), str(key_path))
+        header = _jws_header(signed["integrity"]["signature"]["value"])
+        assert len(header["kid"]) == 43
+        assert verify_assessment(signed) is True
+
+    def test_default_kid_rsa2048_still_works(self, tmp_dir: Path) -> None:
+        """A SUPPORTED RSA-2048 key on the default-kid path still produces a
+        valid thumbprint kid and a verifiable signature (no regression)."""
+        key_path = _write_rsa_key(tmp_dir)
+        signed = sign_assessment(_minimal_assessment(), str(key_path))
+        header = _jws_header(signed["integrity"]["signature"]["value"])
+        assert len(header["kid"]) == 43
+        assert verify_assessment(signed) is True
+
+    def test_derive_jwk_rejects_p384_directly(self, tmp_dir: Path) -> None:
+        """Defense-in-depth at the helper boundary: _derive_jwk itself rejects a
+        non-P-256 EC key with ACEF-013 BEFORE the 32-byte coordinate conversion,
+        so no caller of the default-kid path can trigger a raw OverflowError."""
+        from acef.signing import _derive_jwk
+
+        key = ec.generate_private_key(ec.SECP384R1())
+        with pytest.raises(ACEFSigningError) as exc_info:
+            _derive_jwk(key)
+        assert exc_info.value.code == "ACEF-013"
 
 
 if __name__ == "__main__":

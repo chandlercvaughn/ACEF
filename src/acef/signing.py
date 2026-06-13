@@ -515,7 +515,13 @@ def _derive_jwk(private_key: PrivateKeyTypes) -> dict[str, str]:
 
     if isinstance(public_key, rsa.RSAPublicKey):
         public_numbers = public_key.public_numbers()
-        # Encode n and e as base64url unsigned big-endian integers
+        # Encode n and e as base64url unsigned big-endian integers. The width is
+        # derived from the actual modulus bit-length, so this branch is correct
+        # for ANY RSA key size and never overflows — the RFC 7518 §3.3 >= 2048
+        # floor is enforced at the SIGN entry points (``_detect_algorithm`` in
+        # ``sign_assessment`` / ``create_detached_jws``) and at the VERIFY/JWK
+        # loader path, NOT here, so this helper remains usable to encode a
+        # public JWK regardless of key size.
         n_bytes = public_numbers.n.to_bytes((public_numbers.n.bit_length() + 7) // 8, byteorder="big")
         e_bytes = public_numbers.e.to_bytes((public_numbers.e.bit_length() + 7) // 8, byteorder="big")
         return {
@@ -524,8 +530,21 @@ def _derive_jwk(private_key: PrivateKeyTypes) -> dict[str, str]:
             "e": _base64url_encode(e_bytes),
         }
     elif isinstance(public_key, ec.EllipticCurvePublicKey):
+        # Defense-in-depth (roborev Medium, commit 70462863): reject a non-P-256
+        # EC curve with ACEF-013 BEFORE the FIXED 32-byte coordinate conversion
+        # below. A P-384 key has 48-byte coordinates, so ``to_bytes(32, ...)``
+        # would raise a RAW ``OverflowError`` instead of the established
+        # ``ACEFSigningError(code="ACEF-013")``. ACEF allows only P-256 for
+        # ES256 (spec §3.1.3 / F-M1 hardening), so this is the sole supported
+        # EC shape and the guard never rejects a valid key.
+        curve = public_key.curve
+        if not isinstance(curve, ec.SECP256R1):
+            raise ACEFSigningError(
+                f"Unsupported EC curve: {curve.name!r}. ACEF requires P-256 (secp256r1) for ES256.",
+                code="ACEF-013",
+            )
         ec_public_numbers = public_key.public_numbers()
-        # For P-256, coordinates are 32 bytes each
+        # P-256 coordinates are 32 bytes each (guaranteed by the guard above).
         x_bytes = ec_public_numbers.x.to_bytes(32, byteorder="big")
         y_bytes = ec_public_numbers.y.to_bytes(32, byteorder="big")
         return {
@@ -1163,6 +1182,17 @@ def sign_assessment(
     canonical = canonicalize(assessment_data)
 
     private_key = _load_private_key(key_path)
+    # Validate the key is a SUPPORTED algorithm/curve (RS256 >= 2048 / ES256
+    # P-256 only — F-M1 hardening) BEFORE deriving the default-kid thumbprint
+    # (roborev Medium, commit 70462863). Without this, an unsupported EC key
+    # (e.g. P-384) reached ``_jwk_thumbprint`` -> ``_derive_jwk``, whose 32-byte
+    # coordinate conversion raised a RAW ``OverflowError`` instead of the
+    # established ``ACEFSigningError(code="ACEF-013")``. The explicit-kid path
+    # skips the thumbprint and is rejected by ``create_detached_jws`` directly,
+    # so it was already correct; this fixes the default-kid path to match.
+    # ``create_detached_jws`` re-validates below (idempotent), so supported keys
+    # are unaffected.
+    _detect_algorithm(private_key)
     effective_kid = kid if kid is not None else _jwk_thumbprint(private_key)
     jws = create_detached_jws(canonical, private_key, kid=effective_kid)
 
