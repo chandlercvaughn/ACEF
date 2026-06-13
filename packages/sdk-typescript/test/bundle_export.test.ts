@@ -76,16 +76,25 @@ test("loadBundle reads manifest + records for verified-delivery", () => {
     ]);
 });
 
-test("rebuildManifestForExport drops v1.1 analysis_mode and metadata.created_at", () => {
+test("rebuildManifestForExport PRESERVES v1.1 analysis_mode and metadata.created_at", () => {
     if (!existsSync(VERIFIED_DELIVERY)) return;
     const loaded = loadBundle(VERIFIED_DELIVERY);
     // Sanity: the on-disk manifest DOES carry these fields.
     assert.equal(loaded.manifestRaw["analysis_mode"], "subscriber");
+    const metaRaw = loaded.manifestRaw["metadata"] as Record<string, unknown>;
+    assert.equal(metaRaw["created_at"], "2026-05-01T00:00:00Z");
+
     const m = rebuildManifestForExport(loaded.manifestRaw, loaded.records);
-    // The rebuilt manifest (matching Python build_manifest) drops them.
-    assert.equal(m["analysis_mode"], undefined, "analysis_mode must be dropped");
+    // Lossless export to the open core (spec §6.4 rule 5 / §6.5): the rebuilt
+    // manifest (matching Python build_manifest → to_dict) PRESERVES the v1.1
+    // open-core field analysis_mode (X5) and the extra metadata key created_at
+    // verbatim. This mirrors the Python bundle-level round-trip test
+    // (tests/unit/test_lossless_roundtrip_bundle.py) and is required for the
+    // VAL-PARITY-002/003 cross-language byte-equality contract to hold with
+    // BOTH SDKs spec-correct.
+    assert.equal(m["analysis_mode"], "subscriber", "analysis_mode must be preserved");
     const meta = m["metadata"] as Record<string, unknown>;
-    assert.equal(meta["created_at"], undefined, "metadata.created_at must be dropped");
+    assert.equal(meta["created_at"], "2026-05-01T00:00:00Z", "metadata.created_at must be preserved");
     assert.ok(meta["package_id"], "package_id retained");
     assert.ok(meta["timestamp"], "timestamp retained");
     // record_files recomputed: one per record type.
@@ -95,6 +104,44 @@ test("rebuildManifestForExport drops v1.1 analysis_mode and metadata.created_at"
         assert.match(e["path"] as string, /^records\/.+\.jsonl$/);
         assert.equal(e["count"], 1);
     }
+});
+
+test("rebuildManifestForExport PRESERVES namespaces (X6), top-level x-*, and metadata x-*", () => {
+    // The verified-delivery fixture carries analysis_mode + metadata.created_at
+    // but no vendor x-* / namespaces, so feed a synthetic manifest through the
+    // SAME rebuild transform to pin down the remaining lossless guarantees
+    // (mirrors the Python test's x-* / namespaces assertions). The transform is
+    // pure, so this needs no on-disk fixture.
+    const manifestRaw: Record<string, unknown> = {
+        metadata: {
+            package_id: "urn:acef:pkg:11111111-1111-1111-1111-111111111111",
+            timestamp: "2026-01-01T00:00:00Z",
+            producer: { name: "test-producer", version: "1.0.0" },
+            created_at: "2025-12-31T23:59:59Z",
+            "x-vendor/meta": { team: "compliance" },
+        },
+        versioning: { core_version: "1.1.0", profiles_version: "1.0.0" },
+        subjects: [],
+        entities: { components: [], datasets: [], actors: [], relationships: [] },
+        profiles: [],
+        record_files: [],
+        audit_trail: [],
+        analysis_mode: "subscriber",
+        namespaces: { "x-test/extension": { foo: "bar", nested: { k: [1, 2] } } },
+        "x-vendor-top/meta": { k: "v", n: 42 },
+    };
+
+    const m = rebuildManifestForExport(manifestRaw, []);
+
+    // X5 + X6 open-core fields preserved.
+    assert.equal(m["analysis_mode"], "subscriber");
+    assert.deepEqual(m["namespaces"], { "x-test/extension": { foo: "bar", nested: { k: [1, 2] } } });
+    // Top-level vendor x-* extension preserved.
+    assert.deepEqual(m["x-vendor-top/meta"], { k: "v", n: 42 });
+    // Metadata extras (vendor x-* + created_at) preserved.
+    const meta = m["metadata"] as Record<string, unknown>;
+    assert.deepEqual(meta["x-vendor/meta"], { team: "compliance" });
+    assert.equal(meta["created_at"], "2025-12-31T23:59:59Z");
 });
 
 test("buildVirtualBundle emits the full export_directory file set", () => {

@@ -136,6 +136,9 @@ class RecordEnvelope(ACEFBaseModel):
         - ``lifecycle_phase``  → defaults to ``"development"``
         - ``obligation_role``  → defaults to ``"provider"``
         - ``collector``        → defaults to ``{"name": "unknown", "version": ""}``
+          ONLY when absent (``None``); a present collector — including the
+          empty string ``""``, a valid no-``minLength`` wire shape — is
+          emitted verbatim so the round-trip stays lossless (§6.4).
 
         Callers that want explicit values should pass them through the
         Package builder API, which has its own (typically richer)
@@ -217,8 +220,16 @@ def dict_to_record_envelope(data: dict[str, Any]) -> RecordEnvelope:
     # Wrapping a string into CollectorInfo(name=..., version="") would
     # reshape the bytes (object instead of string) and break the §6.4
     # lossless-export MUST (records-payloads-1).
+    #
+    # Use a key-PRESENCE check, not truthiness: the string branch carries no
+    # ``minLength``, so the EMPTY string "" is a valid wire shape that MUST
+    # round-trip verbatim. A truthiness check (``data.get("collector")``)
+    # drops "" (falsy), which then re-exports as the default collector OBJECT
+    # via ``to_jsonl_dict`` — a reshaped wire form that breaks lossless
+    # round-trip and Python/TS parity. The default is applied ONLY when the
+    # key is ABSENT (in ``to_jsonl_dict``).
     collector: CollectorInfo | str | None = None
-    if data.get("collector"):
+    if "collector" in data:
         collector_data = data["collector"]
         if isinstance(collector_data, dict):
             collector = CollectorInfo(**collector_data)
