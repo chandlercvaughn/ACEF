@@ -16,7 +16,9 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-from acef.errors import ACEFFormatError
+from pydantic import ValidationError as PydanticValidationError
+
+from acef.errors import ACEFFormatError, ACEFSchemaError
 from acef.load_rejections import check_load_rejections
 from acef.models.entities import Actor, Component, Dataset, EntitiesBlock, Relationship
 from acef.models.manifest import AuditTrailEntry, ProfileEntry
@@ -439,13 +441,99 @@ def _load_directory(bundle_dir: Path) -> Package:
         """
         return {k: v for k, v in raw.items() if k not in known}
 
-    # Parse manifest
-    metadata_raw = manifest_data.get("metadata", {})
-    producer_raw = metadata_raw.get("producer", {})
-    producer = ProducerInfo(**producer_raw)
+    # ------------------------------------------------------------------
+    # Adversarial / malformed-manifest robustness (loader-roundtrip-8).
+    #
+    # ``acef.load()`` is a documented public DESERIALIZATION API
+    # (exported in ``acef.__all__``). Every manifest section it consumes
+    # is attacker-controlled, so each is type-guarded BEFORE it is fed to
+    # ``dict.get(...)``, ``**``-unpacked into a Pydantic model, or
+    # iterated — otherwise a hostile/malformed manifest (e.g. ``metadata``
+    # is a list, ``subjects`` is a dict, ``versioning`` is a string)
+    # escapes as a RAW ``AttributeError`` / ``TypeError`` / Pydantic
+    # ``ValidationError`` instead of a structured ACEF diagnostic.
+    #
+    # We use STRUCTURAL type-guards (not full manifest-schema validation):
+    # ``load`` is intentionally LENIENT — it loads bundles the strict
+    # conformance schema rejects (empty ``subjects`` = minItems:1,
+    # non-strict ``namespaces`` keys, ...). The conformance gate is
+    # :func:`acef.validation.engine.validate_bundle`, NOT ``load``.
+    # Imposing full-schema validation here would over-reject and break the
+    # §6.4/§6.5 lossless round-trip MUST. So we reject only the structural
+    # type-confusion the loader itself cannot consume, mapping it to
+    # ACEF-002 (schema-structural) / ACEF-050 (format), and re-raise model
+    # construction failures (Pydantic) as ACEF-002.
+    # ------------------------------------------------------------------
+    def _require_object(value: Any, section: str) -> dict[str, Any]:
+        """Return ``value`` if it is a JSON object, else raise ACEF-002.
 
+        Mirrors the JSON-Schema ``"type": "object"`` constraint for a
+        manifest section the loader must ``.get(...)`` / ``**``-unpack.
+        ``bool`` is a subclass of ``int`` but never of ``dict``, so the
+        ``isinstance(..., dict)`` check rejects every non-object scalar.
+        """
+        if not isinstance(value, dict):
+            raise ACEFSchemaError(
+                f"Manifest section {section!r} must be a JSON object, got {type(value).__name__}",
+                code="ACEF-002",
+            )
+        return value
+
+    def _require_array(value: Any, section: str) -> list[Any]:
+        """Return ``value`` if it is a JSON array, else raise ACEF-002.
+
+        Mirrors the JSON-Schema ``"type": "array"`` constraint for a
+        manifest section the loader iterates. A ``str`` is iterable but is
+        NOT a JSON array, so it is rejected here rather than silently
+        iterated character-by-character.
+        """
+        if not isinstance(value, list):
+            raise ACEFSchemaError(
+                f"Manifest section {section!r} must be a JSON array, got {type(value).__name__}",
+                code="ACEF-002",
+            )
+        return value
+
+    def _build_model(factory: Any, raw: dict[str, Any], section: str) -> Any:
+        """Construct a Pydantic model, re-raising failures as ACEF-002.
+
+        ``raw`` is the caller-guarded object; ``factory`` is the model
+        class invoked as ``factory(**raw)``. A Pydantic ``ValidationError``
+        (e.g. a ``producer`` missing the required ``name``/``version``)
+        is wrapped as :class:`ACEFSchemaError` so callers see a structured
+        ACEF-002 instead of a leaked framework exception.
+        """
+        try:
+            return factory(**raw)
+        except PydanticValidationError as e:
+            raise ACEFSchemaError(
+                f"Manifest section {section!r} failed model validation: {e}",
+                code="ACEF-002",
+            ) from e
+
+    # Parse manifest — the manifest root itself must be an object so the
+    # ``.get(...)`` accesses below cannot raise a raw ``AttributeError``.
+    manifest_data = _require_object(manifest_data, "<manifest root>")
+
+    metadata_raw = _require_object(manifest_data.get("metadata", {}), "metadata")
+    producer_raw = _require_object(metadata_raw.get("producer", {}), "metadata.producer")
+    producer = _build_model(ProducerInfo, producer_raw, "metadata.producer")
+
+    # ``retention_policy`` is OPTIONAL: an absent key, ``null``, or an empty
+    # object means "no policy" (the pre-existing falsy semantics — preserved
+    # so a bundle without retention still loads and round-trips identically).
+    # A non-empty, non-object value (e.g. the string ``"forever"``) is a
+    # structural error and is rejected via ``_require_object``.
     retention_raw = metadata_raw.get("retention_policy")
-    retention = RetentionPolicy(**retention_raw) if retention_raw else None
+    retention = (
+        _build_model(
+            RetentionPolicy,
+            _require_object(retention_raw, "metadata.retention_policy"),
+            "metadata.retention_policy",
+        )
+        if retention_raw
+        else None
+    )
 
     # Build metadata. Pass through any unknown metadata-object keys (vendor
     # x-* extensions, the spec's own metadata.created_at, future fields) via
@@ -459,18 +547,26 @@ def _load_directory(bundle_dir: Path) -> Package:
         "prior_package_ref",
         "retention_policy",
     }
-    metadata = PackageMetadata(
-        producer=producer,
-        retention_policy=retention,
-        prior_package_ref=metadata_raw.get("prior_package_ref"),
-        **_extras(metadata_raw, metadata_known),
-    )
+    try:
+        metadata = PackageMetadata(
+            producer=producer,
+            retention_policy=retention,
+            prior_package_ref=metadata_raw.get("prior_package_ref"),
+            **_extras(metadata_raw, metadata_known),
+        )
+    except PydanticValidationError as e:
+        raise ACEFSchemaError(
+            f"Manifest section 'metadata' failed model validation: {e}",
+            code="ACEF-002",
+        ) from e
     metadata.package_id = metadata_raw.get("package_id", metadata.package_id)
     metadata.timestamp = metadata_raw.get("timestamp", metadata.timestamp)
 
-    # Set versioning
-    versioning_raw = manifest_data.get("versioning", {})
-    versioning = Versioning(**versioning_raw)
+    # Set versioning — guard the object shape before ``**``-unpacking so a
+    # non-object ``versioning`` (e.g. the string ``"v1"``) surfaces ACEF-002
+    # rather than a raw ``TypeError: argument after ** must be a mapping``.
+    versioning_raw = _require_object(manifest_data.get("versioning", {}), "versioning")
+    versioning = _build_model(Versioning, versioning_raw, "versioning")
 
     # Capture the v1.1 open-core manifest fields (X5 analysis_mode, X6
     # namespaces) and every unknown top-level manifest key (vendor x-*
@@ -508,84 +604,132 @@ def _load_directory(bundle_dir: Path) -> Package:
         "lifecycle_phase",
         "lifecycle_timeline",
     }
-    for sub_data in manifest_data.get("subjects", []):
-        timeline = [LifecycleEntry(**e) for e in sub_data.get("lifecycle_timeline", [])]
-        subject = Subject(
-            subject_id=sub_data.get("subject_id", ""),
-            subject_type=sub_data.get("subject_type", "ai_system"),
-            name=sub_data.get("name", ""),
-            version=sub_data.get("version", "1.0.0"),
-            provider=sub_data.get("provider", ""),
-            risk_classification=sub_data.get("risk_classification", "minimal-risk"),
-            modalities=sub_data.get("modalities", []),
-            lifecycle_phase=sub_data.get("lifecycle_phase", "development"),
-            lifecycle_timeline=timeline,
-            **_extras(sub_data, subject_known),
+    for idx, sub_data in enumerate(_require_array(manifest_data.get("subjects", []), "subjects")):
+        sub_data = _require_object(sub_data, f"subjects[{idx}]")
+        timeline_raw = _require_array(
+            sub_data.get("lifecycle_timeline", []),
+            f"subjects[{idx}].lifecycle_timeline",
+        )
+        timeline = [
+            _build_model(
+                LifecycleEntry,
+                _require_object(e, f"subjects[{idx}].lifecycle_timeline[{j}]"),
+                f"subjects[{idx}].lifecycle_timeline[{j}]",
+            )
+            for j, e in enumerate(timeline_raw)
+        ]
+        subject = _build_model(
+            Subject,
+            {
+                "subject_id": sub_data.get("subject_id", ""),
+                "subject_type": sub_data.get("subject_type", "ai_system"),
+                "name": sub_data.get("name", ""),
+                "version": sub_data.get("version", "1.0.0"),
+                "provider": sub_data.get("provider", ""),
+                "risk_classification": sub_data.get("risk_classification", "minimal-risk"),
+                "modalities": sub_data.get("modalities", []),
+                "lifecycle_phase": sub_data.get("lifecycle_phase", "development"),
+                "lifecycle_timeline": timeline,
+                **_extras(sub_data, subject_known),
+            },
+            f"subjects[{idx}]",
         )
         subjects.append(subject)
 
     # Parse entities
-    entities_raw = manifest_data.get("entities", {})
+    entities_raw = _require_object(manifest_data.get("entities", {}), "entities")
     entities = EntitiesBlock()
 
     component_known = {"component_id", "name", "type", "version", "subject_refs", "provider"}
-    for comp_data in entities_raw.get("components", []):
-        comp = Component(
-            component_id=comp_data.get("component_id", ""),
-            name=comp_data.get("name", ""),
-            type=comp_data.get("type", "model"),
-            version=comp_data.get("version", "1.0.0"),
-            subject_refs=comp_data.get("subject_refs", []),
-            provider=comp_data.get("provider", ""),
-            **_extras(comp_data, component_known),
+    for idx, comp_data in enumerate(_require_array(entities_raw.get("components", []), "entities.components")):
+        comp_data = _require_object(comp_data, f"entities.components[{idx}]")
+        comp = _build_model(
+            Component,
+            {
+                "component_id": comp_data.get("component_id", ""),
+                "name": comp_data.get("name", ""),
+                "type": comp_data.get("type", "model"),
+                "version": comp_data.get("version", "1.0.0"),
+                "subject_refs": comp_data.get("subject_refs", []),
+                "provider": comp_data.get("provider", ""),
+                **_extras(comp_data, component_known),
+            },
+            f"entities.components[{idx}]",
         )
         entities.components.append(comp)
 
     dataset_known = {"dataset_id", "name", "version", "source_type", "modality", "size", "subject_refs"}
-    for ds_data in entities_raw.get("datasets", []):
-        ds = Dataset(
-            dataset_id=ds_data.get("dataset_id", ""),
-            name=ds_data.get("name", ""),
-            version=ds_data.get("version", "1.0.0"),
-            source_type=ds_data.get("source_type", "licensed"),
-            modality=ds_data.get("modality", "text"),
-            size=ds_data.get("size", {"records": 0, "size_gb": 0.0}),
-            subject_refs=ds_data.get("subject_refs", []),
-            **_extras(ds_data, dataset_known),
+    for idx, ds_data in enumerate(_require_array(entities_raw.get("datasets", []), "entities.datasets")):
+        ds_data = _require_object(ds_data, f"entities.datasets[{idx}]")
+        ds = _build_model(
+            Dataset,
+            {
+                "dataset_id": ds_data.get("dataset_id", ""),
+                "name": ds_data.get("name", ""),
+                "version": ds_data.get("version", "1.0.0"),
+                "source_type": ds_data.get("source_type", "licensed"),
+                "modality": ds_data.get("modality", "text"),
+                "size": ds_data.get("size", {"records": 0, "size_gb": 0.0}),
+                "subject_refs": ds_data.get("subject_refs", []),
+                **_extras(ds_data, dataset_known),
+            },
+            f"entities.datasets[{idx}]",
         )
         entities.datasets.append(ds)
 
     actor_known = {"actor_id", "role", "name", "organization"}
-    for act_data in entities_raw.get("actors", []):
-        actor = Actor(
-            actor_id=act_data.get("actor_id", ""),
-            role=act_data.get("role", "provider"),
-            name=act_data.get("name", ""),
-            organization=act_data.get("organization", ""),
-            **_extras(act_data, actor_known),
+    for idx, act_data in enumerate(_require_array(entities_raw.get("actors", []), "entities.actors")):
+        act_data = _require_object(act_data, f"entities.actors[{idx}]")
+        actor = _build_model(
+            Actor,
+            {
+                "actor_id": act_data.get("actor_id", ""),
+                "role": act_data.get("role", "provider"),
+                "name": act_data.get("name", ""),
+                "organization": act_data.get("organization", ""),
+                **_extras(act_data, actor_known),
+            },
+            f"entities.actors[{idx}]",
         )
         entities.actors.append(actor)
 
     rel_known = {"source_ref", "target_ref", "relationship_type", "description"}
-    for rel_data in entities_raw.get("relationships", []):
-        rel = Relationship(
-            source_ref=rel_data.get("source_ref", ""),
-            target_ref=rel_data.get("target_ref", ""),
-            relationship_type=rel_data.get("relationship_type", "calls"),
-            description=rel_data.get("description", ""),
-            **_extras(rel_data, rel_known),
+    for idx, rel_data in enumerate(_require_array(entities_raw.get("relationships", []), "entities.relationships")):
+        rel_data = _require_object(rel_data, f"entities.relationships[{idx}]")
+        rel = _build_model(
+            Relationship,
+            {
+                "source_ref": rel_data.get("source_ref", ""),
+                "target_ref": rel_data.get("target_ref", ""),
+                "relationship_type": rel_data.get("relationship_type", "calls"),
+                "description": rel_data.get("description", ""),
+                **_extras(rel_data, rel_known),
+            },
+            f"entities.relationships[{idx}]",
         )
         entities.relationships.append(rel)
 
     # Parse profiles
     profiles: list[ProfileEntry] = []
-    for prof_data in manifest_data.get("profiles", []):
-        profiles.append(ProfileEntry(**prof_data))
+    for idx, prof_data in enumerate(_require_array(manifest_data.get("profiles", []), "profiles")):
+        profiles.append(
+            _build_model(
+                ProfileEntry,
+                _require_object(prof_data, f"profiles[{idx}]"),
+                f"profiles[{idx}]",
+            )
+        )
 
     # Parse audit trail
     audit_trail: list[AuditTrailEntry] = []
-    for at_data in manifest_data.get("audit_trail", []):
-        audit_trail.append(AuditTrailEntry(**at_data))
+    for idx, at_data in enumerate(_require_array(manifest_data.get("audit_trail", []), "audit_trail")):
+        audit_trail.append(
+            _build_model(
+                AuditTrailEntry,
+                _require_object(at_data, f"audit_trail[{idx}]"),
+                f"audit_trail[{idx}]",
+            )
+        )
 
     # Load records from JSONL files.
     #
@@ -603,7 +747,18 @@ def _load_directory(bundle_dir: Path) -> Package:
     # caught by :func:`acef.validation.engine.validate_bundle` as
     # ValidationDiagnostics (VAL-LOAD-005 agreement).
     raw_record_dicts: list[dict[str, Any]] = []
-    for rf_entry in manifest_data.get("record_files", []):
+    record_files_raw = manifest_data.get("record_files", [])
+    if not isinstance(record_files_raw, list):
+        raise ACEFFormatError(
+            f"Manifest section 'record_files' must be a JSON array, got {type(record_files_raw).__name__}",
+            code="ACEF-050",
+        )
+    for rf_idx, rf_entry in enumerate(record_files_raw):
+        if not isinstance(rf_entry, dict):
+            raise ACEFFormatError(
+                f"record_files[{rf_idx}] must be a JSON object, got {type(rf_entry).__name__}",
+                code="ACEF-050",
+            )
         rf_path_str = rf_entry.get("path")
         if not rf_path_str:
             raise ACEFFormatError(
