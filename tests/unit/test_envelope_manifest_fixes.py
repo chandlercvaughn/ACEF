@@ -112,11 +112,17 @@ class TestAddProfileRequiresProvisions:
             pkg.add_profile("eu-ai-act")  # type: ignore[call-arg]
 
     def test_add_profile_with_none_raises_acef_002(self) -> None:
-        """An explicit provisions=None must raise ACEFSchemaError (the
-        empty-guard), not silently produce an empty applicable_provisions."""
+        """An explicit provisions=None must raise ACEFSchemaError, not silently
+        produce an empty applicable_provisions. None is not a concrete ordered
+        sequence, so it is caught by the type gate (roborev: provisions must be
+        a list/tuple, checked before any iteration)."""
         pkg = Package()
-        with pytest.raises(ACEFSchemaError, match="applicable_provisions"):
+        with pytest.raises(ACEFSchemaError, match="must be a list or tuple"):
             pkg.add_profile("eu-ai-act", provisions=None)  # type: ignore[arg-type]
+        # The error is still ACEF-002 (the documented schema-invalid-input code).
+        with pytest.raises(ACEFSchemaError) as exc:
+            pkg.add_profile("eu-ai-act", provisions=None)  # type: ignore[arg-type]
+        assert exc.value.code == "ACEF-002"
 
     def test_add_profile_with_empty_list_raises(self) -> None:
         pkg = Package()

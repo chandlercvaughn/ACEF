@@ -260,6 +260,63 @@ class TestAddProfile:
         with pytest.raises(ACEFSchemaError, match="at least one applicable"):
             pkg.add_profile("eu-ai-act-2024", provisions=[])
 
+    def test_add_profile_accepts_tuple_provisions(self):
+        # A tuple is a concrete, ordered sequence — accepted, order preserved.
+        pkg = Package()
+        entry = pkg.add_profile("eu-ai-act-2024", provisions=("article-9", "article-10"))
+        assert entry.applicable_provisions == ["article-9", "article-10"]
+
+    def test_add_profile_rejects_dict_provisions(self):
+        # roborev F3: a dict is iterable; iterating it yields KEYS, so a
+        # non-empty dict silently authored a profile from its keys. A dict is
+        # not a sequence of provision strings — reject it.
+        pkg = Package()
+        with pytest.raises(ACEFSchemaError, match="must be a list"):
+            pkg.add_profile(
+                "eu-ai-act-2024",
+                provisions={"article-9": 1, "article-10": 2},  # type: ignore[arg-type]
+            )
+
+    def test_add_profile_rejects_set_provisions(self):
+        # roborev F3: a set is iterable but UNORDERED — accepting it would make
+        # applicable_provisions order non-deterministic, breaking the byte-stable
+        # bundle guarantee. Reject it.
+        pkg = Package()
+        with pytest.raises(ACEFSchemaError, match="must be a list"):
+            pkg.add_profile(
+                "eu-ai-act-2024",
+                provisions={"article-9", "article-10"},  # type: ignore[arg-type]
+            )
+
+    def test_add_profile_rejects_generator_provisions(self):
+        # roborev F3: a generator is iterable but single-use and not a concrete
+        # ordered sequence — reject before any iteration so package state is
+        # never mutated from a consumed iterator.
+        pkg = Package()
+        with pytest.raises(ACEFSchemaError, match="must be a list"):
+            pkg.add_profile(
+                "eu-ai-act-2024",
+                provisions=(p for p in ["article-9", "article-10"]),  # type: ignore[arg-type]
+            )
+
+    def test_add_profile_rejects_empty_generator_provisions(self):
+        # roborev F3: an empty generator is TRUTHY, so it bypassed the
+        # `if not provisions` emptiness gate and authored an invalid empty
+        # profile (applicable_provisions=[], schema minItems:1). Reject by type.
+        pkg = Package()
+        with pytest.raises(ACEFSchemaError, match="must be a list"):
+            pkg.add_profile(
+                "eu-ai-act-2024",
+                provisions=(p for p in []),  # type: ignore[arg-type]
+            )
+
+    def test_add_profile_rejects_non_iterable_provisions(self):
+        # roborev F3: a non-iterable (int) is not a sequence — reject with a
+        # clear ACEFSchemaError, not a downstream TypeError from iteration.
+        pkg = Package()
+        with pytest.raises(ACEFSchemaError, match="must be a list"):
+            pkg.add_profile("eu-ai-act-2024", provisions=123)  # type: ignore[arg-type]
+
 
 class TestAddNamespace:
     """Test Package.add_namespace — v1.1 vendor-extension (X6) setter."""

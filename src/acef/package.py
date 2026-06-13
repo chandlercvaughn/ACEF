@@ -761,23 +761,36 @@ class Package:
             The created ProfileEntry.
 
         Raises:
-            ACEFSchemaError: If ``provisions`` is not a list/sequence of
-                provision strings (ACEF-002). A bare ``str``/``bytes`` is
-                rejected even though it is iterable: ``list("article-9")``
-                would shred it into ``["a", "r", "t", ...]``, authoring a
-                schema-valid but semantically corrupted profile. A single
-                provision MUST be passed as a list (``["article-9"]``). An
-                empty sequence, a non-string element, or an empty-string
-                element is likewise rejected (audit envelope-manifest-3,
-                roborev builder-input-validation).
+            ACEFSchemaError: If ``provisions`` is not a concrete, ordered
+                ``list``/``tuple`` of provision strings (ACEF-002). The type is
+                checked up front, BEFORE any iteration, so only a ``list`` or
+                ``tuple`` is accepted. Every other shape is rejected, including:
+                a bare ``str``/``bytes`` (``list("article-9")`` would shred it
+                into ``["a", "r", ...]``); a ``dict`` (iterating yields KEYS,
+                silently authoring a profile from keys); a ``set`` (unordered —
+                accepting it would make ``applicable_provisions`` order
+                non-deterministic, breaking byte-stable bundle output); and a
+                generator/other lazy iterable (an EMPTY generator is truthy, so
+                it would bypass the emptiness gate and author an invalid empty
+                profile; it is also single-use). A single provision MUST be
+                passed as a list (``["article-9"]``). An empty sequence, a
+                non-string element, or an empty-string element is likewise
+                rejected (audit envelope-manifest-3, roborev
+                builder-input-validation).
         """
-        if isinstance(provisions, (str, bytes)):
+        # Type gate BEFORE any iteration: accept ONLY a concrete, ordered
+        # sequence (list/tuple). str/bytes/dict/set/generator/other iterables
+        # and non-iterables are all rejected here — iterating them would shred,
+        # reorder non-deterministically, or (empty generator) bypass the
+        # emptiness check below and author a schema-invalid empty profile.
+        if not isinstance(provisions, (list, tuple)):
             raise ACEFSchemaError(
-                f"Profile {profile_id!r} provisions must be a list of provision "
-                f"strings, not a bare {type(provisions).__name__}: a single "
-                'provision must be passed as a list (e.g. ["article-9"]), not '
-                f"{provisions!r} — a bare string/bytes would be shredded into "
-                "individual characters/bytes.",
+                f"Profile {profile_id!r} provisions must be a list or tuple of "
+                f"provision strings, not a {type(provisions).__name__}: a single "
+                'provision must be passed as a list (e.g. ["article-9"]). A '
+                "str/bytes would be shredded into characters, a dict would be "
+                "iterated as keys, a set would have non-deterministic order, and "
+                "a generator/other iterable is not a concrete ordered sequence.",
                 code="ACEF-002",
             )
         if not provisions:
