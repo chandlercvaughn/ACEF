@@ -26,7 +26,13 @@ from acef.models.metadata import PackageMetadata, ProducerInfo, Versioning
 from acef.models.records import RecordEnvelope
 from acef.models.subjects import Subject
 from acef.models.urns import URNType, parse_urn, validate_urn
-from acef.package import Package
+from acef.package import (
+    _INCIDENT_RECORD_TYPES,
+    _V1_1_INCIDENT_RELATIONSHIP_EDGES,
+    Package,
+    _v1_1_only_incident_report_fields,
+)
+from acef.schemas.registry import parse_core_version_minor
 
 # RFC 4122 §4.3 name-based (v5) namespace for ACEF merge package identifiers.
 # Stable, project-scoped namespace so a deterministic merge package_id derives
@@ -95,6 +101,17 @@ def _compute_incident_links(records: list[RecordEnvelope]) -> list[IncidentLink]
     a deterministic pure function of the merged records — no collapse, no v1.2
     edge, no authority, reproducible across runs.
 
+    LINKAGE CANDIDATES ARE RESTRICTED TO THE SUPPORTED INCIDENT RECORD TYPES
+    (:data:`_INCIDENT_RECORD_TYPES` from package.py — ``incident_card`` /
+    ``incident_report``). The §5.5 ``incident_dedupe_key`` spine is emitted by the
+    F-M8-DEDUPE builders ONLY on those types (PUBLIC plaintext key); a vendor
+    ``x-*`` record SKIPS payload validation, so a non-incident extension record
+    could carry a field literally named ``incident_dedupe_key`` and would be
+    FALSELY linked if we keyed purely on the payload field (roborev MEDIUM on
+    a32e21b7). Restricting to the incident record-type set means a same-named field
+    on any non-incident record (``x-*`` or core) is ignored, while the real
+    incident_card↔incident_card / incident_report linkage is unaffected.
+
     Operates on the records that are ACTUALLY present in the merged package (the
     post-conflict-resolution set), so a record dropped/kept by keep_latest is
     linked exactly as it appears in the output bundle — the linkage can never
@@ -102,6 +119,11 @@ def _compute_incident_links(records: list[RecordEnvelope]) -> list[IncidentLink]
     """
     by_key: dict[str, list[str]] = {}
     for record in records:
+        # Only a SUPPORTED incident record type can spell a §5.5 linkage key. A
+        # vendor x-* (or any non-incident core) record carrying a same-named
+        # payload field is NOT an incident and MUST NOT be linked (roborev MEDIUM).
+        if record.record_type not in _INCIDENT_RECORD_TYPES:
+            continue
         payload = record.payload
         if not isinstance(payload, dict):
             continue
@@ -122,6 +144,104 @@ def _compute_incident_links(records: list[RecordEnvelope]) -> list[IncidentLink]
         # the merged package, but sorting guarantees input-order independence).
         links.append(IncidentLink(key, tuple(sorted(set(record_ids)))))
     return links
+
+
+# The canonical v1.1 floor declaration. A merged bundle that carries v1.1-only
+# incident content (or whose highest input is below it within major 1) is raised
+# to exactly this so the validator resolves the v1.1 schema set + incident rules,
+# matching ``Package._ensure_v1_1`` / ``schema_version_for_core_version``.
+_V1_1_CORE_VERSION = "1.1.0"
+
+
+def _core_version_sort_key(core_version: str) -> tuple[int, int]:
+    """Total-order key for a ``core_version`` string via the SINGLE semver parse.
+
+    Reuses :func:`acef.schemas.registry.parse_core_version_minor` (never a
+    lexicographic string compare): ``None`` parse (legacy/unparseable) sorts
+    lowest as ``(-1, -1)``; a parsed major with a malformed/absent minor sorts as
+    ``(major, -1)`` so a numeric minor outranks a malformed one at the same major.
+    """
+    parsed = parse_core_version_minor(core_version)
+    if parsed is None:
+        return (-1, -1)
+    major, minor = parsed
+    return (major, minor if minor is not None else -1)
+
+
+def _merged_content_requires_v1_1(
+    records: list[RecordEnvelope],
+    relationships: list[Any],
+) -> bool:
+    """True when the RESOLVED merged content can only live on a v1.1 manifest.
+
+    Mirrors the EXACT version-gate predicates the builders use (package.py), so the
+    merged ``core_version`` decision can never drift from the per-record gate:
+
+      * any v1.1-only incident record type — ``incident_card`` /
+        ``incident_report`` carrying a v1.1-only ``incident_report`` payload field
+        (``card_source`` or a §5.5 dedupe field, via
+        :func:`_v1_1_only_incident_report_fields`); ``incident_card`` is itself a
+        v1.1-only type so it always qualifies;
+      * any record carrying a §5.5 ``incident_dedupe_key`` (the spine is a v1.1
+        field even when its host record's schema keeps additionalProperties);
+      * any v1.1-only incident relationship edge
+        (:data:`_V1_1_INCIDENT_RELATIONSHIP_EDGES` — ``public_projection_of`` …).
+
+    A plain v1.0 ``incident_report`` WITHOUT any v1.1-only member is NOT a trigger
+    (it predates RFC-0002), exactly as ``Package.record`` does not bump for it.
+    """
+    v1_1_report_fields = _v1_1_only_incident_report_fields()
+    for record in records:
+        rtype = record.record_type
+        payload = record.payload if isinstance(record.payload, dict) else {}
+        if rtype == "incident_card":
+            return True
+        if rtype == "incident_report" and not v1_1_report_fields.isdisjoint(payload):
+            return True
+        if _INCIDENT_DEDUPE_PAYLOAD_KEY in payload:
+            return True
+    for rel in relationships:
+        if rel.relationship_type in _V1_1_INCIDENT_RELATIONSHIP_EDGES:
+            return True
+    return False
+
+
+def _derive_merged_core_version(
+    packages: list[Package],
+    records: list[RecordEnvelope],
+    relationships: list[Any],
+) -> str:
+    """Derive the merged ``core_version`` from the inputs + resolved content.
+
+    Two combined constraints (roborev HIGH on a32e21b7):
+
+      1. take the HIGHEST input ``core_version`` (semver-tuple compare via the
+         single :func:`parse_core_version_minor` parse) so a merge never DOWNGRADES
+         below any input — an input already at ``1.1.0`` (every typed-incident-
+         builder output) keeps the merged bundle at ``1.1.0``, and a future v1.y /
+         unsupported-major input is preserved (never clobbered);
+      2. FLOOR to ``1.1.0`` whenever the resolved merged records/relationships
+         carry v1.1-only incident content (:func:`_merged_content_requires_v1_1`),
+         so the merged manifest is never the self-contradictory v1.0-declaring /
+         v1.1-carrying bundle the validator rejects (ACEF-003 Unknown record_type).
+
+    A pure-v1.0 merge (all inputs ``1.0.0``, no v1.1 content) stays ``1.0.0``
+    (backward-compat). The floor only RAISES toward ``1.1.0`` within major 1 (and
+    for a legacy/unparseable highest); a highest input at ``>= 1.1.0`` already
+    satisfies the floor and is returned unchanged, never downgraded.
+    """
+    # Highest input core_version by the single semver parse (input order
+    # independent — pure max over the parsed tuples).
+    highest = max((pkg.versioning.core_version for pkg in packages), key=_core_version_sort_key)
+
+    if not _merged_content_requires_v1_1(records, relationships):
+        return highest
+
+    # v1.1 content present: ensure the result is at least the v1.1 floor WITHOUT
+    # downgrading a higher (e.g. future v1.y / unsupported-major) highest input.
+    if _core_version_sort_key(highest) >= _core_version_sort_key(_V1_1_CORE_VERSION):
+        return highest
+    return _V1_1_CORE_VERSION
 
 
 class MergeResult:
@@ -605,10 +725,18 @@ def merge_packages(
         for owner_pkg_index, record in merged_records
     ]
 
+    # Derive the merged core_version from the inputs + resolved content (roborev
+    # HIGH on a32e21b7): the HIGHEST input core_version, floored to 1.1.0 whenever
+    # the merged records/relationships carry v1.1-only incident content. Building
+    # with the bare Versioning() default (1.0.0) produced a self-contradictory
+    # v1.0-declaring / v1.1-carrying manifest the validator rejects (ACEF-003
+    # Unknown record_type: 'incident_card'). A pure-v1.0 merge stays 1.0.0.
+    merged_core_version = _derive_merged_core_version(packages, resolved_records, merged_entities.relationships)
+
     # Construct merged package via _init_from_parts (M-R2-2)
     merged = Package._init_from_parts(
         metadata=merged_metadata,
-        versioning=Versioning(),
+        versioning=Versioning(core_version=merged_core_version),
         subjects=merged_subjects,
         entities=merged_entities,
         profiles=resolved_profiles,
