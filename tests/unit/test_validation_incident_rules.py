@@ -24,9 +24,12 @@ Determinism: every fixture is a static literal; no wall-clock / random values.
 from __future__ import annotations
 
 import copy
+import json
+from pathlib import Path
 from typing import Any
 
 import jsonpointer
+import pytest
 from cryptography.hazmat.primitives.asymmetric import ec
 
 from acef.integrity import canonicalize
@@ -2103,4 +2106,125 @@ class TestCheckIncidentEdges:
         assert _codes(diags) == [], (
             "a dangling record URN endpoint must be left to the reference checker (ACEF-020), "
             f"not double-reported as ACEF-083, got {_codes(diags)}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Install-safety: the §5.11 source-to-card projection map must be a FROZEN
+# module constant (always packaged in src/acef), NOT a runtime read of
+# acef-conventions/v1.1/ schema files (which are absent in a pip-installed
+# wheel/sdist). roborev (codex xhigh) Medium on fe58b71f: a schema-derived
+# runtime map FAILS OPEN in an installed deployment — every /card_source/*
+# projection edge VANISHES and the disposition-honored ACEF-086 check silently
+# disappears. The frozen constant is fail-CLOSED.
+# ---------------------------------------------------------------------------
+
+
+def _derive_projection_from_v1_1_schemas() -> dict[str, str] | None:
+    """Derive the §5.11 projection set from the on-disk v1.1 schemas, the same
+    read the pre-fix runtime did. Returns ``None`` when the schema dir is ABSENT
+    (installed-only CI) so the drift-guard test can skip rather than fail."""
+    here = Path(__file__).resolve()
+    card_path: Path | None = None
+    source_path: Path | None = None
+    for ancestor in here.parents:
+        c = ancestor / "acef-conventions" / "v1.1" / "incident_card.schema.json"
+        s = ancestor / "acef-conventions" / "v1.1" / "incident_report.card_source.schema.json"
+        if c.is_file() and s.is_file():
+            card_path, source_path = c, s
+            break
+    if card_path is None or source_path is None:
+        return None
+    card_schema = json.loads(card_path.read_text(encoding="utf-8"))
+    source_schema = json.loads(source_path.read_text(encoding="utf-8"))
+    card_root_props = card_schema.get("properties", {})
+    card_source_props = source_schema.get("properties", {})
+    projection: dict[str, str] = {}
+    for field in card_source_props:
+        if isinstance(field, str) and field in card_root_props:
+            projection[f"/card_source/{field}"] = field
+    if "severity" in card_root_props:
+        projection["/severity"] = "severity"
+    return projection
+
+
+class TestProjectionMapInstallSafety:
+    """The frozen-constant projection map is install-safe and fail-closed."""
+
+    def test_runtime_projection_source_is_frozen_constant_not_disk_read(self) -> None:
+        # The runtime disposition-honored check MUST source its projection map from
+        # the frozen module constant, never from a disk read. (If a schema-reading
+        # function survives only as a checkout test helper, the runtime accessor must
+        # equal the frozen constant.)
+        assert isinstance(ir._SOURCE_TO_CARD_PROJECTION, dict)
+        assert ir._SOURCE_TO_CARD_PROJECTION  # non-empty
+        # The exact frozen set the constant must mirror (schema-derived in fe58b71f).
+        assert ir._SOURCE_TO_CARD_PROJECTION == {
+            "/card_source/severity_vector": "severity_vector",
+            "/card_source/harm_core": "harm_core",
+            "/card_source/coordinated_disclosure": "coordinated_disclosure",
+            "/card_source/public_incident_id": "public_incident_id",
+            "/card_source/id_grade": "id_grade",
+            "/severity": "severity",
+        }
+
+    def test_installed_layout_absent_schemas_still_fires_086(self, monkeypatch: Any) -> None:
+        # INSTALLED-LAYOUT SIMULATION. Force every ``acef-conventions/v1.1`` schema
+        # file to report ABSENT (the wheel/sdist packages only src/acef), without
+        # mutating any frozen file: patch ``Path.is_file`` so any path under
+        # ``acef-conventions/v1.1`` is treated as missing. Pre-fix (schema-derived
+        # runtime) the projection map COLLAPSED to {'/severity': 'severity'} — every
+        # /card_source/* projection edge VANISHED and /card_source/severity_vector
+        # disposed regulator-only + present-on-card NO LONGER fired ACEF-086
+        # (fail-OPEN). Post-fix (frozen constant) the edge fires REGARDLESS of schema
+        # presence because the runtime reads NO schema file at all.
+        real_is_file = Path.is_file
+
+        def _is_file_hiding_v1_1(self_path: Path) -> bool:
+            if "acef-conventions/v1.1" in self_path.as_posix():
+                return False
+            return real_is_file(self_path)
+
+        monkeypatch.setattr(Path, "is_file", _is_file_hiding_v1_1)
+        # Clear any process-cached projection map if a schema-reading helper survives
+        # (it must NOT be the runtime source post-fix; this is belt-and-suspenders).
+        helper = getattr(ir, "_source_to_card_projection_map", None)
+        if helper is not None and hasattr(helper, "cache_clear"):
+            helper.cache_clear()
+        loader = getattr(ir, "_load_v1_1_schema", None)
+        if loader is not None and hasattr(loader, "cache_clear"):
+            loader.cache_clear()
+
+        report = TestACEF086PublishabilityGate._report_with_card_source_disposition(
+            TestACEF086PublishabilityGate(),
+            pointer="/card_source/severity_vector",
+            disposition="regulator-only",
+        )
+        sev_vector = TestACEF086PublishabilityGate._SEV_VECTOR
+        card = _published_card({"severity_vector": sev_vector})
+        diags = ir.check_publishability([card, report], source_backed=True)
+        assert "ACEF-086" in _codes(diags), (
+            "with the v1.1 schema dir ABSENT (installed wheel), the disposition-honored "
+            "check must STILL fire ACEF-086 for a /card_source/severity_vector edge — the "
+            "projection map must be the frozen module constant, not a runtime schema read "
+            "that collapses to {'/severity': 'severity'} off-checkout (fail-OPEN)"
+        )
+
+    def test_frozen_constant_matches_schema_derived_set_drift_guard(self) -> None:
+        # SCHEMA-DRIFT GUARD (checkout-only). Derive the projection set from the v1.1
+        # schemas on disk and assert it EQUALS the frozen constant — so any future
+        # schema drift (a new public card_source field that overlaps an incident_card
+        # root) is caught in CI. The constant is the runtime authority; this test only
+        # guards it from going stale. If the schema dir is absent (installed-only CI),
+        # SKIP — the constant remains authoritative and install-safe.
+        derived = _derive_projection_from_v1_1_schemas()
+        if derived is None:
+            pytest.skip(
+                "v1.1 schema dir absent (installed-only layout); the frozen "
+                "_SOURCE_TO_CARD_PROJECTION constant is authoritative — the schema "
+                "cross-check is a checkout-only drift guard"
+            )
+        assert derived == ir._SOURCE_TO_CARD_PROJECTION, (
+            "v1.1 schemas drifted from the frozen _SOURCE_TO_CARD_PROJECTION constant; "
+            "update the constant (and its citation comment) to mirror the new schema set"
         )
