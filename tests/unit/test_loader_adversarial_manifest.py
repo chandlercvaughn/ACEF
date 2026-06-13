@@ -144,6 +144,119 @@ def test_retention_policy_not_a_dict_raises_structured_error(tmp_path: Path) -> 
     assert "retention_policy" in exc.value.message
 
 
+@pytest.mark.parametrize(
+    "falsy_value",
+    [
+        pytest.param([], id="empty-list"),
+        pytest.param("", id="empty-string"),
+        pytest.param(0, id="zero"),
+        pytest.param(False, id="false"),
+    ],
+)
+def test_retention_policy_present_but_falsy_non_object_raises(tmp_path: Path, falsy_value: object) -> None:
+    """A PRESENT but falsy non-object ``metadata.retention_policy`` must raise
+    ACEF-002 — not be silently treated as absent and dropped on re-export.
+
+    This guards the truthy-vs-presence bypass (roborev Medium): the section was
+    guarded only when the raw value was TRUTHY (``if retention_raw:``), so a
+    present falsy non-object (``[]``, ``""``, ``0``, ``false``) skipped
+    ``_require_object`` and was silently coerced to ``None`` — malformed input
+    accepted then dropped. The guard must branch on ABSENCE/null only, so every
+    PRESENT value flows through ``_require_object`` and a non-dict is rejected.
+    """
+    bundle = tmp_path / "bundle"
+    manifest = _valid_manifest()
+    manifest["metadata"]["retention_policy"] = falsy_value
+    _write_manifest(bundle, manifest)
+
+    with pytest.raises(ACEFError) as exc:
+        acef.load(str(bundle))
+
+    assert isinstance(exc.value, ACEFSchemaError)
+    assert exc.value.code == "ACEF-002"
+    assert "retention_policy" in exc.value.message
+
+
+@pytest.mark.parametrize(
+    "absent_form",
+    [
+        pytest.param("missing", id="key-absent"),
+        pytest.param(None, id="explicit-null"),
+        pytest.param({}, id="empty-object"),
+    ],
+)
+def test_retention_policy_absent_or_empty_object_loads_as_no_policy(tmp_path: Path, absent_form: object) -> None:
+    """An absent key, an explicit ``null``, or an EMPTY object ``{}`` means
+    "no policy": the bundle must still load with ``retention_policy is None``.
+
+    The presence-based fix must NOT over-reject these legitimately-empty forms;
+    the pre-existing "no policy" semantics for absent/null/``{}`` are preserved.
+    """
+    bundle = tmp_path / "bundle"
+    manifest = _valid_manifest()
+    if absent_form == "missing":
+        manifest["metadata"].pop("retention_policy", None)
+    else:
+        manifest["metadata"]["retention_policy"] = absent_form
+    _write_manifest(bundle, manifest)
+
+    pkg = acef.load(str(bundle))
+    assert pkg.metadata.retention_policy is None
+
+
+def test_retention_policy_valid_object_loads(tmp_path: Path) -> None:
+    """A well-formed ``retention_policy`` object loads into a RetentionPolicy."""
+    bundle = tmp_path / "bundle"
+    manifest = _valid_manifest()
+    manifest["metadata"]["retention_policy"] = {
+        "min_retention_days": 365,
+        "personal_data_interplay": "gdpr-art-5",
+    }
+    _write_manifest(bundle, manifest)
+
+    pkg = acef.load(str(bundle))
+    assert pkg.metadata.retention_policy is not None
+    assert pkg.metadata.retention_policy.min_retention_days == 365
+
+
+@pytest.mark.parametrize(
+    ("section", "mutate"),
+    [
+        pytest.param("metadata", lambda m: m.__setitem__("metadata", 0), id="metadata-zero"),
+        pytest.param("versioning", lambda m: m.__setitem__("versioning", []), id="versioning-empty-list"),
+        pytest.param("subjects", lambda m: m.__setitem__("subjects", ""), id="subjects-empty-string"),
+        pytest.param("subjects", lambda m: m.__setitem__("subjects", 0), id="subjects-zero"),
+        pytest.param("entities", lambda m: m.__setitem__("entities", 0), id="entities-zero"),
+        pytest.param(
+            "entities",
+            lambda m: m["entities"].__setitem__("components", ""),
+            id="entities-components-empty-string",
+        ),
+        pytest.param("profiles", lambda m: m.__setitem__("profiles", 0), id="profiles-zero"),
+        pytest.param("audit_trail", lambda m: m.__setitem__("audit_trail", ""), id="audit-trail-empty-string"),
+    ],
+)
+def test_sibling_sections_present_but_falsy_non_container_raises(tmp_path: Path, section: str, mutate: object) -> None:
+    """Audit lock-in: every OTHER guarded manifest section already rejects a
+    PRESENT falsy non-object/non-array, because it is defaulted via
+    ``_require_object(x.get(key, {}))`` / ``_require_array(x.get(key, []))`` —
+    the default fires only on ABSENCE, so a present falsy value still flows
+    through the type-guard. These cases prove the bypass was unique to
+    ``retention_policy`` and stays fixed across the sibling guards.
+    """
+    bundle = tmp_path / "bundle"
+    manifest = _valid_manifest()
+    mutate(manifest)  # type: ignore[operator]
+    _write_manifest(bundle, manifest)
+
+    with pytest.raises(ACEFError) as exc:
+        acef.load(str(bundle))
+
+    assert isinstance(exc.value, ACEFSchemaError)
+    assert exc.value.code == "ACEF-002"
+    assert section in exc.value.message
+
+
 def test_versioning_is_a_string_raises_structured_error(tmp_path: Path) -> None:
     """``versioning`` as a string must raise ACEF-002, not a raw
     ``TypeError: argument after ** must be a mapping, not str``."""

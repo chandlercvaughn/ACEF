@@ -519,20 +519,27 @@ def _load_directory(bundle_dir: Path) -> Package:
     producer_raw = _require_object(metadata_raw.get("producer", {}), "metadata.producer")
     producer = _build_model(ProducerInfo, producer_raw, "metadata.producer")
 
-    # ``retention_policy`` is OPTIONAL: an absent key, ``null``, or an empty
-    # object means "no policy" (the pre-existing falsy semantics — preserved
-    # so a bundle without retention still loads and round-trips identically).
-    # A non-empty, non-object value (e.g. the string ``"forever"``) is a
-    # structural error and is rejected via ``_require_object``.
+    # ``retention_policy`` is OPTIONAL: an absent key, an explicit ``null``, or
+    # an empty object ``{}`` means "no policy" (the pre-existing semantics —
+    # preserved so a bundle without retention still loads and round-trips
+    # identically). The guard branches on ABSENCE/null/empty-object ONLY, never
+    # on TRUTHINESS: a PRESENT but falsy non-object (``[]``, ``""``, ``0``,
+    # ``false``) is NOT "absent" — it is malformed and MUST be rejected via
+    # ``_require_object`` (ACEF-002), not silently coerced to ``None`` and
+    # dropped on re-export. Truthy-gating (``if retention_raw:``) would let
+    # every falsy non-object bypass the type-guard, so we test presence
+    # explicitly: ``None`` (absent / ``null``) and ``{}`` (empty object) are
+    # the only "no policy" forms; any other present value flows through
+    # ``_require_object`` and a non-dict raises ACEF-002.
     retention_raw = metadata_raw.get("retention_policy")
     retention = (
-        _build_model(
+        None
+        if retention_raw is None or retention_raw == {}
+        else _build_model(
             RetentionPolicy,
             _require_object(retention_raw, "metadata.retention_policy"),
             "metadata.retention_policy",
         )
-        if retention_raw
-        else None
     )
 
     # Build metadata. Pass through any unknown metadata-object keys (vendor
