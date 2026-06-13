@@ -122,9 +122,9 @@ def enforce_tenant_uniformity(
             (
                 "Bundle declares analysis_mode="
                 f"{analysis_mode!r} but records carry multiple distinct "
-                f"tenant_label values: {labels_sorted!r}. Per spec §6.4, a "
-                "single bundle must serve exactly one tenant when an "
-                "analysis_mode is in effect."
+                f"tenant_label values: {labels_sorted!r}. Per the ACEF-075 "
+                "error-taxonomy row (spec §3.6), a single bundle MUST NOT "
+                "carry two distinct tenant_label values."
             ),
         )
     ]
@@ -189,8 +189,9 @@ def enforce_cross_tenant_refs(
                             f"Cross-tenant entity reference: record "
                             f"{rec_id!r} (tenant_label={rec_tenant!r}) "
                             f"references entity {urn!r} owned by tenant "
-                            f"{owner_tenant!r}. Per spec §6.4, entity "
-                            "references MUST NOT cross tenant_label "
+                            f"{owner_tenant!r}. Per the ACEF-075 tenant-"
+                            "uniformity model (spec §3.6 error taxonomy), "
+                            "entity references MUST NOT cross tenant_label "
                             "boundaries."
                         ),
                     )
@@ -407,10 +408,18 @@ def enforce_mode_gates(
 ) -> list[ValidationDiagnostic]:
     """Emit ACEF-080 when analysis_mode requires record types that are absent.
 
-    Per VAL-VALIDATION-VERSION-COMPAT-002 (and the spec §6.6 mode-gating
-    semantics): a bundle declaring `analysis_mode: "subscriber"` MUST
-    contain at least one `authorized_test_scope` AND at least one
-    `harness_attestation` record. Missing either emits ACEF-080.
+    Per VAL-VALIDATION-VERSION-COMPAT-002 and the ACEF-080 error-taxonomy
+    row (spec §3.6: "Bundle declares analysis_mode but lacks required
+    envelope/manifest fields for that mode"): a bundle declaring
+    `analysis_mode: "subscriber"` MUST contain at least one
+    `authorized_test_scope` AND at least one `harness_attestation` record.
+    Missing either emits ACEF-080.
+
+    NOTE (audit cross-record-authority-2): the ACEF-080 *code* is normative
+    (spec §3.6), but the per-mode required-record-type TABLE itself has no
+    normative home in the ACEF spec or RFC-0002 — it derives from the ACEF
+    mode-gate model defined by the acef-v0.4-freddy-adoption operation. The
+    diagnostic therefore cites the code's real home, not a fabricated §.
     """
     if not isinstance(manifest, dict):
         return []
@@ -433,9 +442,11 @@ def enforce_mode_gates(
             "ACEF-080",
             (
                 "Bundle declares analysis_mode='subscriber' but is missing "
-                f"required mode-gated record types: {missing!r}. Per spec "
-                "§6.6, subscriber-mode bundles MUST carry at least one "
-                "authorized_test_scope AND at least one harness_attestation."
+                f"required mode-gated record types: {missing!r}. Per the "
+                "ACEF-080 mode-gate rule (spec §3.6 error taxonomy), "
+                "subscriber-mode bundles MUST carry at least one "
+                "authorized_test_scope AND at least one harness_attestation "
+                "(per-mode table: ACEF mode-gate model)."
             ),
         )
     ]
@@ -479,7 +490,7 @@ def enforce_disposition_authority(
     manifest: dict[str, Any],
     records: list[dict[str, Any]],
 ) -> list[ValidationDiagnostic]:
-    """Emit ACEF-080 for disposition records that violate the §14.5 matrix.
+    """Emit ACEF-080 for disposition records that violate the authority matrix.
 
     For each `disposition_record` (risk_treatment with
     treatment_subtype=external_disposition) whose
@@ -487,13 +498,21 @@ def enforce_disposition_authority(
     associated actor's role and the authority_class, and consult the
     matrix. A denied cell fires ACEF-080.
 
-    The authority_class is read from `payload.authority_check.authority_class`
-    (per Freddy brief §14.5 semantics). The check FAILS CLOSED (audit finding
-    cross-record-authority-5): when `authority_granted: true` is claimed but
-    authority_class is missing, not a non-empty string, or not one of the
-    five recognized §14.5 classes, ACEF-080 is emitted — mirroring the
-    matrix's own defensive-deny default. A silent skip is legitimate ONLY
-    when no authority is claimed (no `authority_granted: true`).
+    Normative basis (audit cross-record-authority-2): the ACEF-080 *code*
+    is normative (spec §3.6 error taxonomy: "mode-gated rule violation").
+    The disposition-authority MATRIX itself — the 5x4 (authority_class x
+    actor_role) grid — has NO normative home in the ACEF spec or RFC-0002;
+    it derives from the ACEF authority model defined by the
+    acef-v0.4-freddy-adoption operation. Diagnostics therefore cite "the
+    ACEF authority model", not a fabricated spec section.
+
+    The authority_class is read from `payload.authority_check.authority_class`.
+    The check FAILS CLOSED (audit finding cross-record-authority-5): when
+    `authority_granted: true` is claimed but authority_class is missing, not
+    a non-empty string, or not one of the five recognized authority classes,
+    ACEF-080 is emitted — mirroring the matrix's own defensive-deny default.
+    A silent skip is legitimate ONLY when no authority is claimed (no
+    `authority_granted: true`).
 
     The actor URN is read from `payload.authority_check.actor_ref` (the
     disposition's explicitly claimed authorizing actor — single-actor
@@ -501,7 +520,7 @@ def enforce_disposition_authority(
     is evaluated (audit finding cross-record-authority-6): ANY denied or
     undeclared actor emits ACEF-080, so ordering a permitted actor first
     cannot hide a denied one. A granted disposition naming no resolvable
-    actor at all is itself a §14.5 violation (ACEF-080).
+    actor at all is itself an authority-model violation (ACEF-080).
     """
     actor_role = _actor_role_map(manifest)
     diags: list[ValidationDiagnostic] = []
@@ -533,9 +552,10 @@ def enforce_disposition_authority(
                         f"disposition_record {rec_id!r} claims "
                         "authority_granted: true but "
                         "authority_check.authority_class is missing or not "
-                        "a non-empty string. Per §14.5, a granted "
-                        "disposition MUST declare a recognized "
-                        "authority_class; fail closed (deny)."
+                        "a non-empty string. Per the ACEF authority model "
+                        "(ACEF-080, spec §3.6), a granted disposition MUST "
+                        "declare a recognized authority_class; fail closed "
+                        "(deny)."
                     ),
                 )
             )
@@ -551,8 +571,9 @@ def enforce_disposition_authority(
                     (
                         f"disposition_record {rec_id!r} claims "
                         "authority_granted: true with unrecognized "
-                        f"authority_class={ac!r}. Recognized §14.5 classes: "
-                        f"{list(AUTHORITY_CLASSES)!r}. Fail closed (deny)."
+                        f"authority_class={ac!r}. Recognized authority-model "
+                        f"classes: {list(AUTHORITY_CLASSES)!r}. Fail closed "
+                        "(deny)."
                     ),
                 )
             )
@@ -577,7 +598,7 @@ def enforce_disposition_authority(
 
         if not candidate_refs:
             # Fail closed: a granted disposition with no resolvable
-            # authorizing actor is itself a §14.5 violation.
+            # authorizing actor is itself an authority-model violation.
             diags.append(
                 ValidationDiagnostic(
                     "ACEF-080",
@@ -585,9 +606,9 @@ def enforce_disposition_authority(
                         f"disposition_record {rec_id!r} grants authority_class="
                         f"{ac!r} but names no authorizing actor (no "
                         "authority_check.actor_ref and no "
-                        "entity_refs.actor_refs). Per §14.5, authority "
-                        "grants require a mapped actor with an explicit "
-                        "role; fail closed (deny)."
+                        "entity_refs.actor_refs). Per the ACEF authority "
+                        "model (ACEF-080), authority grants require a mapped "
+                        "actor with an explicit role; fail closed (deny)."
                     ),
                 )
             )
@@ -598,8 +619,8 @@ def enforce_disposition_authority(
             if role is None:
                 # Unknown actor — emit ACEF-080 (the matrix lookup defaults
                 # to denied for unknown actor types; a granted disposition
-                # referencing an undeclared actor is itself a §14.5
-                # violation).
+                # referencing an undeclared actor is itself an authority-
+                # model violation).
                 diags.append(
                     ValidationDiagnostic(
                         "ACEF-080",
@@ -607,9 +628,9 @@ def enforce_disposition_authority(
                             f"disposition_record {rec_id!r} grants "
                             f"authority_class={ac!r} but the authorizing "
                             f"actor ({candidate!r}) is not declared in "
-                            "manifest.entities.actors. Per §14.5, authority "
-                            "grants require a mapped actor with an explicit "
-                            "role."
+                            "manifest.entities.actors. Per the ACEF authority "
+                            "model (ACEF-080), authority grants require a "
+                            "mapped actor with an explicit role."
                         ),
                     )
                 )
@@ -624,8 +645,10 @@ def enforce_disposition_authority(
                     (
                         f"disposition_record {rec_id!r} grants authority_class="
                         f"{ac!r} to actor {candidate!r} (role={role!r}), but the "
-                        "§14.5 authority matrix denies that "
-                        "(authority_class × actor_role) pair. Reject."
+                        "ACEF authority matrix denies that "
+                        "(authority_class × actor_role) pair (ACEF-080, spec "
+                        "§3.6 error taxonomy; matrix per ACEF authority "
+                        "model). Reject."
                     ),
                 )
             )

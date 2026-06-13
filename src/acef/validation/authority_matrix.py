@@ -1,9 +1,17 @@
-"""Disposition authority matrix per brief §14.5 (inlined in contract.md).
+"""Disposition authority matrix (ACEF authority model).
 
-The contract.md (operation acef-v0.4-freddy-adoption) inlines the §14.5
-authority matrix at lines 41-47 as the authoritative 5×4 grid. Each row is
-an `authority_class` from :class:`acef.models.enums.AuthorityClass`; each
-column is an actor type. Cells declare whether a `disposition_record`
+NORMATIVE BASIS (audit cross-record-authority-2): the ACEF-080 error *code*
+is normative (ACEF-Spec-Outline-v0.1.md §3.6 error taxonomy — "Bundle
+declares analysis_mode ... mode-gated rule violation"). The 5×4 authority
+MATRIX itself, however, has NO normative home in the ACEF spec or RFC-0002
+(grep confirms neither document defines `authority_class` or an authority
+matrix, and the spec has no section 14). The grid below derives from the ACEF
+authority model defined by the acef-v0.4-freddy-adoption operation, whose
+contract.md inlines it at lines 41-47. We document that provenance honestly
+rather than citing a fabricated spec section.
+
+Each row is an `authority_class` from :class:`acef.models.enums.AuthorityClass`;
+each column is an actor type. Cells declare whether a `disposition_record`
 (record_type `risk_treatment` with `treatment_subtype: external_disposition`)
 carrying `authority_check.authority_granted: true` is acceptable for that
 (authority_class × actor_type) pair.
@@ -12,7 +20,7 @@ A cell value of ``True`` means *granted is allowed*; the bundle is clean for
 that pair. ``False`` means *granted is denied*; encountering
 `authority_granted: true` in such a pair MUST emit ACEF-080 (per
 VAL-VALIDATION-LOAD-AUTHORITY-MATRIX-001) so that disposition records cannot
-silently bypass §14.5 governance.
+silently bypass the authority model.
 
 Actor-type columns map to :class:`acef.models.enums.ActorRole` values:
 
@@ -27,7 +35,7 @@ Actor-type columns map to :class:`acef.models.enums.ActorRole` values:
 - "regulator"→ `regulator`
 
 Other ActorRole values (`importer`, `distributor`, `data_subject`) are not in
-the §14.5 matrix; encountering such an actor on a disposition record with
+the authority matrix; encountering such an actor on a disposition record with
 authority_granted: true is treated as a denied (matrix-not-found) result and
 emits ACEF-080.
 """
@@ -58,10 +66,12 @@ AUTHORITY_CLASSES: Final[tuple[str, ...]] = (
 )
 
 # The 5×4 matrix. Each entry is a dict keyed by actor-type string, with
-# True if granted to that actor is allowed under §14.5, False if denied.
+# True if granted to that actor is allowed under the ACEF authority model,
+# False if denied.
 #
-# Source: contract.md lines 41-47 (the operation's inlined version of brief
-# §14.5). Each cell documented inline:
+# Source: the acef-v0.4-freddy-adoption operation contract.md lines 41-47
+# (the operation's inlined authority grid — NOT a normative ACEF spec /
+# RFC-0002 clause; see module docstring). Each cell documented inline:
 _MATRIX: Final[dict[str, dict[str, bool]]] = {
     AuthorityClass.PRIORITY.value: {
         # priority disagreements may be raised by any party — all granted
@@ -119,7 +129,7 @@ def lookup(authority_class: str, actor_type: str) -> bool:
 
     Returns:
         True if the cell is "granted"; False if "denied" OR if either
-        argument is outside the §14.5 matrix (defensive default — an
+        argument is outside the authority matrix (defensive default — an
         unrecognized pair cannot be presumed granted).
     """
     row = _MATRIX.get(authority_class)

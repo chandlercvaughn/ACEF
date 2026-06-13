@@ -1,11 +1,15 @@
 """VAL-VALIDATION-008: banned claim_language in coverage_cell emits ACEF-079.
 
 An Assessment Bundle (sibling file ``<bundle>.acef-assessment.json``) whose
-``coverage_cells[].claim_language`` contains a banned substring (e.g.,
-``compliant``, ``certified``, ``AI Act-approved``, ``guaranteed``,
-``lawful``) MUST emit ACEF-079 AND MUST NOT emit ACEF-053 (codex carved out
-ACEF-079 specifically to keep this outcome independent of vendor-extension
-diagnostics).
+``coverage_cells[].claim_language`` contains a banned token as a WHOLE WORD
+(the closed normative ACEF-079 list: ``compliant``, ``certified``,
+``AI Act-approved``, ``guaranteed``) MUST emit ACEF-079 AND MUST NOT emit
+ACEF-053 (codex carved out ACEF-079 specifically to keep this outcome
+independent of vendor-extension diagnostics).
+
+The non-normative ``lawful`` token was removed (audit
+cross-record-authority-1); see ``test_crossrec_auth_fixes.py`` for the
+normative-list pin and the word-boundary matching tests.
 
 The lint function is also exercised directly so the test pinpoints the
 banned-language code path without coupling to other validator phases.

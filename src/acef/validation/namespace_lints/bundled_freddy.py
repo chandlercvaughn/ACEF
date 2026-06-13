@@ -85,24 +85,25 @@ def _properly_rejected(payload: dict[str, Any]) -> bool:
 
 
 def _has_paired_harness_attestation(payload: dict[str, Any]) -> bool:
-    """True iff payload carries a harness_attestation_ref or causation_chain ref.
+    """True iff ``payload.harness_attestation_ref`` is a non-empty string URN.
 
-    The ACEF-077 description's "paired harness_attestation" allows either:
+    The ACEF-077 carve-out's "paired harness_attestation" is satisfied ONLY
+    by ``payload.harness_attestation_ref`` (a non-empty string URN). That is
+    the sole signal this function honors.
 
-    - ``payload.harness_attestation_ref`` is a non-empty string URN, OR
-    - any element of the record's ``causation_chain`` resolves to a
-      harness attestation URN.
+    causation_chain is intentionally NOT trusted here (audit
+    cross-record-authority-7): an earlier docstring claimed this function
+    also accepted "any URN-shaped causation_chain entry as a best-effort
+    pairing", but the code never inspected causation_chain — and must not.
+    Trusting an arbitrary causation_chain entry would let a forged chain
+    grant a free pass past ACEF-077, so the safer payload-ref-only behavior
+    is deliberate. causation_chain is checked separately, and strictly, by
+    :mod:`acef.validation.cross_record` (ACEF-073), which catches dangling /
+    unsigned refs there.
 
-    For the second case we cannot resolve URNs here (that's the engine's
-    job in cross_record), so we accept ANY non-empty causation_chain
-    entry that looks URN-shaped as a "best-effort pairing". The strict
-    cross-record causation_chain check (ACEF-073) catches dangling refs
-    separately, so a forged causation_chain entry doesn't get a free pass.
-
-    We deliberately do NOT look at the *envelope-level* causation_chain
-    field here — only the payload, because this lint operates strictly on
-    payload content per the registry's lint-callable contract. The
-    engine-level causation_chain is checked by cross_record.py.
+    This lint operates strictly on payload content per the registry's
+    lint-callable contract; the envelope-level causation_chain field is the
+    engine's concern, not this function's.
     """
     ref = payload.get("harness_attestation_ref")
     if isinstance(ref, str) and ref:

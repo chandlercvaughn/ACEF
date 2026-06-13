@@ -45,6 +45,7 @@ not duplicate that check.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Iterator
 from functools import lru_cache
 from pathlib import Path
@@ -56,16 +57,54 @@ from acef.errors import ValidationDiagnostic
 # Banned claim-language tokens
 # ---------------------------------------------------------------------------
 
-# Per brief §3.5 (coverage_cell.claim_language validation rules) and §16.2
-# (banned-copy lint), the following case-insensitive substrings must not
-# appear in any coverage_cell.claim_language. The list is closed and
-# normative in v1.1 — additions require a spec amendment.
+# The closed, normative banned claim-lexicon for ``coverage_cell.claim_language``.
+# Taken VERBATIM from the spec ACEF-079 error-taxonomy row
+# (planning/ACEF-Spec-Outline-v0.1.md §3.6, line 1282): "coverage_cell.claim_language
+# contains a banned claim-lexicon token (`compliant`, `certified`,
+# `AI Act-approved`, `guaranteed`)". The list is CLOSED at exactly these four
+# tokens; additions require a spec amendment. (Audit cross-record-authority-1:
+# the non-normative `lawful` token was removed — it false-rejected conformant
+# bundles citing a GDPR "lawful basis" / disclosing something is "unlawful".)
 BANNED_CLAIM_LANGUAGE_TOKENS: tuple[str, ...] = (
     "compliant",
     "certified",
     "AI Act-approved",
     "guaranteed",
-    "lawful",
+)
+
+
+def _compile_banned_token_patterns(
+    tokens: tuple[str, ...],
+) -> tuple[tuple[str, re.Pattern[str]], ...]:
+    r"""Compile each banned token to a case-insensitive WORD-BOUNDARY matcher.
+
+    Audit cross-record-authority-4: the previous naive substring scan
+    (``token in lowered``) false-rejected legitimate words that merely
+    CONTAIN a banned token (e.g. ``noncompliant`` contains ``compliant``).
+    We anchor every token between word boundaries (``\b<token>\b``) so a
+    banned token only matches as a whole word, never as a substring of a
+    larger word.
+
+    The token is :func:`re.escape`-d so multi-word / hyphenated tokens
+    (``AI Act-approved``) match literally; ``\b`` correctly anchors on the
+    surrounding word characters of the phrase's first/last alphanumerics.
+    Matching is case-insensitive (``re.IGNORECASE``) to preserve the prior
+    "COMPLIANT" == "compliant" behavior, and ``re.UNICODE`` (the Python-3
+    default for ``str`` patterns) makes the word-boundary Unicode-aware.
+    """
+    compiled: list[tuple[str, re.Pattern[str]]] = []
+    for token in tokens:
+        pattern = re.compile(
+            r"\b" + re.escape(token) + r"\b",
+            re.IGNORECASE | re.UNICODE,
+        )
+        compiled.append((token, pattern))
+    return tuple(compiled)
+
+
+# Pre-compiled (token, word-boundary-pattern) pairs — built once at import.
+_BANNED_TOKEN_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = _compile_banned_token_patterns(
+    BANNED_CLAIM_LANGUAGE_TOKENS
 )
 
 
@@ -208,12 +247,18 @@ def load_state_class_taxonomy() -> dict[str, dict[str, Any]]:
 def lint_coverage_cell_claim_language(
     assessment_bundle: dict[str, Any],
 ) -> list[ValidationDiagnostic]:
-    """Emit ACEF-079 for each coverage_cell.claim_language banned-substring hit.
+    """Emit ACEF-079 for each coverage_cell.claim_language banned-token hit.
 
     Per VAL-VALIDATION-008: scan the Assessment Bundle's ``coverage_cells``
-    array. For each cell, run a case-insensitive substring scan over the
-    banned-token list. Each violating (cell_id, token) pair emits a
-    distinct ACEF-079 diagnostic so producers see every offending token.
+    array. For each cell, run a case-insensitive WORD-BOUNDARY scan over the
+    closed normative banned-token list (the four tokens of the spec ACEF-079
+    row). Each violating (cell_id, token) pair emits a distinct ACEF-079
+    diagnostic so producers see every offending token.
+
+    Word-boundary (not substring) matching per audit cross-record-authority-4:
+    a banned token fires only as a whole word, so legitimate words that merely
+    contain a banned token as a substring (e.g. ``noncompliant``) are not
+    false-rejected.
 
     NOT ACEF-053 — codex policy explicitly carved out ACEF-079 to keep the
     Core banned-copy outcome independent of vendor-extension diagnostics.
@@ -231,20 +276,21 @@ def lint_coverage_cell_claim_language(
         claim = cell.get("claim_language")
         if not isinstance(claim, str) or not claim:
             continue
-        lowered = claim.lower()
         cell_id = cell.get("cell_id")
         if not isinstance(cell_id, str) or not cell_id:
             cell_id = f"<coverage_cells[{idx}]>"
-        for token in BANNED_CLAIM_LANGUAGE_TOKENS:
-            if token.lower() in lowered:
+        for token, pattern in _BANNED_TOKEN_PATTERNS:
+            if pattern.search(claim):
                 diags.append(
                     ValidationDiagnostic(
                         "ACEF-079",
                         (
                             f"coverage_cell {cell_id!r} has claim_language "
-                            f"containing banned token {token!r}. Per brief "
-                            "§3.5 / §16.2 the constrained claim vocabulary "
-                            "MUST NOT include this substring."
+                            f"containing the banned claim-lexicon token "
+                            f"{token!r} as a whole word. Per the ACEF-079 "
+                            "error-taxonomy row (spec §3.6), the constrained "
+                            "coverage_cell.claim_language vocabulary MUST NOT "
+                            "include this token."
                         ),
                     )
                 )
@@ -368,7 +414,15 @@ def enforce_mode_gated_forbidden_types(
     +-----------------------+-------------------------------------------+
 
     A bundle without an ``analysis_mode`` does not trigger this check —
-    mode-gates only apply when the producer declares a mode (per brief §6.6).
+    mode-gates only apply when the producer declares a mode.
+
+    Normative basis (audit cross-record-authority-2): the ACEF-080 *code*
+    is normative (spec §3.6 error taxonomy — "contains forbidden record
+    types for that mode"). The per-mode forbidden-record-type TABLE above,
+    however, has no normative home in the ACEF spec or RFC-0002; it derives
+    from the ACEF mode-gate model defined by the acef-v0.4-freddy-adoption
+    operation plan (WS3.9). Diagnostics cite the code's real home plus that
+    model, never a fabricated spec section.
     """
     if not isinstance(manifest, dict):
         return []
@@ -393,7 +447,8 @@ def enforce_mode_gated_forbidden_types(
                     (
                         f"Bundle declares analysis_mode={mode!r} but contains "
                         f"a forbidden record_type {rt!r} on record "
-                        f"{rec_id!r}. Per plan WS3.9 / brief §6.6, "
+                        f"{rec_id!r}. Per the ACEF-080 mode-gate rule (spec "
+                        f"§3.6; per-mode table: ACEF mode-gate model), "
                         f"{mode!r} mode disallows this record type."
                     ),
                 )
@@ -410,7 +465,8 @@ def enforce_mode_gated_forbidden_types(
                         f"Bundle declares analysis_mode={mode!r} but contains "
                         f"a disposition_record (risk_treatment variant "
                         f"V3, treatment_subtype=external_disposition) on "
-                        f"record {rec_id!r}. Per plan WS3.9 / brief §6.6, "
+                        f"record {rec_id!r}. Per the ACEF-080 mode-gate rule "
+                        f"(spec §3.6; per-mode table: ACEF mode-gate model), "
                         f"{mode!r} mode disallows disposition_record."
                     ),
                 )
@@ -428,9 +484,11 @@ def enforce_mode_gated_forbidden_types(
                             (
                                 f"Bundle declares analysis_mode='canary' but "
                                 f"badge_state record {rec_id!r} has "
-                                f"page_state={page_state!r}. Per plan WS3.9 "
-                                "/ brief §6.6, canary-mode badge_state "
-                                "records MUST have page_state='unsupported'."
+                                f"page_state={page_state!r}. Per the ACEF-080 "
+                                "mode-gate rule (spec §3.6; per-mode table: "
+                                "ACEF mode-gate model), canary-mode "
+                                "badge_state records MUST have "
+                                "page_state='unsupported'."
                             ),
                         )
                     )
@@ -444,10 +502,11 @@ def enforce_mode_gated_forbidden_types(
                             (
                                 f"Bundle declares analysis_mode='canary' but "
                                 f"transparency_disclosure record {rec_id!r} "
-                                "has confidentiality='public'. Per plan "
-                                "WS3.9 / brief §6.6, canary mode forbids "
-                                "public transparency_disclosure records "
-                                "(non-badge_state disclosures MUST be "
+                                "has confidentiality='public'. Per the "
+                                "ACEF-080 mode-gate rule (spec §3.6; per-mode "
+                                "table: ACEF mode-gate model), canary mode "
+                                "forbids public transparency_disclosure "
+                                "records (non-badge_state disclosures MUST be "
                                 "private in canary)."
                             ),
                         )
@@ -463,8 +522,9 @@ def enforce_mode_gated_forbidden_types(
                     (
                         f"Bundle declares analysis_mode='unattributed_artifact' "
                         f"but record {rec_id!r} (record_type={rt!r}) carries a "
-                        "non-null attribution field. Per plan WS3.9 / brief "
-                        "§6.6, unattributed_artifact mode forbids any "
+                        "non-null attribution field. Per the ACEF-080 mode-"
+                        "gate rule (spec §3.6; per-mode table: ACEF mode-gate "
+                        "model), unattributed_artifact mode forbids any "
                         "attribution information."
                     ),
                 )
