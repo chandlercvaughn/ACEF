@@ -78,14 +78,18 @@ def _normalize_explicit_package_id(package_id: str) -> str:
     """Validate + canonicalize a caller-supplied merged ``package_id``.
 
     The frozen manifest schema requires a lowercase ``urn:acef:pkg:<uuid>``.
-    ``validate_urn`` alone is too permissive on two axes:
+    ``validate_urn`` is the STRICT grammar (lowercase-hex only, mirroring the
+    frozen schema; see audit envelope-manifest-4), so to retain the historical
+    convenience of accepting an (RFC-4122-legal) uppercase-hex UUID this
+    function lowercase-normalizes the candidate FIRST, then validates:
 
-    1. It accepts ANY ACEF URN type (e.g. ``urn:acef:rec:...``) — a record URN
-       would fail manifest schema validation. We REQUIRE ``URNType.PACKAGE``.
-    2. RFC 4122 textual form permits uppercase hex, so ``validate_urn`` accepts
-       an uppercase UUID — but the schema pattern pins lowercase hex. We
-       canonicalize the UUID segment to lowercase so the merged package_id
-       always satisfies the schema.
+    1. We lowercase the whole URN so an uppercase-hex UUID is canonicalized
+       before the strict ``validate_urn`` grammar check (which no longer
+       tolerates uppercase hex). Only the hex/scheme is case-relevant; ACEF URN
+       schemes/types are already lowercase, so lowercasing is loss-free.
+    2. ``validate_urn`` accepts ANY ACEF URN type (e.g. ``urn:acef:rec:...``) —
+       a record URN would fail manifest schema validation — so we additionally
+       REQUIRE ``URNType.PACKAGE``.
 
     Returns the canonical ``urn:acef:pkg:<lowercase-uuid>``.
 
@@ -93,21 +97,22 @@ def _normalize_explicit_package_id(package_id: str) -> str:
         ACEFMergeError: If ``package_id`` is not a syntactically valid ACEF URN
             or is not a PACKAGE-typed URN.
     """
-    if not validate_urn(package_id):
+    # Canonicalize to lowercase BEFORE the strict grammar check so an
+    # (RFC-4122-legal) uppercase-hex UUID still satisfies the frozen schema's
+    # lowercase-hex pattern (validate_urn is now lowercase-only).
+    normalized = package_id.lower() if isinstance(package_id, str) else package_id
+    if not validate_urn(normalized):
         raise ACEFMergeError(
             f"Invalid merged package_id URN: {package_id!r}",
             code="ACEF-060",
         )
-    parsed = parse_urn(package_id)
+    parsed = parse_urn(normalized)
     if parsed.urn_type is not URNType.PACKAGE:
         raise ACEFMergeError(
             f"Merged package_id must be a package URN (urn:acef:{URNType.PACKAGE.value}:<uuid>), got {package_id!r}",
             code="ACEF-060",
         )
-    # Canonicalize the UUID segment to lowercase so the result matches the
-    # frozen manifest schema's lowercase-hex pattern even if the caller passed
-    # an (RFC-4122-legal) uppercase UUID.
-    return f"urn:acef:{URNType.PACKAGE.value}:{parsed.uuid_str.lower()}"
+    return f"urn:acef:{URNType.PACKAGE.value}:{parsed.uuid_str}"
 
 
 def _normalize_explicit_timestamp(timestamp: str) -> str:

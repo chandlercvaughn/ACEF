@@ -76,7 +76,7 @@ class TestEndToEndBundleFlow:
         pkg.record("risk_treatment", payload={"treatment_type": "mitigate"})
         pkg.record("dataset_card", payload={"name": "DS1"})
         pkg.record("evaluation_report", payload={"methodology": "test"})
-        pkg.record("event_log", payload={"event_type": "inference"})
+        pkg.record("event_log", payload={"event_type": "inference"}, obligation_role="provider")
 
         bundle_dir = tmp_dir / "multi.acef"
         pkg.export(str(bundle_dir))

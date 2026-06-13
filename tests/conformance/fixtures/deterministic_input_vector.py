@@ -107,11 +107,20 @@ def build(pkg: Package, *, shuffle: bool = False, shuffle_seed: int = 0) -> None
         rng = random.Random(shuffle_seed)
         rng.shuffle(records)
 
+    # The role-split record types (event_log here) require an explicit
+    # obligation_role (spec §3.1 / audit envelope-manifest-5). Passing the
+    # constant "provider" is byte-equivalent to the prior silent default, so
+    # the deterministic output vector is unchanged.
+    role_split = {"transparency_marking", "disclosure_labeling", "event_log"}
     for record_type, timestamp, record_id, provisions, payload in records:
+        extra: dict[str, str] = {}
+        if record_type in role_split:
+            extra["obligation_role"] = "provider"
         pkg.record(
             record_type=record_type,
             provisions=provisions,
             payload=payload,
             timestamp=timestamp,
             record_id=record_id,
+            **extra,
         )

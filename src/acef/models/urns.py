@@ -13,12 +13,19 @@ from typing import NamedTuple
 
 from acef.errors import ACEFError
 
-# RFC 4122 explicitly permits uppercase hex in UUID textual form, and many
-# inbound producers (Java/.NET defaults) emit uppercase. Accept either case
-# on input; SDK-generated URNs continue to be lowercase via str(uuid.uuid4()).
+# LOWERCASE-ONLY hex, deliberately mirroring the FROZEN manifest schema's URN
+# pattern (acef-conventions/v1 + v1.1 manifest.schema.json:25, e.g.
+# "^urn:acef:pkg:[0-9a-f]{8}-...$"). Although RFC 4122 permits uppercase hex in
+# UUID textual form, the ACEF schema is the binding authority and admits
+# lowercase only; accepting uppercase here created a model/schema disagreement
+# (audit envelope-manifest-4) where a model-valid uppercase URN was rejected by
+# schema validation as ACEF-002. The model validator now matches the schema's
+# lowercase domain exactly. SDK-generated URNs are already lowercase via
+# str(uuid.uuid4()); inbound uppercase-hex URNs must be lowercase-normalized by
+# the producer before they conform.
 _URN_PATTERN = re.compile(
     r"^urn:acef:(pkg|sub|cmp|dat|act|rec|asx):"
-    r"([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
+    r"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$"
 )
 
 

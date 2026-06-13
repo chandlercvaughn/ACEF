@@ -71,11 +71,26 @@ class TestValidateURN:
     def test_invalid_uuid_too_short(self):
         assert not validate_urn("urn:acef:sub:550e8400-e29b-41d4-a716")
 
-    def test_uppercase_uuid_accepted(self):
-        """RFC 4122 permits uppercase hex in UUID textual form; many inbound
-        producers (Java/.NET defaults) emit uppercase. The ACEF SDK accepts
-        either case on input and emits lowercase on output."""
-        assert validate_urn("urn:acef:sub:550E8400-E29B-41D4-A716-446655440000")
+    def test_uppercase_uuid_rejected(self):
+        """validate_urn MUST agree with the FROZEN manifest schema, which pins
+        lowercase-only hex (``[0-9a-f]``, manifest.schema.json:25). Previously
+        urns.py accepted uppercase hex (``[0-9a-fA-F]``) — a model/schema
+        disagreement (audit envelope-manifest-4): a model-valid uppercase URN
+        was rejected by schema validation as ACEF-002. The validator is now
+        lowercase-only so the two trust layers agree."""
+        assert not validate_urn("urn:acef:sub:550E8400-E29B-41D4-A716-446655440000")
+
+    def test_uppercase_uuid_rejected_all_types(self):
+        """Every URN type rejects uppercase hex (matches the frozen schema's
+        lowercase pattern for pkg/sub/cmp/dat/act)."""
+        for t in URNType:
+            urn = f"urn:acef:{t.value}:550E8400-E29B-41D4-A716-446655440000"
+            assert not validate_urn(urn), f"Uppercase hex must be rejected: {urn}"
+
+    def test_lowercase_hex_segments_only(self):
+        """A mixed-case URN (lowercase prefix, single uppercase hex char) is
+        rejected — the schema permits no uppercase hex anywhere in the UUID."""
+        assert not validate_urn("urn:acef:rec:550e8400-e29b-41d4-a716-44665544000A")
 
     def test_invalid_empty_string(self):
         assert not validate_urn("")

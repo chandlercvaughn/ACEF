@@ -72,7 +72,11 @@ class TestStaleFilesOnReExport:
 
         # Second export with event_log (no risk_register)
         pkg2 = Package()
-        pkg2.record("event_log", payload={"event_type": "inference", "description": "e1"})
+        pkg2.record(
+            "event_log",
+            payload={"event_type": "inference", "description": "e1"},
+            obligation_role="provider",
+        )
         export_directory(pkg2, str(bundle))
 
         # Old risk_register.jsonl must be gone

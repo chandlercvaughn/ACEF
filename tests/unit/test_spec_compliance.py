@@ -78,7 +78,7 @@ class TestEvaluationScopePackage:
             pkg = Package(producer={"name": "test", "version": "1.0"})
             pkg.add_subject("ai_system", name="System A")
             pkg.add_subject("ai_model", name="Model B")
-            pkg.add_profile("test-pkg-scope")
+            pkg.add_profile("test-pkg-scope", provisions=["pkg-gov"])
             pkg.record("governance_policy", payload={"policy_type": "ai_governance"})
 
             assessment = acef.validate(pkg, profiles=["test-pkg-scope"])

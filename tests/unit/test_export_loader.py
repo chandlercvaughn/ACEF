@@ -200,7 +200,11 @@ class TestLoaderSecurity:
         bundle_dir = tmp_dir / "bundle.acef"
         bundle_dir.mkdir(parents=True)
         manifest = {
-            "metadata": {"package_id": "test", "producer": {"name": "t", "version": "1"}},
+            "metadata": {
+                "package_id": "urn:acef:pkg:11111111-1111-1111-1111-111111111111",
+                "timestamp": "2026-01-01T00:00:00Z",
+                "producer": {"name": "t", "version": "1"},
+            },
             "record_files": [{"path": "../../../etc/passwd", "record_type": "risk_register", "count": 0}],
         }
         (bundle_dir / "acef-manifest.json").write_text(json.dumps(manifest), encoding="utf-8")

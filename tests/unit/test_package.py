@@ -222,8 +222,8 @@ class TestAddProfile:
 
     def test_profiles_list(self):
         pkg = Package()
-        pkg.add_profile("eu-ai-act")
-        pkg.add_profile("nist-rmf")
+        pkg.add_profile("eu-ai-act", provisions=["article-9"])
+        pkg.add_profile("nist-rmf", provisions=["govern-1.1"])
         assert len(pkg.profiles) == 2
 
 
@@ -278,10 +278,19 @@ class TestRecord:
         (v1.0 + 6 v1.1 agent-reliability primitives). The test name no
         longer encodes the count; the assertion uses ``len(RECORD_TYPES)``
         so future additions remain covered without churn.
+
+        The role-split record types (transparency_marking,
+        disclosure_labeling, event_log) require an explicit obligation_role
+        (spec §3.1 / audit envelope-manifest-5), so they are passed one
+        here; every other type keeps the convenience provider default.
         """
+        role_split = {"transparency_marking", "disclosure_labeling", "event_log"}
         pkg = Package()
         for rt in RECORD_TYPES:
-            rec = pkg.record(rt, payload={"test": True})
+            kwargs: dict = {"payload": {"test": True}}
+            if rt in role_split:
+                kwargs["obligation_role"] = "provider"
+            rec = pkg.record(rt, **kwargs)
             assert rec.record_type == rt
         assert len(pkg.records) == len(RECORD_TYPES)
 

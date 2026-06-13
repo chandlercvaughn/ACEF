@@ -58,6 +58,24 @@ from acef.models.urns import URNType, generate_urn
 # clock path MUST format identically so v0.3 behavior is preserved.
 _TIMESTAMP_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 
+# Spec §3.1 (line 419): obligation_role is "REQUIRED for transparency_marking,
+# disclosure_labeling, and event_log records (EU AI Act and CAC split
+# obligations by role)." For these role-split record types the builder must NOT
+# silently invent ``provider`` when the caller omits the role — a
+# deployer-side disclosure_labeling defaulted to ``provider`` is semantically
+# wrong split-obligation evidence with no caller signal (audit
+# envelope-manifest-5). All OTHER record types keep the convenience default.
+_ROLE_SPLIT_RECORD_TYPES: frozenset[str] = frozenset({"transparency_marking", "disclosure_labeling", "event_log"})
+
+# Open-core v1.1 manifest-field (X5/X6) builder authoring constraints. These
+# mirror the FROZEN v1.1 manifest schema EXACTLY so the builder cannot author a
+# manifest the schema rejects (the same guard discipline as add_profile):
+#   - analysis_mode is the Manifest model's Literal domain (models/manifest.py).
+#   - the namespaces top-level key pattern is the v1.1 manifest schema's
+#     patternProperties regex (acef-conventions/v1.1/manifest.schema.json:97).
+_ANALYSIS_MODES: frozenset[str] = frozenset({"subscriber", "public_artifact", "canary", "unattributed_artifact"})
+_NAMESPACE_KEY_PATTERN = re.compile(r"^x-[a-z0-9-]+/?$")
+
 
 def _default_clock() -> datetime:
     """Wall-clock default; replaced by the injected ``clock`` callable."""
@@ -722,21 +740,110 @@ class Package:
         self,
         profile_id: str,
         *,
-        provisions: list[str] | None = None,
+        provisions: list[str],
         template_version: str = "1.0.0",
     ) -> ProfileEntry:
         """Declare a regulation profile for this package.
 
+        Args:
+            profile_id: The profile identifier (e.g. ``"eu-ai-act-2024"``).
+            provisions: The applicable provisions this profile covers. MUST be
+                non-empty: the frozen manifest schema pins
+                ``profiles[].applicable_provisions`` to ``minItems: 1``, so a
+                profile with no provisions produces a manifest the spec's
+                §3.1.3 step-(a) schema gate rejects (ACEF-002). The builder
+                refuses up front rather than letting export-time validation
+                surface a structurally-invalid bundle (audit envelope-manifest-3).
+            template_version: The mapping-template version this declaration
+                pins to.
+
         Returns:
             The created ProfileEntry.
+
+        Raises:
+            ACEFSchemaError: If ``provisions`` is empty (ACEF-002).
         """
+        if not provisions:
+            raise ACEFSchemaError(
+                f"Profile {profile_id!r} must declare at least one applicable "
+                "provision: the manifest schema requires "
+                "profiles[].applicable_provisions to be non-empty (minItems:1).",
+                code="ACEF-002",
+            )
         entry = ProfileEntry(
             profile_id=profile_id,
             template_version=template_version,
-            applicable_provisions=provisions or [],
+            applicable_provisions=list(provisions),
         )
         self._profiles.append(entry)
         return entry
+
+    def set_analysis_mode(self, mode: str) -> None:
+        """Declare the v1.1 ``analysis_mode`` (X5) manifest field.
+
+        ``analysis_mode`` is an open-core v1.1 manifest-level field that gates
+        which conditional-required envelope fields and mode-gated record-type
+        rules the validator applies (spec §8.1). The standard Package builder
+        previously had no path to author it — the model + schema supported the
+        field, but ``build_manifest`` never carried a builder-set value (audit
+        envelope-manifest-6). This setter closes that gap.
+
+        Declaring a v1.1-only manifest field bumps ``core_version`` to ``1.1.0``
+        so the validator resolves the v1.1 schema set (the field is rejected by
+        the v1.0 schema), matching the typed incident builders' version gate.
+
+        Args:
+            mode: One of ``subscriber``, ``public_artifact``, ``canary``,
+                ``unattributed_artifact``.
+
+        Raises:
+            ACEFSchemaError: If ``mode`` is not a recognized analysis_mode
+                (ACEF-002).
+        """
+        if mode not in _ANALYSIS_MODES:
+            allowed = ", ".join(sorted(_ANALYSIS_MODES))
+            raise ACEFSchemaError(
+                f"Unknown analysis_mode {mode!r}: must be one of {allowed}.",
+                code="ACEF-002",
+            )
+        self._analysis_mode = mode
+        self._ensure_v1_1()
+
+    def add_namespace(self, key: str, value: dict[str, Any]) -> None:
+        """Register a v1.1 vendor-extension ``namespaces`` (X6) entry.
+
+        ``namespaces`` is the open-core v1.1 vendor-extension container (spec
+        §6.4). Each top-level key MUST be x-vendor-prefixed, matching the FROZEN
+        v1.1 manifest schema pattern ``^x-[a-z0-9-]+/?$`` — the builder rejects
+        a non-conformant key up front so it cannot author a manifest the schema
+        rejects (the same guard discipline as ``add_profile``; audit
+        envelope-manifest-6). The standard builder previously had no path to
+        author this field (the loader could only round-trip it on the load
+        path); this setter lets the builder ORIGINATE it.
+
+        Declaring a v1.1-only manifest field bumps ``core_version`` to ``1.1.0``
+        so the v1.1 schema set resolves.
+
+        Args:
+            key: The x-vendor-prefixed namespace key (e.g. ``x-vendor`` or
+                ``x-vendor-ns``).
+            value: The namespace's arbitrary object payload.
+
+        Raises:
+            ACEFSchemaError: If ``key`` does not match the frozen schema's
+                x-vendor pattern (ACEF-002).
+        """
+        if not _NAMESPACE_KEY_PATTERN.match(key):
+            raise ACEFSchemaError(
+                f"Invalid namespace key {key!r}: top-level namespace keys MUST "
+                "be x-vendor-prefixed, matching the manifest schema pattern "
+                f"'{_NAMESPACE_KEY_PATTERN.pattern}'.",
+                code="ACEF-002",
+            )
+        if self._namespaces is None:
+            self._namespaces = {}
+        self._namespaces[key] = value
+        self._ensure_v1_1()
 
     def record(
         self,
@@ -813,7 +920,24 @@ class Package:
         # them, so SDK-produced records carry concrete values rather than
         # relying on to_jsonl_dict's emit-time defaults (which exist as a
         # safety net for direct RecordEnvelope construction).
+        #
+        # For the role-split record types the caller MUST choose the role
+        # explicitly: providers vs deployers carry distinct EU AI Act Art.
+        # 16/26/50 (and CAC) obligations, so silently defaulting to
+        # ``provider`` would mislabel deployer-side evidence (spec §3.1 line
+        # 419 / audit envelope-manifest-5). Every other record type keeps the
+        # convenience ``provider`` default.
         if obligation_role is None:
+            if record_type in _ROLE_SPLIT_RECORD_TYPES:
+                raise ACEFSchemaError(
+                    f"record_type {record_type!r} requires an explicit "
+                    "obligation_role: providers and deployers carry distinct "
+                    "EU AI Act / CAC split obligations (spec §3.1), so the SDK "
+                    "will not default to 'provider'. Pass "
+                    "obligation_role='provider' or 'deployer' (or another "
+                    "ObligationRole).",
+                    code="ACEF-002",
+                )
             obligation_role = ObligationRole.PROVIDER
         elif isinstance(obligation_role, str):
             obligation_role = ObligationRole(obligation_role)

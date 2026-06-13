@@ -554,8 +554,29 @@ def _load_directory(bundle_dir: Path) -> Package:
         "prior_package_ref",
         "retention_policy",
     }
+    # Construct PackageMetadata WITH the inbound package_id/timestamp directly
+    # (audit envelope-manifest-7). The prior code built metadata WITHOUT these
+    # identity scalars and then MUTATED them post-construction; when either was
+    # absent from the manifest, PackageMetadata's default_factory silently minted
+    # a FRESH random urn:acef:pkg: / wall-clock timestamp — repairing a
+    # malformed/forged bundle into a syntactically valid one whose identity does
+    # not match the on-disk bytes (a load-path non-determinism + identity-forgery
+    # hazard). Identity is required by the manifest schema, so a missing
+    # package_id/timestamp is surfaced as ACEF-002 here rather than fabricated.
+    if "package_id" not in metadata_raw:
+        raise ACEFSchemaError(
+            "Manifest section 'metadata' is missing required field 'package_id'.",
+            code="ACEF-002",
+        )
+    if "timestamp" not in metadata_raw:
+        raise ACEFSchemaError(
+            "Manifest section 'metadata' is missing required field 'timestamp'.",
+            code="ACEF-002",
+        )
     try:
         metadata = PackageMetadata(
+            package_id=metadata_raw["package_id"],
+            timestamp=metadata_raw["timestamp"],
             producer=producer,
             retention_policy=retention,
             prior_package_ref=metadata_raw.get("prior_package_ref"),
@@ -566,8 +587,6 @@ def _load_directory(bundle_dir: Path) -> Package:
             f"Manifest section 'metadata' failed model validation: {e}",
             code="ACEF-002",
         ) from e
-    metadata.package_id = metadata_raw.get("package_id", metadata.package_id)
-    metadata.timestamp = metadata_raw.get("timestamp", metadata.timestamp)
 
     # Set versioning — guard the object shape before ``**``-unpacking so a
     # non-object ``versioning`` (e.g. the string ``"v1"``) surfaces ACEF-002
