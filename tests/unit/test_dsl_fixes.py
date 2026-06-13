@@ -342,3 +342,249 @@ class TestIso8601FormatEnforcement:
     def test_record_envelope_valid_iso_timestamp_passes_format(self) -> None:
         errors = validate_against_schema(self._valid_record("2026-01-01T00:00:00Z"), "record-envelope", "v1")
         assert errors == []
+
+
+# ---------------------------------------------------------------------------
+# roborev follow-up 1 (VAL-FIX-DSL-006): required_alg is validated WHENEVER
+# present, independent of whether any signatures exist. A malformed
+# required_alg must raise ACEF-045 even with min_signatures=0 / zero sigs,
+# instead of being silently treated-as-absent by the old
+# `if required_alg and signature_algorithms` guard.
+# ---------------------------------------------------------------------------
+
+
+class TestBundleSignedRequiredAlgAlwaysValidated:
+    def test_non_string_required_alg_zero_sigs_min_zero_raises_acef045(self) -> None:
+        # required_alg=123 (int) with NO signatures and min_signatures=0 was
+        # previously skipped (guard required signature_algorithms truthy) and
+        # the operator returned PASS. It MUST now raise ACEF-045.
+        params = {"min_signatures": 0, "required_alg": 123}
+        with pytest.raises(ACEFEvaluationError) as exc:
+            op_bundle_signed(params, [], signature_count=0, signature_algorithms=[])
+        assert exc.value.code == "ACEF-045"
+
+    def test_list_with_non_string_member_zero_sigs_raises_acef045(self) -> None:
+        # ["RS256", 5] has a non-string member; previously skipped on zero sigs.
+        params = {"min_signatures": 0, "required_alg": ["RS256", 5]}
+        with pytest.raises(ACEFEvaluationError) as exc:
+            op_bundle_signed(params, [], signature_count=0, signature_algorithms=[])
+        assert exc.value.code == "ACEF-045"
+
+    def test_non_string_required_alg_with_sigs_present_still_raises(self) -> None:
+        # Regression: the previously-validated path (sigs present) stays ACEF-045.
+        params = {"min_signatures": 1, "required_alg": 123}
+        with pytest.raises(ACEFEvaluationError) as exc:
+            op_bundle_signed(params, [], signature_count=1, signature_algorithms=["RS256"])
+        assert exc.value.code == "ACEF-045"
+
+    def test_valid_required_alg_zero_sigs_min_zero_passes(self) -> None:
+        # A well-formed required_alg with min_signatures=0 and zero sigs must
+        # still PASS (validation of the param does not change the count result).
+        params = {"min_signatures": 0, "required_alg": ["RS256"]}
+        passed, _ = op_bundle_signed(params, [], signature_count=0, signature_algorithms=[])
+        assert passed is True
+
+    def test_valid_required_alg_applied_when_sigs_present(self) -> None:
+        # Set normalization still applied to the membership test.
+        params = {"min_signatures": 1, "required_alg": "ES256"}
+        passed, _ = op_bundle_signed(params, [], signature_count=1, signature_algorithms=["ES256"])
+        assert passed is True
+        passed_wrong, _ = op_bundle_signed(params, [], signature_count=1, signature_algorithms=["RS256"])
+        assert passed_wrong is False
+
+    def test_absent_required_alg_no_validation(self) -> None:
+        # required_alg absent -> no validation, count is used directly.
+        params = {"min_signatures": 1}
+        passed, _ = op_bundle_signed(params, [], signature_count=1, signature_algorithms=["RS256"])
+        assert passed is True
+
+
+# ---------------------------------------------------------------------------
+# roborev follow-up 2 (VAL-FIX-DSL-005): blanket re.ASCII overcorrected \s.
+# ECMA-262 \s matches several NON-ASCII whitespace chars; \d/\w/\b stay ASCII.
+# ---------------------------------------------------------------------------
+
+
+class TestRegexWhitespaceEcma262:
+    def test_s_matches_non_breaking_space(self) -> None:
+        # U+00A0 (NBSP) is in ECMA-262 \s but NOT in re.ASCII's \s. It MUST match.
+        assert _compare(" ", "regex", r"^\s+$") is True
+
+    @pytest.mark.parametrize(
+        "codepoint",
+        [
+            0x00A0,  # NO-BREAK SPACE
+            0x1680,  # OGHAM SPACE MARK
+            0x2000,  # EN QUAD
+            0x2001,  # EM QUAD
+            0x2002,  # EN SPACE
+            0x2003,  # EM SPACE
+            0x2004,
+            0x2005,
+            0x2006,
+            0x2007,
+            0x2008,
+            0x2009,
+            0x200A,  # HAIR SPACE
+            0x2028,  # LINE SEPARATOR
+            0x2029,  # PARAGRAPH SEPARATOR
+            0x202F,  # NARROW NO-BREAK SPACE
+            0x205F,  # MEDIUM MATHEMATICAL SPACE
+            0x3000,  # IDEOGRAPHIC SPACE
+            0xFEFF,  # ZERO WIDTH NO-BREAK SPACE (BOM)
+        ],
+    )
+    def test_s_matches_all_ecma262_non_ascii_whitespace(self, codepoint: int) -> None:
+        assert _compare(chr(codepoint), "regex", r"^\s$") is True
+
+    @pytest.mark.parametrize(
+        "ascii_ws",
+        ["\t", "\n", "\r", " ", "\x0b", "\x0c"],
+    )
+    def test_s_matches_ascii_whitespace(self, ascii_ws: str) -> None:
+        assert _compare(ascii_ws, "regex", r"^\s$") is True
+
+    @pytest.mark.parametrize(
+        "non_ws_codepoint",
+        [
+            0x1C,  # FILE SEPARATOR — Python \s matches, ECMA-262 does NOT
+            0x1D,
+            0x1E,
+            0x1F,
+            0x85,  # NEL — Python \s matches, ECMA-262 does NOT
+        ],
+    )
+    def test_s_does_not_match_non_ecma262_control_separators(self, non_ws_codepoint: int) -> None:
+        # These are in Python's default \s but NOT in ECMA-262 \s. A faithful
+        # translation must EXCLUDE them.
+        assert _compare(chr(non_ws_codepoint), "regex", r"^\s$") is False
+
+    def test_capital_s_does_not_match_ecma262_whitespace(self) -> None:
+        # \S (negated) must NOT match an ECMA-262 whitespace char.
+        assert _compare(" ", "regex", r"^\S$") is False
+
+    def test_capital_s_matches_non_whitespace(self) -> None:
+        assert _compare("a", "regex", r"^\S$") is True
+
+    def test_digit_stays_ascii_only(self) -> None:
+        # Regression: \d must STILL be ASCII-only (the DSL-5 invariant holds).
+        assert _compare("٢", "regex", r"^\d+$") is False  # Arabic-Indic 2
+        assert _compare("2", "regex", r"^\d+$") is True
+
+    def test_word_stays_ascii_only(self) -> None:
+        assert _compare("é", "regex", r"^\w+$") is False
+        assert _compare("a", "regex", r"^\w+$") is True
+
+    def test_word_boundary_stays_ascii(self) -> None:
+        # \b depends on \w; with ASCII \w the boundary is ASCII. 'é word' has an
+        # ASCII boundary before 'word'.
+        assert _compare("é word", "regex", r"\bword\b") is True
+        assert _compare("abword", "regex", r"\bword\b") is False
+
+    def test_s_inside_character_class(self) -> None:
+        # \s appearing INSIDE a [...] class must still carry ECMA-262 semantics.
+        assert _compare(" ", "regex", r"^[\sx]$") is True
+        assert _compare("x", "regex", r"^[\sx]$") is True
+
+    def test_d_inside_character_class_stays_ascii(self) -> None:
+        # \d inside a class stays ASCII; Arabic-Indic digit excluded, ASCII in.
+        assert _compare("٢", "regex", r"^[\dz]$") is False
+        assert _compare("5", "regex", r"^[\dz]$") is True
+        assert _compare("z", "regex", r"^[\dz]$") is True
+
+    def test_negated_class_with_s(self) -> None:
+        # [^\s] must exclude an ECMA-262 whitespace char.
+        assert _compare(" ", "regex", r"^[^\s]$") is False
+        assert _compare("a", "regex", r"^[^\s]$") is True
+
+    def test_escaped_literal_backslash_s_not_translated(self) -> None:
+        # An escaped backslash followed by a literal 's' (\\s) is backslash+s,
+        # NOT the whitespace class. It must match literal "\s" — not whitespace.
+        assert _compare("\\s", "regex", r"^\\s$") is True
+        assert _compare(" ", "regex", r"^\\s$") is False
+
+    def test_unparseable_pattern_still_acef045(self) -> None:
+        # A genuinely unparseable pattern keeps ACEF-045.
+        with pytest.raises(ACEFEvaluationError) as exc:
+            _compare("x", "regex", r"[")
+        assert exc.value.code == "ACEF-045"
+
+
+# ---------------------------------------------------------------------------
+# roborev follow-up 3 (VAL-FIX-ENVELOPE-001): lifecycle start_date/end_date
+# declare format:date but the schema descriptions say "date OR date-time".
+# Global format assertion previously rejected a valid date-time. A custom
+# `date` checker must accept date OR date-time while still rejecting bogus.
+# ---------------------------------------------------------------------------
+
+
+class TestDateOrDateTimeFormatAcceptance:
+    def _manifest_with_lifecycle(self, start_date: str, end_date: str | None = None) -> dict:
+        timeline_item: dict = {"phase": "deployment", "start_date": start_date}
+        if end_date is not None:
+            timeline_item["end_date"] = end_date
+        return {
+            "metadata": {
+                "package_id": "urn:acef:pkg:550e8400-e29b-41d4-a716-446655440000",
+                "timestamp": "2026-01-01T00:00:00Z",
+                "producer": {"name": "acef", "version": "1.0.0"},
+            },
+            "versioning": {"core_version": "1.0.0", "profiles_version": "1.0.0"},
+            "subjects": [
+                {
+                    "subject_id": "urn:acef:sub:550e8400-e29b-41d4-a716-446655440010",
+                    "subject_type": "ai_system",
+                    "name": "x",
+                    "version": "1.0.0",
+                    "provider": "acme",
+                    "risk_classification": "high-risk",
+                    "modalities": ["text"],
+                    "lifecycle_phase": "deployment",
+                    "lifecycle_timeline": [timeline_item],
+                }
+            ],
+            "entities": {"components": [], "datasets": [], "actors": [], "relationships": []},
+            "profiles": [],
+            "record_files": [],
+            "audit_trail": [],
+        }
+
+    def test_lifecycle_start_date_as_plain_date_accepted(self) -> None:
+        errors = validate_against_schema(self._manifest_with_lifecycle("2026-01-01"), "manifest", "v1")
+        assert errors == []
+
+    def test_lifecycle_start_date_as_date_time_accepted(self) -> None:
+        # The schema description allows date OR date-time; a date-time value MUST
+        # be accepted even though the field declares format:date.
+        errors = validate_against_schema(self._manifest_with_lifecycle("2026-01-01T12:30:00Z"), "manifest", "v1")
+        assert errors == []
+
+    def test_lifecycle_end_date_as_date_time_accepted(self) -> None:
+        errors = validate_against_schema(
+            self._manifest_with_lifecycle("2026-01-01", "2026-06-01T00:00:00+02:00"),
+            "manifest",
+            "v1",
+        )
+        assert errors == []
+
+    def test_lifecycle_start_date_bogus_value_rejected(self) -> None:
+        # A non-ISO value must STILL be rejected (ENVELOPE-001 intent preserved).
+        errors = validate_against_schema(self._manifest_with_lifecycle("not-a-date"), "manifest", "v1")
+        messages = " ".join(str(e) for e in errors)
+        assert errors, "expected a format error for a bogus lifecycle start_date"
+        assert "date" in messages
+
+    def test_lifecycle_end_date_bogus_value_rejected(self) -> None:
+        errors = validate_against_schema(self._manifest_with_lifecycle("2026-01-01", "BOGUS-END"), "manifest", "v1")
+        assert errors, "expected a format error for a bogus lifecycle end_date"
+
+    def test_metadata_timestamp_date_time_only_still_strict(self) -> None:
+        # A genuine date-time field (metadata.timestamp) must STILL reject a
+        # bare date — the date-or-date-time leniency is scoped to `date` format,
+        # not to `date-time` format.
+        bad = self._manifest_with_lifecycle("2026-01-01")
+        bad["metadata"]["timestamp"] = "not-a-timestamp"
+        errors = validate_against_schema(bad, "manifest", "v1")
+        messages = " ".join(str(e) for e in errors)
+        assert errors, "expected a date-time format error for a bogus metadata.timestamp"
+        assert "date-time" in messages

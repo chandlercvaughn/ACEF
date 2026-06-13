@@ -75,10 +75,13 @@ def _validate_ecma262_compatible(pattern: str) -> None:
     Spec §3.5 requires patterns to be valid ECMA-262 RegExp; this is a
     static pre-validator for syntax constructs that have no ECMA-262
     equivalent (named-group spelling, inline flags, possessive quantifiers,
-    ``\\A``/``\\Z`` anchors). Character-class SEMANTICS are aligned separately:
-    :func:`_safe_regex_search` compiles with :data:`re.ASCII` so ``\\d``/``\\w``/
-    ``\\s``/``\\b`` follow ASCII semantics matching default (no ``u`` flag)
-    ECMA-262, rather than Python's Unicode-by-default classes
+    ``\\A``/``\\Z`` anchors). Character-class SEMANTICS are aligned separately by
+    :func:`_translate_ecma262_char_classes`: ``\\d``/``\\w`` become explicit ASCII
+    classes while ``\\s``/``\\S`` become the explicit ECMA-262 whitespace class
+    (which a blanket :data:`re.ASCII` would wrongly strip of its non-ASCII
+    members), and the translated pattern keeps :data:`re.ASCII` only so
+    ``\\b``/``\\B`` word boundaries stay ASCII — matching default (no ``u`` flag)
+    ECMA-262 rather than Python's Unicode-by-default classes
     (validation-engine-dsl-5).
     """
     for compiled_check, message in _NON_ECMA262_CONSTRUCTS:
@@ -87,6 +90,121 @@ def _validate_ecma262_compatible(pattern: str) -> None:
                 f"Regex pattern is not valid ECMA-262: {message}. Pattern: {pattern!r}",
                 code="ACEF-045",
             )
+
+
+# ECMA-262 ``\s`` matches ``WhiteSpace`` ∪ ``LineTerminator`` (ECMA-262 §12.2 /
+# §12.3): U+0009, U+000B, U+000C, U+0020, U+00A0, U+FEFF, every Unicode
+# ``Space_Separator`` (general category Zs), plus the line terminators U+000A,
+# U+000D, U+2028, U+2029. This explicit set is NEITHER Python's default ``\s``
+# (which also matches U+001C–U+001F and U+0085 but NOT U+FEFF) NOR ASCII ``\s``
+# (which drops every non-ASCII member). We translate ``\s``/``\S`` to this
+# literal class so two conformant validators agree byte-for-byte
+# (validation-engine-dsl-5 follow-up).
+_ECMA262_WHITESPACE_CODEPOINTS: tuple[int, ...] = (
+    0x0009,  # CHARACTER TABULATION
+    0x000A,  # LINE FEED (LineTerminator)
+    0x000B,  # LINE TABULATION
+    0x000C,  # FORM FEED
+    0x000D,  # CARRIAGE RETURN (LineTerminator)
+    0x0020,  # SPACE
+    0x00A0,  # NO-BREAK SPACE (Zs)
+    0x1680,  # OGHAM SPACE MARK (Zs)
+    0x2000,  # EN QUAD (Zs)
+    0x2001,  # EM QUAD (Zs)
+    0x2002,  # EN SPACE (Zs)
+    0x2003,  # EM SPACE (Zs)
+    0x2004,  # THREE-PER-EM SPACE (Zs)
+    0x2005,  # FOUR-PER-EM SPACE (Zs)
+    0x2006,  # SIX-PER-EM SPACE (Zs)
+    0x2007,  # FIGURE SPACE (Zs)
+    0x2008,  # PUNCTUATION SPACE (Zs)
+    0x2009,  # THIN SPACE (Zs)
+    0x200A,  # HAIR SPACE (Zs)
+    0x2028,  # LINE SEPARATOR (LineTerminator)
+    0x2029,  # PARAGRAPH SEPARATOR (LineTerminator)
+    0x202F,  # NARROW NO-BREAK SPACE (Zs)
+    0x205F,  # MEDIUM MATHEMATICAL SPACE (Zs)
+    0x3000,  # IDEOGRAPHIC SPACE (Zs)
+    0xFEFF,  # ZERO WIDTH NO-BREAK SPACE / BOM
+)
+
+# Bracket-class BODY (no surrounding ``[]``) for ECMA-262 ``\s``. Each member is
+# a ``\uXXXX`` escape so the produced pattern is pure-ASCII source and immune to
+# any source-encoding surprise; ``re.ASCII`` does NOT restrict explicit
+# ``\uXXXX`` class members, only the ``\d``/``\w``/``\s``/``\b`` escapes.
+_ECMA262_WHITESPACE_CLASS_BODY = "".join(f"\\u{cp:04x}" for cp in _ECMA262_WHITESPACE_CODEPOINTS)
+
+
+def _translate_ecma262_char_classes(pattern: str) -> str:
+    r"""Rewrite ``\d``/``\w``/``\s`` (and negations) to ECMA-262-faithful classes.
+
+    Python's ``re`` matches Unicode by default; compiling with blanket
+    :data:`re.ASCII` fixes ``\d``/``\w`` but *overcorrects* ``\s`` — ASCII ``\s``
+    drops the many non-ASCII whitespace chars that ECMA-262 (no ``u`` flag)
+    ``\s`` matches (U+00A0, U+1680, U+2000–U+200A, U+2028/9, U+202F, U+205F,
+    U+3000, U+FEFF). So we translate per-class rather than flag the whole
+    pattern (validation-engine-dsl-5 follow-up):
+
+    * ``\d`` → ``[0-9]``        ``\D`` → ``[^0-9]``
+    * ``\w`` → ``[A-Za-z0-9_]`` ``\W`` → ``[^A-Za-z0-9_]``
+    * ``\s`` → ``[<ecma-262 ws>]``  ``\S`` → ``[^<ecma-262 ws>]``
+
+    Inside a ``[...]`` character class the bracketed forms are inlined as bare
+    class *bodies* (no nested brackets, no negation — a negated shorthand inside
+    a class cannot be expressed losslessly, so it is left untouched and remains
+    ASCII via the residual :data:`re.ASCII` flag). ``\b``/``\B`` are NOT
+    rewritten; they depend on ``\w`` and stay ASCII because the compiled pattern
+    still carries ``re.ASCII`` (which no longer affects ``\s`` once ``\s`` is an
+    explicit literal class).
+
+    A backslash escapes the next character, so ``\\s`` (escaped backslash + literal
+    ``s``) and ``\\d`` are passed through unchanged — only a *single* backslash
+    immediately preceding ``d``/``w``/``s`` (any case) is a shorthand class.
+    """
+    # Per-position rewrites depending on whether we are inside a [...] class.
+    outside = {
+        "d": "[0-9]",
+        "D": "[^0-9]",
+        "w": "[A-Za-z0-9_]",
+        "W": "[^A-Za-z0-9_]",
+        "s": f"[{_ECMA262_WHITESPACE_CLASS_BODY}]",
+        "S": f"[^{_ECMA262_WHITESPACE_CLASS_BODY}]",
+    }
+    # Inside a character class we can only inline the POSITIVE bodies losslessly.
+    # Negated shorthands (``\D``/``\W``/``\S``) inside a class keep their original
+    # escape; with the residual ``re.ASCII`` flag ``\D``/``\W`` stay ASCII, and
+    # ``\S`` inside a class is an uncommon construct preserved as-is.
+    inside = {
+        "d": "0-9",
+        "w": "A-Za-z0-9_",
+        "s": _ECMA262_WHITESPACE_CLASS_BODY,
+    }
+
+    out: list[str] = []
+    in_class = False
+    i = 0
+    n = len(pattern)
+    while i < n:
+        ch = pattern[i]
+        if ch == "\\" and i + 1 < n:
+            nxt = pattern[i + 1]
+            table = inside if in_class else outside
+            if nxt in table:
+                out.append(table[nxt])
+            else:
+                # Preserve any other escape verbatim (e.g. ``\.``, ``\\``, ``\b``,
+                # negated shorthands inside a class).
+                out.append(ch)
+                out.append(nxt)
+            i += 2
+            continue
+        if ch == "[" and not in_class:
+            in_class = True
+        elif ch == "]" and in_class:
+            in_class = False
+        out.append(ch)
+        i += 1
+    return "".join(out)
 
 
 def _safe_regex_search(pattern: str, text: str) -> bool:
@@ -99,10 +217,14 @@ def _safe_regex_search(pattern: str, text: str) -> bool:
     4. Pre-validating against known Python-only (non-ECMA-262) constructs
        per :func:`_validate_ecma262_compatible`
 
-    The pattern is compiled with :data:`re.ASCII` so the ``\\d``/``\\w``/``\\s``/
-    ``\\b`` character classes follow ASCII semantics, matching default (no ``u``
-    flag) ECMA-262 — Python's ``re`` matches Unicode by default, which would let
-    two conformant validators disagree on the same bundle (validation-engine-dsl-5).
+    ECMA-262 character-class SEMANTICS are aligned by
+    :func:`_translate_ecma262_char_classes`: ``\\d``/``\\w`` become explicit ASCII
+    classes and ``\\s``/``\\S`` become the explicit ECMA-262 whitespace class
+    (which, unlike blanket :data:`re.ASCII`, keeps the non-ASCII whitespace chars
+    ECMA-262 ``\\s`` matches). The translated pattern is still compiled with
+    :data:`re.ASCII` so word boundaries ``\\b``/``\\B`` follow ASCII semantics —
+    ``re.ASCII`` no longer affects ``\\s`` because it is now a literal class
+    (validation-engine-dsl-5).
 
     Args:
         pattern: ECMA-262 regex pattern from DSL rule.
@@ -127,6 +249,11 @@ def _safe_regex_search(pattern: str, text: str) -> bool:
             code="ACEF-045",
         )
 
+    # Translate ECMA-262 shorthand classes BEFORE compiling. The original
+    # ``pattern`` was length-checked above (the translation only expands it);
+    # the compiled engine sees the ECMA-262-faithful form.
+    compiled_pattern = _translate_ecma262_char_classes(pattern)
+
     # On Unix, use SIGALRM for timeout protection against catastrophic backtracking.
     # M-SCOUT-1: SIGALRM only works in the main thread of the main interpreter.
     use_alarm = (
@@ -137,7 +264,7 @@ def _safe_regex_search(pattern: str, text: str) -> bool:
         old_handler = signal.signal(signal.SIGALRM, _regex_timeout_handler)
         signal.alarm(_REGEX_TIMEOUT_SECONDS)
         try:
-            result = re.search(pattern, text, re.ASCII) is not None
+            result = re.search(compiled_pattern, text, re.ASCII) is not None
         except _RegexTimeoutError:
             raise ACEFEvaluationError(
                 f"Regex evaluation timed out after {_REGEX_TIMEOUT_SECONDS}s "
@@ -150,7 +277,7 @@ def _safe_regex_search(pattern: str, text: str) -> bool:
         return result
     else:
         # On non-Unix systems or non-main threads, rely on pattern and input length limits only.
-        return re.search(pattern, text, re.ASCII) is not None
+        return re.search(compiled_pattern, text, re.ASCII) is not None
 
 
 def _validate_pointer_syntax(pointer: str) -> None:
@@ -568,22 +695,35 @@ def op_bundle_signed(
     required_alg = params.get("required_alg")
 
     effective_count = signature_count
-    if required_alg and signature_algorithms:
-        # Normalize a bare-string ``required_alg`` to a single-element list so
-        # membership is EXACT, not substring. A template author who writes
-        # ``required_alg: "ES256"`` (string) instead of ``["ES256"]`` would
-        # otherwise turn ``a in required_alg`` into a substring test, wrongly
-        # crediting e.g. "S256" or "S2" (validation-engine-dsl-6).
+    if required_alg is not None:
+        # Validate ``required_alg`` WHENEVER it is present, independent of
+        # whether any signatures exist. The previous ``and signature_algorithms``
+        # guard let a malformed ``required_alg`` (e.g. ``123`` or
+        # ``["RS256", 5]``) be silently treated as absent — and PASS — when there
+        # were zero verified signatures (notably ``min_signatures: 0``). The
+        # parameter is specified as ``string[]`` (spec §3.5 bundle_signed); accept
+        # a bare string (normalized to a single-element set so membership is
+        # EXACT, not substring — validation-engine-dsl-6) OR a list of strings,
+        # and reject anything else with ACEF-045 (validation-engine-dsl-6 follow-up).
         if isinstance(required_alg, str):
             required_set = {required_alg}
         elif isinstance(required_alg, list):
+            for member in required_alg:
+                if not isinstance(member, str):
+                    raise ACEFEvaluationError(
+                        f"bundle_signed required_alg list members must be strings, got {type(member).__name__}",
+                        code="ACEF-045",
+                    )
             required_set = set(required_alg)
         else:
             raise ACEFEvaluationError(
                 f"bundle_signed required_alg must be a string or list of strings, got {type(required_alg).__name__}",
                 code="ACEF-045",
             )
-        effective_count = sum(1 for a in signature_algorithms if a in required_set)
+        # Apply the validated algorithm set to the membership test. With zero
+        # verified signatures this yields effective_count == 0, which is the
+        # correct count — the param was still validated above.
+        effective_count = sum(1 for a in (signature_algorithms or []) if a in required_set)
 
     return effective_count >= min_signatures, []
 

@@ -15,10 +15,70 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from jsonschema import Draft202012Validator, ValidationError
+from jsonschema import Draft202012Validator, FormatChecker, ValidationError
 from referencing import Registry, Resource
 
 from acef.errors import ACEFSchemaError
+
+
+def _build_date_or_datetime_format_checker() -> FormatChecker:
+    """Return a format checker whose ``date`` format accepts date OR date-time.
+
+    The draft2020-12 ``FORMAT_CHECKER`` asserts ``"format": "date"`` strictly
+    (a ``date-time`` value FAILS the ``date`` check). But several manifest fields
+    declare ``"format": "date"`` while their schema descriptions explicitly say
+    "ISO 8601 date or date-time" — notably ``lifecycle_timeline[].start_date`` /
+    ``end_date`` (acef-conventions/v1 and v1.1 manifest schema). Those schemas are
+    FROZEN (v1) or owned by other features (v1.1), so the contract cannot be
+    expressed as ``anyOf [{format: date}, {format: date-time}]`` in the schema
+    itself. Instead we register a CUSTOM ``date`` checker that conforms when the
+    value is a valid ``date`` OR a valid ``date-time``.
+
+    ``date-time`` stays STRICT (a bare date or a bogus string still fails), so a
+    genuine timestamp field (``metadata.timestamp``, ``audit_trail[].timestamp``,
+    record-envelope ``timestamp``) is unaffected. A non-ISO ``date`` value (e.g.
+    "not-a-date") is still rejected — preserving the ENVELOPE-001 ISO-8601 MUST.
+    """
+    base = Draft202012Validator.FORMAT_CHECKER
+    date_func, _ = base.checkers["date"]
+    datetime_func, _ = base.checkers["date-time"]
+
+    # Seed a fresh checker with EVERY draft2020-12 format (``date-time``,
+    # ``uuid``, ``uri``, …) so all formats keep their strict semantics. Mutating
+    # ``base`` directly would corrupt the shared class-level checker.
+    checker = FormatChecker()
+    checker.checkers = dict(base.checkers)
+
+    # Override ONLY ``date`` to conform on a valid date OR date-time. The
+    # underlying ``is_date`` raises ``ValueError`` and ``is_datetime`` raises
+    # nothing (it returns False), so the decorator registers ``ValueError`` as a
+    # conformance-non-error and we additionally guard with a broad try/except to
+    # be robust to either checker's failure mode.
+    @checker.checks("date", raises=(ValueError,))
+    def _is_date_or_datetime(value: object) -> bool:
+        # jsonschema only invokes a format checker on instances matching the
+        # format's primitive type (string). Non-strings conform vacuously so the
+        # ``type`` keyword — not ``format`` — owns the type error.
+        if not isinstance(value, str):
+            return True
+        try:
+            if bool(date_func(value)):
+                return True
+        except ValueError:
+            pass
+        try:
+            if bool(datetime_func(value)):
+                return True
+        except ValueError:
+            pass
+        return False
+
+    return checker
+
+
+# Module-level singleton: the format checker used for every envelope/record
+# schema validation. ``date`` accepts date-or-date-time; everything else strict.
+_DATE_OR_DATETIME_FORMAT_CHECKER = _build_date_or_datetime_format_checker()
 
 # Schema base directories — searched in order.
 # First: relative to project root (development layout)
@@ -268,11 +328,16 @@ def validate_against_schema(
     # non-ISO value surfaces as ACEF-002 (manifest) / ACEF-004 (record payload)
     # rather than passing silently and corrupting the deterministic
     # timestamp-ascending JSONL ordering (envelope-manifest-1). ``date-time``
-    # checking relies on the installed ``rfc3339-validator`` dependency.
+    # checking relies on the installed ``rfc3339-validator`` dependency. The
+    # checker is the ``date``-or-``date-time``-lenient
+    # ``_DATE_OR_DATETIME_FORMAT_CHECKER`` so a ``format: date`` field documented
+    # as "date OR date-time" (lifecycle_timeline.start_date/end_date) accepts a
+    # date-time value while genuine ``date-time``-only fields stay strict and a
+    # bogus value is still rejected.
     validator = Draft202012Validator(
         schema,
         registry=build_schema_registry(version),
-        format_checker=Draft202012Validator.FORMAT_CHECKER,
+        format_checker=_DATE_OR_DATETIME_FORMAT_CHECKER,
     )
     return list(validator.iter_errors(data))
 
