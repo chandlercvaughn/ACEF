@@ -11,6 +11,7 @@ import secrets
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from functools import lru_cache
 from typing import TYPE_CHECKING, Any
 
 from pydantic import ValidationError
@@ -52,6 +53,10 @@ from acef.models.records import (
 )
 from acef.models.subjects import LifecycleEntry, Subject
 from acef.models.urns import URNType, generate_urn
+from acef.schemas.registry import (
+    list_record_type_schemas,
+    parse_core_version_minor,
+)
 
 # Spec §3.1 timestamp format — ISO 8601 with explicit ``Z`` suffix and no
 # sub-second precision. Both the model default factories and the injected-
@@ -66,6 +71,39 @@ _TIMESTAMP_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 # wrong split-obligation evidence with no caller signal (audit
 # envelope-manifest-5). All OTHER record types keep the convenience default.
 _ROLE_SPLIT_RECORD_TYPES: frozenset[str] = frozenset({"transparency_marking", "disclosure_labeling", "event_log"})
+
+# ``coverage_cell`` is registered in ``RECORD_TYPES`` (so cross-cutting
+# type-name inventories treat it uniformly), but it is an Assessment-Bundle
+# inventory concept that has NO standalone ``coverage_cell.schema.json`` — it
+# is defined inline in assessment-bundle.schema.json#/properties/coverage_cells.
+# It is therefore NOT a records/ record_type: ``Package.record()`` rejects it up
+# front (audit records-payloads-3) rather than authoring a record the SDK's own
+# validator later rejects ACEF-003.
+_ASSESSMENT_ONLY_RECORD_TYPES: frozenset[str] = frozenset({"coverage_cell"})
+
+
+@lru_cache(maxsize=1)
+def _v1_1_only_record_types() -> frozenset[str]:
+    """Record types in ``RECORD_TYPES`` that exist ONLY in the v1.1 schema set.
+
+    A v1.1-only type (e.g. ``incident_card`` or an agent-reliability primitive)
+    is present in ``list_record_type_schemas('v1.1')`` but absent from
+    ``list_record_type_schemas('v1')``. Recording one on a v1.0-declared package
+    MUST bump ``core_version`` to 1.1.0 so the validator resolves the v1.1
+    allowlist (audit records-payloads-2). ``_ASSESSMENT_ONLY_RECORD_TYPES``
+    (coverage_cell) is excluded — it has no schema in EITHER set and is rejected
+    up front, so it never reaches the version-bump path.
+
+    ``list_record_type_schemas`` globs the on-disk schema dirs (it is not itself
+    cached) and the schema set is fixed for the process lifetime, so this result
+    is memoized with ``lru_cache(maxsize=1)`` — every ``Package.record()`` call
+    consults it without re-globbing (the schema files are frozen on disk, so the
+    cached value cannot go stale within a process).
+    """
+    v1_types = set(list_record_type_schemas("v1"))
+    v1_1_types = set(list_record_type_schemas("v1.1"))
+    return frozenset((v1_1_types - v1_types) - _ASSESSMENT_ONLY_RECORD_TYPES)
+
 
 # Open-core v1.1 manifest-field (X5/X6) builder authoring constraints. These
 # mirror the FROZEN v1.1 manifest schema EXACTLY so the builder cannot author a
@@ -972,6 +1010,36 @@ class Package:
                 code="ACEF-003",
             )
 
+        # ``coverage_cell`` is an Assessment-Bundle inventory concept with no
+        # ``coverage_cell.schema.json`` — it is NOT a records/ record_type.
+        # Reject it up front with an assessment-bundle hint (audit
+        # records-payloads-3) rather than authoring a record the SDK's own
+        # validator later rejects ACEF-003. This guard fires BEFORE any version
+        # mutation below, so a rejected coverage_cell leaves package state
+        # (including core_version) unchanged.
+        if record_type in _ASSESSMENT_ONLY_RECORD_TYPES:
+            raise ACEFSchemaError(
+                f"record_type {record_type!r} is an Assessment-Bundle inventory "
+                "concept, not an Evidence-Bundle records/ record_type: it has no "
+                f"standalone {record_type}.schema.json (it is defined inline in "
+                "assessment-bundle.schema.json#/properties/coverage_cells). "
+                "Recording it would produce a record the validator rejects "
+                "ACEF-003. Build coverage cells via the Assessment Bundle path "
+                "instead.",
+                code="ACEF-003",
+            )
+
+        # v1.1-only record types (incident_card + the agent-reliability
+        # primitives) have schemas ONLY under acef-conventions/v1.1/. A default
+        # Package declares core_version 1.0.0, whose validator allowlist
+        # (list_record_type_schemas('v1')) excludes these types and would reject
+        # the record ACEF-003 — the SDK producing a bundle its own validator
+        # rejects (audit records-payloads-2). Bump to 1.1.0 here so the v1.1
+        # schema set resolves, exactly as the typed incident/agent-reliability
+        # builders do via _ensure_v1_1().
+        if record_type in _v1_1_only_record_types():
+            self._ensure_v1_1()
+
         # Resolve the schema-required envelope fields when callers omit
         # them, so SDK-produced records carry concrete values rather than
         # relying on to_jsonl_dict's emit-time defaults (which exist as a
@@ -1111,11 +1179,18 @@ class Package:
         # entire block unless the package declares v1.1+. Caller-supplied
         # X1/X2 kwargs still flow through to RecordEnvelope below; the
         # gate only suppresses *auto*-population.
+        #
+        # The gate parses ``(major, minor)`` numerically via
+        # :func:`parse_core_version_minor` (audit redaction-5) rather than a
+        # lexicographic ``core_v >= "1.1"`` comparison, which is not
+        # semver-correct (e.g. it would treat ``"1.1abc"`` as v1.1). A bundle is
+        # v1.1+ when ``(major, minor) >= (1, 1)``; an unparseable version is
+        # NOT v1.1+ (suppress auto-population).
         try:
-            core_v = self._versioning.core_version
-            v1_1_or_later = isinstance(core_v, str) and core_v >= "1.1"
+            parsed_core = parse_core_version_minor(self._versioning.core_version)
         except AttributeError:
-            v1_1_or_later = False
+            parsed_core = None
+        v1_1_or_later = parsed_core is not None and parsed_core >= (1, 1)
 
         if is_non_public and v1_1_or_later:
             policy = self._redaction_policy
@@ -1747,12 +1822,20 @@ class Package:
     def _ensure_v1_1(self) -> None:
         """Bump core_version to 1.1.0 (the incident record types are gated on it).
 
-        v1.1 is a minor release; a bundle already declaring 1.1.x is left as-is.
-        Calling an incident builder on a fresh Package (default 1.0.0) upgrades it
-        so the v1.1 schema set + incident validation rules apply.
+        v1.1 is a minor release; a bundle already declaring 1.1.x (or any future
+        v1.y, y > 1) is left as-is. Calling an incident builder on a fresh
+        Package (default 1.0.0) upgrades it so the v1.1 schema set + incident
+        validation rules apply.
+
+        The gate parses ``(major, minor)`` numerically via
+        :func:`parse_core_version_minor` (audit records-payloads-6) instead of a
+        lexicographic ``current >= "1.1"`` string comparison, which is not
+        semver-correct: an unparseable/odd value (e.g. ``"1.1abc"``) is treated
+        as not-yet-v1.1 and repaired to the canonical ``"1.1.0"`` rather than
+        being mistaken for a valid v1.1 declaration.
         """
-        current = self._versioning.core_version
-        if not (isinstance(current, str) and current >= "1.1"):
+        parsed = parse_core_version_minor(self._versioning.core_version)
+        if parsed is None or parsed < (1, 1):
             self._versioning.core_version = "1.1.0"
 
     def _declare_art73_profile(self) -> None:

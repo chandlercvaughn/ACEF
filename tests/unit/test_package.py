@@ -400,27 +400,40 @@ class TestRecord:
         assert rec.record_type == "x-custom-record"
 
     def test_record_all_known_types(self):
-        """Package.record() accepts every entry in RECORD_TYPES.
+        """Package.record() accepts every records/ record_type in RECORD_TYPES.
 
-        Per VAL-MODEL-001, RECORD_TYPES expanded from 16 (v1.0) to 22
-        (v1.0 + 6 v1.1 agent-reliability primitives). The test name no
-        longer encodes the count; the assertion uses ``len(RECORD_TYPES)``
-        so future additions remain covered without churn.
+        Per VAL-MODEL-001, RECORD_TYPES expanded from 16 (v1.0) to 22+
+        (v1.0 + the v1.1 agent-reliability primitives + incident_card). The
+        assertion derives the expected count from RECORD_TYPES so future
+        additions remain covered without churn.
 
         The role-split record types (transparency_marking,
         disclosure_labeling, event_log) require an explicit obligation_role
         (spec §3.1 / audit envelope-manifest-5), so they are passed one
         here; every other type keeps the convenience provider default.
+
+        ``coverage_cell`` is EXCLUDED: it is an Assessment-Bundle inventory
+        concept with no records/ schema, rejected up front by record() (audit
+        records-payloads-3) — see ``test_record_coverage_cell_rejected`` below.
         """
         role_split = {"transparency_marking", "disclosure_labeling", "event_log"}
+        records_record_types = RECORD_TYPES - {"coverage_cell"}
         pkg = Package()
-        for rt in RECORD_TYPES:
+        for rt in records_record_types:
             kwargs: dict = {"payload": {"test": True}}
             if rt in role_split:
                 kwargs["obligation_role"] = "provider"
             rec = pkg.record(rt, **kwargs)
             assert rec.record_type == rt
-        assert len(pkg.records) == len(RECORD_TYPES)
+        assert len(pkg.records) == len(records_record_types)
+
+    def test_record_coverage_cell_rejected(self):
+        """coverage_cell is not a records/ record_type (audit records-payloads-3)."""
+        pkg = Package()
+        with pytest.raises(ACEFSchemaError) as exc_info:
+            pkg.record("coverage_cell", payload={"test": True})
+        assert exc_info.value.code == "ACEF-003"
+        assert "assessment" in str(exc_info.value).lower()
 
     def test_records_list_is_copy(self):
         pkg = Package()

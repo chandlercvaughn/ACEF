@@ -136,6 +136,51 @@ _COMPANION_SUBSCHEMAS: frozenset[str] = frozenset(
 )
 
 
+def parse_core_version_minor(core_version: str | None) -> tuple[int, int] | None:
+    """Parse ``core_version`` into a numeric ``(major, minor)`` tuple.
+
+    This is the single, semver-correct parse for every ``core_version``
+    minor-gating decision (schema selection, the v1.1 version gate, the X1/X2
+    redaction auto-population gate) — callers MUST NOT re-implement
+    lexicographic string comparison (``core_v >= "1.1"``), which is not
+    semver-correct (e.g. it accepts ``"1.1abc"`` and is fragile across widening
+    version strings; audit records-payloads-6 / redaction-5).
+
+    Args:
+        core_version: The value of ``manifest.versioning.core_version`` (or
+            ``None`` if absent).
+
+    Returns:
+        ``(major, minor)`` when both the major segment and (when present) the
+        minor segment parse as integers. Returns ``None`` when the version is
+        absent/empty or the major/minor segment is non-numeric (e.g.
+        ``"garbage"``, ``"1.1abc"``) — callers treat ``None`` as "not parseable
+        as a v1.1+ declaration" and route to their established floor/error.
+        A bare major (``"1"``) yields ``(1, 0)`` — minor defaults to 0.
+    """
+    if core_version is None or core_version == "":
+        return None
+
+    parts = core_version.split(".")
+    try:
+        major = int(parts[0])
+    except (ValueError, IndexError):
+        return None
+
+    if len(parts) < 2:
+        return (major, 0)
+
+    try:
+        minor = int(parts[1])
+    except ValueError:
+        # A non-numeric minor segment (e.g. "1.x", "1.1abc") is NOT a valid
+        # numeric minor — signal unparseable rather than silently flooring to
+        # 0, so the v1.1 gate does not accept "1.1abc" as a v1.1 declaration.
+        return None
+
+    return (major, minor)
+
+
 def schema_version_for_core_version(core_version: str | None) -> str:
     """Map ``manifest.versioning.core_version`` to a schema directory token.
 
@@ -155,30 +200,19 @@ def schema_version_for_core_version(core_version: str | None) -> str:
         ACEFSchemaError: code ACEF-001, when the major version is not 1
             (validator does not support core 2.x).
     """
-    if core_version is None or core_version == "":
+    parsed = parse_core_version_minor(core_version)
+    if parsed is None:
+        # Garbage like "garbage", "", a non-numeric minor ("1.x"), or absent
+        # — lenient fallback. Phase 1 schema validation diagnoses the malformed
+        # version string itself; we just route through v1.
         return "v1"
 
-    parts = core_version.split(".")
-    try:
-        major = int(parts[0])
-    except (ValueError, IndexError):
-        # Garbage like "garbage" or "" after split — lenient fallback.
-        # Phase 1 schema validation will diagnose the malformed version
-        # string itself; we just route through v1.
-        return "v1"
-
+    major, minor = parsed
     if major != 1:
         raise ACEFSchemaError(
             f"Incompatible core_version: {core_version!r} (validator supports 1.x only)",
             code="ACEF-001",
         )
-
-    # major == 1 — inspect the minor.
-    try:
-        minor = int(parts[1]) if len(parts) >= 2 else 0
-    except ValueError:
-        # e.g. "1.x" — treat as v1.0 floor.
-        minor = 0
 
     if minor <= 0:
         return "v1"

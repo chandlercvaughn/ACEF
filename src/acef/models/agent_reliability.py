@@ -8,9 +8,13 @@ v0.4 per brief ``planning/freddy-on-acef-requirements-v0.1.md`` §3.1-§3.6:
 - :class:`ScopeBoundaryEventPayload` — §3.2
 - :class:`FindingRecordPayload` — §3.3
 - :class:`DeliveryVerdictPayload` — §3.4
-- :class:`CoverageCellPayload` — §3.5 (lives in Assessment Bundles, exposed
-  here for type-checked construction)
 - :class:`HarnessAttestationPayload` — §3.6
+
+§3.5 ``coverage_cell`` has NO payload model here: it is an Assessment-Bundle
+inventory concept defined inline in
+``assessment-bundle.schema.json#/properties/coverage_cells`` (no standalone
+``coverage_cell.schema.json``), validated as raw dicts by
+``acef.validation.v1_1_rules`` (audit records-payloads-5).
 
 Each model inherits :class:`ACEFBaseModel` (``extra='allow'``) so that
 vendor-prefixed extension keys round-trip losslessly. Field optionality
@@ -346,45 +350,18 @@ class DeliveryVerdictPayload(ACEFBaseModel):
 
 
 # ---------- §3.5 coverage_cell (lives in Assessment Bundle) ----------
-
-
-class CoverageDimensions(ACEFBaseModel):
-    """``coverage_cell.dimensions``."""
-
-    scenario_class: str
-    surface_class: str
-    time_window_start: str  # ISO 8601 date-time
-    time_window_end: str  # ISO 8601 date-time
-
-
-class CoverageCellPayload(ACEFBaseModel):
-    """Coverage cell entry per brief §3.5.
-
-    Lives inside ``assessment-bundle.schema.json#/properties/coverage_cells``
-    (an optional plural array) rather than in records/. This model is
-    exposed here so that callers building Assessment Bundles can construct
-    type-checked cell entries; serialization into the bundle is handled by
-    the assessment builder.
-
-    Banned ``claim_language`` substrings (``compliant``, ``certified``,
-    ``AI Act-approved``, ``guaranteed``) are enforced at validator level
-    (ACEF-079 per VAL-VALIDATION-008), not by this model.
-    """
-
-    cell_id: str
-    subject_ref: str
-    dimensions: CoverageDimensions
-    bound_evidence_refs: list[str]
-    freshness_state: Literal[
-        "fresh",
-        "stale_within_grace",
-        "stale_outside_grace",
-        "unverified",
-    ]
-    freshness_policy_ref: str
-    claim_language: str
-    coverage_outcome: Literal["covered", "gap", "blocked"]
-    blocker_ref: str | None = None
+#
+# coverage_cell has NO standalone records/ payload model. It is an
+# Assessment-Bundle inventory concept defined INLINE in
+# ``assessment-bundle.schema.json#/properties/coverage_cells`` (there is no
+# ``coverage_cell.schema.json``), and the validator
+# (``acef.validation.v1_1_rules.lint_coverage_cell_claim_language``) reads the
+# ``coverage_cells`` entries as raw dicts off the assessment bundle. The former
+# ``CoverageCellPayload`` / ``CoverageDimensions`` models were orphaned — never
+# constructed anywhere in src/ — and gave a false impression of type-checked
+# coverage-cell construction; they were removed (audit records-payloads-5). If a
+# future Assessment-Bundle builder needs type-checked cell construction, add the
+# model back WITH a construction call site and a parity test at that time.
 
 
 # ---------- §3.6 harness_attestation ----------
@@ -468,7 +445,6 @@ __all__ = [
     "ScopeBoundaryEventPayload",
     "FindingRecordPayload",
     "DeliveryVerdictPayload",
-    "CoverageCellPayload",
     "HarnessAttestationPayload",
     # Nested helpers — exported for advanced builder use cases.
     "AuthorizedSurface",
@@ -487,7 +463,6 @@ __all__ = [
     "DeliveryWriteAttempt",
     "DeliveryReadBack",
     "DeliveryRetryEntry",
-    "CoverageDimensions",
     "HarnessStateTransition",
     "HarnessVerifier",
     "HarnessAttestationSignature",
