@@ -428,14 +428,39 @@ class TestPerCallRedactionPolicyIsCallLocal:
         assert after is before
         assert after is not None and after.version == "1.0.0"
 
-    def test_per_call_policy_restored_even_on_exception(self) -> None:
-        """If ``record()`` raises mid-call, the per-call override is still restored
-        — the package keeps its original attached policy (try/finally)."""
+    def test_per_call_policy_restored_even_on_exception(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """If ``record()`` raises mid-call — AFTER the call-local policy swap has
+        already happened — the per-call override is still restored: the package
+        keeps its ORIGINAL attached policy (the ``try/finally`` in
+        ``report_incident``).
+
+        This exercises the ``finally`` restore directly, NOT the pre-swap mismatch
+        guard (which would raise before the swap and prove nothing about
+        restoration). We monkeypatch ``Package.record`` with a wrapper that (a)
+        asserts the per-call override Q is installed at ``self._redaction_policy``
+        at the moment ``record()`` runs — proving the swap occurred — then (b)
+        raises. After ``report_incident`` propagates that error we assert the
+        package's policy is back to the ORIGINAL attached P. If the ``finally``
+        restore were deleted, ``self._redaction_policy`` would still be Q here and
+        this test would FAIL — so it is non-vacuous."""
         pkg = _pkg_with_policy()  # attached P, 1.0.0
-        before = pkg._redaction_policy
-        # Diverging explicit version + an explicit policy raises (Medium 1 guard)
-        # AFTER the call-local swap would have happened; the finally must restore P.
-        with pytest.raises(ValueError):
+        original = pkg._redaction_policy
+        assert original is not None and original.version == "1.0.0"
+        per_call = RedactionPolicy(version="5.6.7")  # the override Q
+        boom = RuntimeError("record() exploded after the call-local policy swap")
+
+        observed_at_record_time: list[Any] = []
+
+        def _exploding_record(self: Package, *args: Any, **kwargs: Any) -> RecordEnvelope:
+            # The swap MUST already have installed the per-call override by the time
+            # report_incident delegates to record(). Capturing it proves the swap
+            # happened before the failure (i.e. we are past the pre-swap guard).
+            observed_at_record_time.append(self._redaction_policy)
+            raise boom
+
+        monkeypatch.setattr(Package, "record", _exploding_record)
+
+        with pytest.raises(RuntimeError) as exc:
             pkg.report_incident(
                 public_incident_id=_PUBLIC_ID,
                 harm_core=dict(_HARM_CORE),
@@ -443,10 +468,14 @@ class TestPerCallRedactionPolicyIsCallLocal:
                 description="x",
                 awareness_date=_AWARENESS,
                 eu_ai_act_facts={"serious_incident_triggers": ["3.49.a"], "widespread": False, "death_involved": True},
-                redaction_policy=RedactionPolicy(version="5.6.7"),
-                redaction_policy_version="9.9.9",
+                redaction_policy=per_call,  # Q — no diverging explicit version, so the pre-swap guard does NOT fire
             )
-        assert pkg._redaction_policy is before
+        assert exc.value is boom
+
+        # The swap DID install Q before record() ran (we failed AFTER the swap).
+        assert observed_at_record_time == [per_call]
+        # ...and the finally restored the ORIGINAL attached P (identity + version).
+        assert pkg._redaction_policy is original
         assert pkg._redaction_policy is not None and pkg._redaction_policy.version == "1.0.0"
 
     def test_per_call_policy_on_bare_package_does_not_persist(self) -> None:
