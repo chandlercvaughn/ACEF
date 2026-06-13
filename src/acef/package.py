@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any
 from pydantic import ValidationError
 
 from acef.errors import ACEFError, ACEFSchemaError
-from acef.integrity import canonicalize, path_nfc_utf8_problem, sha256_hex
+from acef.integrity import canonicalize, path_nfc_utf8_problem, sha256_hex, utf16_collation_key
 from acef.models.agent_reliability import (
     AuthorizedTestScopePayload,
     DeliveryVerdictPayload,
@@ -458,6 +458,132 @@ _NIST_AI_600_1_EDITION = "2024-07-final"
 # ACEF-084 checks run and the framework-match rule is satisfied, §5.7).
 _ART73_PROFILE_ID = "eu-ai-act-art73-2026"
 _ART73_TIMELINE_FRAMEWORK = "eu-ai-act-art73"
+
+# The STIX 2.1 crosswalk edition pin (schema const; §5.5 / §5.8). The member is
+# emit-only and pinned to STIX spec version 2.1.
+_STIX_EDITION = "2.1"
+
+# The STIX 2.1 id grammar `<type>--<uuidv4>` (RFC-0002 §5.8), mirrored VERBATIM
+# from acef-conventions/v1.1/taxonomy_crosswalk.schema.json (stix.object_refs
+# items.pattern) so the builder NEVER emits a ref the closed schema would reject.
+# `<type>` is a lowercase STIX SDO/SRO type token (starts with a letter, 3-250
+# chars); `--`; then a strict RFC-4122 v4 UUID (version nibble 4, variant 8-b).
+_STIX_OBJECT_REF_PATTERN = re.compile(
+    r"^[a-z][a-z0-9-]{2,249}--[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+)
+
+# ---------------------------------------------------------------------------
+# ACEF -> STIX 2.1 drop-list (RFC-0002 §5.8 / Appendix A, the STIX 2.1 column).
+#
+# The documented EMIT-direction mapping of each ACEF incident_card class/field to
+# its STIX 2.1 SDO/SRO TYPE, with explicit ``None`` (DROPPED) entries for ACEF
+# concepts that have NO STIX home (the "drop" in drop-list). It is the
+# implementation of the ACEF->STIX drop-list the §5.8 emit-only contract requires.
+#
+# It maps to verified STIX 2.1 SDO/SRO TYPE TOKENS only — NEVER to STIX Incident
+# Core Extension FIELD names, which are [unverified] and scoped to v1.2 ingest
+# (§10; do not invent them). The drop-list DOCUMENTS which ACEF classes have a
+# STIX home; it is NOT used to mint refs (the caller supplies producer-asserted
+# refs, which the builder validates + sorts).
+#
+# Each entry cites its Appendix A crosswalk row (RFC §5.8 :470-482, STIX column).
+# ---------------------------------------------------------------------------
+_ACEF_STIX_DROPLIST: dict[str, str | None] = {
+    # Appendix A row `public_incident_id` -> STIX SDO `id` (the incident SDO id).
+    "public_incident_id": "incident",
+    # Appendix A row `harm_core.harm_class` -> n/a (no STIX SDO home) -> DROPPED.
+    "harm_core.harm_class": None,
+    # Appendix A row `harm_core.realization` -> n/a -> DROPPED.
+    "harm_core.realization": None,
+    # Appendix A row `harm_core.causality` -> SRO `relationship_type`.
+    "harm_core.causality": "relationship",
+    # Appendix A row `harm_core.tangibility` -> n/a -> DROPPED.
+    "harm_core.tangibility": None,
+    # Appendix A row `severity_vector -> severity` -> n/a (no built STIX mapping).
+    "severity_vector": None,
+    "severity": None,
+    # Appendix A row `value_chain_role` -> identity SDO.
+    "value_chain_role": "identity",
+    # Appendix A row `autonomy_level` -> n/a -> DROPPED.
+    "autonomy_level": None,
+    # Appendix A row `harm_distribution_basis` -> n/a -> DROPPED.
+    "harm_distribution_basis": None,
+    # Appendix A row `coordinated_disclosure` -> `object_marking_refs`
+    # (a marking-definition SDO).
+    "coordinated_disclosure": "marking-definition",
+    # Appendix A row `transferability` -> SRO `related-to` (a relationship SRO).
+    "transferability": "relationship",
+}
+
+
+@lru_cache(maxsize=1)
+def acef_stix_droplist() -> dict[str, str | None]:
+    """Return the documented ACEF -> STIX 2.1 emit-direction drop-list (RFC §5.8).
+
+    The mapping covers (1) every documented ``incident_card`` field of the
+    Appendix A crosswalk table (the STIX 2.1 column, RFC §5.8 :470-482) keyed by
+    its ACEF field path, and (2) every ACEF ``harm_class`` code (keyed
+    ``harm_class:<code>``) materialized from the v1.1 ``harm-core-taxonomy.json``
+    derivation rows. Each value is a verified STIX 2.1 SDO/SRO TYPE token, or
+    ``None`` when the ACEF concept has no STIX home (DROPPED — the "drop" in
+    drop-list; ``harm_class`` codes are uniformly DROPPED because
+    ``harm_core.harm_class`` maps to ``n/a`` in the STIX column).
+
+    This is the documented EMIT-direction mapping only; ingest/round-trip is
+    deferred to v1.2 (Appendix E Q27) and this function NEVER references STIX
+    Incident Core Extension field names. It is NOT used to mint refs (the caller
+    supplies producer-asserted ``object_refs``); it documents which ACEF classes
+    have a STIX home so a producer knows where each maps.
+
+    Returns:
+        A COPY of the drop-list mapping (cached source; the copy keeps callers
+        from mutating the shared constant).
+    """
+    from acef.validation.incident_rules import _derivation_rows_by_class
+
+    droplist: dict[str, str | None] = dict(_ACEF_STIX_DROPLIST)
+    # The closed ACEF harm_class code list: each code has NO STIX SDO home
+    # (Appendix A: `harm_core.harm_class` -> n/a), so each is DROPPED.
+    for harm_class in _derivation_rows_by_class():
+        droplist[f"harm_class:{harm_class}"] = None
+    return droplist
+
+
+def _normalize_stix_object_refs(object_refs: list[str] | None) -> list[str] | None:
+    """Validate, de-duplicate, and §5.10-sort a supplied STIX ``object_refs`` list.
+
+    The refs are PRODUCER-ASSERTED: the builder does NOT mint them — it validates
+    each against the STIX 2.1 id grammar (:data:`_STIX_OBJECT_REF_PATTERN`,
+    mirrored from the closed v1.1 schema), de-duplicates them, and sorts them
+    ascending by the RFC-8785 canonical byte sequence of each element (§5.10),
+    REUSING :func:`acef.integrity.utf16_collation_key` — the same canonical-byte
+    collation the Merkle/content-hash key order uses (F-M3-MERKLE-SORT). Two
+    builds from the same (unsorted) input therefore emit byte-identical output.
+
+    Args:
+        object_refs: The caller-supplied STIX 2.1 ids, or ``None``.
+
+    Returns:
+        The sorted, de-duplicated ref list, or ``None`` when no refs are supplied
+        (so the optional ``stix`` member is omitted entirely).
+
+    Raises:
+        ValueError: if any supplied ref does not match the STIX 2.1
+            ``<type>--<uuidv4>`` grammar, so a non-conformant id never reaches
+            the emitted (closed-schema-validated) crosswalk.
+    """
+    if not object_refs:
+        return None
+    for ref in object_refs:
+        if not isinstance(ref, str) or not _STIX_OBJECT_REF_PATTERN.match(ref):
+            raise ValueError(
+                f"STIX object_ref {ref!r} is not a valid STIX 2.1 id of the form "
+                "'<type>--<uuidv4>' (lowercase SDO/SRO type token + RFC-4122 v4 UUID); "
+                "the builder validates producer-asserted refs against the v1.1 "
+                "taxonomy_crosswalk.stix.object_refs schema pattern (§5.8)."
+            )
+    # De-dup then §5.10-sort by the RFC-8785 canonical byte sequence.
+    return sorted(set(object_refs), key=utf16_collation_key)
 
 
 def _parse_iso_instant(value: str) -> datetime:
@@ -2198,6 +2324,7 @@ class Package:
     def _derive_taxonomy_crosswalk(
         harm_core: dict[str, Any],
         eu_ai_act_facts: dict[str, Any],
+        stix_object_refs: list[str] | None = None,
     ) -> dict[str, Any]:
         """Auto-derive ``taxonomy_crosswalk`` from ``harm_core`` (§5.5).
 
@@ -2216,32 +2343,49 @@ class Package:
         - ``nist_ai_600_1`` — the closed NIST category projection for the row (the one
           external enum already transcribed/closed), present only when non-empty.
 
-        The result is CONSISTENT with the validator's ACEF-085 derivation check by
-        construction (it is derived from the same rows). An unmappable harm_class
-        (empty members) leaves the corresponding member legitimately absent.
+        The derived members are CONSISTENT with the validator's ACEF-085 derivation
+        check by construction (they are derived from the same rows). An unmappable
+        harm_class (empty members) leaves the corresponding member legitimately absent.
+
+        - ``stix`` — the §5.8 EMIT-ONLY cross-reference, emitted ONLY when the caller
+          SUPPLIES ``stix_object_refs`` (the member is optional and is omitted
+          otherwise). It is INDEPENDENT of ``harm_class`` derivation: the refs are
+          producer-asserted STIX 2.1 SDO ids (the builder validates them against the
+          STIX ``<type>--<uuidv4>`` grammar, de-duplicates, and §5.10-sorts them — it
+          does NOT mint them). Ingest/round-trip is deferred to v1.2 (Appendix E Q27),
+          so this emits the ``object_refs`` only and never a STIX extension field name.
         """
         from acef.validation.incident_rules import _derivation_rows_by_class
 
-        harm_class = harm_core.get("harm_class")
         crosswalk: dict[str, Any] = {}
-        if not isinstance(harm_class, str):
-            return crosswalk
 
-        rows = _derivation_rows_by_class()
-        row = rows.get(harm_class, {})
+        harm_class = harm_core.get("harm_class")
+        if isinstance(harm_class, str):
+            rows = _derivation_rows_by_class()
+            row = rows.get(harm_class, {})
 
-        # --- eu_ai_act member (always emitted; it anchors the Art.73 facts) ---
-        # REUSE the merged (derived ∪ supplied) fact block so the public crosswalk
-        # the validator reads carries the same triggers the deadline is clocked from.
-        crosswalk["eu_ai_act"] = Package._merged_eu_facts(harm_core, eu_ai_act_facts)
+            # --- eu_ai_act member (always emitted; it anchors the Art.73 facts) ---
+            # REUSE the merged (derived ∪ supplied) fact block so the public crosswalk
+            # the validator reads carries the same triggers the deadline is clocked from.
+            crosswalk["eu_ai_act"] = Package._merged_eu_facts(harm_core, eu_ai_act_facts)
 
-        # --- nist_ai_600_1 member (only when the row has a non-empty projection) ---
-        nist_row = row.get("nist_ai_600_1", {}) if isinstance(row, dict) else {}
-        nist_members = [m for m in nist_row.get("members", []) if isinstance(m, str)]
-        if nist_members:
-            crosswalk["nist_ai_600_1"] = {
-                "edition": _NIST_AI_600_1_EDITION,
-                "categories": sorted(nist_members),
+            # --- nist_ai_600_1 member (only when the row has a non-empty projection) ---
+            nist_row = row.get("nist_ai_600_1", {}) if isinstance(row, dict) else {}
+            nist_members = [m for m in nist_row.get("members", []) if isinstance(m, str)]
+            if nist_members:
+                crosswalk["nist_ai_600_1"] = {
+                    "edition": _NIST_AI_600_1_EDITION,
+                    "categories": sorted(nist_members),
+                }
+
+        # --- stix member (§5.8 emit-only; independent of harm_class derivation) ---
+        # Validate + de-dup + §5.10-sort the producer-asserted refs; omit the member
+        # entirely when none are supplied. A non-conformant ref raises ValueError.
+        sorted_refs = _normalize_stix_object_refs(stix_object_refs)
+        if sorted_refs is not None:
+            crosswalk["stix"] = {
+                "edition": _STIX_EDITION,
+                "object_refs": sorted_refs,
             }
         return crosswalk
 
@@ -2449,6 +2593,7 @@ class Package:
         harm_distribution_basis: list[str] | None = None,
         declared_publication_basis: dict[str, Any] | None = None,
         commitments: dict[str, Any] | None = None,
+        stix_object_refs: list[str] | None = None,
         disclosure_status: str = "coordinated",
         reporter_role: str | None = None,
         extra_payload: dict[str, Any] | None = None,
@@ -2521,7 +2666,7 @@ class Package:
         # trigger now yields a 2-day deadline, not 15-day → no ACEF-084).
         facts = self._merged_eu_facts(harm_core, eu_ai_act_facts)
 
-        crosswalk = self._derive_taxonomy_crosswalk(harm_core, eu_ai_act_facts)
+        crosswalk = self._derive_taxonomy_crosswalk(harm_core, eu_ai_act_facts, stix_object_refs)
         timeline_entry = self._art73_timeline_entry(awareness_date, facts)
         band_value = band(severity_vector)
 

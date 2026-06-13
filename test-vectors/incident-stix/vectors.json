@@ -1,0 +1,24 @@
+{
+  "_comment": "F-M8-STIX §5.8 emit-only conformance vectors. Built by generate.py via the production Package.incident_card(stix_object_refs=...) builder. The with-stix vector emits a §5.10-sorted, deduped, pattern-valid taxonomy_crosswalk.stix.object_refs[]; the without-stix vector omits it.",
+  "stix_object_refs_input": [
+    "relationship--ffffffff-0000-4000-bbbb-000000000003",
+    "incident--7c8d2f10-0000-4000-8000-000000000001",
+    "incident--7c8d2f10-0000-4000-8000-000000000001",
+    "marking-definition--0badf00d-0000-4000-a000-000000000004",
+    "identity--a1b2c3d4-0000-4000-9000-000000000002"
+  ],
+  "vectors": [
+    {
+      "name": "with-stix",
+      "with_stix": true,
+      "path": "with-stix/card.acef",
+      "expect_stix_member": true
+    },
+    {
+      "name": "without-stix",
+      "with_stix": false,
+      "path": "without-stix/card.acef",
+      "expect_stix_member": false
+    }
+  ]
+}
