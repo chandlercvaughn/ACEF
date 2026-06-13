@@ -337,6 +337,68 @@ def compute_incident_dedupe_key_hmac(
     return "hmac-sha256:" + mac
 
 
+def _coerce_confidentiality(value: str | Confidentiality) -> Confidentiality:
+    """Normalize a ``str`` | :class:`Confidentiality` to the enum (single coercion)."""
+    return Confidentiality(value) if isinstance(value, str) else value
+
+
+def effective_incident_confidentiality(
+    record_type: str,
+    payload: dict[str, Any] | None,
+    confidentiality: str | Confidentiality,
+) -> Confidentiality:
+    """Resolve the EFFECTIVE confidentiality of an incident record AFTER the
+    source-backed PUBLIC→``regulator-only`` coercion (roborev High on 6211995b).
+
+    A ``card_source``-bearing ``incident_report`` is the §5.7 Art.73 regulator-filing
+    record carrying the PRIVATE ``eu_ai_act_facts`` block; the typed
+    ``report_incident()`` builder defaults such reports to ``regulator-only``. The
+    generic ``record()`` signature cannot distinguish "caller omitted confidentiality"
+    from "caller explicitly chose PUBLIC", so a source-backed report arriving at PUBLIC
+    is coerced to ``regulator-only`` to MIRROR the typed default. A caller who chose a
+    DIFFERENT non-public level (e.g. ``under-nda``) keeps it; a plain v1.0 report WITHOUT
+    ``card_source`` keeps the caller's PUBLIC (scope: source-backed reports only).
+
+    This is the SINGLE authoritative coercion decision so the generic ``record()`` path
+    AND the typed ``report_incident()`` path (which must know the effective level BEFORE
+    it decides the §5.5 dedupe-key form) can never drift (roborev High on 7aa6c09f).
+    """
+    resolved = _coerce_confidentiality(confidentiality)
+    if (
+        record_type == "incident_report"
+        and isinstance(payload, dict)
+        and "card_source" in payload
+        and resolved == Confidentiality.PUBLIC
+    ):
+        return Confidentiality.REGULATOR_ONLY
+    return resolved
+
+
+def normalize_incident_dedupe_for_confidentiality(
+    payload: dict[str, Any],
+    effective_confidentiality: Confidentiality,
+) -> None:
+    """Enforce the §5.5 public-only ``incident_dedupe_key`` spine in ONE place,
+    keyed on the EFFECTIVE confidentiality (roborev High on 7aa6c09f, ACEF-086).
+
+    The subject-bearing plaintext ``incident_dedupe_key`` is a PUBLIC-ONLY spine:
+    three of its four inputs are low-entropy/enumerable, so an unsalted key over a
+    non-public (often guessable) subject is offline-enumerable — a confidentiality
+    leak the offline incident rule rejects ACEF-086. When the record resolves
+    NON-public the plaintext key MUST be OMITTED (mutates ``payload`` in place);
+    only on a PUBLIC record does it survive. The pepper-keyed
+    ``incident_dedupe_key_hmac`` is NOT enumerable and is left untouched at any level.
+
+    No HMAC is synthesized here: this is the FAIL-SAFE omit both builder and generic
+    paths share. The keyed variant requires a §5.5 resolver pepper the generic caller
+    did not supply (and ``report_incident`` already emits the hmac itself when a pepper
+    is given, regardless of confidentiality), so on a non-public record the plaintext
+    key is removed rather than transformed — never emit plaintext on non-public.
+    """
+    if effective_confidentiality != Confidentiality.PUBLIC and "incident_dedupe_key" in payload:
+        del payload["incident_dedupe_key"]
+
+
 # The five v1.1-only in-bundle incident relationship edges (RFC-0002 §5.8 / §8 #4).
 # These edge values exist ONLY in the v1.1 manifest schema's broadened
 # ``relationship_type`` enum (the v1 schema keeps the original seven entity
@@ -1571,13 +1633,14 @@ class Package:
         # the caller's PUBLIC (the coercion is scoped to source-backed reports, so
         # backward-compat public v1.0 incident_reports are untouched). ``card_source``
         # is the §5.5 schema-diff member, so this scope matches the v1.1 gate above.
-        if (
-            record_type == "incident_report"
-            and isinstance(payload, dict)
-            and "card_source" in payload
-            and (confidentiality == Confidentiality.PUBLIC or confidentiality == Confidentiality.PUBLIC.value)
-        ):
-            confidentiality = Confidentiality.REGULATOR_ONLY
+        #
+        # CENTRALIZED: the coercion decision lives in
+        # :func:`effective_incident_confidentiality` so the typed ``report_incident()``
+        # builder resolves the SAME effective level BEFORE it decides the §5.5
+        # dedupe-key form (roborev High on 7aa6c09f). The helper is a no-op for a
+        # non-public caller level or a plain v1.0 report without ``card_source``.
+        if record_type == "incident_report":
+            confidentiality = effective_incident_confidentiality(record_type, payload, confidentiality)
 
         # Resolve the schema-required envelope fields when callers omit
         # them, so SDK-produced records carry concrete values rather than
@@ -1681,6 +1744,20 @@ class Package:
         # stays order-significant — _sort_incident_arrays never touches it.
         if record_type in _INCIDENT_RECORD_TYPES and resolved_payload:
             resolved_payload = self._sort_incident_arrays(deepcopy(resolved_payload))
+
+        # §5.5 public-only dedupe spine (ACEF-086, roborev High on 7aa6c09f). The
+        # source-backed PUBLIC→regulator-only coercion above could otherwise leave an
+        # already-present PLAINTEXT ``incident_dedupe_key`` (subject-bearing,
+        # offline-enumerable) on a now-NON-public record — the very ACEF-086 leak the
+        # rule rejects. ``confidentiality`` is the EFFECTIVE level here (post-coercion,
+        # and a str caller value was normalized to the enum at line ~1670), so apply
+        # the centralized public-only spine uniformly: on a non-public record the
+        # plaintext key is OMITTED (fail-safe — the generic caller supplied no resolver
+        # pepper to HMAC with). The pepper-keyed ``incident_dedupe_key_hmac`` is left
+        # untouched (not enumerable). Runs AFTER the array sort so the stripped payload
+        # is what gets hashed/serialized/redacted below — generic↔typed byte parity.
+        if record_type in _INCIDENT_RECORD_TYPES and isinstance(resolved_payload, dict):
+            normalize_incident_dedupe_for_confidentiality(resolved_payload, confidentiality)
 
         # ------------------------------------------------------------------
         # VAL-REDACTION-003 — auto-populate X1/X2 on non-public records.
@@ -2826,9 +2903,17 @@ class Package:
         # confidentiality MUST — the same public-only gate the public card applies).
         # The keyed HMAC variant (pepper supplied) is the redacted-subject dedupe
         # path and is emitted regardless of confidentiality (it is pepper-keyed).
-        resolved_confidentiality = (
-            Confidentiality(confidentiality) if isinstance(confidentiality, str) else confidentiality
-        )
+        #
+        # EFFECTIVE confidentiality, not the caller-supplied value (roborev High on
+        # 7aa6c09f). The payload above always carries ``card_source``, so a PUBLIC
+        # caller value is coerced to ``regulator-only`` by record() below; deciding
+        # the dedupe-key form against the raw PUBLIC value would compute the plaintext
+        # key and then coerce — leaving plaintext on a non-public record (ACEF-086). We
+        # resolve the SAME effective level record() will use, via the SINGLE shared
+        # :func:`effective_incident_confidentiality`, so the form is decided correctly
+        # up front: a source-backed report is non-public, so the plaintext key is never
+        # computed here. (record() also runs the centralized omit defensively.)
+        resolved_confidentiality = effective_incident_confidentiality("incident_report", payload, confidentiality)
         harm_class = harm_core.get("harm_class") if isinstance(harm_core, dict) else None
         if resolved_confidentiality == Confidentiality.PUBLIC:
             dedupe_key = compute_incident_dedupe_key(

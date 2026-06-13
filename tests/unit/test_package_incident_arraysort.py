@@ -35,7 +35,11 @@ from typing import Any
 
 from acef.integrity import canonicalize
 from acef.models.enums import Confidentiality
-from acef.package import Package, _v1_1_only_incident_report_fields
+from acef.package import (
+    Package,
+    _v1_1_only_incident_report_fields,
+    compute_incident_dedupe_key,
+)
 from acef.redaction import RedactionPolicy
 from acef.schemas.registry import validate_record_payload
 from acef.validation.incident_rules import check_dedupe_key_confidentiality
@@ -576,10 +580,14 @@ class TestGenericReportDedupeKeyTriggersV11Rules:
         )
         assert pkg._versioning.core_version == "1.1.0"
 
-    def test_acef_086_fires_on_generic_non_public_plaintext_dedupe_leak(self) -> None:
-        # The §5.5 confidentiality MUST: a subject-bearing plaintext incident_dedupe_key on a
-        # NON-public record is an offline-enumerable leak → ACEF-086. Routed through the
-        # generic record() path (now v1.1), the emitted envelope reaches the incident rule.
+    def test_generic_non_public_plaintext_dedupe_is_stripped_not_emitted(self) -> None:
+        # The §5.5 confidentiality MUST is enforced at EMISSION (roborev High on 7aa6c09f):
+        # a subject-bearing plaintext incident_dedupe_key handed to a NON-public record is an
+        # offline-enumerable leak, so the SDK STRIPS it (it does not author the leaky shape).
+        # The record still routes to v1.1 (the dedupe field is a v1.1 trigger), and the emitted
+        # envelope is ACEF-086-CONFORMANT — the rule does not fire on the SDK's own output. (The
+        # rule's positive case — firing on a hand-built leaky shape — is proven separately in
+        # TestCoercionDoesNotLeavePlaintextDedupeOnNonPublic.test_acef_086_would_fire_on_the_pre_fix_shape.)
         pkg = _new_pkg()
         env = pkg.record(
             "incident_report",
@@ -592,8 +600,11 @@ class TestGenericReportDedupeKeyTriggersV11Rules:
             obligation_role="provider",
             confidentiality=Confidentiality.REGULATOR_ONLY,
         )
-        diags = check_dedupe_key_confidentiality([env.to_jsonl_dict()])
-        assert any(d.code == "ACEF-086" for d in diags), diags
+        assert pkg._versioning.core_version == "1.1.0"  # v1.1 routing still happens
+        wire = env.to_jsonl_dict()
+        assert "incident_dedupe_key" not in wire["payload"]
+        diags = check_dedupe_key_confidentiality([wire])
+        assert not any(d.code == "ACEF-086" for d in diags), diags
 
     def test_acef_086_fires_on_generic_malformed_dedupe_shape(self) -> None:
         # The shape MUST: a malformed incident_dedupe_key value → ACEF-086. The generic path
@@ -626,6 +637,160 @@ class TestGenericReportDedupeKeyTriggersV11Rules:
         )
         assert pkg._versioning.core_version == "1.0.0"
         assert validate_record_payload(dict(env.payload), "incident_report", "v1") == []
+
+
+class TestCoercionDoesNotLeavePlaintextDedupeOnNonPublic:
+    """roborev High (7aa6c09f): the PUBLIC→regulator-only source-backed coercion can leave an
+    already-present PLAINTEXT ``incident_dedupe_key`` (subject-bearing) on a now-NON-public record.
+
+    The §5.5 confidentiality MUST (ACEF-086, owned by F-M8-DEDUPE): the plaintext
+    ``incident_dedupe_key`` is a PUBLIC-ONLY spine — on a non-public record it MUST be HMAC'd
+    (``incident_dedupe_key_hmac``) or OMITTED, never present in plaintext. The fix resolves the
+    EFFECTIVE confidentiality (after any coercion) BEFORE the dedupe-key form is decided, then
+    applies the F-M8-DEDUPE rule uniformly: PUBLIC → plaintext stays; NON-public → plaintext is
+    stripped (and, lacking a generic-caller pepper, OMITTED — fail-safe, never emit plaintext on
+    non-public).
+    """
+
+    _PLAINTEXT_KEY = "sha256:" + "a" * 64
+
+    def _generic_source_backed_with_plaintext_dedupe(self) -> dict[str, Any]:
+        payload = _valid_report_payload(_identity)
+        payload["incident_dedupe_key"] = self._PLAINTEXT_KEY
+        return payload
+
+    def test_generic_coercion_strips_plaintext_dedupe_on_non_public(self) -> None:
+        # EXPLOIT PATH 1 (generic). A source-backed report arriving at PUBLIC carrying a plaintext
+        # incident_dedupe_key is coerced to regulator-only (non-public) by record(). RED pre-fix:
+        # the coercion ran AFTER the plaintext key was accepted, so the EXPORTED regulator-only
+        # record still carried the plaintext incident_dedupe_key (subject-bearing leak on a
+        # non-public record) — ACEF-086 violation. After the fix: the emitted record is non-public
+        # AND carries NO plaintext incident_dedupe_key (omitted; no pepper to HMAC with).
+        pkg = _new_pkg()
+        env = pkg.record(
+            "incident_report",
+            payload=self._generic_source_backed_with_plaintext_dedupe(),
+            confidentiality=Confidentiality.PUBLIC,
+        )
+        wire = env.to_jsonl_dict()
+        assert wire["confidentiality"] != Confidentiality.PUBLIC.value
+        assert wire["confidentiality"] == Confidentiality.REGULATOR_ONLY.value
+        assert "incident_dedupe_key" not in wire["payload"]
+
+    def test_generic_coercion_emitted_record_is_acef_086_conformant(self) -> None:
+        # The corrected output is conformant: ACEF-086 does NOT fire on the emitted (stripped)
+        # record. RED pre-fix: ACEF-086 fired (plaintext key surviving on a regulator-only record).
+        pkg = _new_pkg()
+        env = pkg.record(
+            "incident_report",
+            payload=self._generic_source_backed_with_plaintext_dedupe(),
+            confidentiality=Confidentiality.PUBLIC,
+        )
+        diags = check_dedupe_key_confidentiality([env.to_jsonl_dict()])
+        assert not any(d.code == "ACEF-086" for d in diags), diags
+
+    def test_acef_086_would_fire_on_the_pre_fix_shape(self) -> None:
+        # Witness the violation the fix prevents: the PRE-FIX illegal shape (a regulator-only
+        # record that still carries the plaintext key) DOES trip ACEF-086. This anchors the RED
+        # observation independently of the builder, proving the omit is what makes it conformant.
+        pre_fix_wire = {
+            "record_id": "urn:acef:record:test",
+            "record_type": "incident_report",
+            "confidentiality": Confidentiality.REGULATOR_ONLY.value,
+            "payload": {
+                "incident_type": "operational_failure",
+                "description": "d",
+                "severity": "major",
+                "incident_dedupe_key": self._PLAINTEXT_KEY,
+            },
+        }
+        diags = check_dedupe_key_confidentiality([pre_fix_wire])
+        assert any(d.code == "ACEF-086" for d in diags), diags
+
+    def test_typed_report_incident_public_strips_plaintext_after_effective_coercion(self) -> None:
+        # EXPLOIT PATH 2 (typed). report_incident(confidentiality=PUBLIC, …dedupe inputs…) computes
+        # the plaintext key because the CALLER-supplied confidentiality is PUBLIC — but record()
+        # then coerces the source-backed report to regulator-only. RED pre-fix: the plaintext key
+        # was computed against the caller's PUBLIC then coerced, leaving plaintext on a non-public
+        # record. After the fix: report_incident resolves the EFFECTIVE confidentiality first, so a
+        # source-backed report (always coerced non-public) never computes/emits the plaintext key.
+        pkg = _new_pkg()
+        env = pkg.report_incident(
+            public_incident_id=_PUBLIC_ID,
+            harm_core=dict(_HARM_CORE),
+            incident_type="operational_failure",
+            description="d",
+            awareness_date=_AWARENESS,
+            eu_ai_act_facts={
+                "serious_incident_triggers": ["3.49.a"],
+                "widespread": False,
+                "death_involved": False,
+            },
+            value_chain_role="provider",
+            subject_identity=("org", "openai", "gpt"),
+            occurrence_date="2026-07-30T00:00:00Z",
+            confidentiality=Confidentiality.PUBLIC,
+        )
+        wire = env.to_jsonl_dict()
+        assert wire["confidentiality"] != Confidentiality.PUBLIC.value
+        assert "incident_dedupe_key" not in wire["payload"]
+        diags = check_dedupe_key_confidentiality([wire])
+        assert not any(d.code == "ACEF-086" for d in diags), diags
+
+    def test_legitimate_public_card_keeps_plaintext_spine(self) -> None:
+        # Backward-compat / no over-strip: the LEGITIMATE public spine — a PUBLIC incident_card
+        # with the plaintext incident_dedupe_key — is UNAFFECTED. The strip only applies when the
+        # record resolves NON-public; a genuinely public card keeps its plaintext key.
+        pkg = _new_pkg()
+        env = pkg.incident_card(
+            public_incident_id=_PUBLIC_ID,
+            harm_core=dict(_HARM_CORE),
+            severity_vector=_SEVERITY_VECTOR,
+            awareness_date=_AWARENESS,
+            eu_ai_act_facts={
+                "serious_incident_triggers": ["3.49.a"],
+                "widespread": False,
+                "death_involved": False,
+            },
+            value_chain_role="provider",
+            subject_identity=("org", "openai", "gpt"),
+            occurrence_date="2026-07-30T00:00:00Z",
+            confidentiality=Confidentiality.PUBLIC,
+        )
+        wire = env.to_jsonl_dict()
+        assert wire["confidentiality"] == Confidentiality.PUBLIC.value
+        assert wire["payload"]["incident_dedupe_key"] == compute_incident_dedupe_key(
+            value_chain_role="provider",
+            subject_identity=("org", "openai", "gpt"),
+            harm_class=_HARM_CORE["harm_class"],
+            occurrence_date="2026-07-30T00:00:00Z",
+            detection_date=None,
+        )
+        diags = check_dedupe_key_confidentiality([wire])
+        assert not any(d.code == "ACEF-086" for d in diags), diags
+
+    def test_generic_non_public_with_plaintext_dedupe_no_card_source_is_stripped(self) -> None:
+        # The strip is keyed on EFFECTIVE non-public confidentiality, not solely on card_source: a
+        # caller who explicitly records a NON-public incident_report carrying a plaintext dedupe key
+        # (no card_source, so no coercion) must also have it omitted — the public-only spine rule is
+        # uniform. RED pre-fix: the plaintext key survived on the explicitly-non-public record.
+        pkg = _new_pkg()
+        env = pkg.record(
+            "incident_report",
+            payload={
+                "incident_type": "operational_failure",
+                "description": "d",
+                "severity": "major",
+                "incident_dedupe_key": self._PLAINTEXT_KEY,
+            },
+            obligation_role="provider",
+            confidentiality=Confidentiality.UNDER_NDA,
+        )
+        wire = env.to_jsonl_dict()
+        assert wire["confidentiality"] == Confidentiality.UNDER_NDA.value
+        assert "incident_dedupe_key" not in wire["payload"]
+        diags = check_dedupe_key_confidentiality([wire])
+        assert not any(d.code == "ACEF-086" for d in diags), diags
 
 
 class TestNotificationTimelineIsOrderSignificant:
