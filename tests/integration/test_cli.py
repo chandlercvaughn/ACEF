@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import tarfile
 from pathlib import Path
 
 import pytest
@@ -14,6 +16,26 @@ from acef.package import Package
 @pytest.fixture
 def runner():
     return CliRunner()
+
+
+def _build_raw_archive(src_dir: Path, out: Path, *, skip: set[str] | None = None) -> None:
+    """Pack ``src_dir`` into a raw .tar.gz at ``out``, preserving the on-disk
+    file set EXACTLY (optionally omitting members named in ``skip``).
+
+    This deliberately does NOT go through ``export_archive`` / ``Package.export``:
+    those regenerate ``hashes/content-hashes.json`` and ``hashes/merkle-tree.json``
+    from the loaded records, which would heal any tampering. To prove doctor
+    detects a tampered archive we must ship the tampered bytes verbatim, with
+    the bundle nested under its root directory exactly like a real archive.
+    """
+    skip = skip or set()
+    with tarfile.open(str(out), "w:gz") as tar:
+        for path in sorted(src_dir.rglob("*")):
+            inner = path.relative_to(src_dir).as_posix()
+            if inner in skip:
+                continue
+            arcname = path.relative_to(src_dir.parent).as_posix()
+            tar.add(str(path), arcname=arcname, recursive=False)
 
 
 class TestCLI:
@@ -126,6 +148,84 @@ class TestCLI:
         result = runner.invoke(cli, ["doctor", bundle_path])
         assert result.exit_code == 0
         assert "ACEF-011" not in result.output
+
+    def test_doctor_healthy_archive_is_clean(self, runner: CliRunner, minimal_package: Package, tmp_dir: Path) -> None:
+        """A healthy .acef.tar.gz archive → doctor exits 0 and verifies integrity.
+
+        Guards the archive happy path: delegating archive integrity to
+        ``check_integrity`` must NOT regress a clean archive into an error.
+        """
+        bundle_dir = tmp_dir / "healthy.acef"
+        minimal_package.export(str(bundle_dir))
+        archive = tmp_dir / "healthy.acef.tar.gz"
+        _build_raw_archive(bundle_dir, archive)
+
+        result = runner.invoke(cli, ["doctor", str(archive)])
+        assert result.exit_code == 0, result.output
+        assert "ACEF-011" not in result.output
+        assert "ACEF-010" not in result.output
+
+    def test_doctor_archive_absent_merkle_tree_is_fatal(
+        self, runner: CliRunner, minimal_package: Package, tmp_dir: Path
+    ) -> None:
+        """ARCHIVE parity with the directory path: an .acef.tar.gz whose
+        ``hashes/merkle-tree.json`` is removed (content-hashes.json present) is
+        FATAL ACEF-011 with a non-zero exit.
+
+        Finding (roborev Medium on d8a3a4f9): for archive inputs doctor only
+        called ``load(path)`` and returned BEFORE any integrity check. ``load()``
+        does not verify ``hashes/merkle-tree.json``, so a tampered archive
+        (merkle-tree.json stripped) exited 0 — while the equivalent directory
+        bundle and ``validate`` both reject it with FATAL ACEF-011. RED proof:
+        before the fix doctor prints "Archive loads successfully" and exits 0.
+        """
+        bundle_dir = tmp_dir / "src-no-merkle.acef"
+        minimal_package.export(str(bundle_dir))
+        assert (bundle_dir / "hashes" / "merkle-tree.json").exists()
+        assert (bundle_dir / "hashes" / "content-hashes.json").exists()
+
+        archive = tmp_dir / "no-merkle.acef.tar.gz"
+        _build_raw_archive(bundle_dir, archive, skip={"hashes/merkle-tree.json"})
+
+        result = runner.invoke(cli, ["doctor", str(archive)])
+        assert result.exit_code != 0, "doctor exited 0 for a tampered archive the validator rejects with FATAL ACEF-011"
+        assert "ACEF-011" in result.output
+        assert "merkle-tree.json" in result.output
+
+    def test_doctor_archive_content_hash_mismatch_matches_validate(
+        self, runner: CliRunner, minimal_package: Package, tmp_dir: Path
+    ) -> None:
+        """ARCHIVE content-hash mismatch (valid JSON, tampered field) → doctor
+        reports it as an error and exits non-zero, in PARITY with ``validate``.
+
+        RED proof: before the fix the archive branch skipped integrity entirely,
+        so doctor printed "Archive loads successfully" and exited 0 even though
+        ``validate`` flags the same archive with FATAL ACEF-010.
+        """
+        bundle_dir = tmp_dir / "src-tamper.acef"
+        minimal_package.export(str(bundle_dir))
+
+        # Tamper a field inside the manifest. The result is STILL valid JSON and
+        # a structurally valid bundle, but its content hash no longer matches
+        # content-hashes.json — only an integrity verify catches it.
+        manifest_path = bundle_dir / "acef-manifest.json"
+        data = json.loads(manifest_path.read_text(encoding="utf-8"))
+        data["metadata"]["producer"]["name"] = "ATTACKER"
+        manifest_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+        archive = tmp_dir / "tampered-field.acef.tar.gz"
+        _build_raw_archive(bundle_dir, archive)
+
+        # validate's verdict on the SAME archive (the parity oracle).
+        validate_result = runner.invoke(cli, ["validate", str(archive)])
+
+        doctor_result = runner.invoke(cli, ["doctor", str(archive)])
+        assert doctor_result.exit_code != 0, (
+            "doctor exited 0 for an archive with a content-hash mismatch that validate rejects"
+        )
+        assert "ACEF-010" in doctor_result.output
+        # Parity: validate also fails (fatal) on the tampered archive.
+        assert validate_result.exit_code != 0, validate_result.output
 
     def test_export_to_archive(self, runner: CliRunner, minimal_package: Package, tmp_dir: Path) -> None:
         bundle_path = str(tmp_dir / "export-src.acef")

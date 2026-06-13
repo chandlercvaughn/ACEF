@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 import json
+import tarfile
+import tempfile
+from contextlib import ExitStack
 from pathlib import Path
 
 import click
 from rich.console import Console
+
+from acef.errors import Severity, ValidationDiagnostic
 
 console = Console()
 
@@ -16,7 +21,8 @@ console = Console()
 def doctor_cmd(path: str) -> None:
     """Diagnose issues with an ACEF Evidence Bundle at PATH.
 
-    Checks structure, integrity, references, and common problems.
+    Checks structure, integrity, references, and common problems for BOTH
+    directory bundles and ``.acef.tar.gz`` archives.
     """
     bundle_path = Path(path)
     issues: list[tuple[str, str, str]] = []  # (severity, category, message)
@@ -28,29 +34,41 @@ def doctor_cmd(path: str) -> None:
         console.print(f"[red]Bundle not found: {path}[/red]")
         raise SystemExit(1)
 
-    if bundle_path.is_file() and (bundle_path.suffix == ".gz" or str(bundle_path).endswith(".tar.gz")):
-        console.print("[yellow]Archive bundles — extracting for analysis...[/yellow]")
-        from acef.loader import load
+    # Resolve the input to a bundle DIRECTORY. An archive is extracted (raw,
+    # preserving the on-disk file set EXACTLY) into a temp dir that stays alive
+    # for the duration of every check below. This is the single fix that makes
+    # archive inputs run the SAME structure / manifest / integrity / record
+    # checks as directory inputs — previously the archive branch only called
+    # ``load(path)`` and returned BEFORE any integrity check, so a tampered
+    # archive (e.g. ``hashes/merkle-tree.json`` stripped, or a content-hash
+    # mismatch) exited 0 while ``validate`` rejected it (roborev Medium).
+    is_archive = bundle_path.is_file() and (bundle_path.suffix == ".gz" or str(bundle_path).endswith(".tar.gz"))
 
-        try:
-            load(path)
-            console.print("[green]Archive loads successfully[/green]")
-        except Exception as e:
-            console.print(f"[red]Archive load failed: {e}[/red]")
-            raise SystemExit(1)
-        return
+    with ExitStack() as stack:
+        if is_archive:
+            console.print("[yellow]Archive bundle — extracting for analysis...[/yellow]")
+            try:
+                bundle_dir = _extract_archive(bundle_path, stack)
+            except Exception as e:  # noqa: BLE001 — surface any extraction fault, never crash doctor
+                console.print(f"[red]Archive could not be extracted: {e}[/red]")
+                raise SystemExit(1) from e
+            console.print("[green]Archive extracted[/green]")
+        else:
+            bundle_dir = bundle_path
 
-    # Check directory structure
-    _check_structure(bundle_path, issues)
+        # Check directory structure
+        _check_structure(bundle_dir, issues)
 
-    # Check manifest
-    _check_manifest(bundle_path, issues)
+        # Check manifest
+        _check_manifest(bundle_dir, issues)
 
-    # Check integrity
-    _check_integrity(bundle_path, issues)
+        # Check integrity — DELEGATED to the canonical validator so doctor's
+        # severity + exit status MATCH ``validate`` / ``check_integrity`` for
+        # every integrity condition, for both directory and archive inputs.
+        _check_integrity(bundle_dir, issues)
 
-    # Check records
-    _check_records(bundle_path, issues)
+        # Check records
+        _check_records(bundle_dir, issues)
 
     # Report
     console.print()
@@ -74,6 +92,36 @@ def doctor_cmd(path: str) -> None:
     # consumers can now actually detect a broken bundle via exit code.
     if errors > 0:
         raise SystemExit(1)
+
+
+def _extract_archive(archive_path: Path, stack: ExitStack) -> Path:
+    """Safely extract a ``.acef.tar.gz`` archive into a temp dir and return the
+    bundle root directory.
+
+    Reuses the loader's vetted safety primitives (``_validate_tar_safety`` +
+    ``_safe_tar_extract``) — the SAME safe-extract path ``load()`` uses — so
+    doctor never introduces a second, unsafe extractor. The temp directory is
+    registered on ``stack`` and is cleaned up when the caller's ``with`` block
+    exits, AFTER every check has run against the extracted files. Crucially this
+    extracts the archive bytes VERBATIM (it does NOT round-trip through
+    ``load()`` + ``export()``, which would regenerate ``content-hashes.json`` /
+    ``merkle-tree.json`` and silently heal tampering), so the integrity check
+    sees the archive's real on-disk state.
+    """
+    from acef.loader import _safe_tar_extract, _validate_tar_safety
+
+    tmpdir = Path(stack.enter_context(tempfile.TemporaryDirectory()))
+    with tarfile.open(str(archive_path), "r:gz") as tar:
+        _validate_tar_safety(tar)
+        _safe_tar_extract(tar, tmpdir)
+
+    # Find the bundle root: a single nested directory is the bundle root
+    # (the canonical archive layout); otherwise the temp dir itself is the
+    # bundle root. Mirrors loader._load_archive.
+    extracted = list(tmpdir.iterdir())
+    if len(extracted) == 1 and extracted[0].is_dir():
+        return extracted[0]
+    return tmpdir
 
 
 def _check_structure(bundle_path: Path, issues: list[tuple[str, str, str]]) -> None:
@@ -133,72 +181,48 @@ def _check_manifest(bundle_path: Path, issues: list[tuple[str, str, str]]) -> No
         issues.append(("warning", "manifest", "No subjects declared"))
 
 
+# Map the canonical validator severities onto doctor's three console buckets.
+# FATAL and ERROR both fail the command (counted as "error" → exit 1), so
+# doctor's exit status MATCHES ``validate`` / ``check_integrity``: a condition
+# the validator treats as FATAL (e.g. ACEF-010 hash mismatch, ACEF-011 missing
+# Merkle tree / root mismatch, ACEF-012/013/014 signature & hash-index faults)
+# makes doctor exit non-zero, never 0.
+_SEVERITY_TO_BUCKET: dict[Severity, str] = {
+    Severity.FATAL: "error",
+    Severity.ERROR: "error",
+    Severity.WARNING: "warning",
+    Severity.INFO: "info",
+}
+
+
 def _check_integrity(bundle_path: Path, issues: list[tuple[str, str, str]]) -> None:
-    """Check integrity files."""
+    """Check integrity by DELEGATING to the canonical validator.
+
+    Doctor no longer walks the hash files itself. It calls
+    :func:`acef.validation.integrity_checker.check_integrity` — the exact
+    routine Phase 2 of ``validate`` runs — and maps the returned
+    :class:`ValidationDiagnostic`\\ s into doctor's console report. This makes
+    doctor's verdict (severity + exit status) MATCH ``validate`` for every
+    integrity condition (missing/invalid content-hashes.json, hash mismatch,
+    missing/invalid merkle-tree.json, Merkle root mismatch, signature faults),
+    for BOTH directory and archive inputs — closing the divergence roborev
+    flagged twice on this command (the bespoke walk had a different severity
+    for a missing Merkle tree, and the archive path skipped integrity entirely).
+    """
     console.print("\nChecking integrity...")
 
-    hashes_path = bundle_path / "hashes" / "content-hashes.json"
-    if hashes_path.exists():
-        try:
-            hashes = json.loads(hashes_path.read_text(encoding="utf-8"))
-            console.print(f"  [green]content-hashes.json: {len(hashes)} entries[/green]")
+    from acef.validation.integrity_checker import check_integrity
 
-            # Spot-check a few hashes
-            from acef.integrity import ACEFCanonicalizationError, verify_content_hashes
+    diagnostics: list[ValidationDiagnostic] = check_integrity(bundle_path)
 
-            try:
-                errors = verify_content_hashes(bundle_path, hashes)
-            except ACEFCanonicalizationError as exc:
-                # Strict canonicalization now raises on BOM, non-NFC, illegal
-                # JSONL whitespace, missing trailing newline. Surface as an
-                # ACEF-051 issue rather than crashing doctor.
-                issues.append(("error", "integrity", f"ACEF-051: {exc}"))
-                errors = []
-            if errors:
-                for err in errors[:5]:
-                    issues.append(("error", "integrity", err))
-            else:
-                console.print("  [green]All hashes verified[/green]")
-        except json.JSONDecodeError:
-            issues.append(("error", "integrity", "Invalid JSON in content-hashes.json"))
-    else:
-        issues.append(("warning", "integrity", "No content-hashes.json found"))
+    if not diagnostics:
+        console.print("  [green]Integrity verified (hashes, Merkle root, signatures)[/green]")
+        return
 
-    # Merkle-tree presence is MANDATORY whenever content-hashes.json exists.
-    # check_integrity() (validation/integrity_checker.py) treats an absent
-    # hashes/merkle-tree.json — in a bundle that DOES carry content-hashes.json
-    # — as FATAL ACEF-011: spec §3.1.3 step (d)'s mandatory recompute-and-
-    # compare cannot be performed without the file. doctor MUST agree on both
-    # severity (error) and exit status (non-zero) so it never exits 0 for a
-    # bundle ``validate`` rejects. When content-hashes.json is itself absent,
-    # the missing Merkle file is not independently actionable (the integrity
-    # layer is already flagged above via the missing content-hashes warning),
-    # so we keep the advisory note in that case to avoid a confusing
-    # double-report.
-    merkle_path = bundle_path / "hashes" / "merkle-tree.json"
-    if merkle_path.exists():
-        console.print("  [green]merkle-tree.json present[/green]")
-    elif hashes_path.exists():
-        issues.append(
-            (
-                "error",
-                "integrity",
-                "ACEF-011: merkle-tree.json not found in hashes/ — mandatory "
-                "Merkle root comparison (spec §3.1.3 step d) cannot be performed",
-            )
-        )
-    else:
-        issues.append(("warning", "integrity", "No merkle-tree.json found"))
-
-    sig_dir = bundle_path / "signatures"
-    if sig_dir.exists():
-        sigs = list(sig_dir.glob("*.jws"))
-        if sigs:
-            console.print(f"  [green]{len(sigs)} signature(s) found[/green]")
-        else:
-            console.print("  [dim]No signatures (unsigned bundle — valid)[/dim]")
-    else:
-        console.print("  [dim]No signatures directory (unsigned bundle — valid)[/dim]")
+    for diag in diagnostics:
+        bucket = _SEVERITY_TO_BUCKET.get(diag.severity, "error")
+        location = f" ({diag.path})" if diag.path else ""
+        issues.append((bucket, "integrity", f"{diag.code}: {diag.message}{location}"))
 
 
 def _check_records(bundle_path: Path, issues: list[tuple[str, str, str]]) -> None:
