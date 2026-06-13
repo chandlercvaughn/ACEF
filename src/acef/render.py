@@ -5,9 +5,12 @@ Generates Markdown and console-formatted compliance reports from Assessment Bund
 
 from __future__ import annotations
 
+from typing import Any
+
 from acef.errors import incident_error_detail
 from acef.models.assessment import AssessmentBundle
 from acef.models.enums import ProvisionOutcome, RuleOutcome
+from acef.validation.incident_rules import band
 
 # Outcome display mapping
 _OUTCOME_SYMBOLS = {
@@ -94,7 +97,16 @@ def render_markdown(assessment: AssessmentBundle) -> str:
             if result.message:
                 lines.append(f"- **Message:** {result.message}")
             if result.evidence_refs:
-                lines.append(f"- **Evidence:** {', '.join(f'`{r}`' for r in result.evidence_refs[:5])}")
+                shown = result.evidence_refs[:5]
+                rendered = ", ".join(f"`{r}`" for r in shown)
+                # Disclose any truncation rather than silently dropping evidence
+                # references beyond the first five — silently hiding evidence in a
+                # compliance report is a correctness defect (Part-A audit). This
+                # mirrors the console structural-errors "... and N more" discipline.
+                overflow = len(result.evidence_refs) - len(shown)
+                if overflow > 0:
+                    rendered += f" … and {overflow} more"
+                lines.append(f"- **Evidence:** {rendered}")
             lines.append("")
 
     # Structural Errors
@@ -182,4 +194,247 @@ def render_console(assessment: AssessmentBundle) -> str:
         if len(assessment.structural_errors) > 10:
             lines.append(f"  ... and {len(assessment.structural_errors) - 10} more")
 
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Incident-evidence rendering (RFC-0002 §5.2 acef.render) — VAL-COVERAGE-RENDER-001
+# ---------------------------------------------------------------------------
+#
+# The AssessmentBundle renderers above surface validation RESULTS (and the §7
+# incident ERROR diagnostics ACEF-081..088). They do NOT carry incident EVIDENCE
+# CONTENT — an Assessment Bundle holds outcomes, not the incident_card /
+# incident_report payloads themselves.
+#
+# These functions render that evidence content from the raw record envelopes
+# (plain dicts: ``{record_type, payload}``) the caller (CLI inspect, a later
+# feature) holds: for each ``incident_card`` / ``incident_report`` record they
+# surface the public_incident_id (+ id_grade), the harm_core, the severity_vector
+# rendered WITH its band (reusing the shipped band() projection — never
+# recomputed), and the taxonomy_crosswalk framework members.
+#
+# Discipline:
+# - Presentation only. ``render`` surfaces whatever fields are present on the
+#   record AS-IS; it never re-derives confidentiality and never invents fields.
+# - Robust: a record missing an optional field renders gracefully (no crash); a
+#   non-incident (or non-dict) record is skipped; an empty input yields "".
+# - Deterministic: records render in given order; crosswalk members and harm_core
+#   fields render in a fixed key order; no wall-clock / random values are read.
+
+_INCIDENT_RECORD_TYPES: frozenset[str] = frozenset({"incident_card", "incident_report"})
+
+# Fixed render order for taxonomy_crosswalk framework members (§5.5). Ordering is
+# deterministic and stable regardless of dict insertion order.
+_CROSSWALK_MEMBER_ORDER: tuple[str, ...] = (
+    "eu_ai_act",
+    "oecd",
+    "nist_ai_600_1",
+    "cset",
+    "mit_causal",
+    "mit_domain",
+    "aiid",
+    "stix",
+)
+
+# Fixed render order for harm_core scalar/sub-object fields (§5.2).
+_HARM_CORE_FIELD_ORDER: tuple[str, ...] = (
+    "harm_class",
+    "realization",
+    "causality",
+    "tangibility",
+)
+
+
+def _as_dict(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _incident_payload(record: dict[str, Any]) -> dict[str, Any] | None:
+    """Return the payload of an incident_card / incident_report record, else None.
+
+    Non-dict records, non-incident record_types, and records without a dict
+    payload return ``None`` (the record is skipped).
+    """
+    if not isinstance(record, dict):
+        return None
+    if record.get("record_type") not in _INCIDENT_RECORD_TYPES:
+        return None
+    payload = record.get("payload")
+    return payload if isinstance(payload, dict) else None
+
+
+def _resolve_incident_field(payload: dict[str, Any], field: str) -> Any:
+    """Resolve a field from the payload root or, failing that, from card_source.
+
+    A source-backed ``incident_report`` carries public_incident_id / id_grade /
+    severity_vector under ``card_source`` rather than at the payload root; this
+    resolves either location (root preferred) without inventing absent fields.
+    """
+    value = payload.get(field)
+    if value is not None:
+        return value
+    return _as_dict(payload.get("card_source")).get(field)
+
+
+def _crosswalk_edition(member: dict[str, Any]) -> str | None:
+    """Return a member's version-pin (``edition`` or, for mit_domain, the
+    ``taxonomy_version`` label), or None when absent (§5.5)."""
+    edition = member.get("edition")
+    if isinstance(edition, str) and edition:
+        return edition
+    tv = member.get("taxonomy_version")
+    return tv if isinstance(tv, str) and tv else None
+
+
+def _render_harm_core_markdown(harm_core: dict[str, Any]) -> list[str]:
+    """Render harm_core sub-fields as Markdown bullet lines (fixed key order)."""
+    lines: list[str] = []
+    for field in _HARM_CORE_FIELD_ORDER:
+        if field not in harm_core:
+            continue
+        value = harm_core[field]
+        if field == "causality" and isinstance(value, dict):
+            entity = value.get("entity", "")
+            intent = value.get("intent", "")
+            timing = value.get("timing", "")
+            lines.append(f"  - **causality:** entity={entity}, intent={intent}, timing={timing}")
+        else:
+            lines.append(f"  - **{field}:** {value}")
+    return lines
+
+
+def _ordered_crosswalk_members(crosswalk: dict[str, Any]) -> list[str]:
+    """Return present crosswalk member keys in the fixed order, with any extra
+    (e.g. ``x-*`` vendor namespace) members appended in sorted order for
+    determinism."""
+    present = [m for m in _CROSSWALK_MEMBER_ORDER if m in crosswalk]
+    extras = sorted(k for k in crosswalk if k not in _CROSSWALK_MEMBER_ORDER)
+    return present + extras
+
+
+def render_incident_evidence_markdown(records: list[dict[str, Any]]) -> str:
+    """Render incident EVIDENCE content from record envelopes as Markdown.
+
+    For each ``incident_card`` / ``incident_report`` record in ``records``,
+    surfaces the public_incident_id (+ id_grade), harm_core, the severity_vector
+    WITH its derived band (reusing :func:`acef.validation.incident_rules.band` —
+    never recomputed), and the taxonomy_crosswalk framework members (each with its
+    version-pin edition). Non-incident / non-dict records are skipped. An empty
+    input — or an input with no incident records — yields ``""`` (no heading).
+
+    Args:
+        records: Record envelopes (plain dicts ``{record_type, payload, ...}``).
+
+    Returns:
+        Markdown-formatted incident-evidence section, or ``""`` when there is no
+        incident evidence to render.
+    """
+    blocks: list[list[str]] = []
+    for record in records:
+        payload = _incident_payload(record)
+        if payload is None:
+            continue
+        block: list[str] = []
+
+        public_id = _resolve_incident_field(payload, "public_incident_id")
+        id_grade = _resolve_incident_field(payload, "id_grade")
+        heading = f"### {public_id}" if isinstance(public_id, str) and public_id else "### (no public_incident_id)"
+        block.append(heading)
+        if isinstance(public_id, str) and public_id:
+            block.append(f"- **Public Incident ID:** `{public_id}`")
+        if isinstance(id_grade, str) and id_grade:
+            block.append(f"- **ID Grade:** {id_grade}")
+
+        # severity_vector + band (reuse the shipped band() projection).
+        severity_vector = _resolve_incident_field(payload, "severity_vector")
+        if isinstance(severity_vector, str) and severity_vector:
+            band_value = band(severity_vector)
+            if band_value is not None:
+                block.append(f"- **Severity Vector:** `{severity_vector}` (band: **{band_value}**)")
+            else:
+                # A present-but-unparseable vector: surface it verbatim with no
+                # derived band rather than crashing (band() returns None).
+                block.append(f"- **Severity Vector:** `{severity_vector}` (band: unparseable)")
+
+        # harm_core.
+        harm_core = _as_dict(payload.get("harm_core"))
+        if harm_core:
+            block.append("- **Harm Core:**")
+            block.extend(_render_harm_core_markdown(harm_core))
+
+        # taxonomy_crosswalk.
+        crosswalk = _as_dict(payload.get("taxonomy_crosswalk"))
+        member_keys = _ordered_crosswalk_members(crosswalk)
+        if member_keys:
+            block.append("- **Taxonomy Crosswalk:**")
+            for key in member_keys:
+                member = _as_dict(crosswalk.get(key))
+                edition = _crosswalk_edition(member)
+                if edition is not None:
+                    block.append(f"  - **{key}** (edition: {edition})")
+                else:
+                    block.append(f"  - **{key}**")
+
+        blocks.append(block)
+
+    if not blocks:
+        return ""
+
+    lines: list[str] = ["## Incident Evidence", ""]
+    for block in blocks:
+        lines.extend(block)
+        lines.append("")
+    return "\n".join(lines).rstrip("\n")
+
+
+def render_incident_evidence_console(records: list[dict[str, Any]]) -> str:
+    """Render incident EVIDENCE content from record envelopes for the console.
+
+    Concise console twin of :func:`render_incident_evidence_markdown`: one block
+    per ``incident_card`` / ``incident_report`` record carrying the
+    public_incident_id, the severity band (reusing
+    :func:`acef.validation.incident_rules.band`), the harm_class, and the present
+    crosswalk framework members. Non-incident / non-dict records are skipped; an
+    empty input yields ``""``.
+
+    Args:
+        records: Record envelopes (plain dicts ``{record_type, payload, ...}``).
+
+    Returns:
+        Console-formatted incident-evidence section, or ``""`` when there is no
+        incident evidence to render.
+    """
+    blocks: list[list[str]] = []
+    for record in records:
+        payload = _incident_payload(record)
+        if payload is None:
+            continue
+        block: list[str] = []
+
+        public_id = _resolve_incident_field(payload, "public_incident_id")
+        block.append(f"Incident: {public_id}" if isinstance(public_id, str) and public_id else "Incident: (no id)")
+
+        severity_vector = _resolve_incident_field(payload, "severity_vector")
+        if isinstance(severity_vector, str) and severity_vector:
+            band_value = band(severity_vector)
+            block.append(f"  Severity: {band_value if band_value is not None else 'unparseable'} ({severity_vector})")
+
+        harm_core = _as_dict(payload.get("harm_core"))
+        harm_class = harm_core.get("harm_class")
+        if isinstance(harm_class, str) and harm_class:
+            block.append(f"  Harm class: {harm_class}")
+
+        crosswalk = _as_dict(payload.get("taxonomy_crosswalk"))
+        member_keys = _ordered_crosswalk_members(crosswalk)
+        if member_keys:
+            block.append(f"  Crosswalk: {', '.join(member_keys)}")
+
+        blocks.append(block)
+
+    if not blocks:
+        return ""
+
+    lines: list[str] = ["Incident Evidence", "=" * 40]
+    for block in blocks:
+        lines.extend(block)
     return "\n".join(lines)
