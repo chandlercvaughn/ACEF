@@ -199,6 +199,188 @@ class TestRenderIncidentEvidenceConsole:
         assert render_incident_evidence_console([other]) == ""
 
 
+class TestSourceBackedIncidentReportResolution:
+    """roborev: a SOURCE-BACKED incident_report carries the authoritative evidence
+    under ``payload.card_source.*`` (the shape ``Package.report_incident()`` emits),
+    NOT at the payload root. The renderer MUST resolve public_incident_id / id_grade /
+    severity_vector / harm_core from ``card_source`` for ``incident_report`` records,
+    falling back to the root only when the source field is absent — and keep the
+    PUBLIC ``incident_card`` (root fields) root-first (no regression).
+    """
+
+    # The real builder's canonical inputs (mirrors test_package_incident_incbuilder).
+    _BUILDER_VECTOR = "ACEF-SEV:1.0/HT:P/HG:H/RV:A/SC:U/BR:I"
+    _BUILDER_HARM_CLASS = "physical_health"
+    _BUILDER_HARM_CORE = {
+        "realization": "harm_event",
+        "causality": {"entity": "ai", "intent": "unintentional", "timing": "post_deployment"},
+        "harm_class": _BUILDER_HARM_CLASS,
+    }
+
+    @staticmethod
+    def _real_report_incident_record() -> dict:
+        """Emit an ACTUAL source-backed incident_report via the builder.
+
+        Uses an attached RedactionPolicy so the regulator-only one-call path emits
+        (matching F-M8-INCIDENT-BUILDER's construction). Returns the emitted record
+        as a plain ``{record_type, payload}`` dict the renderer consumes.
+        """
+        from acef.package import Package
+        from acef.redaction import RedactionPolicy
+
+        pkg = Package(
+            producer={"name": "test", "version": "1.0"},
+            redaction_policy=RedactionPolicy(version="1.0.0"),
+        )
+        env = pkg.report_incident(
+            public_incident_id=_PUBLIC_ID,
+            harm_core=dict(TestSourceBackedIncidentReportResolution._BUILDER_HARM_CORE),
+            incident_type="operational_failure",
+            description="Confidential Art.73 serious-incident report.",
+            awareness_date="2026-08-01T00:00:00Z",
+            eu_ai_act_facts={"serious_incident_triggers": ["3.49.a"], "widespread": False, "death_involved": True},
+            severity_vector=TestSourceBackedIncidentReportResolution._BUILDER_VECTOR,
+        )
+        return {"record_type": env.record_type, "payload": env.payload}
+
+    def test_real_report_incident_markdown_surfaces_card_source_evidence(self) -> None:
+        """RED (pre-fix): the real builder output stores public_incident_id /
+        severity_vector / harm_core under ``card_source``; the renderer read
+        ``payload.harm_core`` (root) → harm evidence OMITTED entirely.
+
+        Pre-fix rendered Markdown was::
+
+            ### AIIC-OPENAI-2026-0123456789ABCDEFGHJKMNPQRS
+            - **Public Incident ID:** `...`
+            - **ID Grade:** self-asserted
+            - **Severity Vector:** `...` (band: **major**)
+
+        — NO "Harm Core" bullet, NO ``physical_health``/``harm_event`` lines.
+        """
+        rec = self._real_report_incident_record()
+        # Precondition: the builder really puts harm_core under card_source, not root.
+        assert "harm_core" not in rec["payload"]
+        assert rec["payload"]["card_source"]["harm_core"]["harm_class"] == self._BUILDER_HARM_CLASS
+
+        md = render_incident_evidence_markdown([rec])
+        # public_incident_id resolves from card_source.
+        assert _PUBLIC_ID in md
+        # harm_core (Medium 2) — these were OMITTED pre-fix.
+        assert "Harm Core" in md
+        assert self._BUILDER_HARM_CLASS in md
+        assert "harm_event" in md
+        # severity band derived from the card_source.severity_vector via incident_rules.band.
+        expected_band = band(self._BUILDER_VECTOR)
+        assert expected_band == "major"
+        assert self._BUILDER_VECTOR in md
+        assert expected_band in md
+
+    def test_real_report_incident_console_surfaces_card_source_harm_class(self) -> None:
+        """RED (pre-fix): the console twin read ``payload.harm_core.harm_class``
+        (root) → the "Harm class" line was OMITTED for real source-backed reports."""
+        rec = self._real_report_incident_record()
+        out = render_incident_evidence_console([rec])
+        assert _PUBLIC_ID in out
+        # Harm class line — OMITTED pre-fix (read root, found nothing).
+        assert self._BUILDER_HARM_CLASS in out
+        assert band(self._BUILDER_VECTOR) in out
+
+    def test_divergent_root_id_does_not_mask_card_source_for_incident_report(self) -> None:
+        """RED (pre-fix, Medium 1): an incident_report with BOTH a stray ROOT
+        public_incident_id/severity_vector AND the authoritative card_source values
+        rendered the ROOT (wrong) value, masking the real source-backed evidence.
+
+        Record-type-aware resolution: for incident_report, card_source WINS.
+        """
+        stray_root_id = "AIIC-FORGED-2099-ZZZZZZZZZZZZZZZZZZZZZZZZZZ"
+        stray_root_vector = "ACEF-SEV:1.0/HT:P/HG:H/RV:I/SC:C/BR:P"  # critical (diverges)
+        assert band(stray_root_vector) == "critical"  # the WRONG band, if root won.
+        rec = {
+            "record_type": "incident_report",
+            "payload": {
+                # Stray ROOT values that MUST NOT win for an incident_report.
+                "public_incident_id": stray_root_id,
+                "id_grade": "verified",
+                "severity_vector": stray_root_vector,
+                "harm_core": {"harm_class": "financial_loss", "realization": "near_miss"},
+                # The authoritative card_source values.
+                "card_source": {
+                    "public_incident_id": _PUBLIC_ID,
+                    "id_grade": "self-asserted",
+                    "severity_vector": self._BUILDER_VECTOR,
+                    "harm_core": dict(self._BUILDER_HARM_CORE),
+                },
+            },
+        }
+        md = render_incident_evidence_markdown([rec])
+        # The authoritative card_source values surface...
+        assert _PUBLIC_ID in md
+        assert "self-asserted" in md
+        assert self._BUILDER_VECTOR in md
+        assert band(self._BUILDER_VECTOR) in md  # "major"
+        assert self._BUILDER_HARM_CLASS in md
+        # ...and the stray ROOT values do NOT mask them.
+        assert stray_root_id not in md
+        assert stray_root_vector not in md
+        assert "financial_loss" not in md
+        assert "critical" not in md
+
+        # Console twin: same record-type-aware resolution.
+        out = render_incident_evidence_console([rec])
+        assert _PUBLIC_ID in out
+        assert stray_root_id not in out
+        assert self._BUILDER_HARM_CLASS in out
+        assert "financial_loss" not in out
+
+    def test_incident_report_falls_back_to_root_when_card_source_field_absent(self) -> None:
+        """An incident_report whose card_source lacks a field falls back to the ROOT
+        value for that field (the legacy public-shaped incident_report still renders).
+        """
+        rec = {
+            "record_type": "incident_report",
+            "payload": {
+                "public_incident_id": _PUBLIC_ID,  # only at root
+                "harm_core": dict(self._BUILDER_HARM_CORE),  # only at root
+                "card_source": {
+                    # card_source present but WITHOUT public_incident_id / harm_core.
+                    "severity_vector": self._BUILDER_VECTOR,
+                },
+            },
+        }
+        md = render_incident_evidence_markdown([rec])
+        assert _PUBLIC_ID in md  # fell back to root
+        assert self._BUILDER_HARM_CLASS in md  # fell back to root
+        assert band(self._BUILDER_VECTOR) in md  # resolved from card_source
+
+    def test_public_incident_card_still_root_first_no_regression(self) -> None:
+        """A PUBLIC incident_card carries its evidence at the payload ROOT; the
+        record-type-aware rule keeps root-first for incident_card (no regression)."""
+        rec = _incident_card_record()
+        md = render_incident_evidence_markdown([rec])
+        assert _PUBLIC_ID in md
+        assert "self-asserted" in md
+        assert "physical_safety" in md  # the public card's root harm_class
+        assert _CRITICAL_VECTOR in md
+        assert band(_CRITICAL_VECTOR) in md  # "critical"
+        out = render_incident_evidence_console([rec])
+        assert _PUBLIC_ID in out
+        assert "physical_safety" in out
+        assert band(_CRITICAL_VECTOR) in out
+
+    def test_public_incident_card_root_wins_over_stray_card_source(self) -> None:
+        """Even when a public incident_card carries a stray card_source, ROOT wins
+        for incident_card (root-first), unchanged from the public-card contract."""
+        rec = _incident_card_record()
+        rec["payload"]["card_source"] = {
+            "public_incident_id": "AIIC-STRAY-2099-ZZZZZZZZZZZZZZZZZZZZZZZZZZ",
+            "severity_vector": "ACEF-SEV:1.0/HT:P/HG:L/RV:N/SC:I/BR:S",
+        }
+        md = render_incident_evidence_markdown([rec])
+        assert _PUBLIC_ID in md
+        assert "AIIC-STRAY-2099-ZZZZZZZZZZZZZZZZZZZZZZZZZZ" not in md
+        assert _CRITICAL_VECTOR in md
+
+
 class TestMarkdownEvidenceTruncationAudit:
     """Part-A audit regression: Markdown evidence-ref list must not silently drop.
 

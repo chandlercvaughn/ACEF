@@ -249,31 +249,55 @@ def _as_dict(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
-def _incident_payload(record: dict[str, Any]) -> dict[str, Any] | None:
-    """Return the payload of an incident_card / incident_report record, else None.
+def _incident_payload(record: dict[str, Any]) -> tuple[str, dict[str, Any]] | None:
+    """Return ``(record_type, payload)`` for an incident record, else ``None``.
 
     Non-dict records, non-incident record_types, and records without a dict
-    payload return ``None`` (the record is skipped).
+    payload return ``None`` (the record is skipped). The ``record_type`` is
+    returned because incident-field resolution is record-type aware: a
+    source-backed ``incident_report`` carries the authoritative evidence under
+    ``card_source`` whereas a public ``incident_card`` carries it at the payload
+    root (see :func:`_resolve_incident_field`).
     """
     if not isinstance(record, dict):
         return None
-    if record.get("record_type") not in _INCIDENT_RECORD_TYPES:
+    record_type = record.get("record_type")
+    if record_type not in _INCIDENT_RECORD_TYPES:
         return None
     payload = record.get("payload")
-    return payload if isinstance(payload, dict) else None
+    if not isinstance(payload, dict):
+        return None
+    return record_type, payload
 
 
-def _resolve_incident_field(payload: dict[str, Any], field: str) -> Any:
-    """Resolve a field from the payload root or, failing that, from card_source.
+def _resolve_incident_field(payload: dict[str, Any], record_type: str, field: str) -> Any:
+    """Resolve an incident field RECORD-TYPE AWARE-ly (roborev Medium 1/2).
 
-    A source-backed ``incident_report`` carries public_incident_id / id_grade /
-    severity_vector under ``card_source`` rather than at the payload root; this
-    resolves either location (root preferred) without inventing absent fields.
+    The authoritative location of ``public_incident_id`` / ``id_grade`` /
+    ``severity_vector`` / ``harm_core`` depends on the record type:
+
+    - A SOURCE-BACKED ``incident_report`` (the shape ``Package.report_incident``
+      emits) carries them under ``payload.card_source`` — the regulator-filing
+      evidence. ``card_source`` is preferred; a stray/divergent ROOT value must
+      NOT mask the real source-backed evidence. Falls back to the root only when
+      the ``card_source`` field is absent (a legacy public-shaped report).
+    - A PUBLIC ``incident_card`` carries them at the payload ROOT (the public
+      surface). Root is preferred; ``card_source`` is a fallback only.
+
+    Never invents absent fields (returns ``None`` when present in neither).
     """
+    card_source = _as_dict(payload.get("card_source"))
+    if record_type == "incident_report":
+        # Source-backed: card_source is authoritative, root is the fallback.
+        value = card_source.get(field)
+        if value is not None:
+            return value
+        return payload.get(field)
+    # Public incident_card: root-first, card_source fallback.
     value = payload.get(field)
     if value is not None:
         return value
-    return _as_dict(payload.get("card_source")).get(field)
+    return card_source.get(field)
 
 
 def _crosswalk_edition(member: dict[str, Any]) -> str | None:
@@ -331,13 +355,14 @@ def render_incident_evidence_markdown(records: list[dict[str, Any]]) -> str:
     """
     blocks: list[list[str]] = []
     for record in records:
-        payload = _incident_payload(record)
-        if payload is None:
+        resolved = _incident_payload(record)
+        if resolved is None:
             continue
+        record_type, payload = resolved
         block: list[str] = []
 
-        public_id = _resolve_incident_field(payload, "public_incident_id")
-        id_grade = _resolve_incident_field(payload, "id_grade")
+        public_id = _resolve_incident_field(payload, record_type, "public_incident_id")
+        id_grade = _resolve_incident_field(payload, record_type, "id_grade")
         heading = f"### {public_id}" if isinstance(public_id, str) and public_id else "### (no public_incident_id)"
         block.append(heading)
         if isinstance(public_id, str) and public_id:
@@ -346,7 +371,7 @@ def render_incident_evidence_markdown(records: list[dict[str, Any]]) -> str:
             block.append(f"- **ID Grade:** {id_grade}")
 
         # severity_vector + band (reuse the shipped band() projection).
-        severity_vector = _resolve_incident_field(payload, "severity_vector")
+        severity_vector = _resolve_incident_field(payload, record_type, "severity_vector")
         if isinstance(severity_vector, str) and severity_vector:
             band_value = band(severity_vector)
             if band_value is not None:
@@ -356,8 +381,8 @@ def render_incident_evidence_markdown(records: list[dict[str, Any]]) -> str:
                 # derived band rather than crashing (band() returns None).
                 block.append(f"- **Severity Vector:** `{severity_vector}` (band: unparseable)")
 
-        # harm_core.
-        harm_core = _as_dict(payload.get("harm_core"))
+        # harm_core — record-type aware (card_source for a source-backed report).
+        harm_core = _as_dict(_resolve_incident_field(payload, record_type, "harm_core"))
         if harm_core:
             block.append("- **Harm Core:**")
             block.extend(_render_harm_core_markdown(harm_core))
@@ -406,20 +431,22 @@ def render_incident_evidence_console(records: list[dict[str, Any]]) -> str:
     """
     blocks: list[list[str]] = []
     for record in records:
-        payload = _incident_payload(record)
-        if payload is None:
+        resolved = _incident_payload(record)
+        if resolved is None:
             continue
+        record_type, payload = resolved
         block: list[str] = []
 
-        public_id = _resolve_incident_field(payload, "public_incident_id")
+        public_id = _resolve_incident_field(payload, record_type, "public_incident_id")
         block.append(f"Incident: {public_id}" if isinstance(public_id, str) and public_id else "Incident: (no id)")
 
-        severity_vector = _resolve_incident_field(payload, "severity_vector")
+        severity_vector = _resolve_incident_field(payload, record_type, "severity_vector")
         if isinstance(severity_vector, str) and severity_vector:
             band_value = band(severity_vector)
             block.append(f"  Severity: {band_value if band_value is not None else 'unparseable'} ({severity_vector})")
 
-        harm_core = _as_dict(payload.get("harm_core"))
+        # harm_core — record-type aware (card_source for a source-backed report).
+        harm_core = _as_dict(_resolve_incident_field(payload, record_type, "harm_core"))
         harm_class = harm_core.get("harm_class")
         if isinstance(harm_class, str) and harm_class:
             block.append(f"  Harm class: {harm_class}")
