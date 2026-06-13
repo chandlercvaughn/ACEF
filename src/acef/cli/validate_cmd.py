@@ -50,8 +50,17 @@ def validate_cmd(path: str, profile: tuple[str, ...], output: str | None, fmt: s
 
     if output:
         from acef.assessment_builder import export_assessment
+        from acef.errors import ACEFError
 
-        export_assessment(assessment, output)
+        # An unwritable ``--output`` path (parent is a file, read-only FS, etc.)
+        # must surface as a clean error + non-zero exit, NOT an uncaught OSError
+        # traceback — which would corrupt a ``--format json`` consumer reading
+        # stdout (audit: arg-handling defect).
+        try:
+            export_assessment(assessment, output)
+        except (OSError, ACEFError) as exc:
+            click.echo(f"Error: Cannot write assessment to {output}: {exc}", err=True)
+            sys.exit(2)
         # Send the "Assessment written to:" status line to STDERR. This
         # keeps stdout exclusively machine-readable in --format json mode
         # so `acef validate ... -f json -o out | jq` succeeds.
