@@ -10,7 +10,7 @@ import hmac
 import re
 import secrets
 import unicodedata
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from functools import lru_cache
@@ -2287,6 +2287,144 @@ class Package:
             self.add_profile(_ART73_PROFILE_ID, provisions=["art-73"])
 
     @staticmethod
+    def _sorted_canonical(seq: Iterable[Any], *, numeric: bool = False) -> list[Any]:
+        """Sort an order-insensitive incident array deterministically (§5.10).
+
+        RFC 8785 (JCS) canonicalizes object KEYS but NOT array ELEMENTS, so every
+        order-insensitive array this profile introduces MUST be sorted before
+        hashing/serialization or two exporters could emit different orders and break
+        the bundle digest + the §5.5 dedupe hash (RFC-0002 §5.10 / Q26).
+
+        The §5.10 sort key is the **RFC-8785 canonical byte sequence of the element**:
+        :func:`acef.integrity.canonicalize` returns each element's JCS UTF-8 bytes
+        (e.g. ``"foo"`` -> ``b'"foo"'``, an object -> its canonical form), and lists
+        sort by those bytes lexicographically — the single ordering primitive already
+        used for the Merkle/content-hash collation, never a second one. This orders
+        scalar strings AND whole crosswalk sub-objects (e.g. ``oecd.criteria[]``
+        entries) identically across builders and across the Python/TS SDKs.
+
+        The ONE exception is ``numeric=True`` (``aiid.report_ids[]``): the spec
+        mandates **numeric ascending**, NOT canonical-byte — under byte ordering
+        ``10`` (``b'10'``) sorts before ``2`` (``b'2'``), the wrong order — so a
+        numeric key is used for that array only.
+
+        Args:
+            seq: The array to sort. A non-list/tuple value is returned unchanged so
+                a malformed payload field is never silently coerced here.
+            numeric: When ``True``, sort by numeric value (``aiid.report_ids[]``);
+                otherwise by the RFC-8785 canonical byte sequence.
+
+        Returns:
+            A new list sorted ascending (input is not mutated).
+        """
+        items = list(seq)
+        if numeric:
+            return sorted(items, key=lambda v: (0, v) if isinstance(v, (int, float)) else (1, canonicalize(v)))
+        return sorted(items, key=canonicalize)
+
+    @staticmethod
+    def _sort_incident_arrays(payload: dict[str, Any]) -> dict[str, Any]:
+        """Sort every order-insensitive array an incident payload carries (§5.10).
+
+        Single, auditable application point for the §5.10 array-determinism rule, run
+        at emission time on the fully-assembled ``incident_card`` / ``incident_report``
+        payload BEFORE :meth:`record` hashes/serializes it. It normalizes EXACTLY the
+        order-insensitive arrays the profile introduces — the explicit §5.10 list plus
+        every array inside a crosswalk sub-member — sorting each ascending by the
+        RFC-8785 canonical byte sequence of its element (``aiid.report_ids[]`` numeric
+        ascending, per §5.10). uniqueItems-constrained string arrays
+        (``serious_incident_triggers[]``) are de-duplicated.
+
+        ``notification_timeline[]`` is the SOLE order-SIGNIFICANT exception (§5.10) and
+        is deliberately NOT touched, so the caller's notification sequence survives
+        verbatim. Because a source-backed ``incident_report`` carries the same
+        order-insensitive sub-blocks nested one level down under the private
+        ``card_source`` projection input (§5.1), the rule is applied at BOTH the
+        public-card root AND inside ``card_source``. The payload is normalized in
+        place and also returned.
+
+        Args:
+            payload: The assembled incident-record payload (mutated in place).
+
+        Returns:
+            The same ``payload`` dict, with its order-insensitive arrays sorted.
+        """
+        Package._sort_incident_scope(payload)
+        card_source = payload.get("card_source")
+        if isinstance(card_source, dict):
+            # The report's private projection input carries the same sub-arrays
+            # (eu_ai_act_facts.serious_incident_triggers, coordinated_disclosure.
+            # regulatory_timeline, and any extra_card_source-supplied taxonomy_crosswalk
+            # / transferability / harm_distribution_basis) one level down (§5.1).
+            Package._sort_incident_scope(card_source)
+        return payload
+
+    @staticmethod
+    def _sort_incident_scope(scope: dict[str, Any]) -> None:
+        """Sort the order-insensitive §5.10 arrays reachable from one incident
+        ``scope`` dict (the public-card root, or the private ``card_source`` block).
+
+        Mutates ``scope`` in place. ``notification_timeline[]`` is never touched
+        (order-significant, §5.10).
+        """
+
+        def _sort_str_array(container: dict[str, Any], key: str, *, dedupe: bool = False) -> None:
+            value = container.get(key)
+            if isinstance(value, list):
+                items = list(dict.fromkeys(value)) if dedupe else value
+                container[key] = Package._sorted_canonical(items)
+
+        # --- §5.10 arrays at this scope --------------------------------------------
+        _sort_str_array(scope, "harm_distribution_basis")
+
+        transferability = scope.get("transferability")
+        if isinstance(transferability, dict):
+            _sort_str_array(transferability, "related_incident_ids")
+
+        # The merged Art.73 EU fact block (card_source.eu_ai_act_facts) carries the
+        # same uniqueItems serious_incident_triggers[] as taxonomy_crosswalk.eu_ai_act.
+        eu_facts = scope.get("eu_ai_act_facts")
+        if isinstance(eu_facts, dict):
+            _sort_str_array(eu_facts, "serious_incident_triggers", dedupe=True)
+
+        # coordinated_disclosure.regulatory_timeline[] (order-insensitive, §5.10).
+        # notification_timeline[] is order-SIGNIFICANT and is intentionally skipped.
+        disclosure = scope.get("coordinated_disclosure")
+        if isinstance(disclosure, dict):
+            timeline = disclosure.get("regulatory_timeline")
+            if isinstance(timeline, list):
+                disclosure["regulatory_timeline"] = Package._sorted_canonical(timeline)
+
+        # --- taxonomy_crosswalk sub-member arrays -----------------------------------
+        crosswalk = scope.get("taxonomy_crosswalk")
+        if isinstance(crosswalk, dict):
+            eu = crosswalk.get("eu_ai_act")
+            if isinstance(eu, dict):
+                _sort_str_array(eu, "serious_incident_triggers", dedupe=True)
+
+            nist = crosswalk.get("nist_ai_600_1")
+            if isinstance(nist, dict):
+                _sort_str_array(nist, "categories")
+
+            oecd = crosswalk.get("oecd")
+            if isinstance(oecd, dict):
+                criteria = oecd.get("criteria")
+                if isinstance(criteria, list):
+                    # Whole-object canonical byte ordering (criteria entries are objects).
+                    oecd["criteria"] = Package._sorted_canonical(criteria)
+
+            aiid = crosswalk.get("aiid")
+            if isinstance(aiid, dict):
+                report_ids = aiid.get("report_ids")
+                if isinstance(report_ids, list):
+                    # §5.10: aiid.report_ids[] sorts NUMERIC ascending, not by bytes.
+                    aiid["report_ids"] = Package._sorted_canonical(report_ids, numeric=True)
+
+            stix = crosswalk.get("stix")
+            if isinstance(stix, dict):
+                _sort_str_array(stix, "object_refs")
+
+    @staticmethod
     def _merged_eu_facts(
         harm_core: dict[str, Any],
         eu_ai_act_facts: dict[str, Any],
@@ -2570,6 +2708,12 @@ class Package:
             if dedupe_hmac is not None:
                 payload["incident_dedupe_key_hmac"] = dedupe_hmac
 
+        # §5.10 — sort every order-insensitive array (regulatory_timeline, the
+        # eu_ai_act/nist/oecd/aiid/stix crosswalk sub-arrays, transferability,
+        # harm_distribution_basis) by the RFC-8785 canonical byte sequence before
+        # the record is hashed/serialized; notification_timeline stays order-significant.
+        self._sort_incident_arrays(payload)
+
         return self.record(
             record_type="incident_report",
             payload=payload,
@@ -2741,6 +2885,13 @@ class Package:
         if extra_payload:
             for key, value in extra_payload.items():
                 payload.setdefault(key, value)
+
+        # §5.10 — sort every order-insensitive array (taxonomy_crosswalk sub-arrays,
+        # regulatory_timeline, transferability.related_incident_ids,
+        # harm_distribution_basis) by the RFC-8785 canonical byte sequence — including
+        # any caller-supplied via extra_payload — before the record is hashed/serialized;
+        # notification_timeline stays order-significant.
+        self._sort_incident_arrays(payload)
 
         return self.record(
             record_type="incident_card",
