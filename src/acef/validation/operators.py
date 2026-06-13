@@ -134,6 +134,60 @@ _ECMA262_WHITESPACE_CODEPOINTS: tuple[int, ...] = (
 # ``\uXXXX`` class members, only the ``\d``/``\w``/``\s``/``\b`` escapes.
 _ECMA262_WHITESPACE_CLASS_BODY = "".join(f"\\u{cp:04x}" for cp in _ECMA262_WHITESPACE_CODEPOINTS)
 
+# Highest code unit a non-``/u`` ECMA-262 regex can match: a UTF-16 code unit,
+# i.e. the BMP ceiling. We translate negated shorthands to the EXPLICIT
+# positive complement over [U+0000, U+FFFF] so the produced class is a literal
+# range body (immune to ``re.ASCII``) that matches every code unit NOT in the
+# excluded set — exactly what the OUTSIDE ``\D``→``[^0-9]`` / ``\W``→
+# ``[^A-Za-z0-9_]`` forms already do (a literal ``[^…]`` is unaffected by
+# ``re.ASCII``, so it spans the full BMP).
+_BMP_MAX_CODE_UNIT = 0xFFFF
+
+
+def _complement_class_body(excluded: tuple[int, ...]) -> str:
+    r"""Return a class BODY matching every BMP code unit NOT in ``excluded``.
+
+    Used to inline a NEGATED ECMA-262 shorthand (``\D``/``\W``/``\S``) inside a
+    ``[...]`` character class, where Python ``re`` cannot nest a negated class.
+    The result is a concatenation of ``\uXXXX`` / ``\uXXXX-\uYYYY`` ranges that
+    is the positive complement of ``excluded`` over ``[U+0000, U+FFFF]``. Inside
+    a positive class ``[…body…]`` this matches "not in excluded"; inside a
+    negated class ``[^…body…]`` the regex engine composes the outer negation,
+    yielding "in excluded" (so ``[^\S]`` correctly becomes ECMA-262 whitespace).
+    """
+    ordered = sorted(set(excluded))
+    parts: list[str] = []
+    start = 0x0000
+    for cp in ordered:
+        if cp > start:
+            end = cp - 1
+            parts.append(f"\\u{start:04x}" if start == end else f"\\u{start:04x}-\\u{end:04x}")
+        start = cp + 1
+    if start <= _BMP_MAX_CODE_UNIT:
+        parts.append(
+            f"\\u{start:04x}" if start == _BMP_MAX_CODE_UNIT else f"\\u{start:04x}-\\u{_BMP_MAX_CODE_UNIT:04x}"
+        )
+    return "".join(parts)
+
+
+# Excluded sets for the three negated shorthands, as BMP code-unit tuples.
+# ``\D`` excludes the ASCII digits [0-9]; ``\W`` excludes the ASCII word chars
+# [A-Za-z0-9_]; ``\S`` excludes the ECMA-262 whitespace set. ``\d``/``\w`` stay
+# ASCII to match the OUTSIDE positive translations and the DSL-5 invariant.
+_ECMA262_DIGIT_CODEPOINTS: tuple[int, ...] = tuple(range(ord("0"), ord("9") + 1))
+_ECMA262_WORD_CODEPOINTS: tuple[int, ...] = (
+    *range(ord("0"), ord("9") + 1),
+    *range(ord("A"), ord("Z") + 1),
+    *range(ord("a"), ord("z") + 1),
+    ord("_"),
+)
+
+# Class BODIES for the NEGATED shorthands — the positive complement of each
+# excluded set over the BMP. Built once at import time.
+_ECMA262_NON_DIGIT_CLASS_BODY = _complement_class_body(_ECMA262_DIGIT_CODEPOINTS)
+_ECMA262_NON_WORD_CLASS_BODY = _complement_class_body(_ECMA262_WORD_CODEPOINTS)
+_ECMA262_NON_WHITESPACE_CLASS_BODY = _complement_class_body(_ECMA262_WHITESPACE_CODEPOINTS)
+
 
 def _translate_ecma262_char_classes(pattern: str) -> str:
     r"""Rewrite ``\d``/``\w``/``\s`` (and negations) to ECMA-262-faithful classes.
@@ -149,13 +203,21 @@ def _translate_ecma262_char_classes(pattern: str) -> str:
     * ``\w`` → ``[A-Za-z0-9_]`` ``\W`` → ``[^A-Za-z0-9_]``
     * ``\s`` → ``[<ecma-262 ws>]``  ``\S`` → ``[^<ecma-262 ws>]``
 
-    Inside a ``[...]`` character class the bracketed forms are inlined as bare
-    class *bodies* (no nested brackets, no negation — a negated shorthand inside
-    a class cannot be expressed losslessly, so it is left untouched and remains
-    ASCII via the residual :data:`re.ASCII` flag). ``\b``/``\B`` are NOT
-    rewritten; they depend on ``\w`` and stay ASCII because the compiled pattern
-    still carries ``re.ASCII`` (which no longer affects ``\s`` once ``\s`` is an
-    explicit literal class).
+    Inside a ``[...]`` character class the forms are inlined as bare class
+    *bodies* (no nested brackets). POSITIVE shorthands inline their literal body
+    (``\d`` → ``0-9``, …). NEGATED shorthands (``\D``/``\W``/``\S``) cannot nest a
+    negated class in Python ``re``, so they inline the EXPLICIT positive
+    complement over the BMP (``\S`` → every code unit NOT in the ECMA-262
+    whitespace set, etc.) — see :func:`_complement_class_body`. This composes
+    correctly: in a positive class ``[\S]`` it matches non-whitespace; in a
+    negated class ``[^\S]`` the outer negation yields whitespace. The previous
+    behavior left a negated shorthand inside a class at residual ASCII semantics,
+    which DIVERGED from ECMA-262 (e.g. ``[\S]`` wrongly matched U+00A0 because
+    ASCII ``\s`` drops it) — the roborev Finding-2 fix.
+
+    ``\b``/``\B`` are NOT rewritten; they depend on ``\w`` and stay ASCII because
+    the compiled pattern still carries ``re.ASCII`` (which no longer affects
+    ``\s`` once ``\s`` is an explicit literal class).
 
     A backslash escapes the next character, so ``\\s`` (escaped backslash + literal
     ``s``) and ``\\d`` are passed through unchanged — only a *single* backslash
@@ -170,14 +232,18 @@ def _translate_ecma262_char_classes(pattern: str) -> str:
         "s": f"[{_ECMA262_WHITESPACE_CLASS_BODY}]",
         "S": f"[^{_ECMA262_WHITESPACE_CLASS_BODY}]",
     }
-    # Inside a character class we can only inline the POSITIVE bodies losslessly.
-    # Negated shorthands (``\D``/``\W``/``\S``) inside a class keep their original
-    # escape; with the residual ``re.ASCII`` flag ``\D``/``\W`` stay ASCII, and
-    # ``\S`` inside a class is an uncommon construct preserved as-is.
+    # Inside a character class every shorthand is inlined as a bare class BODY.
+    # POSITIVE shorthands use their literal body; NEGATED shorthands use the
+    # EXPLICIT positive complement over the BMP so ``\D``/``\W``/``\S`` carry
+    # ECMA-262 semantics inside a class (and compose under an outer ``[^…]``
+    # negation) instead of falling back to divergent ASCII semantics.
     inside = {
         "d": "0-9",
+        "D": _ECMA262_NON_DIGIT_CLASS_BODY,
         "w": "A-Za-z0-9_",
+        "W": _ECMA262_NON_WORD_CLASS_BODY,
         "s": _ECMA262_WHITESPACE_CLASS_BODY,
+        "S": _ECMA262_NON_WHITESPACE_CLASS_BODY,
     }
 
     out: list[str] = []

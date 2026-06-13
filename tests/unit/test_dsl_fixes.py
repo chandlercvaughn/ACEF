@@ -497,6 +497,76 @@ class TestRegexWhitespaceEcma262:
         assert _compare(" ", "regex", r"^[^\s]$") is False
         assert _compare("a", "regex", r"^[^\s]$") is True
 
+    # -- roborev follow-up (Finding 2): negated shorthands INSIDE a class --
+    # \S/\D/\W inside a [...] class were previously left at Python re.ASCII
+    # semantics, diverging from ECMA-262. They must translate to their explicit
+    # ECMA-262-correct complement bodies both outside AND inside a class.
+
+    def test_capital_s_inside_class_excludes_ecma262_whitespace(self) -> None:
+        # [\S] is "non-whitespace". U+00A0 IS ECMA-262 whitespace, so it must
+        # NOT match. Previously [\S] left \S at re.ASCII (which DROPS U+00A0
+        # from \s, so \S WRONGLY MATCHED U+00A0). The fix excludes U+00A0.
+        assert _compare(" ", "regex", r"^[\S]$") is False
+        assert _compare("a", "regex", r"^[\S]$") is True
+        assert _compare(" ", "regex", r"^[\S]$") is False
+
+    def test_negated_class_with_capital_s_matches_ecma262_whitespace(self) -> None:
+        # [^\S] is the inverse of [\S]: it must MATCH ECMA-262 whitespace and
+        # reject non-whitespace. Previously the residual re.ASCII \S made [^\S]
+        # WRONGLY match U+00A0 (because ASCII \S includes it).
+        assert _compare(" ", "regex", r"^[^\S]$") is True
+        assert _compare(" ", "regex", r"^[^\S]$") is True
+        assert _compare("a", "regex", r"^[^\S]$") is False
+
+    def test_capital_d_inside_class_full_complement(self) -> None:
+        # [\D] is "non-digit" — must match a non-ASCII char and a letter, and
+        # reject an ASCII digit. Consistent with the OUTSIDE \D -> [^0-9].
+        assert _compare("5", "regex", r"^[\D]$") is False
+        assert _compare("a", "regex", r"^[\D]$") is True
+        assert _compare(" ", "regex", r"^[\D]$") is True
+
+    def test_negated_class_with_capital_d(self) -> None:
+        # [^\D] is the inverse of non-digit = digit.
+        assert _compare("5", "regex", r"^[^\D]$") is True
+        assert _compare("a", "regex", r"^[^\D]$") is False
+
+    def test_capital_w_inside_class_full_complement(self) -> None:
+        # [\W] is "non-word" — must reject an ASCII word char and match a symbol
+        # and a non-ASCII char. Consistent with OUTSIDE \W -> [^A-Za-z0-9_].
+        assert _compare("a", "regex", r"^[\W]$") is False
+        assert _compare("_", "regex", r"^[\W]$") is False
+        assert _compare("!", "regex", r"^[\W]$") is True
+        assert _compare(" ", "regex", r"^[\W]$") is True
+
+    def test_negated_class_with_capital_w(self) -> None:
+        # [^\W] is the inverse of non-word = word char.
+        assert _compare("a", "regex", r"^[^\W]$") is True
+        assert _compare("!", "regex", r"^[^\W]$") is False
+
+    def test_positive_shorthands_inside_class_still_ascii(self) -> None:
+        # The prior positive-class semantics are unchanged: \d/\w inside a class
+        # stay ASCII-only; \s inside a class stays ECMA-262.
+        assert _compare("٢", "regex", r"^[\d]$") is False  # Arabic-Indic 2
+        assert _compare("5", "regex", r"^[\d]$") is True
+        assert _compare("é", "regex", r"^[\w]$") is False
+        assert _compare("a", "regex", r"^[\w]$") is True
+        assert _compare(" ", "regex", r"^[\s]$") is True  # ECMA-262 ws
+
+    def test_escaped_literal_inside_class_unaffected(self) -> None:
+        # An escaped literal (\.) inside a class is a literal dot, not a
+        # metacharacter; the shorthand translation must not disturb it.
+        assert _compare(".", "regex", r"^[\.]$") is True
+        assert _compare("x", "regex", r"^[\.]$") is False
+        # A literal backslash escape inside a class (\\) is a literal backslash.
+        assert _compare("\\", "regex", r"^[\\]$") is True
+
+    def test_mixed_negated_and_literal_inside_class(self) -> None:
+        # [\Sx] is "non-whitespace OR x" = non-whitespace (x already non-ws).
+        # U+00A0 (ws) must NOT match; 'x' and 'a' must match.
+        assert _compare(" ", "regex", r"^[\Sx]$") is False
+        assert _compare("x", "regex", r"^[\Sx]$") is True
+        assert _compare("a", "regex", r"^[\Sx]$") is True
+
     def test_escaped_literal_backslash_s_not_translated(self) -> None:
         # An escaped backslash followed by a literal 's' (\\s) is backslash+s,
         # NOT the whitespace class. It must match literal "\s" — not whitespace.
@@ -588,3 +658,94 @@ class TestDateOrDateTimeFormatAcceptance:
         messages = " ".join(str(e) for e in errors)
         assert errors, "expected a date-time format error for a bogus metadata.timestamp"
         assert "date-time" in messages
+
+    def test_lifecycle_v1_1_start_date_as_date_time_accepted(self) -> None:
+        # The v1.1 manifest schema documents the SAME date-or-date-time contract
+        # for lifecycle_timeline.start_date/end_date; the in-memory patch must
+        # apply there too.
+        errors = validate_against_schema(self._manifest_with_lifecycle("2026-01-01T12:30:00Z"), "manifest", "v1.1")
+        assert errors == []
+
+    def test_lifecycle_v1_1_start_date_bogus_value_rejected(self) -> None:
+        errors = validate_against_schema(self._manifest_with_lifecycle("not-a-date"), "manifest", "v1.1")
+        assert errors, "expected a format error for a bogus v1.1 lifecycle start_date"
+
+
+# ---------------------------------------------------------------------------
+# roborev follow-up (Finding 1): the date-or-date-time leniency was applied
+# GLOBALLY to every `format: date` field, WRONGLY weakening date-ONLY record
+# fields (evaluation_date, approval_date, implementation_date, …) so they
+# accepted a date-time. Only the lifecycle_timeline fields (whose schema
+# DESCRIPTION documents "date or date-time") may accept a date-time; every
+# other `format: date` field must REJECT a date-time but still accept a plain
+# date and reject a bogus value.
+# ---------------------------------------------------------------------------
+
+
+class TestDateOnlyRecordFieldsRejectDateTime:
+    def test_evaluation_date_plain_date_accepted(self) -> None:
+        payload = {"methodology": "manual", "evaluation_date": "2026-01-01"}
+        errors = validate_against_schema(payload, "evaluation_report", "v1")
+        assert errors == []
+
+    def test_evaluation_date_date_time_rejected(self) -> None:
+        # evaluation_report.evaluation_date is documented "ISO 8601" (date only).
+        # A date-time value MUST be rejected — it was wrongly accepted under the
+        # over-broad global checker.
+        payload = {"methodology": "manual", "evaluation_date": "2026-01-01T12:00:00Z"}
+        errors = validate_against_schema(payload, "evaluation_report", "v1")
+        messages = " ".join(str(e) for e in errors)
+        assert errors, "expected a date format error for a date-time evaluation_date"
+        assert "date" in messages
+
+    def test_evaluation_date_bogus_rejected(self) -> None:
+        payload = {"methodology": "manual", "evaluation_date": "not-a-date"}
+        errors = validate_against_schema(payload, "evaluation_report", "v1")
+        assert errors, "expected a format error for a bogus evaluation_date"
+
+    def test_governance_approval_date_date_time_rejected(self) -> None:
+        payload = {"policy_type": "ai_governance_policy", "approval_date": "2026-01-01T08:30:00Z"}
+        errors = validate_against_schema(payload, "governance_policy", "v1")
+        messages = " ".join(str(e) for e in errors)
+        assert errors, "expected a date format error for a date-time approval_date"
+        assert "date" in messages
+
+    def test_governance_approval_date_plain_date_accepted(self) -> None:
+        payload = {"policy_type": "ai_governance_policy", "approval_date": "2026-01-01"}
+        errors = validate_against_schema(payload, "governance_policy", "v1")
+        assert errors == []
+
+    def test_risk_treatment_implementation_date_date_time_rejected(self) -> None:
+        payload = {
+            "risk_id": "R-1",
+            "treatment_type": "mitigate",
+            "control_description": "x",
+            "implementation_status": "implemented",
+            "implementation_date": "2026-01-01T00:00:00Z",
+        }
+        errors = validate_against_schema(payload, "risk_treatment", "v1")
+        messages = " ".join(str(e) for e in errors)
+        assert errors, "expected a date format error for a date-time implementation_date"
+        assert "date" in messages
+
+    def test_risk_treatment_implementation_date_plain_date_accepted(self) -> None:
+        payload = {
+            "risk_id": "R-1",
+            "treatment_type": "mitigate",
+            "control_description": "x",
+            "implementation_status": "implemented",
+            "implementation_date": "2026-01-01",
+        }
+        errors = validate_against_schema(payload, "risk_treatment", "v1")
+        assert errors == []
+
+    def test_risk_treatment_implementation_date_bogus_rejected(self) -> None:
+        payload = {
+            "risk_id": "R-1",
+            "treatment_type": "mitigate",
+            "control_description": "x",
+            "implementation_status": "implemented",
+            "implementation_date": "not-a-date",
+        }
+        errors = validate_against_schema(payload, "risk_treatment", "v1")
+        assert errors, "expected a format error for a bogus implementation_date"
