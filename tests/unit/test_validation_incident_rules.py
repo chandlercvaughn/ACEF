@@ -826,6 +826,69 @@ class TestACEF086PublishabilityGate:
         diags = ir.check_publishability([card], source_backed=False)
         assert "ACEF-086" not in _codes(diags)
 
+    def _report_with_nested_pointer_disposition(self, *, root_key: str, leaf: str, disposition: str) -> dict[str, Any]:
+        """An incident_report whose publishability_map disposes a NESTED pointer
+        ``/<root_key>/<leaf>`` that DOES resolve in the source (the nested object is
+        placed at the report payload ROOT, where pointer resolution runs). This
+        isolates the disposition-honored check: the only ACEF-086 in play would be
+        the leaf-name collapse — which the fix removes for nested pointers."""
+        report = _report_record(
+            {
+                "public_incident_id": _VALID_ID,
+                "id_grade": "self-asserted",
+                "id_state": "PUBLISHED",
+                "harm_core": dict(_VALID_HARM_CORE),
+                "publishability_map": {f"/{root_key}/{leaf}": disposition},
+                "eu_ai_act_facts": {
+                    "edition": "reg-2024-1689",
+                    "serious_incident_triggers": ["3.49.a"],
+                    "widespread": False,
+                    "death_involved": False,
+                },
+            }
+        )
+        # Place the nested object at the report payload ROOT so the JSON Pointer
+        # /<root_key>/<leaf> resolves (pointer resolution runs against the payload).
+        report["payload"][root_key] = {leaf: "internal-value"}
+        return report
+
+    def test_nested_source_pointer_does_not_false_positive_on_unrelated_card_root(self) -> None:
+        # A NESTED source pointer /details/severity disposed regulator-only must
+        # NOT be collapsed to leaf 'severity' and matched against an UNRELATED card
+        # root 'severity'. Pre-fix this raised a spurious ACEF-086; post-fix it does
+        # NOT, because /details/severity is not a single-segment root pointer and so
+        # does not name a card-root field.
+        report = self._report_with_nested_pointer_disposition(
+            root_key="details", leaf="severity", disposition="regulator-only"
+        )
+        card = _published_card({"severity": "major"})  # unrelated card-root severity
+        diags = ir.check_publishability([card, report], source_backed=True)
+        assert "ACEF-086" not in _codes(diags), (
+            "nested source pointer /details/severity must not false-positive ACEF-086 "
+            "against an unrelated card-root 'severity' field"
+        )
+
+    def test_nested_source_pointer_omitted_does_not_false_positive(self) -> None:
+        # Same lock for the 'omitted' disposition: a nested /details/severity entry
+        # must not trip the leaf-name collapse against a card-root 'severity'.
+        report = self._report_with_nested_pointer_disposition(
+            root_key="details", leaf="severity", disposition="omitted"
+        )
+        card = _published_card({"severity": "major"})
+        diags = ir.check_publishability([card, report], source_backed=True)
+        assert "ACEF-086" not in _codes(diags)
+
+    def test_internal_nested_pointer_with_root_public_incident_id_no_086(self) -> None:
+        # A nested /internal/public_incident_id disposed regulator-only must not be
+        # collapsed to 'public_incident_id' and flagged against the card's own
+        # (legitimately present) root public_incident_id.
+        report = self._report_with_nested_pointer_disposition(
+            root_key="internal", leaf="public_incident_id", disposition="regulator-only"
+        )
+        card = _published_card({})  # card has its own root public_incident_id (always)
+        diags = ir.check_publishability([card, report], source_backed=True)
+        assert "ACEF-086" not in _codes(diags)
+
 
 # ---------------------------------------------------------------------------
 # ACEF-081 — incident profile declared but crosswalk missing a mandatory member

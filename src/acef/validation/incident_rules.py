@@ -1464,15 +1464,28 @@ def check_publishability(
         # source) — comparing the source against its own map would be a guaranteed
         # false-positive. ``card_payload`` here is the incident_card's payload.
         #
-        # The pointer's LAST token is the field name; a single-segment top-level
-        # pointer (``/<field>``) names a card-root property directly, and a deeper
-        # pointer (``/a/b``) keys on its leaf token so a card-root field of that
-        # name is still checked.
+        # SCOPE — single-segment ROOT pointers ONLY. A pointer that names a card-root
+        # field is exactly one root segment: ``/<name>``. We MUST NOT infer a card
+        # root field from an arbitrary pointer's LEAF token: a nested source pointer
+        # like ``/details/severity`` or ``/internal/public_incident_id`` does NOT map
+        # to a card-root field, so collapsing it to its leaf (``severity`` /
+        # ``public_incident_id``) and matching that against an unrelated card-root
+        # field is a false-positive (spurious ACEF-086 against a conformant bundle).
+        # The §5.11 finding establishes ``severity`` is the ONLY property shared
+        # between the incident_report payload root and the incident_card root, so the
+        # single-root-segment rule covers the entire exploitable leak surface.
         if rtype == "incident_card":
             for pointer, disposition in pub_map.items():
                 if not isinstance(pointer, str) or disposition not in ("omitted", "regulator-only"):
                     continue
-                field_name = pointer.split("/")[-1].replace("~1", "/").replace("~0", "~")
+                # A card-root field is named by EXACTLY one root segment: "/<name>".
+                # split("/") on "/severity" -> ["", "severity"]; reject anything
+                # that is not a two-element split with a non-empty leading "" (i.e.
+                # nested "/a/b" -> 3 segments, "severity" -> no leading "/").
+                segments = pointer.split("/")
+                if len(segments) != 2 or segments[0] != "":
+                    continue
+                field_name = segments[1].replace("~1", "/").replace("~0", "~")
                 if not field_name:
                     continue
                 if field_name in card_payload:
