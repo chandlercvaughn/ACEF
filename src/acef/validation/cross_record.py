@@ -189,10 +189,11 @@ def enforce_cross_tenant_refs(
                             f"Cross-tenant entity reference: record "
                             f"{rec_id!r} (tenant_label={rec_tenant!r}) "
                             f"references entity {urn!r} owned by tenant "
-                            f"{owner_tenant!r}. Per the ACEF-075 tenant-"
-                            "uniformity model (spec §3.6 error taxonomy), "
-                            "entity references MUST NOT cross tenant_label "
-                            "boundaries."
+                            f"{owner_tenant!r}. Per the ACEF-020 reference-"
+                            "integrity rule (spec §3.6 error taxonomy — "
+                            "entity_refs reference-integrity; cross-tenant "
+                            "entity-reference model), entity references MUST "
+                            "NOT cross tenant_label boundaries."
                         ),
                     )
                 )

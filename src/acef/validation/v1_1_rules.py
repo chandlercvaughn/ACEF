@@ -76,26 +76,47 @@ BANNED_CLAIM_LANGUAGE_TOKENS: tuple[str, ...] = (
 def _compile_banned_token_patterns(
     tokens: tuple[str, ...],
 ) -> tuple[tuple[str, re.Pattern[str]], ...]:
-    r"""Compile each banned token to a case-insensitive WORD-BOUNDARY matcher.
+    r"""Compile each banned token to a case-insensitive HYPHEN-AWARE matcher.
 
-    Audit cross-record-authority-4: the previous naive substring scan
+    Audit cross-record-authority-4: the original naive substring scan
     (``token in lowered``) false-rejected legitimate words that merely
     CONTAIN a banned token (e.g. ``noncompliant`` contains ``compliant``).
-    We anchor every token between word boundaries (``\b<token>\b``) so a
-    banned token only matches as a whole word, never as a substring of a
-    larger word.
+    The first fix anchored each token between word boundaries
+    (``\b<token>\b``), which stopped pure-substring matches.
+
+    But ``\b`` treats ``-`` as a word boundary, so ``\bcompliant\b`` STILL
+    matched "compliant" inside legitimate hyphenated compounds like
+    ``non-compliant`` / ``self-certified`` / ``AI Act-approved-process`` — a
+    residual false ACEF-079 (roborev follow-up). We therefore replace the
+    ``\b`` anchors with explicit edge LOOKAROUNDS that treat a hyphenated
+    compound as a single lexical unit:
+
+        (?<![\w-]) <token> (?![\w-])
+
+    A banned token matches ONLY when it is NOT adjacent to a word-character
+    OR a hyphen on either edge. So:
+
+    * ``non-compliant`` / ``self-certified`` / ``certified-evidence`` →
+      hyphen on one edge → NOT matched (the compound is one token).
+    * ``AI Act-approved-process`` → trailing ``-`` after the multi-word
+      token → NOT matched.
+    * ``noncompliant`` / ``recertified`` → word-char on the edge → NOT
+      matched (the original substring guard preserved).
+    * standalone ``compliant`` / ``compliant.`` / ``(certified)`` →
+      whitespace or punctuation on the edge (neither ``\w`` nor ``-``) →
+      MATCHED. Punctuation is a real boundary.
 
     The token is :func:`re.escape`-d so multi-word / hyphenated tokens
-    (``AI Act-approved``) match literally; ``\b`` correctly anchors on the
-    surrounding word characters of the phrase's first/last alphanumerics.
-    Matching is case-insensitive (``re.IGNORECASE``) to preserve the prior
-    "COMPLIANT" == "compliant" behavior, and ``re.UNICODE`` (the Python-3
-    default for ``str`` patterns) makes the word-boundary Unicode-aware.
+    (``AI Act-approved``) match literally; the internal hyphen of the token
+    itself is part of the escaped literal and is unaffected by the edge
+    lookarounds. Matching is case-insensitive (``re.IGNORECASE``) to preserve
+    the prior "COMPLIANT" == "compliant" behavior, and ``re.UNICODE`` (the
+    Python-3 default for ``str`` patterns) makes ``\w`` Unicode-aware.
     """
     compiled: list[tuple[str, re.Pattern[str]]] = []
     for token in tokens:
         pattern = re.compile(
-            r"\b" + re.escape(token) + r"\b",
+            r"(?<![\w-])" + re.escape(token) + r"(?![\w-])",
             re.IGNORECASE | re.UNICODE,
         )
         compiled.append((token, pattern))
@@ -250,15 +271,18 @@ def lint_coverage_cell_claim_language(
     """Emit ACEF-079 for each coverage_cell.claim_language banned-token hit.
 
     Per VAL-VALIDATION-008: scan the Assessment Bundle's ``coverage_cells``
-    array. For each cell, run a case-insensitive WORD-BOUNDARY scan over the
-    closed normative banned-token list (the four tokens of the spec ACEF-079
-    row). Each violating (cell_id, token) pair emits a distinct ACEF-079
-    diagnostic so producers see every offending token.
+    array. For each cell, run a case-insensitive HYPHEN-AWARE whole-token scan
+    over the closed normative banned-token list (the four tokens of the spec
+    ACEF-079 row). Each violating (cell_id, token) pair emits a distinct
+    ACEF-079 diagnostic so producers see every offending token.
 
-    Word-boundary (not substring) matching per audit cross-record-authority-4:
-    a banned token fires only as a whole word, so legitimate words that merely
-    contain a banned token as a substring (e.g. ``noncompliant``) are not
-    false-rejected.
+    Hyphen-aware (not substring, not bare ``\\b``) matching per audit
+    cross-record-authority-4 + roborev follow-up: a banned token fires only as
+    a standalone token bounded by non-word/non-hyphen edges. Legitimate words
+    that merely contain a banned token as a substring (``noncompliant``) and
+    legitimate hyphenated compounds that embed one (``non-compliant`` /
+    ``self-certified``) are NOT false-rejected; punctuation-delimited
+    standalone tokens (``compliant.``) still fire.
 
     NOT ACEF-053 — codex policy explicitly carved out ACEF-079 to keep the
     Core banned-copy outcome independent of vendor-extension diagnostics.
