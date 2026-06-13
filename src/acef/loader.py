@@ -308,20 +308,30 @@ def extract_archive_raw(archive_path: str | Path) -> Iterator[Path]:
     if not archive.exists():
         raise ACEFFormatError(f"Archive not found: {archive}", code="ACEF-050")
 
-    try:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            extract_dir = Path(tmpdir)
+    # Keep the temp directory alive for the WHOLE ``with`` block, but scope the
+    # corruption-rewriting ``try/except`` to ONLY the extraction + bundle-root
+    # resolution that happens BEFORE the ``yield``. If the ``yield`` lived inside
+    # that ``try``, a generator-based context manager would re-raise a CALLER's
+    # exception at the ``yield`` point, where ``except (... OSError)`` would catch
+    # it and MASK it as an archive-corruption error — hiding the caller's real
+    # failure. Resolving the bundle root inside the guard and yielding OUTSIDE it
+    # lets any caller-raised exception (e.g. ``OSError``) propagate UNCHANGED.
+    with tempfile.TemporaryDirectory() as tmpdir:
+        extract_dir = Path(tmpdir)
+        try:
             with tarfile.open(str(archive), "r:gz") as tar:
                 _validate_tar_safety(tar)
                 _safe_tar_extract(tar, extract_dir)
-            yield _resolve_bundle_root(extract_dir)
-    except ACEFFormatError:
-        raise
-    except (tarfile.TarError, gzip.BadGzipFile, OSError) as e:
-        raise ACEFFormatError(
-            f"Malformed or corrupt archive: {archive}: {e}",
-            code="ACEF-050",
-        ) from e
+            bundle_root = _resolve_bundle_root(extract_dir)
+        except ACEFFormatError:
+            raise
+        except (tarfile.TarError, gzip.BadGzipFile, OSError) as e:
+            raise ACEFFormatError(
+                f"Malformed or corrupt archive: {archive}: {e}",
+                code="ACEF-050",
+            ) from e
+
+        yield bundle_root
 
 
 def _parse_jsonl(path: Path) -> list[dict[str, Any]]:
