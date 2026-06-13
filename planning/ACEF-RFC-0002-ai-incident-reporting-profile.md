@@ -555,8 +555,9 @@ The public `incident_card` record. Closed (`additionalProperties: false`); unkno
     },
     "harm_distribution_basis": {
       "type": "array",
+      "uniqueItems": true,
       "items": { "type": "string", "enum": ["race", "sex", "national_origin", "disability", "religion", "sexual_orientation_or_gender_identity", "financial_means", "age", "geography", "ideology", "familial_status", "other"] },
-      "description": "Closed CSETv1 axis (§5.2). GDPR Art.9 special-category; §5.11 governs publishability (regulator-only by default; a *_commitment field carries the hash-committed form)."
+      "description": "Closed CSETv1 axis (§5.2), a SET (uniqueItems: true) — a duplicate ['race','race'] is rejected; §5.10 order-insensitive (sorted before hashing). GDPR Art.9 special-category; §5.11 governs publishability (regulator-only by default; a *_commitment field carries the hash-committed form)."
     },
     "taxonomy_crosswalk": { "$ref": "taxonomy_crosswalk.schema.json", "description": "Closed, version-pinned members; derived projections of harm_core (§5.5)." },
     "coordinated_disclosure": { "$ref": "coordinated_disclosure.schema.json", "description": "Single canonical shape (§5.6)." },
@@ -620,7 +621,7 @@ The private projection-source overlay on `incident_report` (also v1.1, gated on 
           "required": ["edition", "serious_incident_triggers", "widespread", "death_involved"],
           "properties": {
             "edition": { "const": "reg-2024-1689" },
-            "serious_incident_triggers": { "type": "array", "items": { "enum": ["3.49.a", "3.49.b", "3.49.c", "3.49.d"] } },
+            "serious_incident_triggers": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "enum": ["3.49.a", "3.49.b", "3.49.c", "3.49.d"] } },
             "widespread": { "type": "boolean" },
             "death_involved": { "type": "boolean" }
           }

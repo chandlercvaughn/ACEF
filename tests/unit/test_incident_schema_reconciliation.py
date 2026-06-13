@@ -262,6 +262,125 @@ def test_appendix_b_card_source_required_equals_shipped_schema() -> None:
 
 
 # ---------------------------------------------------------------------------
+# VAL-FIX-INCSCHEMA-002 reconciliation — Appendix B incident_card excerpt
+# harm_distribution_basis uniqueItems matches the shipped schema
+# ---------------------------------------------------------------------------
+
+
+def _appendix_b_incident_card_excerpt() -> dict[str, Any]:
+    """Parse the Appendix B incident_card JSON excerpt out of the RFC body.
+
+    Locates the ```json fenced block whose ``$id`` is the incident_card schema and
+    whose ``properties`` carries ``harm_distribution_basis`` (the public-card
+    excerpt, distinct from the card_source overlay block). Raises if absent.
+    """
+    text = _RFC_PATH.read_text(encoding="utf-8")
+    blocks = re.findall(r"```json\n(.*?)```", text, re.S)
+    for block in blocks:
+        if "incident_card.schema.json" in block and '"harm_distribution_basis"' in block:
+            parsed = json.loads(block)
+            props = parsed.get("properties", {})
+            if "harm_distribution_basis" in props:
+                return parsed
+    raise AssertionError("Appendix B incident_card JSON excerpt not found in RFC")
+
+
+def test_appendix_b_harm_distribution_basis_declares_unique_items() -> None:
+    """VAL-FIX-INCSCHEMA-002 reconciliation (RED→GREEN).
+
+    The shipped ``incident_card.schema.json`` now constrains
+    ``harm_distribution_basis`` with ``uniqueItems: true`` (a duplicate
+    ``["race","race"]`` is rejected). The Appendix B normative excerpt documents the
+    same property as a plain array WITHOUT ``uniqueItems``, so an RFC-derived
+    implementation would accept duplicates the shipped schema rejects. The excerpt
+    MUST carry ``uniqueItems: true``. Pre-fix the excerpt omits it and this FAILS.
+    """
+    excerpt = _appendix_b_incident_card_excerpt()
+    hdb = excerpt["properties"]["harm_distribution_basis"]
+    assert hdb.get("uniqueItems") is True, (
+        "RED defect: Appendix B incident_card.harm_distribution_basis lacks "
+        "uniqueItems:true; shipped schema now rejects duplicates"
+    )
+
+
+def test_appendix_b_harm_distribution_basis_matches_shipped_schema() -> None:
+    """VAL-FIX-INCSCHEMA-002 reconciliation invariant.
+
+    The Appendix B excerpt's ``harm_distribution_basis`` constraints (``type``,
+    ``items``, ``uniqueItems``) MUST EQUAL the shipped ``incident_card.schema.json``
+    property, so an implementation built from the normative text and one built from
+    the shipped schema agree on whether a duplicate axis is valid.
+    """
+    excerpt = _appendix_b_incident_card_excerpt()["properties"]["harm_distribution_basis"]
+    shipped = _load(_INCIDENT_CARD_PATH)["properties"]["harm_distribution_basis"]
+    for key in ("type", "items", "uniqueItems"):
+        assert excerpt.get(key) == shipped.get(key), (
+            f"Appendix B harm_distribution_basis.{key} ({excerpt.get(key)!r}) must equal shipped ({shipped.get(key)!r})"
+        )
+
+
+# ---------------------------------------------------------------------------
+# VAL-FIX-INCSCHEMA-001 reconciliation — Appendix B nested card_source
+# eu_ai_act_facts.serious_incident_triggers matches the shipped schema
+# ---------------------------------------------------------------------------
+
+
+def _appendix_b_card_source_triggers() -> dict[str, Any]:
+    """Return the Appendix B card_source eu_ai_act_facts.serious_incident_triggers
+    constraint object from the RFC excerpt."""
+    excerpt = _appendix_b_card_source_excerpt()
+    return excerpt["properties"]["card_source"]["properties"]["eu_ai_act_facts"]["properties"][
+        "serious_incident_triggers"
+    ]
+
+
+def _shipped_card_source_triggers() -> dict[str, Any]:
+    """Return the shipped card_source eu_ai_act_facts.serious_incident_triggers
+    constraint object from the shipped overlay schema."""
+    return _load(_CARD_SOURCE_PATH)["properties"]["eu_ai_act_facts"]["properties"]["serious_incident_triggers"]
+
+
+def test_appendix_b_nested_triggers_declare_minitems_and_unique() -> None:
+    """VAL-FIX-INCSCHEMA-001 nested reconciliation (RED→GREEN).
+
+    The shipped ``incident_report.card_source.schema.json`` constrains
+    ``eu_ai_act_facts.serious_incident_triggers`` with ``minItems: 1`` and
+    ``uniqueItems: true`` (and a string item ``type``). The Appendix B excerpt omits
+    these, so an RFC-derived implementation could accept empty/duplicate
+    source-backed trigger arrays the actual schema rejects. The nested excerpt MUST
+    carry both constraints. Pre-fix the excerpt omits them and this FAILS.
+    """
+    triggers = _appendix_b_card_source_triggers()
+    assert triggers.get("minItems") == 1, (
+        "RED defect: Appendix B card_source serious_incident_triggers lacks minItems:1"
+    )
+    assert triggers.get("uniqueItems") is True, (
+        "RED defect: Appendix B card_source serious_incident_triggers lacks uniqueItems:true"
+    )
+    assert triggers.get("items", {}).get("type") == "string", (
+        "RED defect: Appendix B card_source serious_incident_triggers items lack a string type"
+    )
+
+
+def test_appendix_b_nested_triggers_match_shipped_schema() -> None:
+    """VAL-FIX-INCSCHEMA-001 nested reconciliation invariant.
+
+    The Appendix B nested ``serious_incident_triggers`` constraints
+    (``type``, ``minItems``, ``uniqueItems``, ``items``) MUST EQUAL the shipped
+    ``incident_report.card_source.schema.json`` property, so the normative text and
+    the shipped schema agree on whether an empty/duplicate source-backed trigger set
+    is valid.
+    """
+    excerpt = _appendix_b_card_source_triggers()
+    shipped = _shipped_card_source_triggers()
+    for key in ("type", "minItems", "uniqueItems", "items"):
+        assert excerpt.get(key) == shipped.get(key), (
+            f"Appendix B nested serious_incident_triggers.{key} ({excerpt.get(key)!r}) "
+            f"must equal shipped ({shipped.get(key)!r})"
+        )
+
+
+# ---------------------------------------------------------------------------
 # INCVAL-005 carry — validator-enforced public Art.73 fact-block RFC note
 # ---------------------------------------------------------------------------
 

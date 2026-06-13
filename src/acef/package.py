@@ -2554,6 +2554,47 @@ class Package:
         return sorted(items, key=canonicalize)
 
     @staticmethod
+    def _sorted_unique_canonical(seq: Iterable[Any]) -> list[Any]:
+        """Sort AND de-duplicate a SET-semantic order-insensitive incident array.
+
+        The set-semantic sibling of :meth:`_sorted_canonical` for the incident arrays
+        the v1.1 schema declares ``uniqueItems: true`` — ``harm_distribution_basis``
+        (the closed CSETv1 protected-attribute axis) and the
+        ``serious_incident_triggers`` trigger codes (public crosswalk + source-backed
+        ``eu_ai_act_facts``). §5.5 / §5.10 treat these arrays as SETS: two
+        canonical-byte-equal elements are the SAME member and collapse to one, so the
+        emission path must DEDUP (never reject) before sorting. Without this the
+        builder could emit ``["race","race"]`` — a card the now-stricter v1.1 schema
+        rejects, a self-inflicted regression.
+
+        De-duplication keys on the RFC-8785 canonical byte sequence of the element
+        (the single ordering primitive :meth:`_sorted_canonical` already uses), so a
+        scalar string and a whole sub-object are both collapsed by canonical-byte
+        equality, identically across builders and across the Python/TS SDKs. The
+        first occurrence of each distinct canonical form is kept, then the surviving
+        set is sorted ascending by the same canonical bytes — so the result is
+        order- and duplicate-independent (the §5.5/§5.10 set semantics). Numeric
+        ordering is intentionally not offered here: no ``uniqueItems`` incident array
+        is the numeric ``aiid.report_ids[]`` array.
+
+        Args:
+            seq: The array to sort-and-dedup. A non-list/tuple value is returned
+                unchanged so a malformed payload field is never silently coerced.
+
+        Returns:
+            A new list, de-duplicated by canonical bytes then sorted ascending
+            (input is not mutated).
+        """
+        seen: set[bytes] = set()
+        unique: list[Any] = []
+        for item in seq:
+            key = canonicalize(item)
+            if key not in seen:
+                seen.add(key)
+                unique.append(item)
+        return sorted(unique, key=canonicalize)
+
+    @staticmethod
     def _sort_incident_arrays(payload: dict[str, Any]) -> dict[str, Any]:
         """Sort every order-insensitive array an incident payload carries (§5.10).
 
@@ -2563,8 +2604,10 @@ class Package:
         order-insensitive arrays the profile introduces — the explicit §5.10 list plus
         every array inside a crosswalk sub-member — sorting each ascending by the
         RFC-8785 canonical byte sequence of its element (``aiid.report_ids[]`` numeric
-        ascending, per §5.10). uniqueItems-constrained string arrays
-        (``serious_incident_triggers[]``) are de-duplicated.
+        ascending, per §5.10). uniqueItems-constrained SET arrays
+        (``serious_incident_triggers[]`` and ``harm_distribution_basis[]``) are
+        sorted AND de-duplicated via :meth:`_sorted_unique_canonical`, so the builder
+        never emits a duplicate the now-stricter v1.1 schema rejects (§5.5/§5.10).
 
         ``notification_timeline[]`` is the SOLE order-SIGNIFICANT exception (§5.10) and
         is deliberately NOT touched, so the caller's notification sequence survives
@@ -2602,11 +2645,18 @@ class Package:
         def _sort_str_array(container: dict[str, Any], key: str, *, dedupe: bool = False) -> None:
             value = container.get(key)
             if isinstance(value, list):
-                items = list(dict.fromkeys(value)) if dedupe else value
-                container[key] = Package._sorted_canonical(items)
+                # uniqueItems-declared SET arrays sort-AND-dedup via the canonical-byte
+                # variant (§5.5/§5.10 set semantics); the rest sort only.
+                if dedupe:
+                    container[key] = Package._sorted_unique_canonical(value)
+                else:
+                    container[key] = Package._sorted_canonical(value)
 
         # --- §5.10 arrays at this scope --------------------------------------------
-        _sort_str_array(scope, "harm_distribution_basis")
+        # harm_distribution_basis is uniqueItems:true (closed CSETv1 axis, §5.2/§5.10
+        # set semantics) — sort AND dedup so emission never produces ["race","race"],
+        # which the now-stricter v1.1 incident_card schema rejects.
+        _sort_str_array(scope, "harm_distribution_basis", dedupe=True)
 
         transferability = scope.get("transferability")
         if isinstance(transferability, dict):

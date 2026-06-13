@@ -527,6 +527,135 @@ class TestGenericSourceBackedReportConfidentiality:
         assert pkg._versioning.core_version == "1.0.0"
 
 
+class TestEmissionDedupesSetSemanticIncidentArrays:
+    """roborev Medium (3f99e87c): the v1.1 schema tightening made the set-semantic
+    incident arrays ``uniqueItems: true`` — ``harm_distribution_basis`` (the closed
+    CSETv1 protected-attribute axis) and the public
+    ``taxonomy_crosswalk.eu_ai_act.serious_incident_triggers``. The §5.10 emission
+    normalizer SORTS those arrays but, for ``harm_distribution_basis``, did NOT
+    de-duplicate, so a producer calling ``incident_card(harm_distribution_basis=
+    ['race','race'])`` (or the generic ``record('incident_card', …)`` path) emitted a
+    card the UPDATED schema now REJECTS — a self-inflicted regression.
+
+    §5.5 / §5.10 treat these arrays as SETS: canonical-byte-equal duplicates collapse
+    to one (DEDUP, never reject). The emission path must therefore sort-AND-dedup the
+    set-semantic arrays so the builder cannot produce schema-invalid output. Both the
+    typed builder and the generic ``record()`` path use the SAME normalizer, so they
+    stay byte-identical.
+
+    RED before the fix: ``harm_distribution_basis=['race','race']`` emits a card that
+    FAILS v1.1 schema validation (uniqueItems on harm_distribution_basis).
+    """
+
+    def test_builder_dedupes_harm_distribution_basis(self) -> None:
+        # RED pre-fix: the typed builder sorts but keeps the duplicate, so the emitted
+        # card has ['race','race'] and FAILS the now-uniqueItems v1.1 schema.
+        pkg = _new_pkg()
+        env = pkg.incident_card(
+            public_incident_id=_PUBLIC_ID,
+            harm_core=dict(_HARM_CORE),
+            severity_vector=_SEVERITY_VECTOR,
+            awareness_date=_AWARENESS,
+            eu_ai_act_facts={
+                "serious_incident_triggers": ["3.49.a"],
+                "widespread": False,
+                "death_involved": False,
+            },
+            harm_distribution_basis=["race", "race", "sex"],
+        )
+        payload = dict(env.payload)
+        assert payload["harm_distribution_basis"] == ["race", "sex"], (
+            "RED defect: builder emits duplicate harm_distribution_basis "
+            f"{payload['harm_distribution_basis']} (uniqueItems schema rejects it)"
+        )
+        errors = validate_record_payload(payload, "incident_card", "v1.1")
+        assert errors == [], f"emitted incident_card failed v1.1 schema validation: {errors}"
+
+    def test_record_path_dedupes_harm_distribution_basis(self) -> None:
+        # Generic↔typed PARITY: record('incident_card', …) dedupes identically.
+        pkg = _new_pkg()
+        payload = {
+            "public_incident_id": _PUBLIC_ID,
+            "id_grade": "self-asserted",
+            "harm_core": dict(_HARM_CORE),
+            "severity_vector": _SEVERITY_VECTOR,
+            "severity": "major",
+            "harm_distribution_basis": ["sex", "race", "race", "sex"],
+        }
+        env = pkg.record("incident_card", payload=payload)
+        emitted = dict(env.payload)
+        assert emitted["harm_distribution_basis"] == ["race", "sex"], (
+            "RED defect: generic record() path emits duplicate harm_distribution_basis "
+            f"{emitted['harm_distribution_basis']}"
+        )
+        errors = validate_record_payload(emitted, "incident_card", "v1.1")
+        assert errors == [], f"emitted incident_card failed v1.1 schema validation: {errors}"
+
+    def test_record_path_dedupes_public_serious_incident_triggers(self) -> None:
+        # The OTHER newly-uniqueItems public set-array: a duplicate trigger collapses
+        # to one and the emitted card validates clean.
+        pkg = _new_pkg()
+        payload = {
+            "public_incident_id": _PUBLIC_ID,
+            "id_grade": "self-asserted",
+            "harm_core": dict(_HARM_CORE),
+            "severity_vector": _SEVERITY_VECTOR,
+            "severity": "major",
+            "taxonomy_crosswalk": {
+                "eu_ai_act": {
+                    "edition": "reg-2024-1689",
+                    "serious_incident_triggers": ["3.49.a", "3.49.a", "3.49.b"],
+                    "widespread": False,
+                    "death_involved": False,
+                }
+            },
+        }
+        env = pkg.record("incident_card", payload=payload)
+        emitted = dict(env.payload)
+        triggers = emitted["taxonomy_crosswalk"]["eu_ai_act"]["serious_incident_triggers"]
+        assert triggers == ["3.49.a", "3.49.b"], (
+            f"RED defect: generic record() path emits duplicate triggers {triggers}"
+        )
+        errors = validate_record_payload(emitted, "incident_card", "v1.1")
+        assert errors == [], f"emitted incident_card failed v1.1 schema validation: {errors}"
+
+    def test_builder_and_record_agree_on_deduped_harm_distribution_basis(self) -> None:
+        # Both paths collapse the same duplicate to the same single canonical-byte
+        # ordering, so a producer cannot fork the hash by choosing an API.
+        via_builder = dict(
+            _new_pkg()
+            .incident_card(
+                public_incident_id=_PUBLIC_ID,
+                harm_core=dict(_HARM_CORE),
+                severity_vector=_SEVERITY_VECTOR,
+                awareness_date=_AWARENESS,
+                eu_ai_act_facts={
+                    "serious_incident_triggers": ["3.49.a"],
+                    "widespread": False,
+                    "death_involved": False,
+                },
+                harm_distribution_basis=["sex", "race", "race"],
+            )
+            .payload
+        )
+        via_record = dict(
+            _new_pkg()
+            .record(
+                "incident_card",
+                payload={
+                    "public_incident_id": _PUBLIC_ID,
+                    "id_grade": "self-asserted",
+                    "harm_core": dict(_HARM_CORE),
+                    "severity_vector": _SEVERITY_VECTOR,
+                    "severity": "major",
+                    "harm_distribution_basis": ["sex", "race", "race"],
+                },
+            )
+            .payload
+        )
+        assert via_builder["harm_distribution_basis"] == via_record["harm_distribution_basis"] == ["race", "sex"]
+
+
 class TestGenericReportDedupeKeyTriggersV11Rules:
     """roborev Medium (8826e7f7 / 6211995b): the generic-report v1.1 trigger set was ONLY the
     schema property diff (``{card_source}``), so rule-owned v1.1 fields
