@@ -164,9 +164,29 @@ def _check_integrity(bundle_path: Path, issues: list[tuple[str, str, str]]) -> N
     else:
         issues.append(("warning", "integrity", "No content-hashes.json found"))
 
+    # Merkle-tree presence is MANDATORY whenever content-hashes.json exists.
+    # check_integrity() (validation/integrity_checker.py) treats an absent
+    # hashes/merkle-tree.json — in a bundle that DOES carry content-hashes.json
+    # — as FATAL ACEF-011: spec §3.1.3 step (d)'s mandatory recompute-and-
+    # compare cannot be performed without the file. doctor MUST agree on both
+    # severity (error) and exit status (non-zero) so it never exits 0 for a
+    # bundle ``validate`` rejects. When content-hashes.json is itself absent,
+    # the missing Merkle file is not independently actionable (the integrity
+    # layer is already flagged above via the missing content-hashes warning),
+    # so we keep the advisory note in that case to avoid a confusing
+    # double-report.
     merkle_path = bundle_path / "hashes" / "merkle-tree.json"
     if merkle_path.exists():
         console.print("  [green]merkle-tree.json present[/green]")
+    elif hashes_path.exists():
+        issues.append(
+            (
+                "error",
+                "integrity",
+                "ACEF-011: merkle-tree.json not found in hashes/ — mandatory "
+                "Merkle root comparison (spec §3.1.3 step d) cannot be performed",
+            )
+        )
     else:
         issues.append(("warning", "integrity", "No merkle-tree.json found"))
 
