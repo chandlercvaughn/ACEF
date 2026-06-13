@@ -38,6 +38,41 @@ def _build_raw_archive(src_dir: Path, out: Path, *, skip: set[str] | None = None
             tar.add(str(path), arcname=arcname, recursive=False)
 
 
+def _clean_package() -> Package:
+    """Build a SCHEMA-VALID minimal package.
+
+    The shared ``minimal_package`` fixture carries a deliberately loose
+    risk_register payload (legacy field names) that trips FATAL ACEF-004
+    payload-schema errors — fine for asserting on integrity-code PRESENCE, but
+    it cannot prove a "healthy bundle → exit 0" path because the schema noise
+    keeps the exit code non-zero. ``verify`` exits 0 here because the only
+    remaining diagnostic (``ACEF-002`` empty ``audit_trail[0].actor_ref``) is a
+    known baseline downgrade.
+    """
+    pkg = Package(producer={"name": "test-tool", "version": "1.0.0"})
+    system = pkg.add_subject(
+        "ai_system",
+        name="Test System",
+        risk_classification="high-risk",
+        modalities=["text"],
+        lifecycle_phase="deployment",
+    )
+    pkg.record(
+        "risk_register",
+        provisions=["article-9"],
+        payload={
+            "risk_id": "R-1",
+            "description": "Test risk",
+            "category": "safety",
+            "likelihood": "possible",
+            "severity": "major",
+        },
+        obligation_role="provider",
+        entity_refs={"subject_refs": [system.id]},
+    )
+    return pkg
+
+
 class TestCLI:
     """CLI command integration tests."""
 
@@ -226,6 +261,144 @@ class TestCLI:
         assert "ACEF-010" in doctor_result.output
         # Parity: validate also fails (fatal) on the tampered archive.
         assert validate_result.exit_code != 0, validate_result.output
+
+    def test_validate_archive_missing_merkle_reports_acef011(
+        self, runner: CliRunner, minimal_package: Package, tmp_dir: Path
+    ) -> None:
+        """ARCHIVE with ``hashes/merkle-tree.json`` stripped → ``acef validate``
+        MUST surface FATAL ACEF-011 (the integrity verdict), not silently heal it.
+
+        RED proof (roborev Medium on 40b11e4a): ``validate`` resolved an archive
+        input by ``load(path)`` then ``pkg.export(...)`` into a temp dir before
+        running the validator. That round-trip REGENERATES
+        ``hashes/content-hashes.json`` / ``hashes/merkle-tree.json`` from the
+        loaded records, so the stripped Merkle tree is rebuilt and the tampering
+        is HEALED — ``validate`` ran against the recomputed (clean) integrity
+        files and never emitted ACEF-011. (The exit code happened to be non-zero
+        only because of unrelated baseline payload-schema errors in the fixture,
+        masking the real defect.) The integrity code is the load-bearing signal:
+        on the tampered archive it must be PRESENT.
+        """
+        bundle_dir = tmp_dir / "val-no-merkle.acef"
+        minimal_package.export(str(bundle_dir))
+        assert (bundle_dir / "hashes" / "merkle-tree.json").exists()
+        assert (bundle_dir / "hashes" / "content-hashes.json").exists()
+
+        archive = tmp_dir / "val-no-merkle.acef.tar.gz"
+        _build_raw_archive(bundle_dir, archive, skip={"hashes/merkle-tree.json"})
+
+        result = runner.invoke(cli, ["validate", str(archive)])
+        assert result.exit_code != 0, result.output
+        assert "ACEF-011" in result.output, (
+            "validate healed the stripped merkle-tree.json instead of reporting ACEF-011"
+        )
+
+    def test_validate_archive_content_hash_mismatch_reports_acef010(
+        self, runner: CliRunner, minimal_package: Package, tmp_dir: Path
+    ) -> None:
+        """ARCHIVE with a content-hash mismatch (a record/manifest byte changed
+        after hashing) → ``acef validate`` MUST surface FATAL ACEF-010.
+
+        RED proof: the load→export round-trip recomputes content-hashes.json from
+        the tampered bytes, so the recomputed hashes match the tampered content
+        and the mismatch is HEALED — ACEF-010 never fires. Validating the raw
+        archive bytes as-received catches it.
+        """
+        bundle_dir = tmp_dir / "val-tamper.acef"
+        minimal_package.export(str(bundle_dir))
+
+        # Tamper a manifest field AFTER hashing: still valid JSON and a
+        # structurally valid bundle, but its content hash no longer matches the
+        # frozen content-hashes.json entry. Only an integrity verify catches it.
+        manifest_path = bundle_dir / "acef-manifest.json"
+        data = json.loads(manifest_path.read_text(encoding="utf-8"))
+        data["metadata"]["producer"]["name"] = "ATTACKER"
+        manifest_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+        archive = tmp_dir / "val-tampered-field.acef.tar.gz"
+        _build_raw_archive(bundle_dir, archive)
+
+        result = runner.invoke(cli, ["validate", str(archive)])
+        assert result.exit_code != 0, result.output
+        assert "ACEF-010" in result.output, "validate healed the content-hash mismatch instead of reporting ACEF-010"
+
+    def test_validate_healthy_archive_no_integrity_errors(
+        self, runner: CliRunner, minimal_package: Package, tmp_dir: Path
+    ) -> None:
+        """A healthy, untampered archive → ``acef validate`` emits NO integrity
+        codes (ACEF-010/ACEF-011). Guards that validating the raw archive bytes
+        does not regress a clean archive into a false integrity failure.
+        """
+        bundle_dir = tmp_dir / "val-healthy.acef"
+        minimal_package.export(str(bundle_dir))
+        archive = tmp_dir / "val-healthy.acef.tar.gz"
+        _build_raw_archive(bundle_dir, archive)
+
+        result = runner.invoke(cli, ["validate", str(archive)])
+        assert "ACEF-011" not in result.output, result.output
+        assert "ACEF-010" not in result.output, result.output
+
+    def test_verify_archive_missing_merkle_rejected(
+        self, runner: CliRunner, minimal_package: Package, tmp_dir: Path
+    ) -> None:
+        """``acef verify`` on an ARCHIVE with ``hashes/merkle-tree.json`` stripped
+        → FATAL ACEF-011, non-zero exit.
+
+        RED proof: ``verify`` rejected ANY non-directory path outright
+        ("bundle path is not a directory") and so could not verify archive
+        integrity at all — a CI gate that silently never inspected archives.
+        """
+        bundle_dir = tmp_dir / "vfy-no-merkle.acef"
+        minimal_package.export(str(bundle_dir))
+        archive = tmp_dir / "vfy-no-merkle.acef.tar.gz"
+        _build_raw_archive(bundle_dir, archive, skip={"hashes/merkle-tree.json"})
+
+        result = runner.invoke(cli, ["verify", str(archive)])
+        assert result.exit_code != 0, result.output
+        assert "ACEF-011" in result.output
+
+    def test_verify_archive_content_hash_mismatch_rejected(
+        self, runner: CliRunner, minimal_package: Package, tmp_dir: Path
+    ) -> None:
+        """``acef verify`` on an ARCHIVE with a content-hash mismatch → FATAL
+        ACEF-010, non-zero exit (raw archive bytes verified as-received)."""
+        bundle_dir = tmp_dir / "vfy-tamper.acef"
+        minimal_package.export(str(bundle_dir))
+
+        manifest_path = bundle_dir / "acef-manifest.json"
+        data = json.loads(manifest_path.read_text(encoding="utf-8"))
+        data["metadata"]["producer"]["name"] = "ATTACKER"
+        manifest_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+        archive = tmp_dir / "vfy-tampered-field.acef.tar.gz"
+        _build_raw_archive(bundle_dir, archive)
+
+        result = runner.invoke(cli, ["verify", str(archive)])
+        assert result.exit_code != 0, result.output
+        assert "ACEF-010" in result.output
+
+    def test_verify_healthy_archive_passes(self, runner: CliRunner, tmp_dir: Path) -> None:
+        """A healthy (schema-valid) archive → ``acef verify`` exits 0 with no
+        integrity diagnostics. Guards that verifying the raw archive bytes does
+        not regress a clean archive into a false failure."""
+        bundle_dir = tmp_dir / "vfy-healthy.acef"
+        _clean_package().export(str(bundle_dir))
+        archive = tmp_dir / "vfy-healthy.acef.tar.gz"
+        _build_raw_archive(bundle_dir, archive)
+
+        result = runner.invoke(cli, ["verify", str(archive)])
+        assert result.exit_code == 0, result.output
+        assert "ACEF-011" not in result.output
+        assert "ACEF-010" not in result.output
+
+    def test_verify_directory_input_unchanged(self, runner: CliRunner, tmp_dir: Path) -> None:
+        """Directory inputs to ``verify`` are unaffected by the archive fix: a
+        healthy directory bundle still verifies clean (exit 0)."""
+        bundle_dir = tmp_dir / "vfy-dir.acef"
+        _clean_package().export(str(bundle_dir))
+
+        result = runner.invoke(cli, ["verify", str(bundle_dir)])
+        assert result.exit_code == 0, result.output
 
     def test_export_to_archive(self, runner: CliRunner, minimal_package: Package, tmp_dir: Path) -> None:
         bundle_path = str(tmp_dir / "export-src.acef")

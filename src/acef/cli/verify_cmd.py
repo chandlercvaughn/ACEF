@@ -37,11 +37,13 @@ from __future__ import annotations
 import json
 import re
 import sys
+from contextlib import ExitStack
 from pathlib import Path
 from typing import Any
 
 import click
 
+from acef.cli.validate_cmd import extract_archive_raw
 from acef.validation.engine import validate_bundle
 
 # Baseline downgrade table.
@@ -189,10 +191,17 @@ def _compute_exit_code(tallies: dict[str, int]) -> int:
 def verify_cmd(path: str, fmt: str, quiet: bool) -> None:
     """Verify an ACEF Evidence Bundle at PATH.
 
-    Runs schema validation, integrity verification, reference checking, and
-    (for v1.1 bundles) cross-record rules, banned-language lint, and
-    vendor-namespace lint hooks. Does NOT load regulation profiles or
-    compute provision outcomes -- use ``acef validate`` for that.
+    Accepts a directory bundle or an ``.acef.tar.gz`` archive. Runs schema
+    validation, integrity verification, reference checking, and (for v1.1
+    bundles) cross-record rules, banned-language lint, and vendor-namespace lint
+    hooks. Does NOT load regulation profiles or compute provision outcomes --
+    use ``acef validate`` for that.
+
+    Archive inputs are verified AS RECEIVED: the archive is safely extracted
+    verbatim and the SAME validator runs against the extracted bytes, so a
+    tampered archive (e.g. stripped ``merkle-tree.json`` or a content-hash
+    mismatch) is rejected with the matching integrity code. The archive is NOT
+    round-tripped through load→export, which would heal the tampering.
 
     Exit codes:
 
@@ -207,31 +216,53 @@ def verify_cmd(path: str, fmt: str, quiet: bool) -> None:
     if not bundle_path.exists():
         click.echo(f"ERROR: bundle path does not exist: {path}", err=True)
         sys.exit(2)
-    if not bundle_path.is_dir():
-        click.echo(f"ERROR: bundle path is not a directory: {path}", err=True)
+
+    is_archive = bundle_path.is_file() and (bundle_path.suffix == ".gz" or str(bundle_path).endswith(".tar.gz"))
+    if not bundle_path.is_dir() and not is_archive:
+        click.echo(
+            f"ERROR: bundle path is not a directory or .acef.tar.gz archive: {path}",
+            err=True,
+        )
         sys.exit(2)
 
-    # ``profiles=None`` skips Phase 4 (rule evaluation). The other phases
-    # still run and populate ``structural_errors``.
-    assessment = validate_bundle(str(bundle_path), profiles=None)
-    diagnostics: list[dict[str, Any]] = list(assessment.structural_errors)
+    with ExitStack() as stack:
+        if is_archive:
+            # Resolve the archive to a RAW-extracted directory and verify that.
+            # ``extract_archive_raw`` extracts the bytes verbatim (no load→export
+            # round-trip), so the integrity check sees the archive's real
+            # on-disk state and detects tampering. The temp dir is alive until
+            # this ``with`` block exits, after the validator has run.
+            try:
+                target = extract_archive_raw(bundle_path, stack)
+            except Exception as e:  # noqa: BLE001 — surface any extraction fault as a clean exit, never crash
+                click.echo(f"ERROR: archive could not be extracted: {e}", err=True)
+                sys.exit(2)
+            report_path = str(bundle_path)
+        else:
+            target = bundle_path
+            report_path = str(bundle_path)
 
-    # Tally by classification.
-    tallies: dict[str, int] = {
-        "fatal": 0,
-        "error": 0,
-        "warning": 0,
-        "baseline": 0,
-        "info": 0,
-    }
-    for d in diagnostics:
-        tallies[_classify(d)] = tallies.get(_classify(d), 0) + 1
+        # ``profiles=None`` skips Phase 4 (rule evaluation). The other phases
+        # still run and populate ``structural_errors``.
+        assessment = validate_bundle(str(target), profiles=None)
+        diagnostics: list[dict[str, Any]] = list(assessment.structural_errors)
 
-    exit_code = _compute_exit_code(tallies)
+        # Tally by classification.
+        tallies: dict[str, int] = {
+            "fatal": 0,
+            "error": 0,
+            "warning": 0,
+            "baseline": 0,
+            "info": 0,
+        }
+        for d in diagnostics:
+            tallies[_classify(d)] = tallies.get(_classify(d), 0) + 1
 
-    if fmt == "json":
-        _print_json(str(bundle_path), exit_code, tallies, diagnostics)
-    else:
-        _print_pretty(str(bundle_path), tallies, diagnostics, quiet)
+        exit_code = _compute_exit_code(tallies)
+
+        if fmt == "json":
+            _print_json(report_path, exit_code, tallies, diagnostics)
+        else:
+            _print_pretty(report_path, tallies, diagnostics, quiet)
 
     sys.exit(exit_code)

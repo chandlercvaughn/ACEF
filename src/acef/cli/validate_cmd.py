@@ -4,12 +4,58 @@ from __future__ import annotations
 
 import json
 import sys
+import tarfile
+import tempfile
+from contextlib import ExitStack
+from pathlib import Path
 
 import click
 
 from acef.assessment_builder import validate
 from acef.cli.formatters import print_assessment
 from acef.models.enums import ProvisionOutcome, RuleOutcome
+
+
+def _is_archive(path: Path) -> bool:
+    """Return True if ``path`` is an ``.acef.tar.gz`` archive file."""
+    return path.is_file() and (path.suffix == ".gz" or str(path).endswith(".tar.gz"))
+
+
+def extract_archive_raw(archive_path: Path, stack: ExitStack) -> Path:
+    """Safely extract an ``.acef.tar.gz`` archive VERBATIM and return its bundle
+    root directory.
+
+    Reuses the loader's vetted safety primitives (``_validate_tar_safety`` +
+    ``_safe_tar_extract``) — the SAME safe-extract path ``load()`` uses — so the
+    CLI never introduces a second, unsafe extractor. The temp directory is
+    registered on ``stack`` and cleaned up when the caller's ``with`` block exits,
+    AFTER validation has run against the extracted files.
+
+    Crucially this extracts the archive bytes EXACTLY as received: it does NOT
+    round-trip through ``load()`` + ``Package.export()``, which would regenerate
+    ``hashes/content-hashes.json`` / ``hashes/merkle-tree.json`` from the loaded
+    records and SILENTLY HEAL any tampering (e.g. a stripped Merkle tree or a
+    content-hash mismatch) before the validator ever ran. Validating the raw
+    extracted directory makes ``validate`` detect archive tampering with the same
+    integrity verdict (ACEF-010 hash mismatch, ACEF-011 missing/invalid Merkle
+    tree, etc.) it produces for the equivalent directory bundle.
+
+    Mirrors ``doctor``'s archive handling and ``loader._load_archive``'s bundle-root
+    resolution.
+    """
+    from acef.loader import _safe_tar_extract, _validate_tar_safety
+
+    tmpdir = Path(stack.enter_context(tempfile.TemporaryDirectory()))
+    with tarfile.open(str(archive_path), "r:gz") as tar:
+        _validate_tar_safety(tar)
+        _safe_tar_extract(tar, tmpdir)
+
+    # Find the bundle root: a single nested directory is the canonical archive
+    # layout; otherwise the temp dir itself is the bundle root.
+    extracted = list(tmpdir.iterdir())
+    if len(extracted) == 1 and extracted[0].is_dir():
+        return extracted[0]
+    return tmpdir
 
 
 @click.command("validate")
@@ -20,10 +66,30 @@ from acef.models.enums import ProvisionOutcome, RuleOutcome
 def validate_cmd(path: str, profile: tuple[str, ...], output: str | None, fmt: str) -> None:
     """Validate an ACEF Evidence Bundle at PATH.
 
-    Optionally specify --profile to evaluate against regulation mapping templates.
+    Accepts a directory bundle or an ``.acef.tar.gz`` archive. Optionally specify
+    --profile to evaluate against regulation mapping templates.
+
+    Archive inputs are validated AS RECEIVED: the archive is safely extracted
+    verbatim and the SAME validation pipeline runs against the extracted bytes.
+    The integrity files inside the archive are checked as-is, so a tampered
+    archive (e.g. stripped ``merkle-tree.json`` or a content-hash mismatch) is
+    rejected — it is NOT round-tripped through load→export, which would heal the
+    tampering before validation.
     """
     profiles = list(profile) if profile else None
-    assessment = validate(path, profiles=profiles)
+    bundle_path = Path(path)
+
+    with ExitStack() as stack:
+        if _is_archive(bundle_path):
+            # Resolve the archive to a RAW-extracted directory and validate that.
+            # Passing the extracted directory (not the archive path) to
+            # ``validate`` bypasses its archive branch's load→export round-trip,
+            # which heals tampering. See ``extract_archive_raw``.
+            target: str | Path = extract_archive_raw(bundle_path, stack)
+        else:
+            target = path
+
+        assessment = validate(target, profiles=profiles)
 
     if fmt == "json":
         click.echo(json.dumps(assessment.to_dict(), indent=2))
