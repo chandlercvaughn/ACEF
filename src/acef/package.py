@@ -403,17 +403,33 @@ def _v1_1_only_incident_report_fields() -> frozenset[str]:
     1.1.0 so the v1.1 schema set + incident validation resolve, exactly as the
     typed ``report_incident()`` builder does via ``_ensure_v1_1()``.
 
-    The trigger set is DERIVED from the schema-property diff (v1.1 declared
-    properties minus v1.0 declared properties) — the same drift-proof,
-    data-driven approach as :func:`_v1_1_only_record_types` — so a future v1.1
-    field added to the incident_report overlay is picked up automatically without
-    a hand-maintained literal. Currently this resolves to ``{'card_source'}``.
+    The trigger set is the UNION of two v1.1-only field sources:
+
+      1. the schema-property diff (v1.1 declared properties minus v1.0 declared
+         properties) — the drift-proof, data-driven member that resolves to
+         ``{'card_source'}`` today and auto-picks-up any future v1.1 overlay
+         property without a hand-maintained literal; and
+      2. the RULE-owned v1.1 incident fields (:data:`_RESERVED_DEDUPE_FIELDS` —
+         ``incident_dedupe_key`` / ``incident_dedupe_key_hmac``). These are §5.5
+         dedupe fields the offline incident rules (notably ACEF-086: a non-public
+         subject-bearing plaintext-dedupe leak and a malformed dedupe shape)
+         validate, but the v1.1 ``incident_report`` schema keeps
+         ``additionalProperties: true`` and does NOT declare them — so the
+         schema-property diff alone does NOT see them. Without this branch a
+         generic ``record('incident_report', {…incident_dedupe_key…})`` with no
+         ``card_source`` would stay at ``core_version 1.0.0``, where the incident
+         rules (gated on ``schema_version == 'v1.1'``) never run and ACEF-086 is
+         silently bypassed (roborev Medium on 6211995b). The constant is the SAME
+         field set the typed builders reject from the free-form extra blocks
+         (:func:`_reject_reserved_dedupe_fields`), so there is no second drifting
+         list.
+
     Memoized (``lru_cache(maxsize=1)``): the on-disk schemas are frozen for the
     process lifetime, so the diff is computed once.
     """
     v1_props = set(load_schema("incident_report", "v1").get("properties", {}).keys())
     v1_1_props = set(load_schema("incident_report", "v1.1").get("properties", {}).keys())
-    return frozenset(v1_1_props - v1_props)
+    return frozenset((v1_1_props - v1_props) | _RESERVED_DEDUPE_FIELDS)
 
 
 # Open-core v1.1 manifest-field (X5/X6) builder authoring constraints. These
@@ -1517,17 +1533,51 @@ class Package:
         # (roborev Medium on 103bd03b). So when the payload carries any v1.1-only
         # incident_report member, bump to 1.1.0 — exactly the same decision the
         # typed ``report_incident()`` builder makes via ``_ensure_v1_1()`` (it
-        # always emits ``card_source``, so it always gates). The trigger set is the
-        # SCHEMA-derived field diff (:func:`_v1_1_only_incident_report_fields`), not
-        # a parallel hand-rolled version check. A plain v1.0 incident_report WITHOUT
-        # any v1.1-only member is left at 1.0.0 (backward-compat: only v1.1 content
-        # triggers the bump — no over-gating).
+        # always emits ``card_source``, so it always gates). The trigger set
+        # (:func:`_v1_1_only_incident_report_fields`) is the UNION of the
+        # SCHEMA-derived field diff (``card_source``) AND the RULE-owned v1.1 dedupe
+        # fields (``incident_dedupe_key`` / ``incident_dedupe_key_hmac``): those are
+        # validated by the offline incident rules (ACEF-086) but the v1.1 schema
+        # keeps ``additionalProperties: true`` and does not declare them, so the
+        # schema diff alone would miss them — leaving a generic
+        # ``record('incident_report', {…incident_dedupe_key…})`` at 1.0.0 where the
+        # incident rules never run and ACEF-086 is silently bypassed (roborev Medium
+        # on 6211995b). It is NOT a parallel hand-rolled version check. A plain v1.0
+        # incident_report WITHOUT any v1.1-only member is left at 1.0.0
+        # (backward-compat: only v1.1 content triggers the bump — no over-gating).
         if (
             record_type == "incident_report"
             and isinstance(payload, dict)
             and not _v1_1_only_incident_report_fields().isdisjoint(payload)
         ):
             self._ensure_v1_1()
+
+        # CONFIDENTIALITY parity for SOURCE-BACKED incident_report (roborev High on
+        # 6211995b). A ``card_source``-bearing incident_report is the §5.7 Art.73
+        # regulator-filing record: it carries the PRIVATE ``eu_ai_act_facts`` block.
+        # The typed ``report_incident()`` builder defaults such reports to
+        # ``regulator-only`` (its signature default ``confidentiality:
+        # Confidentiality.REGULATOR_ONLY``). The generic ``record()`` signature
+        # defaults ``confidentiality`` to ``PUBLIC`` for every record type and cannot
+        # distinguish "caller omitted it" from "caller explicitly chose PUBLIC" — so a
+        # generic ``record('incident_report', {…card_source…})`` would otherwise
+        # export the confidential source-backed record under a PUBLIC label, leaking
+        # ``eu_ai_act_facts``. We MIRROR the typed builder's contract: when a
+        # source-backed incident_report arrives at PUBLIC, coerce it to the SAME
+        # non-public default the typed builder uses (``regulator-only``). This is
+        # default-coerce, NOT reject: a caller who deliberately chose a DIFFERENT
+        # non-public level (e.g. ``under-nda``) is honored unchanged (it is already
+        # non-public), and a plain v1.0 incident_report WITHOUT ``card_source`` keeps
+        # the caller's PUBLIC (the coercion is scoped to source-backed reports, so
+        # backward-compat public v1.0 incident_reports are untouched). ``card_source``
+        # is the §5.5 schema-diff member, so this scope matches the v1.1 gate above.
+        if (
+            record_type == "incident_report"
+            and isinstance(payload, dict)
+            and "card_source" in payload
+            and (confidentiality == Confidentiality.PUBLIC or confidentiality == Confidentiality.PUBLIC.value)
+        ):
+            confidentiality = Confidentiality.REGULATOR_ONLY
 
         # Resolve the schema-required envelope fields when callers omit
         # them, so SDK-produced records carry concrete values rather than

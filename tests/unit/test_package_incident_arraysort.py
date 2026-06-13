@@ -34,9 +34,11 @@ from collections.abc import Callable, Sequence
 from typing import Any
 
 from acef.integrity import canonicalize
-from acef.package import Package
+from acef.models.enums import Confidentiality
+from acef.package import Package, _v1_1_only_incident_report_fields
 from acef.redaction import RedactionPolicy
 from acef.schemas.registry import validate_record_payload
+from acef.validation.incident_rules import check_dedupe_key_confidentiality
 
 _HARM_CORE = {
     "realization": "harm_event",
@@ -443,6 +445,187 @@ class TestGenericRecordPathNormalizesIncidentArrays:
         payload = {"harm_distribution_basis": ["sex", "age", "race"]}
         env = pkg.record("event_log", payload=payload, obligation_role="provider")
         assert env.payload["harm_distribution_basis"] == ["sex", "age", "race"]
+
+
+class TestGenericSourceBackedReportConfidentiality:
+    """roborev High (8826e7f7 / 6211995b): a generic ``Package.record('incident_report',
+    {…card_source…})`` MUST NOT export the source-backed §5.7 regulator-filing record as
+    PUBLIC. The typed ``report_incident()`` builder defaults source-backed reports to
+    ``regulator-only`` (package.py: ``confidentiality: ... = Confidentiality.REGULATOR_ONLY``);
+    the generic path must MIRROR that — a ``card_source``-bearing report arriving at PUBLIC is
+    coerced to ``regulator-only`` so the confidential ``eu_ai_act_facts`` block is never
+    exported public.
+
+    RED before the fix: the generic path left confidentiality at the ``record()`` default
+    ``Confidentiality.PUBLIC``, so a confidential source-backed ``card_source`` exported PUBLIC.
+    """
+
+    def _build_pkg(self) -> Package:
+        return _new_pkg()
+
+    def test_generic_source_backed_report_is_not_public(self) -> None:
+        # RED pre-fix: env.confidentiality == Confidentiality.PUBLIC (value "public").
+        pkg = self._build_pkg()
+        env = pkg.record("incident_report", payload=_valid_report_payload(_identity))
+        assert env.confidentiality != Confidentiality.PUBLIC
+        assert env.confidentiality == Confidentiality.REGULATOR_ONLY
+
+    def test_generic_source_backed_report_matches_typed_default(self) -> None:
+        # Generic↔typed PARITY: both default a source-backed report to regulator-only.
+        generic = self._build_pkg().record("incident_report", payload=_valid_report_payload(_identity))
+        typed = self._build_pkg().report_incident(
+            public_incident_id=_PUBLIC_ID,
+            harm_core=dict(_HARM_CORE),
+            incident_type="operational_failure",
+            description="d",
+            awareness_date=_AWARENESS,
+            eu_ai_act_facts={
+                "serious_incident_triggers": ["3.49.a"],
+                "widespread": False,
+                "death_involved": False,
+            },
+        )
+        assert generic.confidentiality == typed.confidentiality == Confidentiality.REGULATOR_ONLY
+
+    def test_generic_source_backed_report_exported_confidentiality_is_non_public(self) -> None:
+        # BUNDLE-LEVEL coverage: the SERIALIZED envelope (the on-disk shape a validator /
+        # exporter reads) carries a non-public confidentiality for a source-backed report —
+        # the confidential card_source.eu_ai_act_facts is never persisted under a PUBLIC label.
+        pkg = self._build_pkg()
+        env = pkg.record("incident_report", payload=_valid_report_payload(_identity))
+        wire = env.to_jsonl_dict()
+        assert "card_source" in wire["payload"]
+        assert wire["confidentiality"] != Confidentiality.PUBLIC.value
+        assert wire["confidentiality"] == Confidentiality.REGULATOR_ONLY.value
+
+    def test_generic_caller_may_choose_a_different_non_public_level(self) -> None:
+        # An explicit non-public level the caller chose is HONORED (the coercion only
+        # rescues the PUBLIC default; it never overrides a caller's deliberate non-public
+        # choice). under-nda survives.
+        pkg = self._build_pkg()
+        env = pkg.record(
+            "incident_report",
+            payload=_valid_report_payload(_identity),
+            confidentiality=Confidentiality.UNDER_NDA,
+        )
+        assert env.confidentiality == Confidentiality.UNDER_NDA
+
+    def test_plain_v1_0_report_honors_caller_public(self) -> None:
+        # Backward-compat: a plain v1.0 incident_report (NO card_source) honors the caller's
+        # PUBLIC confidentiality unchanged — the coercion is scoped to source-backed reports.
+        pkg = Package(producer={"name": "test", "version": "1.0"})
+        env = pkg.record(
+            "incident_report",
+            payload={"incident_type": "operational_failure", "description": "d", "severity": "major"},
+            obligation_role="provider",
+        )
+        assert env.confidentiality == Confidentiality.PUBLIC
+        assert pkg._versioning.core_version == "1.0.0"
+
+
+class TestGenericReportDedupeKeyTriggersV11Rules:
+    """roborev Medium (8826e7f7 / 6211995b): the generic-report v1.1 trigger set was ONLY the
+    schema property diff (``{card_source}``), so rule-owned v1.1 fields
+    ``incident_dedupe_key`` / ``incident_dedupe_key_hmac`` did NOT bump a generic
+    ``incident_report`` to v1.1 — the incident rules (incl. ACEF-086: non-public plaintext
+    dedupe leak + malformed dedupe shape) run ONLY on v1.1, so they were SILENTLY skipped.
+
+    The fix extends the trigger to the UNION of (schema property diff) ∪ (rule-owned v1.1
+    fields ``incident_dedupe_key`` / ``incident_dedupe_key_hmac``).
+    """
+
+    def test_trigger_set_includes_rule_owned_dedupe_fields(self) -> None:
+        triggers = _v1_1_only_incident_report_fields()
+        assert "card_source" in triggers  # the schema-diff member is preserved
+        assert "incident_dedupe_key" in triggers
+        assert "incident_dedupe_key_hmac" in triggers
+
+    def test_generic_report_with_dedupe_key_routes_to_v1_1(self) -> None:
+        # RED pre-fix: a default (v1.0) Package recording an incident_report carrying a
+        # rule-owned incident_dedupe_key (but NO card_source) stayed at core_version 1.0.0,
+        # so run_incident_rules (gated on schema_version == "v1.1") NEVER ran → ACEF-086
+        # bypassed. (A RedactionPolicy is attached so the now-v1.1 non-public record can
+        # auto-populate X1/X2; the routing assertion is independent of it.)
+        pkg = _new_pkg()
+        assert pkg._versioning.core_version == "1.0.0"
+        pkg.record(
+            "incident_report",
+            payload={
+                "incident_type": "operational_failure",
+                "description": "d",
+                "severity": "major",
+                "incident_dedupe_key": "sha256:" + "a" * 64,
+            },
+            obligation_role="provider",
+            confidentiality=Confidentiality.REGULATOR_ONLY,
+        )
+        assert pkg._versioning.core_version == "1.1.0"
+
+    def test_generic_report_with_dedupe_hmac_routes_to_v1_1(self) -> None:
+        pkg = _new_pkg()
+        pkg.record(
+            "incident_report",
+            payload={
+                "incident_type": "operational_failure",
+                "description": "d",
+                "severity": "major",
+                "incident_dedupe_key_hmac": "hmac-sha256:" + "b" * 64,
+            },
+            obligation_role="provider",
+            confidentiality=Confidentiality.REGULATOR_ONLY,
+        )
+        assert pkg._versioning.core_version == "1.1.0"
+
+    def test_acef_086_fires_on_generic_non_public_plaintext_dedupe_leak(self) -> None:
+        # The §5.5 confidentiality MUST: a subject-bearing plaintext incident_dedupe_key on a
+        # NON-public record is an offline-enumerable leak → ACEF-086. Routed through the
+        # generic record() path (now v1.1), the emitted envelope reaches the incident rule.
+        pkg = _new_pkg()
+        env = pkg.record(
+            "incident_report",
+            payload={
+                "incident_type": "operational_failure",
+                "description": "d",
+                "severity": "major",
+                "incident_dedupe_key": "sha256:" + "a" * 64,
+            },
+            obligation_role="provider",
+            confidentiality=Confidentiality.REGULATOR_ONLY,
+        )
+        diags = check_dedupe_key_confidentiality([env.to_jsonl_dict()])
+        assert any(d.code == "ACEF-086" for d in diags), diags
+
+    def test_acef_086_fires_on_generic_malformed_dedupe_shape(self) -> None:
+        # The shape MUST: a malformed incident_dedupe_key value → ACEF-086. The generic path
+        # routes the record to v1.1 so the shape rule (which the v1.1 incident_report schema
+        # does NOT enforce — additionalProperties:true) actually runs.
+        pkg = Package(producer={"name": "test", "version": "1.0"})
+        env = pkg.record(
+            "incident_report",
+            payload={
+                "incident_type": "operational_failure",
+                "description": "d",
+                "severity": "major",
+                # Malformed: not the ^sha256:[0-9a-f]{64}$ shape. PUBLIC so the confidentiality
+                # rule does not also fire — isolates the SHAPE check.
+                "incident_dedupe_key": "not-a-valid-dedupe-key",
+            },
+            obligation_role="provider",
+        )
+        diags = check_dedupe_key_confidentiality([env.to_jsonl_dict()])
+        assert any(d.code == "ACEF-086" for d in diags), diags
+
+    def test_plain_v1_0_report_without_dedupe_stays_v1_0(self) -> None:
+        # Backward-compat (no over-gating): a plain v1.0 incident_report with NO v1.1 member
+        # (no card_source, no dedupe field) stays at core_version 1.0.0.
+        pkg = Package(producer={"name": "test", "version": "1.0"})
+        env = pkg.record(
+            "incident_report",
+            payload={"incident_type": "operational_failure", "description": "d", "severity": "major"},
+            obligation_role="provider",
+        )
+        assert pkg._versioning.core_version == "1.0.0"
+        assert validate_record_payload(dict(env.payload), "incident_report", "v1") == []
 
 
 class TestNotificationTimelineIsOrderSignificant:
