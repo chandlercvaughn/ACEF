@@ -103,6 +103,8 @@ def export_assessment(
     output_path: str,
     *,
     key_path: str | None = None,
+    signer: str = "",
+    kid: str | None = None,
 ) -> Path:
     """Export an Assessment Bundle to a JSON file.
 
@@ -110,6 +112,13 @@ def export_assessment(
         assessment: The AssessmentBundle to export.
         output_path: Path to the output .acef-assessment.json file.
         key_path: Optional path to private key for signing.
+        signer: Signer identity threaded into ``integrity.signature.signer``
+            when signing — a URN (e.g. ``urn:acef:act:...``) or X.509 subject,
+            per the spec §4 example. Ignored when ``key_path`` is None. Default
+            ``""`` (no fabricated identity).
+        kid: JWS key identifier threaded into the signature header when signing.
+            Default ``None`` derives a stable per-key identifier from the key
+            (RFC 7638 JWK thumbprint). Ignored when ``key_path`` is None.
 
     Returns:
         Path to the created file.
@@ -119,7 +128,7 @@ def export_assessment(
     if key_path:
         from acef.signing import sign_assessment
 
-        data = sign_assessment(data, key_path)
+        data = sign_assessment(data, key_path, signer=signer, kid=kid)
 
     canonical = canonicalize(data)
     output = Path(output_path)

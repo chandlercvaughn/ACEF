@@ -541,6 +541,42 @@ def _derive_jwk(private_key: PrivateKeyTypes) -> dict[str, str]:
         )
 
 
+def _jwk_thumbprint(private_key: PrivateKeyTypes) -> str:
+    """Compute the RFC 7638 JWK SHA-256 thumbprint of the public key.
+
+    Used as the DEFAULT ``kid`` when a caller does not supply one, so the key
+    identifier is DERIVED from the key (stable per-key, distinct across keys)
+    rather than a fixed literal that carries no rotation/identification value
+    (assessment-rollup-6 / signing-jws-6).
+
+    Per RFC 7638 §3 the thumbprint is the base64url(SHA-256(JSON)) of the JWK's
+    REQUIRED members ONLY, serialized with lexicographically-sorted keys and no
+    whitespace:
+
+    * RSA: ``{"e", "kty", "n"}``
+    * EC:  ``{"crv", "kty", "x", "y"}``
+
+    Reuses :func:`_derive_jwk` (already the canonical public-key JWK encoder) and
+    projects onto the required members so the digest matches any conformant RFC
+    7638 implementation.
+    """
+    jwk = _derive_jwk(private_key)
+    kty = jwk.get("kty", "")
+    if kty == "RSA":
+        required = {"e": jwk["e"], "kty": jwk["kty"], "n": jwk["n"]}
+    elif kty == "EC":
+        required = {"crv": jwk["crv"], "kty": jwk["kty"], "x": jwk["x"], "y": jwk["y"]}
+    else:  # pragma: no cover - _derive_jwk only emits RSA/EC or raises
+        raise ACEFSigningError(
+            f"Cannot compute JWK thumbprint for key type: {kty!r}",
+            code="ACEF-013",
+        )
+    canonical = json.dumps(required, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    digest = hashes.Hash(hashes.SHA256())
+    digest.update(canonical)
+    return _base64url_encode(digest.finalize())
+
+
 def _load_public_key_from_jwk(jwk: dict[str, Any]) -> PublicKeyTypes:
     """Load a public key from a JWK dictionary.
 
@@ -1091,6 +1127,9 @@ def sign_bundle(bundle_dir: Path, key_path: str, *, kid: str = "provider-key") -
 def sign_assessment(
     assessment_data: dict[str, Any],
     key_path: str,
+    *,
+    signer: str = "",
+    kid: str | None = None,
 ) -> dict[str, Any]:
     """Sign an Assessment Bundle.
 
@@ -1102,6 +1141,14 @@ def sign_assessment(
     Args:
         assessment_data: The Assessment Bundle dict.
         key_path: Path to the PEM private key file.
+        signer: Signer identity for ``integrity.signature.signer`` — a URN
+            (e.g. ``urn:acef:act:...``) or X.509 subject, matching the spec §4
+            Assessment Bundle example. Default ``""`` (schema-valid empty string;
+            no fabricated identity — the caller supplies the real one).
+        kid: JWS key identifier. Default ``None`` derives a stable per-key
+            identifier from the signing key (RFC 7638 JWK thumbprint) rather than
+            a fixed literal, so key rotation/identification is expressible
+            (assessment-rollup-6 / signing-jws-6).
 
     Returns:
         A new Assessment Bundle dict with populated integrity block.
@@ -1116,12 +1163,13 @@ def sign_assessment(
     canonical = canonicalize(assessment_data)
 
     private_key = _load_private_key(key_path)
-    jws = create_detached_jws(canonical, private_key, kid="assessor-key")
+    effective_kid = kid if kid is not None else _jwk_thumbprint(private_key)
+    jws = create_detached_jws(canonical, private_key, kid=effective_kid)
 
     assessment_data["integrity"] = {
         "signature": {
             "method": "jws",
-            "signer": "",
+            "signer": signer,
             "value": jws,
         }
     }

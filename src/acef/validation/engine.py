@@ -986,33 +986,78 @@ def _evaluate_profiles(
 
         # Synthesize SKIPPED results for not-yet-effective provisions so the
         # roll-up algorithm reports ``skipped`` for them (spec §3.7 step 3).
+        #
+        # The synthesis MUST mirror the package/per-subject split used for
+        # effective provisions (assessment-rollup-2): a not-yet-effective
+        # PER-SUBJECT provision in a multi-subject bundle must produce one SKIPPED
+        # summary PER SUBJECT, each carrying that subject's ``subject_scope`` —
+        # NOT a single package-scoped summary with empty ``subject_scope`` (which
+        # violates the §3.7 MUST that per-subject ``provision_summary`` entries
+        # identify their subject(s)). Package-scoped not-yet-effective provisions
+        # still produce one summary with empty ``subject_scope``.
         if not_yet_effective:
             from acef.models.assessment import RuleResult
             from acef.models.enums import RuleOutcome, RuleSeverity
 
-            for prov in provisions_to_evaluate:
-                if prov.provision_id not in not_yet_effective:
-                    continue
-                skipped_results: list[RuleResult] = []
-                for rule in prov.evaluation:
-                    skipped_results.append(
-                        RuleResult(
-                            rule_id=rule.rule_id,
-                            provision_id=prov.provision_id,
-                            profile_id=profile_id,
-                            rule_severity=RuleSeverity(rule.severity),
-                            outcome=RuleOutcome.SKIPPED,
-                            message=(
-                                f"Provision not yet effective "
-                                f"(effective_date={prov.effective_date}, "
-                                f"evaluation_instant={evaluation_instant})"
-                            ),
-                            evidence_refs=[],
-                            subject_scope=[],
-                        )
+            def _synthesize_skipped(prov: Any, scope: list[str]) -> list[RuleResult]:
+                """One SKIPPED RuleResult per rule for a not-yet-effective provision."""
+                return [
+                    RuleResult(
+                        rule_id=rule.rule_id,
+                        provision_id=prov.provision_id,
+                        profile_id=profile_id,
+                        rule_severity=RuleSeverity(rule.severity),
+                        outcome=RuleOutcome.SKIPPED,
+                        message=(
+                            f"Provision not yet effective "
+                            f"(effective_date={prov.effective_date}, "
+                            f"evaluation_instant={evaluation_instant})"
+                        ),
+                        evidence_refs=[],
+                        subject_scope=list(scope),
                     )
+                    for rule in prov.evaluation
+                ]
+
+            nye_provisions = [p for p in provisions_to_evaluate if p.provision_id in not_yet_effective]
+            nye_package = [p for p in nye_provisions if p.evaluation_scope == "package"]
+            nye_per_subject = [p for p in nye_provisions if p.evaluation_scope != "package"]
+
+            # Package-scoped not-yet-effective: one summary, empty subject_scope.
+            for prov in nye_package:
+                skipped_results = _synthesize_skipped(prov, [])
                 if skipped_results:
                     _collect_results(assessment, skipped_results, profile_id, records)
+
+            # Per-subject not-yet-effective: one summary PER applicable subject,
+            # each scoped to that subject (mirrors the effective per-subject
+            # split, honoring ``applicable_to`` so a non-applicable subject yields
+            # no summary — consistent with effective evaluation). With no subjects
+            # declared, evaluate at package level (empty scope), matching the
+            # ``elif per_subject`` effective fallback.
+            if nye_per_subject:
+                concrete_subjects = [s for s in subjects if isinstance(s, dict)]
+                if concrete_subjects:
+                    for subject in concrete_subjects:
+                        subject_id = subject.get("subject_id", "")
+                        risk_class = subject.get("risk_classification", "")
+                        for prov in nye_per_subject:
+                            if prov.applicable_to and risk_class and risk_class not in prov.applicable_to:
+                                continue
+                            skipped_results = _synthesize_skipped(prov, [subject_id])
+                            if skipped_results:
+                                _collect_results(
+                                    assessment,
+                                    skipped_results,
+                                    profile_id,
+                                    records,
+                                    subject_scope=[subject_id],
+                                )
+                else:
+                    for prov in nye_per_subject:
+                        skipped_results = _synthesize_skipped(prov, [])
+                        if skipped_results:
+                            _collect_results(assessment, skipped_results, profile_id, records)
 
         # Exclude not-yet-effective provisions from further evaluation.
         provisions_to_evaluate = [p for p in provisions_to_evaluate if p.provision_id not in not_yet_effective]

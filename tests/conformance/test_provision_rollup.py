@@ -175,6 +175,199 @@ class TestProvisionRollup:
         assert summary.provision_outcome == ProvisionOutcome.SATISFIED
 
 
+class TestNotYetEffectivePerSubjectScope:
+    """assessment-rollup-2: a not-yet-effective PER-SUBJECT provision in a
+    multi-subject bundle must emit one SKIPPED summary PER SUBJECT, each with the
+    correct subject_scope — not a single package-scoped SKIPPED summary with
+    empty subject_scope.
+
+    Spec §3.7 (normative): "provision_summary[] entries MUST include
+    subject_scope identifying which subject(s) the summary covers." A future
+    effective_date does not exempt a per-subject provision from per-subject
+    attribution.
+    """
+
+    def test_not_yet_effective_per_subject_emits_per_subject_summaries(self, tmp_dir: Path) -> None:
+        """A future-effective per-subject provision yields one SKIPPED summary
+        per subject, each scoped to exactly that subject."""
+        from acef.package import Package as Pkg
+        from acef.templates.models import EvaluationRule, Provision, Template
+        from acef.templates.registry import load_template
+        from acef.validation.engine import validate_bundle
+
+        tid = "conformance-not-yet-effective-per-subject"
+
+        template = Template(
+            template_id=tid,
+            template_name="Conformance Not-Yet-Effective Per-Subject Test",
+            version="1.0.0",
+            provisions=[
+                Provision(
+                    provision_id="future-prov-01",
+                    provision_name="Future Per-Subject Provision",
+                    # default (per-subject) evaluation_scope
+                    effective_date="2099-01-01",
+                    evaluation=[
+                        EvaluationRule(
+                            rule_id="future-prov-01-check",
+                            rule="has_record_type",
+                            params={"type": "risk_register", "min_count": 1},
+                            severity="fail",
+                            message="Need a risk register",
+                        ),
+                    ],
+                ),
+            ],
+        )
+
+        template_path = Path(__file__).parent.parent.parent / "src" / "acef" / "templates" / f"{tid}.json"
+        template_path.write_text(template.model_dump_json(indent=2), encoding="utf-8")
+
+        try:
+            load_template.cache_clear()
+
+            pkg = Pkg(producer={"name": "future-per-subject", "version": "1.0.0"})
+            sys1 = pkg.add_subject(
+                "ai_system",
+                name="System Alpha",
+                risk_classification="high-risk",
+                modalities=["text"],
+            )
+            sys2 = pkg.add_subject(
+                "ai_system",
+                name="System Beta",
+                risk_classification="high-risk",
+                modalities=["text"],
+            )
+            pkg.add_profile(tid, provisions=["future-prov-01"])
+            # A record so the bundle is non-empty; the provision is not yet in force.
+            pkg.record(
+                "risk_register",
+                provisions=["future-prov-01"],
+                payload={"description": "Risk Alpha", "likelihood": "low", "severity": "low"},
+                obligation_role="provider",
+                entity_refs={"subject_refs": [sys1.id]},
+            )
+
+            bundle_dir = tmp_dir / "not_yet_effective_per_subject"
+            pkg.export(str(bundle_dir))
+
+            # Evaluate BEFORE the future effective_date.
+            assessment = validate_bundle(
+                bundle_dir,
+                profiles=[tid],
+                evaluation_instant="2026-01-01T00:00:00Z",
+            )
+
+            future_summaries = [s for s in assessment.provision_summary if s.provision_id == "future-prov-01"]
+
+            # One SKIPPED summary per subject — not a single empty-scope summary.
+            assert len(future_summaries) == 2, (
+                f"Not-yet-effective per-subject provision must produce one summary per subject, "
+                f"got {len(future_summaries)}"
+            )
+            for s in future_summaries:
+                assert s.provision_outcome == ProvisionOutcome.SKIPPED, f"Expected SKIPPED, got {s.provision_outcome}"
+                assert len(s.subject_scope) == 1, (
+                    f"Each per-subject not-yet-effective summary must carry exactly one subject, "
+                    f"got subject_scope={s.subject_scope}"
+                )
+
+            scoped_subjects = {s.subject_scope[0] for s in future_summaries}
+            assert scoped_subjects == {sys1.id, sys2.id}, (
+                f"Per-subject not-yet-effective summaries must cover BOTH subjects with correct "
+                f"subject_scope; got {scoped_subjects}, expected {{{sys1.id}, {sys2.id}}}"
+            )
+        finally:
+            if template_path.exists():
+                template_path.unlink()
+            load_template.cache_clear()
+
+    def test_not_yet_effective_package_scoped_emits_single_summary(self, tmp_dir: Path) -> None:
+        """A future-effective PACKAGE-scoped provision still yields exactly ONE
+        summary with empty subject_scope (the package-scope branch is unchanged)."""
+        from acef.package import Package as Pkg
+        from acef.templates.models import EvaluationRule, Provision, Template
+        from acef.templates.registry import load_template
+        from acef.validation.engine import validate_bundle
+
+        tid = "conformance-not-yet-effective-package"
+
+        template = Template(
+            template_id=tid,
+            template_name="Conformance Not-Yet-Effective Package Test",
+            version="1.0.0",
+            provisions=[
+                Provision(
+                    provision_id="future-pkg-01",
+                    provision_name="Future Package Provision",
+                    evaluation_scope="package",
+                    effective_date="2099-01-01",
+                    evaluation=[
+                        EvaluationRule(
+                            rule_id="future-pkg-01-check",
+                            rule="has_record_type",
+                            params={"type": "governance_policy", "min_count": 1},
+                            severity="fail",
+                            message="Need a governance policy",
+                        ),
+                    ],
+                ),
+            ],
+        )
+
+        template_path = Path(__file__).parent.parent.parent / "src" / "acef" / "templates" / f"{tid}.json"
+        template_path.write_text(template.model_dump_json(indent=2), encoding="utf-8")
+
+        try:
+            load_template.cache_clear()
+
+            pkg = Pkg(producer={"name": "future-package", "version": "1.0.0"})
+            pkg.add_subject(
+                "ai_system",
+                name="System A",
+                risk_classification="high-risk",
+                modalities=["text"],
+            )
+            pkg.add_subject(
+                "ai_system",
+                name="System B",
+                risk_classification="high-risk",
+                modalities=["text"],
+            )
+            pkg.add_profile(tid, provisions=["future-pkg-01"])
+            pkg.record(
+                "governance_policy",
+                provisions=["future-pkg-01"],
+                payload={"policy_type": "quality_management", "description": "QMS"},
+                obligation_role="provider",
+            )
+
+            bundle_dir = tmp_dir / "not_yet_effective_package"
+            pkg.export(str(bundle_dir))
+
+            assessment = validate_bundle(
+                bundle_dir,
+                profiles=[tid],
+                evaluation_instant="2026-01-01T00:00:00Z",
+            )
+
+            future_summaries = [s for s in assessment.provision_summary if s.provision_id == "future-pkg-01"]
+            assert len(future_summaries) == 1, (
+                f"Not-yet-effective package-scoped provision must produce exactly 1 summary, "
+                f"got {len(future_summaries)}"
+            )
+            assert future_summaries[0].provision_outcome == ProvisionOutcome.SKIPPED
+            assert future_summaries[0].subject_scope == [], (
+                f"Package-scoped not-yet-effective summary must have empty subject_scope, "
+                f"got {future_summaries[0].subject_scope}"
+            )
+        finally:
+            if template_path.exists():
+                template_path.unlink()
+            load_template.cache_clear()
+
+
 class TestPackageScopedEvaluation:
     """Verifier M3: Package-scoped evaluation conformance test.
 

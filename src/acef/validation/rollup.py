@@ -6,8 +6,9 @@ Per spec Section 3.7:
 3. All rules skipped → SKIPPED
 4. Evidence gap exists, no fails failed → GAP_ACKNOWLEDGED
 5. All fails passed, some warnings failed → PARTIALLY_SATISFIED
-6. All rules passed (or all non-skipped rules passed) → SATISFIED
-7. No rules for provision → NOT_ASSESSED
+6. All non-skipped rules passed → SATISFIED (LITERAL: a failed info-severity
+   rule means NOT all passed, so it falls through to NOT_ASSESSED, never SATISFIED)
+7. No rules for provision (or a residual info-failed mix matching no step) → NOT_ASSESSED
 """
 
 from __future__ import annotations
@@ -59,6 +60,13 @@ def compute_provision_outcome(
     has_error = False
     all_skipped = True
     has_warning_failed = False
+    # Step 6 is LITERAL ("If ALL rules have outcome: passed -> satisfied"): track
+    # whether EVERY non-skipped result PASSED. An info-severity rule that FAILED
+    # increments neither fail_count nor warning_count and trips none of steps 1-5,
+    # but it means NOT all rules passed, so the provision MUST NOT roll up to
+    # SATISFIED (assessment-rollup-1). Skipped rules are not-applicable and do not
+    # block SATISFIED, so they are excluded from the all-passed tally.
+    all_non_skipped_passed = True
 
     for result in provision_results:
         all_evidence_refs.extend(result.evidence_refs)
@@ -67,6 +75,8 @@ def compute_provision_outcome(
             skipped_count += 1
         else:
             all_skipped = False
+            if result.outcome != RuleOutcome.PASSED:
+                all_non_skipped_passed = False
 
         if result.outcome == RuleOutcome.ERROR:
             has_error = True
@@ -121,12 +131,20 @@ def compute_provision_outcome(
     elif has_warning_failed:
         # Step 5: All fail-severity rules passed (step 1 didn't match), some warnings failed
         outcome = ProvisionOutcome.PARTIALLY_SATISFIED
-    elif not has_fail_severity_failed and not has_error and not has_warning_failed:
-        # Step 6: All evaluated rules passed (skipped rules are not-applicable,
-        # so a mix of passed + skipped with no failures/errors = satisfied)
+    elif all_non_skipped_passed:
+        # Step 6 (LITERAL): every non-skipped rule PASSED -> satisfied. Skipped
+        # rules are not-applicable, so a mix of passed + skipped with no
+        # failures/errors is satisfied. A FAILED info-severity rule clears
+        # ``all_non_skipped_passed`` here (it tripped none of steps 1-5), so it
+        # falls through to the documented NOT_ASSESSED fallback below rather than
+        # being reported as fully SATISFIED (assessment-rollup-1).
         outcome = ProvisionOutcome.SATISFIED
     else:
-        # Fallback: should not be reached given the above conditions are exhaustive
+        # Fallback: reached when a non-fail/non-warning rule (i.e. an info-severity
+        # rule) has outcome=failed and nothing in steps 1-5 matched. The spec §3.7
+        # precedence defines no info-driven slot, so a residual info-failed mix
+        # falls through to the documented NOT_ASSESSED outcome (step 7's outcome) —
+        # it is NOT SATISFIED because not all rules passed.
         outcome = ProvisionOutcome.NOT_ASSESSED
 
     # Deduplicate evidence refs
