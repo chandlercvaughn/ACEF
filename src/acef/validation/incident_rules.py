@@ -1477,16 +1477,37 @@ _INCIDENT_GRAPH_EDGES: frozenset[str] = frozenset(
 )
 
 
-def _public_incident_id_of(payload: dict[str, Any]) -> str | None:
-    """Return a record's ``public_incident_id`` — read from the public card payload
-    root OR, for a confidential ``incident_report``, from its ``card_source`` block
-    (§5.1). Returns ``None`` when neither path carries a non-empty string id."""
-    pid = payload.get("public_incident_id")
-    if isinstance(pid, str) and pid:
-        return pid
+# A relationship endpoint is a RECORD URN iff it matches the record_id grammar
+# (``urn:acef:rec:<uuid>``; record-envelope.schema.json:24). An entity URN
+# (``urn:acef:sub:/cmp:/dat:/act:``) — or any other URN — is NOT a record URN
+# and therefore an invalid public_projection_of endpoint (the projection links
+# two RECORDS, §5.1/§5.8).
+_REC_URN_SHAPE = re.compile(r"^urn:acef:rec:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+
+
+def _is_record_urn(ref: str) -> bool:
+    """True iff ``ref`` is a well-formed record URN (``urn:acef:rec:<uuid>``)."""
+    return bool(_REC_URN_SHAPE.match(ref))
+
+
+def _report_public_incident_id_of(payload: dict[str, Any]) -> str | None:
+    """The AUTHORITATIVE ``public_incident_id`` of a confidential ``incident_report``:
+    its ``card_source.public_incident_id`` (§5.7 — the report carries the shared id
+    under ``card_source``, the block from which the public card is projected).
+
+    A root-level ``public_incident_id`` on the report is NOT consulted: it must not
+    be allowed to mask a divergent ``card_source`` id in the projection shared-id
+    check. Returns ``None`` when ``card_source`` carries no non-empty string id."""
     cs = _as_dict(payload.get("card_source"))
-    pid2 = cs.get("public_incident_id")
-    return pid2 if isinstance(pid2, str) and pid2 else None
+    pid = cs.get("public_incident_id")
+    return pid if isinstance(pid, str) and pid else None
+
+
+def _card_public_incident_id_of(payload: dict[str, Any]) -> str | None:
+    """The ``public_incident_id`` of a public ``incident_card``: its payload-ROOT
+    ``public_incident_id`` (§5.1). Returns ``None`` when absent or non-string."""
+    pid = payload.get("public_incident_id")
+    return pid if isinstance(pid, str) and pid else None
 
 
 def check_incident_edges(
@@ -1500,23 +1521,30 @@ def check_incident_edges(
     ``public_projection_of`` edge is semantically well-formed. Per §5.1/§5.8 the
     card is the deterministic public projection of the report, and the two are
     linked by a typed ``public_projection_of`` relationship whose direction is
-    **report→card** and which shares a single ``public_incident_id``. This rule
-    enforces, for every ``public_projection_of`` edge in
-    ``manifest.entities.relationships[]`` whose BOTH endpoints resolve to in-bundle
-    records:
+    **report→card** and which shares a single ``public_incident_id``. A projection
+    edge links two RECORDS; an entity URN endpoint (or any non-record URN) is a
+    malformed projection. This rule enforces, for every ``public_projection_of``
+    edge in ``manifest.entities.relationships[]``:
 
+    - BOTH endpoints are RECORD URNs (``urn:acef:rec:<uuid>``) — an entity URN
+      endpoint (``urn:acef:sub:`` / ``cmp:`` / ``dat:`` / ``act:``), or any other
+      non-record URN, raises ACEF-083 (a projection edge between a record and an
+      entity is malformed; it is NOT silently skipped just because the entity URN
+      is absent from the record index);
+    - each record-URN endpoint that is well-formed but DANGLING (not present in the
+      bundle) is left to the reference checker's ACEF-020 (NOT double-reported);
     - the SOURCE record is an ``incident_report``;
     - the TARGET record is an ``incident_card``;
-    - both records carry the SAME ``public_incident_id`` (the report's id is read
-      from its ``card_source`` block, the card's from its public payload root).
+    - both records carry the SAME ``public_incident_id``, extracted BY RECORD TYPE:
+      the report's AUTHORITATIVE id is its ``card_source.public_incident_id`` (§5.7;
+      a root-level id on the report is NOT consulted, so it cannot mask a divergent
+      ``card_source`` id), the card's is its public payload-ROOT
+      ``public_incident_id``.
 
     Any violation raises ACEF-083 (id-trust/integrity band — the edge asserts the
     card is the projection of the report under a shared id; a wrong-type, reversed,
-    or mismatched-id edge is a public_incident_id-linkage integrity failure). An
-    endpoint that does NOT resolve to an in-bundle record (e.g. a dangling URN, or
-    an entity URN) is left to the reference checker's ACEF-020 dangling-ref /
-    schema endpoint grammar — this rule only judges edges whose endpoints both
-    resolve to records, so it never double-reports a dangling endpoint.
+    mismatched-id, or non-record-endpoint edge is a public_incident_id-linkage
+    integrity failure).
 
     The other four §5.8 incident edges (``caused_by`` / ``harms`` / ``mitigated_by``
     / ``transferable_to``) are general in-bundle record-graph edges; §5.8 does not
@@ -1545,40 +1573,68 @@ def check_incident_edges(
         target_ref = rel.get("target_ref")
         if not isinstance(source_ref, str) or not isinstance(target_ref, str):
             continue
-        source_rec = records_by_urn.get(source_ref)
-        target_rec = records_by_urn.get(target_ref)
-        # Only judge edges whose BOTH endpoints resolve to in-bundle records; a
-        # non-resolving (dangling / entity-URN) endpoint is the reference
-        # checker's concern (ACEF-020 / schema grammar), not this rule's.
-        if source_rec is None or target_rec is None:
-            continue
-
-        src_type = _record_type_of(source_rec)
-        tgt_type = _record_type_of(target_rec)
-        src_pid = _public_incident_id_of(_payload_of(source_rec))
-        tgt_pid = _public_incident_id_of(_payload_of(target_rec))
 
         problems: list[str] = []
-        if src_type != "incident_report":
+
+        # Endpoint grammar (Finding 1): a public_projection_of edge MUST link two
+        # RECORD URNs. An entity URN endpoint (urn:acef:sub:/cmp:/dat:/act:) — or any
+        # other non-record URN — is a malformed projection (record↔entity) → ACEF-083;
+        # it is NOT silently skipped just because the entity URN is absent from the
+        # record index. A WELL-FORMED but dangling record URN, however, is the
+        # reference checker's ACEF-020 concern, so it is left to that checker (no
+        # double-report) and the endpoint contributes no problem here.
+        source_rec: dict[str, Any] | None = None
+        target_rec: dict[str, Any] | None = None
+        for ref, label in ((source_ref, "source"), (target_ref, "target")):
+            resolved: dict[str, Any] | None = records_by_urn.get(ref)
+            if resolved is not None:
+                if label == "source":
+                    source_rec = resolved
+                else:
+                    target_rec = resolved
+                continue
+            if _is_record_urn(ref):
+                # Well-formed record URN with no in-bundle record: dangling →
+                # ACEF-020 (reference checker), not ACEF-083. No problem added.
+                continue
+            problems.append(
+                f"{label} endpoint {ref!r} is not a record URN (urn:acef:rec:<uuid>) — a "
+                f"public_projection_of edge MUST link two in-bundle records, not an entity "
+                f"(or other non-record) URN"
+            )
+
+        # Record-type + shared-id checks only for endpoints that resolved to an
+        # in-bundle record. The report's AUTHORITATIVE id is its
+        # card_source.public_incident_id (§5.7); the card's is its payload-root id
+        # (Finding 2 — by-record-type extraction, so a root-level id on the report
+        # cannot mask a divergent card_source id).
+        src_type = _record_type_of(source_rec) if source_rec is not None else None
+        tgt_type = _record_type_of(target_rec) if target_rec is not None else None
+        src_pid = _report_public_incident_id_of(_payload_of(source_rec)) if source_rec is not None else None
+        tgt_pid = _card_public_incident_id_of(_payload_of(target_rec)) if target_rec is not None else None
+
+        if source_rec is not None and src_type != "incident_report":
             problems.append(
                 f"source record {source_ref!r} is record_type {src_type!r}, not 'incident_report' "
                 f"(the projection's SOURCE must be the private report)"
             )
-        if tgt_type != "incident_card":
+        if target_rec is not None and tgt_type != "incident_card":
             problems.append(
                 f"target record {target_ref!r} is record_type {tgt_type!r}, not 'incident_card' "
                 f"(the projection's TARGET must be the public card)"
             )
-        # Shared-id check only when both ids are present; a missing id on either
-        # side is reported as its own problem so the diagnostic is actionable.
-        if src_pid is None:
-            problems.append(f"source record {source_ref!r} carries no public_incident_id")
-        if tgt_pid is None:
+        # Shared-id check only when both endpoints resolved to records and both ids
+        # are present; a missing id on a resolved endpoint is reported as its own
+        # problem so the diagnostic is actionable.
+        if source_rec is not None and src_pid is None:
+            problems.append(f"source record {source_ref!r} carries no card_source.public_incident_id")
+        if target_rec is not None and tgt_pid is None:
             problems.append(f"target record {target_ref!r} carries no public_incident_id")
         if src_pid is not None and tgt_pid is not None and src_pid != tgt_pid:
             problems.append(
-                f"the report's public_incident_id ({src_pid!r}) and the card's ({tgt_pid!r}) differ — "
-                f"a public_projection_of edge MUST link a report and card sharing ONE public_incident_id"
+                f"the report's card_source.public_incident_id ({src_pid!r}) and the card's "
+                f"public_incident_id ({tgt_pid!r}) differ — a public_projection_of edge MUST "
+                f"link a report and card sharing ONE public_incident_id"
             )
 
         if problems:

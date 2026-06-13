@@ -598,3 +598,152 @@ class TestPublicProjectionOfSemantics:
             _proj_records(src_type="incident_card", tgt_type="incident_report"),
         )
         assert "ACEF-083" in codes, "public_projection_of direction must be report→card"
+
+
+# --------------------------------------------------------------------------- #
+# Finding 1 (roborev): entity-endpoint projection edges must NOT be skipped.   #
+# A public_projection_of edge MUST link two RECORD URNs (urn:acef:rec:...). An #
+# endpoint that is an entity URN (urn:acef:sub:/cmp:/dat:/act:) — or any non-  #
+# record URN — is a malformed projection edge → ACEF-083 (NOT silently         #
+# skipped because the endpoint is absent from records_by_urn). Only a          #
+# well-formed but DANGLING record URN is left to the reference checker's        #
+# ACEF-020 (no double-report).                                                 #
+# --------------------------------------------------------------------------- #
+
+
+# An EXISTING subject entity URN (declared in the manifest, so the reference
+# checker resolves it and never raises ACEF-020 for it).
+_PROJ_SUB = "urn:acef:sub:00000000-0000-0000-0000-0000000000d1"
+# A well-formed record URN that resolves to NO in-bundle record (dangling).
+_PROJ_DANGLING_REC = "urn:acef:rec:00000000-0000-0000-0000-0000000000d2"
+
+
+def _proj_manifest_with(
+    *,
+    source_ref: str,
+    target_ref: str,
+    subjects: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    rel = {
+        "source_ref": source_ref,
+        "target_ref": target_ref,
+        "relationship_type": "public_projection_of",
+    }
+    return _manifest_with_relationship(rel, subjects=subjects)
+
+
+class TestPublicProjectionOfRequiresRecordUrnEndpoints:
+    def test_source_entity_urn_endpoint_fails(self) -> None:
+        # RED (Finding 1): source is an EXISTING subject entity URN. The endpoint
+        # is not a record URN, so the projection edge (record↔entity) is malformed
+        # → ACEF-083. Previously this edge was SILENTLY SKIPPED (source absent from
+        # records_by_urn) and the reference checker never raised ACEF-020 for an
+        # existing entity, so it passed with NO diagnostic.
+        manifest = _proj_manifest_with(
+            source_ref=_PROJ_SUB,
+            target_ref=_CARD,
+            subjects=[{"subject_id": _PROJ_SUB}],
+        )
+        # Only the card record exists in-bundle; the source is an entity URN.
+        records = [
+            {"record_id": _CARD, "record_type": "incident_card", "payload": {"public_incident_id": _PID}},
+        ]
+        codes = _edge_codes(manifest, records)
+        assert "ACEF-083" in codes, (
+            "a public_projection_of source that is an entity URN (not urn:acef:rec:) "
+            "must raise ACEF-083, not be silently skipped"
+        )
+
+    def test_target_entity_urn_endpoint_fails(self) -> None:
+        # RED (Finding 1): target is an EXISTING subject entity URN → ACEF-083.
+        manifest = _proj_manifest_with(
+            source_ref=_RPT,
+            target_ref=_PROJ_SUB,
+            subjects=[{"subject_id": _PROJ_SUB}],
+        )
+        records = [
+            {
+                "record_id": _RPT,
+                "record_type": "incident_report",
+                "payload": {"card_source": {"public_incident_id": _PID}},
+            },
+        ]
+        codes = _edge_codes(manifest, records)
+        assert "ACEF-083" in codes, (
+            "a public_projection_of target that is an entity URN (not urn:acef:rec:) "
+            "must raise ACEF-083, not be silently skipped"
+        )
+
+    def test_dangling_record_urn_endpoint_not_double_reported(self) -> None:
+        # A WELL-FORMED record URN that resolves to no in-bundle record is the
+        # reference checker's ACEF-020 concern; the projection-edge semantic rule
+        # must NOT also raise ACEF-083 for it (no double-report).
+        manifest = _proj_manifest_with(source_ref=_RPT, target_ref=_PROJ_DANGLING_REC)
+        records = [
+            {
+                "record_id": _RPT,
+                "record_type": "incident_report",
+                "payload": {"card_source": {"public_incident_id": _PID}},
+            },
+        ]
+        codes = _edge_codes(manifest, records)
+        assert "ACEF-083" not in codes, (
+            "a dangling but well-formed record URN endpoint is the reference checker's "
+            "ACEF-020 concern; the projection rule must not double-report it as ACEF-083"
+        )
+
+
+# --------------------------------------------------------------------------- #
+# Finding 2 (roborev): by-record-type public_incident_id extraction.          #
+# The SOURCE incident_report's AUTHORITATIVE id is its card_source.            #
+# public_incident_id (§5.7); the TARGET incident_card's id is its ROOT         #
+# public_incident_id. A root-level public_incident_id on the report MUST NOT   #
+# mask a DIVERGENT card_source.public_incident_id.                             #
+# --------------------------------------------------------------------------- #
+
+
+class TestPublicProjectionOfByRecordTypeIdExtraction:
+    def test_report_root_id_matching_card_but_divergent_card_source_fails(self) -> None:
+        # RED (Finding 2): the report carries a ROOT public_incident_id that MATCHES
+        # the card, but its authoritative card_source.public_incident_id DIFFERS.
+        # Previously _public_incident_id_of read the root id FIRST, so the root id
+        # masked the divergent card_source id and the shared-id check PASSED.
+        report = {
+            "record_id": _RPT,
+            "record_type": "incident_report",
+            "payload": {
+                # Root id matches the card …
+                "public_incident_id": _PID,
+                # … but the AUTHORITATIVE card_source id diverges.
+                "card_source": {"public_incident_id": _PID_OTHER},
+            },
+        }
+        card = {
+            "record_id": _CARD,
+            "record_type": "incident_card",
+            "payload": {"public_incident_id": _PID},
+        }
+        codes = _edge_codes(_proj_manifest(), [report, card])
+        assert "ACEF-083" in codes, (
+            "the report's authoritative card_source.public_incident_id (not a root-level "
+            "id) must be compared against the card's id; a divergent card_source id must fail"
+        )
+
+    def test_report_card_source_id_matching_card_passes(self) -> None:
+        # The report's card_source id matches the card's root id → passes, even if a
+        # (consistent) root id is also present on the report.
+        report = {
+            "record_id": _RPT,
+            "record_type": "incident_report",
+            "payload": {
+                "public_incident_id": _PID,
+                "card_source": {"public_incident_id": _PID},
+            },
+        }
+        card = {
+            "record_id": _CARD,
+            "record_type": "incident_card",
+            "payload": {"public_incident_id": _PID},
+        }
+        codes = _edge_codes(_proj_manifest(), [report, card])
+        assert "ACEF-083" not in codes, "a report whose card_source id matches the card's root id is a valid projection"

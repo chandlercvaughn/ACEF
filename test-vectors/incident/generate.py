@@ -776,6 +776,67 @@ def _vector_specs() -> list[dict[str, Any]]:
         }
     )
 
+    # F7 (roborev F-M8-EDGES Finding 2): ACEF-083 — public_projection_of edge whose
+    # report carries a ROOT public_incident_id that MATCHES the card, but whose
+    # AUTHORITATIVE card_source.public_incident_id DIFFERS. The shared-id check
+    # extracts the report's id BY RECORD TYPE from card_source.public_incident_id
+    # (§5.7), so the matching root-level id MUST NOT mask the divergent card_source
+    # id → ACEF-083. Both record-URN endpoints resolve, so ACEF-020 is forbidden.
+    specs.append(
+        {
+            "name": "fail-projection-edge-root-id-bypass-083",
+            "conformance_class": "offline-deterministic",
+            "disposition": "fail",
+            "confidentiality": _CONFIDENTIAL,
+            "profiles": [],
+            "record_type": "incident_report",
+            "title": "public_projection_of report root-id masks divergent card_source id (ACEF-083)",
+            "body": (
+                "A non-public incident_report (source) and a public incident_card (target) "
+                "linked report→card by a typed `public_projection_of` edge. The report carries "
+                "a ROOT `public_incident_id` that MATCHES the card, but its AUTHORITATIVE "
+                "`card_source.public_incident_id` DIFFERS (both individually pattern-valid). "
+                "The §5.7 shared-id check extracts the report's id from `card_source` BY RECORD "
+                "TYPE, so the matching root id MUST NOT mask the divergent card_source id → "
+                "ACEF-083. Both record-URN endpoints resolve, so no ACEF-020 is raised."
+            ),
+            "payload": {
+                "incident_type": "operational_failure",
+                "severity": "major",
+                "description": "Confidential source report with a root-id-masked divergent card_source id.",
+                # A root-level public_incident_id that MATCHES the card's id …
+                "public_incident_id": _VALID_ID,
+                "card_source": {
+                    # … but the AUTHORITATIVE card_source id DIVERGES.
+                    "public_incident_id": _VALID_ID_OTHER,
+                    "id_grade": "self-asserted",
+                    "id_state": "RESERVED",
+                    "harm_core": dict(_VALID_HARM_CORE),
+                    "publishability_map": {"/root_cause_analysis": "regulator-only"},
+                    "eu_ai_act_facts": {
+                        "edition": "reg-2024-1689",
+                        "serious_incident_triggers": ["3.49.a"],
+                        "widespread": False,
+                        "death_involved": False,
+                    },
+                },
+                "root_cause_analysis": "Privileged analysis withheld from the public projection.",
+            },
+            "second_record": {
+                "record_type": "incident_card",
+                "confidentiality": "public",
+                "payload": {
+                    "public_incident_id": _VALID_ID,
+                    "id_grade": "self-asserted",
+                    "harm_core": dict(_VALID_HARM_CORE),
+                },
+            },
+            "projection_edge": True,
+            "expect_codes": ["ACEF-083"],
+            "forbid_codes": ["ACEF-020"],
+        }
+    )
+
     # === FAIL — source-backed ===
 
     # F6: ACEF-084 — Art.73 compound (death + critical-infra) with a WRONG deadline.

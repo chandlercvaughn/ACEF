@@ -1512,11 +1512,61 @@ class TestCheckIncidentEdges:
         assert ir.check_incident_edges({}, _well_formed_projection_records()) == []
         assert ir.check_incident_edges({"entities": {}}, _well_formed_projection_records()) == []
 
-    def test_report_pid_on_root_also_resolves(self) -> None:
-        # A report that carries public_incident_id at the payload root (not only on
-        # card_source) is accepted by _public_incident_id_of.
+    def test_report_pid_only_on_root_does_not_resolve_083(self) -> None:
+        # Finding 2 (roborev): the report's AUTHORITATIVE public_incident_id is its
+        # card_source.public_incident_id (§5.7). A report carrying the id ONLY at the
+        # payload root (no card_source id) does NOT supply the authoritative id, so
+        # the projection's shared-id check sees a missing card_source id → ACEF-083.
         records = [
-            _edge_record(_EDGE_RPT, "incident_report", pid=_EDGE_PID),
+            _edge_record(_EDGE_RPT, "incident_report", pid=_EDGE_PID),  # root id only
             _edge_record(_EDGE_CARD, "incident_card", pid=_EDGE_PID),
         ]
-        assert ir.check_incident_edges(_edge_manifest(), records) == []
+        diags = ir.check_incident_edges(_edge_manifest(), records)
+        assert "ACEF-083" in _codes(diags)
+        assert "card_source.public_incident_id" in next(d for d in diags if d.code == "ACEF-083").message
+
+    def test_report_root_id_does_not_mask_divergent_card_source_083(self) -> None:
+        # Finding 2 (roborev): a root-level public_incident_id on the report that
+        # MATCHES the card MUST NOT mask a DIVERGENT card_source.public_incident_id.
+        # The by-record-type extraction reads the report id from card_source only.
+        report = {
+            "record_id": _EDGE_RPT,
+            "record_type": "incident_report",
+            "payload": {
+                "public_incident_id": _EDGE_PID,  # root matches the card …
+                "card_source": {"public_incident_id": _EDGE_PID_OTHER},  # … but card_source diverges
+            },
+        }
+        records = [report, _edge_record(_EDGE_CARD, "incident_card", pid=_EDGE_PID)]
+        diags = ir.check_incident_edges(_edge_manifest(), records)
+        assert "ACEF-083" in _codes(diags)
+        assert "card_source.public_incident_id" in next(d for d in diags if d.code == "ACEF-083").message
+
+    def test_source_entity_urn_endpoint_fails_083(self) -> None:
+        # Finding 1 (roborev): a public_projection_of source that is an ENTITY URN
+        # (not urn:acef:rec:) is a malformed record↔entity projection → ACEF-083,
+        # NOT silently skipped because the entity URN is absent from the record index.
+        sub_urn = "urn:acef:sub:00000000-0000-0000-0000-0000000000e1"
+        records = [_edge_record(_EDGE_CARD, "incident_card", pid=_EDGE_PID)]
+        diags = ir.check_incident_edges(_edge_manifest(source_ref=sub_urn, target_ref=_EDGE_CARD), records)
+        assert "ACEF-083" in _codes(diags)
+        assert "not a record URN" in next(d for d in diags if d.code == "ACEF-083").message
+
+    def test_target_entity_urn_endpoint_fails_083(self) -> None:
+        # Finding 1 (roborev): an ENTITY URN target → ACEF-083.
+        sub_urn = "urn:acef:sub:00000000-0000-0000-0000-0000000000e1"
+        records = [_edge_record(_EDGE_RPT, "incident_report", pid=_EDGE_PID, pid_on_card_source=True)]
+        diags = ir.check_incident_edges(_edge_manifest(source_ref=_EDGE_RPT, target_ref=sub_urn), records)
+        assert "ACEF-083" in _codes(diags)
+        assert "not a record URN" in next(d for d in diags if d.code == "ACEF-083").message
+
+    def test_dangling_record_urn_endpoint_not_double_reported(self) -> None:
+        # Finding 1 (roborev): a WELL-FORMED but dangling record URN endpoint is the
+        # reference checker's ACEF-020 concern — this rule must NOT raise ACEF-083.
+        dangling = "urn:acef:rec:00000000-0000-0000-0000-0000000000ff"
+        records = [_edge_record(_EDGE_RPT, "incident_report", pid=_EDGE_PID, pid_on_card_source=True)]
+        diags = ir.check_incident_edges(_edge_manifest(source_ref=_EDGE_RPT, target_ref=dangling), records)
+        assert _codes(diags) == [], (
+            "a dangling record URN endpoint must be left to the reference checker (ACEF-020), "
+            f"not double-reported as ACEF-083, got {_codes(diags)}"
+        )
