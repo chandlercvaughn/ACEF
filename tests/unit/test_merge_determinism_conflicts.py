@@ -753,6 +753,173 @@ class TestKeepAllRelocationExportable:
 
 
 # ---------------------------------------------------------------------------
+# VAL-FIX-LOADER (roborev MEDIUM) — the FIRST (BASE) relocation target was
+# returned WITHOUT the USTAR-domain guard, and its prefix
+# (artifacts/_merged/<36-char-uuid>/ ~ 55 bytes) was budget-hostile: even a
+# realistic ~45-byte leaf pushed the BASE relpath to >= 100 bytes BEFORE the
+# hash-disambiguation branch was ever reached, so a single conflicting
+# attachment of a normal name produced an UNEXPORTABLE merged package.
+#
+# Post-fix: (1) the package-disambiguator segment is a SHORT deterministic token
+# (a prefix of the owning package_id hash, shape-disjoint from the content-hash
+# h<token>) so realistic single-conflict merges stay exportable, and (2) EVERY
+# returned relocation path (BASE and hash-disambiguated) passes
+# _assert_relocation_within_ustar_domain so a genuinely pathological leaf fails
+# closed with ACEFMergeError(ACEF-052) rather than silently producing an
+# unexportable bundle.
+# ---------------------------------------------------------------------------
+
+
+class TestKeepAllBaseTargetBudget:
+    @staticmethod
+    def _record_att_paths(pkg) -> dict[str, list[str]]:
+        out: dict[str, list[str]] = {}
+        for rec in pkg.records:
+            key = rec.payload.get("k", rec.record_id)
+            out[key] = [att.path for att in rec.attachments]
+        return out
+
+    @staticmethod
+    def _base_relocated_paths(pkg) -> list[str]:
+        """Relocated keys that took the BASE branch (no inserted h<token>).
+
+        With a single-leaf remainder a BASE target is
+        ``artifacts/_merged/<pkg-token>/<leaf>`` (4 slashes); the
+        hash-disambiguated branch inserts an extra ``h<content-token>/`` segment
+        before the leaf (``artifacts/_merged/<pkg-token>/h<token>/<leaf>``,
+        5 slashes). So a relocated key whose remainder-after-the-pkg-token has no
+        leading ``h<token>`` segment is a BASE target.
+        """
+        prefix = "artifacts/_merged/"
+        out: list[str] = []
+        for k in pkg.attachments:
+            if not k.startswith(prefix):
+                continue
+            tail = k[len(prefix) :]  # "<pkg-token>/<remainder...>"
+            if "/" not in tail:
+                continue
+            remainder = tail.split("/", 1)[1]
+            first_seg = remainder.split("/", 1)[0]
+            # Hash-disambiguated => first remainder segment is "h<hex-token>".
+            if not (first_seg.startswith("h") and "/" in remainder):
+                out.append(k)
+        return out
+
+    @staticmethod
+    def _build_single_conflict_inputs(leaf: str) -> list[Package]:
+        """TWO inputs with DIFFERENT bytes at the same ``artifacts/<leaf>`` path.
+
+        Exactly one conflict, so the SECOND input relocates to the BASE target
+        (no hash-disambiguation branch). ``leaf`` is a realistic, normal-length
+        attachment basename.
+        """
+        p1 = _make_package(
+            "A", attachment=(leaf, b"BYTES-1"), timestamp="2026-01-01T00:00:00Z", record_refs_attachment=True
+        )
+        p2 = _make_package(
+            "B", attachment=(leaf, b"BYTES-2"), timestamp="2026-01-02T00:00:00Z", record_refs_attachment=True
+        )
+        return [p1, p2]
+
+    def test_normal_leaf_base_relocation_member_within_ustar_domain(self) -> None:
+        """A NORMAL ~45-byte leaf that relocates to the BASE target must keep the
+        FULL member name (<bundle_name>/<relpath>) under the 100-byte USTAR limit
+        for a realistic bundle name. Pre-fix the 55-byte
+        artifacts/_merged/<36-char-uuid>/ prefix + a 45-byte leaf made the
+        relpath ALONE >= 100 bytes."""
+        from acef.export import _USTAR_NAME_MAX_BYTES
+        from acef.merge import merge_packages
+
+        # 45-byte leaf (a realistic eval-report-style attachment name).
+        leaf = "model-eval-report-v3-final-2026q1-signed.pdf"
+        assert len(leaf.encode("utf-8")) == 44
+        result = merge_packages(self._build_single_conflict_inputs(leaf), conflict_strategy="keep_all")
+        base = self._base_relocated_paths(result.package)
+        assert base, "expected a BASE-target relocation (no hash-disambiguation branch)"
+        bundle_name = "merged-bundle"
+        for relpath in base:
+            full = f"{bundle_name}/{relpath}"
+            byte_len = len(full.encode("utf-8"))
+            assert byte_len < _USTAR_NAME_MAX_BYTES, (
+                f"BASE relocated member {full!r} is {byte_len} UTF-8 bytes, >= USTAR limit {_USTAR_NAME_MAX_BYTES}"
+            )
+
+    def test_normal_leaf_merged_package_exports_and_roundtrips(self, tmp_path) -> None:
+        """RED: a single normal-leaf conflict relocates to the BASE target whose
+        member name exceeds USTAR -> Package.export() raises ACEF-052 (the merged
+        package is UNEXPORTABLE). GREEN: the shorter prefix fits, the package
+        exports, loads, and every record ref resolves to its OWN bytes."""
+        import acef
+        from acef.merge import merge_packages
+
+        leaf = "model-eval-report-v3-final-2026q1-signed.pdf"
+        result = merge_packages(self._build_single_conflict_inputs(leaf), conflict_strategy="keep_all")
+        assert self._base_relocated_paths(result.package), "test must exercise the BASE-target branch"
+
+        bundle_dir = tmp_path / "merged-bundle"
+        # Pre-fix this raises ACEFExportError (ACEF-052, >= 100-byte member name).
+        result.package.export(str(bundle_dir))
+
+        reloaded = acef.load(str(bundle_dir))
+        att = reloaded.attachments
+        values = list(att.values())
+        assert values.count(b"BYTES-1") == 1
+        assert values.count(b"BYTES-2") == 1
+        record_refs = self._record_att_paths(reloaded)
+        att_keys = set(att.keys())
+        for paths in record_refs.values():
+            for p in paths:
+                assert p in att_keys, f"record ref {p!r} does not resolve after round-trip"
+        assert att[record_refs["A"][0]] == b"BYTES-1"
+        assert att[record_refs["B"][0]] == b"BYTES-2"
+
+    def test_base_target_relocation_is_deterministic(self, tmp_path) -> None:
+        """Two merges of the same single-conflict inputs derive identical BASE
+        relocation targets + byte-identical export (no random/wall-clock)."""
+        import copy
+
+        from acef.merge import merge_packages
+
+        leaf = "model-eval-report-v3-final-2026q1-signed.pdf"
+        inputs_a = self._build_single_conflict_inputs(leaf)
+        inputs_b = copy.deepcopy(inputs_a)
+
+        r1 = merge_packages(inputs_a, conflict_strategy="keep_all")
+        r2 = merge_packages(inputs_b, conflict_strategy="keep_all")
+        assert r1.package.attachments == r2.package.attachments
+        assert self._record_att_paths(r1.package) == self._record_att_paths(r2.package)
+
+        # Byte-identical export to the same basename in separate dirs.
+        d1 = tmp_path / "run1"
+        d2 = tmp_path / "run2"
+        d1.mkdir()
+        d2.mkdir()
+        a1 = d1 / "merged.acef.tar.gz"
+        a2 = d2 / "merged.acef.tar.gz"
+        r1.package.export(str(a1))
+        r2.package.export(str(a2))
+        assert a1.read_bytes() == a2.read_bytes()
+
+    def test_pathological_base_leaf_fails_closed_not_unexportable(self) -> None:
+        """A BASE relocation (target FREE) whose relpath ALONE reaches the
+        100-byte USTAR limit is surfaced as a structured ACEFMergeError
+        (ACEF-052) at merge time. Pre-fix the FREE-target branch returned the
+        base target WITHOUT the USTAR guard -> a silently unexportable bundle."""
+        from acef.errors import ACEFMergeError
+        from acef.merge import _resolve_collision_free_target
+
+        # A leaf long enough that the BASE relpath alone (short prefix + leaf)
+        # reaches >= 100 UTF-8 bytes. The base target is FREE (empty occupancy),
+        # so the FIRST returned path is exercised, not the disambiguation loop.
+        long_leaf = "x" * 95 + ".pdf"
+        base = f"artifacts/_merged/p0badf00d/{long_leaf}"
+        assert len(base.encode("utf-8")) >= 100
+        with pytest.raises(ACEFMergeError) as exc:
+            _resolve_collision_free_target(base, b"NEW", {})
+        assert exc.value.code == "ACEF-052"
+
+
+# ---------------------------------------------------------------------------
 # VAL-FIX-LOADER-009 — profile provisions union + template_version conflict
 # ---------------------------------------------------------------------------
 

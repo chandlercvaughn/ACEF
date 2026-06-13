@@ -441,9 +441,11 @@ def merge_packages(
                 # else: keep the existing (newer) attachment.
             elif conflict_strategy == "keep_all":
                 # Relocate the incoming attachment under a deterministic,
-                # package-scoped subpath so both byte streams survive. The
-                # owning package's UUID keeps the relocated path schema-valid
-                # (forward slashes, relative, NFC, no '..').
+                # package-scoped subpath so both byte streams survive. A SHORT
+                # deterministic package-disambiguator token (a prefix of the
+                # owning package_id hash) keeps the relocated path schema-valid
+                # (forward slashes, relative, NFC, no '..') AND inside the
+                # exporter's USTAR member-name budget for realistic leaves.
                 base_target = _relocate_attachment_path(att_path, pkg_id)
                 # The base target is NOT guaranteed unique: an input package may
                 # already hold a real artifact there (e.g. a re-merge of a prior
@@ -540,20 +542,49 @@ def _rewrite_record_attachment_refs(record: RecordEnvelope, path_map: dict[str, 
     return rewritten
 
 
+# Length (hex chars) of the package-disambiguator token in a keep_all relocation
+# path. The PRE-FIX scheme embedded the FULL 36-char package UUID, so the prefix
+# ``artifacts/_merged/<36-char-uuid>/`` alone was 55 UTF-8 bytes — leaving room
+# for only a ~44-byte leaf before the RELPATH ALONE reached the 100-byte USTAR
+# member-name domain (unexportable under ANY bundle name), and that was BEFORE
+# the ``<bundle_name>/`` prefix or the hash-disambiguation segment. An 8-hex
+# (32-bit) prefix of the owning package_id's sha256 is a deterministic,
+# pure-function-of-the-id token that shrinks the prefix to
+# ``artifacts/_merged/p<8-hex>/`` = 28 bytes, restoring a realistic leaf budget.
+# It is ``p``-prefixed so the package-disambiguator segment stays DISJOINT IN
+# SHAPE from the ``h<token>`` content-hash disambiguator inserted by
+# :func:`_disambiguated_target` — the two can never be confused. An 8-hex prefix
+# collision between two DISTINCT package_ids (1-in-2^32) does not break
+# correctness: the downstream content-hash collision loop in
+# :func:`_resolve_collision_free_target` still yields a collision-free FINAL
+# target (identical bytes collapse; different bytes get an ``h<token>`` segment).
+_PKG_DISAMBIGUATION_TOKEN_LEN = 8
+
+
 def _relocate_attachment_path(att_path: str, pkg_id: str) -> str:
     """Build a deterministic, package-scoped relocation path for keep_all.
 
-    Inserts the owning package's UUID under an ``artifacts/_merged/<uuid>/``
-    prefix so a same-path/different-bytes attachment from a second package keeps
-    a distinct, schema-valid path (forward slashes, relative, NFC, no ``..``).
+    Inserts a SHORT, deterministic package-disambiguator token under an
+    ``artifacts/_merged/p<token>/`` prefix so a same-path/different-bytes
+    attachment from a second package keeps a distinct, schema-valid path
+    (forward slashes, relative, NFC, no ``..``). The token is an
+    ``_PKG_DISAMBIGUATION_TOKEN_LEN``-hex prefix of ``sha256(pkg_id)`` — a pure
+    function of the owning package_id, so two merges of the same inputs derive
+    identical targets (determinism) and two inputs sharing a package_id derive
+    the SAME prefix (their per-content collision is then resolved downstream).
+
+    The token replaces the PRE-FIX 36-char package UUID, shrinking the relocation
+    prefix from 55 to 28 UTF-8 bytes so a realistic attachment leaf fits inside
+    the exporter's 100-byte USTAR member-name domain (the pre-fix prefix made
+    even a normal ~45-byte leaf unexportable). The ``p`` prefix keeps the segment
+    disjoint in shape from the ``h<token>`` content-hash disambiguator.
     """
-    # pkg_id is 'urn:acef:pkg:<uuid>'; fall back to the full id if unparseable.
-    uuid_segment = pkg_id.rsplit(":", 1)[-1] if ":" in pkg_id else pkg_id
+    token = sha256_hex(pkg_id.encode("utf-8"))[:_PKG_DISAMBIGUATION_TOKEN_LEN]
     if att_path.startswith("artifacts/"):
         remainder = att_path[len("artifacts/") :]
     else:
         remainder = att_path
-    return f"artifacts/_merged/{uuid_segment}/{remainder}"
+    return f"artifacts/_merged/p{token}/{remainder}"
 
 
 # Initial length (hex chars) of the content-sha256 disambiguation token. Eight
@@ -571,13 +602,14 @@ def _disambiguated_target(base_target: str, digest: str, token_len: int) -> str:
     Splits ``base_target`` into ``<head>/<leaf>`` and inserts an ``h``-prefixed
     prefix of the content sha256 hex (``token_len`` hex chars) as a path segment
     before the leaf:
-    ``artifacts/_merged/<uuid>/h<token>/<leaf>``. ``digest`` is a pure function
-    of the bytes, so identical bytes at the same ``token_len`` always derive the
-    SAME path (idempotent) while different bytes derive distinct paths. The
-    inserted segment is lowercase hex (``h`` + hex) — schema-valid (forward
-    slashes, relative, NFC, no '..'). The ``h`` prefix keeps the token a
-    non-numeric, non-empty path segment and disjoint from the 36-char UUID
-    segment shape, so a token can never be confused with the package-id segment.
+    ``artifacts/_merged/p<pkg-token>/h<token>/<leaf>``. ``digest`` is a pure
+    function of the bytes, so identical bytes at the same ``token_len`` always
+    derive the SAME path (idempotent) while different bytes derive distinct
+    paths. The inserted segment is lowercase hex (``h`` + hex) — schema-valid
+    (forward slashes, relative, NFC, no '..'). The ``h`` prefix keeps the token a
+    non-numeric, non-empty path segment and disjoint from the ``p``-prefixed
+    package-disambiguator segment shape, so a content token can never be confused
+    with the package-id token.
 
     Unlike the pre-fix scheme (which inserted the FULL 64-char digest and so
     produced a 128-char relpath that exceeds the USTAR member-name budget BEFORE
@@ -612,7 +644,9 @@ def _resolve_collision_free_target(
     the same inputs produce identical targets):
 
     * ``base_target`` free, or already holding IDENTICAL bytes  -> use it
-      (idempotent: identical bytes collapse to one artifact).
+      (idempotent: identical bytes collapse to one artifact), AFTER clearing the
+      USTAR-domain guard (a pathologically long ORIGINAL leaf can push even the
+      short-prefix base relpath over the limit).
     * otherwise -> a content-hash-disambiguated path
       (``.../h<token>/<leaf>``) using a SHORT prefix of the content sha256
       (``_DISAMBIGUATION_TOKEN_INITIAL_LEN`` hex chars). Identical bytes always
@@ -623,14 +657,19 @@ def _resolve_collision_free_target(
       so it stays deterministic — up to the full 64-char digest, guaranteeing a
       collision-free target for ANY input.
 
-    Budget (cross-feature with F-M3-TAR-USTAR): the relocated relpath is kept
-    short (an 8-char token vs the pre-fix 64-char digest) so the FULL member name
-    ``<bundle_name>/<relpath>`` stays within the exporter's 100-byte USTAR domain
-    for realistic bundle names — the pre-fix branch produced UNEXPORTABLE merged
-    packages. If a pathologically long original leaf makes even the RELPATH alone
-    reach the USTAR limit (``>= 100`` UTF-8 bytes — unexportable under ANY bundle
-    name), surface a structured ``ACEFMergeError`` (``ACEF-052``, consistent with
-    the exporter) rather than returning an unexportable target.
+    Budget (cross-feature with F-M3-TAR-USTAR): the relocation PREFIX is kept
+    short — a ``p``-prefixed 8-hex package-disambiguator token (28-byte prefix)
+    in place of the pre-fix 36-char package UUID (55-byte prefix), plus an 8-char
+    content token in place of the pre-fix 64-char digest on the disambiguation
+    branch — so the FULL member name ``<bundle_name>/<relpath>`` stays within the
+    exporter's 100-byte USTAR domain for realistic leaves and bundle names. The
+    pre-fix prefix made even a normal ~45-byte leaf UNEXPORTABLE. EVERY returned
+    relocation path (base AND hash-disambiguated) clears
+    :func:`_assert_relocation_within_ustar_domain`, so a pathologically long
+    original leaf whose RELPATH alone reaches the USTAR limit (``>= 100`` UTF-8
+    bytes — unexportable under ANY bundle name) surfaces a structured
+    ``ACEFMergeError`` (``ACEF-052``, consistent with the exporter) rather than
+    silently returning a target that makes the merged package unexportable.
 
     Returns the final target path; the caller stores ``content`` there and maps
     the original ref to this path so record refs resolve to the correct bytes.
@@ -638,6 +677,12 @@ def _resolve_collision_free_target(
     existing = merged_attachments.get(base_target)
     if existing is None or existing[0] == content:
         # Free target, or identical bytes already there (idempotent reuse).
+        # Guard the BASE target too: a pathologically long ORIGINAL leaf can make
+        # even the short-prefix base relpath reach the USTAR limit (unexportable
+        # under ANY bundle name). Fail closed here rather than returning a target
+        # that silently produces an unexportable merged bundle — EVERY returned
+        # relocation path (base AND hash-disambiguated) clears the same guard.
+        _assert_relocation_within_ustar_domain(base_target)
         return base_target
 
     # Different bytes occupy base_target: derive a short content-hash token.
