@@ -2841,23 +2841,39 @@ class Package:
         requires the X1/X2 redaction envelope fields (``redaction_policy_version`` +
         ``redaction_attestation_ref``) the cross-record validator enforces
         (ACEF-074). To keep the documented ONE-call path self-contained
-        (VAL-DX-001 / VAL-FIX-INCBUILD-002), the X1/X2 fields are auto-populated
-        from, in priority order: (1) an explicit ``redaction_policy_version`` kwarg;
-        (2) an explicit ``redaction_policy`` kwarg; (3) a RedactionPolicy already
-        attached to the Package; (4) a sensible builder-supplied DEFAULT
-        RedactionPolicy. So a first-time ``Package(...).report_incident(...)`` with
-        NO pre-attached policy now emits a valid, signable bundle rather than raising
-        — without weakening ``record()``'s X1 enforcement for other callers.
+        (VAL-DX-001 / VAL-FIX-INCBUILD-002), an EFFECTIVE RedactionPolicy is resolved
+        in priority order — (1) an explicit ``redaction_policy`` kwarg; (2) a
+        RedactionPolicy already attached to the Package; (3) a sensible
+        builder-supplied DEFAULT — and used to mint X2 (the ``event_log``
+        attestation) and supply X1. So a first-time
+        ``Package(...).report_incident(...)`` with NO pre-attached policy now emits a
+        valid, signable bundle rather than raising — without weakening ``record()``'s
+        X1 enforcement for other callers. The effective policy is applied CALL-LOCALLY
+        (the original attached policy is restored afterwards, even on exception; no
+        per-call override leaks into package state — roborev Medium 2). An explicit
+        ``redaction_policy_version`` is written verbatim to X1; it MUST agree with the
+        effective policy's version when one already exists (mismatch -> ``ValueError``
+        naming both versions) and otherwise the builder default's version is derived
+        from it, so X1 (record) and X2 (attestation) never silently diverge (roborev
+        Medium 1).
 
         Args:
             redaction_policy: an optional :class:`~acef.redaction.RedactionPolicy`
-                used to auto-populate X1/X2 on the non-public record when the Package
-                has none attached. Mint a Core ``event_log`` redaction attestation
-                (X2) and supply the policy version (X1).
+                used to auto-populate X1/X2 on the non-public record. It mints a Core
+                ``event_log`` redaction attestation (X2) and supplies the policy
+                version (X1). This kwarg is CALL-LOCAL: it does NOT overwrite a policy
+                attached to the Package — the original attached policy is restored
+                after this call so later ``record()`` / ``report_incident()`` calls on
+                the same Package are unaffected.
             redaction_policy_version: an optional explicit X1 value. When supplied it
-                is written verbatim to the record's ``redaction_policy_version`` (the
-                caller then owns supplying X2 / pre-redaction, exactly as on
-                ``record()``).
+                is written verbatim to the record's ``redaction_policy_version``. To
+                keep X1 (record) and X2 (the auto-minted attestation) consistent, it
+                MUST match the effective policy's ``version`` when one already exists
+                (explicit ``redaction_policy`` kwarg or an attached package policy) —
+                a mismatch raises ``ValueError`` naming both versions. When no
+                effective policy exists, the builder-supplied default policy's version
+                is derived from this value so the attestation's ``policy_version``
+                equals X1.
 
         Note:
             ``awareness_date`` (and the derived Art.73 ``deadline``) is stored at
@@ -2990,23 +3006,63 @@ class Package:
         # is EFFECTIVELY non-public (``resolved_confidentiality`` above), so record()
         # requires the X1/X2 redaction envelope fields. record() auto-populates X1
         # (redaction_policy_version) and X2 (a minted event_log attestation) from the
-        # Package's attached RedactionPolicy — but a first-time caller has none. So,
-        # for the non-public path, ensure a policy is attached so record() can mint
+        # package's attached RedactionPolicy — but a first-time caller has none. So,
+        # for the non-public path, resolve an EFFECTIVE policy so record() can mint
         # X2 (and supply X1 when no explicit version is given): the headline
         # "one call -> valid signable bundle" must hold WITHOUT the caller pre-wiring
         # a policy. Priority for the policy object: explicit ``redaction_policy``
-        # kwarg > already-attached package policy > a sensible builder DEFAULT. An
-        # explicit ``redaction_policy_version`` still wins for X1 (threaded to record()
-        # below); the attached policy is what mints X2. We never CLOBBER an
-        # already-attached policy (the pre-existing contract).
+        # kwarg > already-attached package policy > a sensible builder DEFAULT.
+        #
+        # The effective policy is applied CALL-LOCALLY: it is swapped into
+        # ``self._redaction_policy`` only for the duration of the wrapped
+        # ``record()`` call and the ORIGINAL is restored in ``finally`` (roborev
+        # Medium 2). A per-call ``redaction_policy`` override therefore never
+        # leaks into package state and a later ``record()`` / ``report_incident()``
+        # on the same package keeps using the originally-attached policy.
+        #
+        # X1/X2 MUST agree (roborev Medium 1): when an explicit
+        # ``redaction_policy_version`` is supplied it is written verbatim to X1 on
+        # the record, while X2 (the auto-minted attestation) takes its policy
+        # version from the effective policy's ``.version``. To guarantee they never
+        # silently diverge:
+        #   - if an effective policy ALREADY exists (explicit ``redaction_policy``
+        #     kwarg or an already-attached package policy) and the explicit
+        #     ``redaction_policy_version`` differs from its ``.version`` -> fail
+        #     closed with a ValueError naming BOTH versions; and
+        #   - if we are falling back to the builder DEFAULT (no effective policy),
+        #     derive the default's version FROM the explicit version so the minted
+        #     attestation's ``policy_version`` equals X1.
+        original_redaction_policy = self._redaction_policy
+        effective_policy = original_redaction_policy
         if resolved_confidentiality != Confidentiality.PUBLIC:
-            if redaction_policy is not None:
-                self._redaction_policy = redaction_policy
-            elif self._redaction_policy is None:
-                from acef.redaction import RedactionPolicy
+            from acef.redaction import RedactionPolicy
 
-                self._redaction_policy = RedactionPolicy(
-                    version="1.0.0",
+            # The explicit ``redaction_policy`` kwarg (call-local) takes priority
+            # over any already-attached package policy.
+            if redaction_policy is not None:
+                effective_policy = redaction_policy
+
+            # Reject a silent X1/X2 divergence: an explicit version that disagrees
+            # with the effective policy already in hand is fail-closed.
+            if effective_policy is not None and redaction_policy_version is not None:
+                effective_version = getattr(effective_policy, "version", None)
+                if effective_version is not None and effective_version != redaction_policy_version:
+                    raise ValueError(
+                        "Package.report_incident: explicit "
+                        f"redaction_policy_version={redaction_policy_version!r} disagrees with the "
+                        f"effective redaction policy version {effective_version!r}. The record's X1 "
+                        "(redaction_policy_version) and the auto-minted X2 attestation's policy_version "
+                        "must match. Pass a redaction_policy_version equal to the policy's version, "
+                        "supply a redaction_policy whose version matches, or omit redaction_policy_version "
+                        "to use the policy's version for both."
+                    )
+
+            if effective_policy is None:
+                # No effective policy: self-supply a builder DEFAULT. Derive its
+                # version from an explicit redaction_policy_version (if any) so the
+                # minted X2 attestation's policy_version equals X1.
+                effective_policy = RedactionPolicy(
+                    version=redaction_policy_version if redaction_policy_version is not None else "1.0.0",
                     description=(
                         "Default regulator-only incident-report redaction policy "
                         "auto-attached by Package.report_incident (VAL-FIX-INCBUILD-002) "
@@ -3014,16 +3070,22 @@ class Package:
                     ),
                 )
 
-        return self.record(
-            record_type="incident_report",
-            payload=payload,
-            entity_refs=entity_refs,
-            confidentiality=confidentiality,
-            obligation_role=obligation_role,
-            redaction_policy_version=redaction_policy_version,
-            timestamp=timestamp,
-            record_id=record_id,
-        )
+        # Apply the effective policy CALL-LOCALLY and restore the original
+        # afterwards (even on exception) — no permanent package-state mutation.
+        self._redaction_policy = effective_policy
+        try:
+            return self.record(
+                record_type="incident_report",
+                payload=payload,
+                entity_refs=entity_refs,
+                confidentiality=confidentiality,
+                obligation_role=obligation_role,
+                redaction_policy_version=redaction_policy_version,
+                timestamp=timestamp,
+                record_id=record_id,
+            )
+        finally:
+            self._redaction_policy = original_redaction_policy
 
     def incident_card(
         self,

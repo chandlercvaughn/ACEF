@@ -44,6 +44,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 
 from acef.integrity import canonicalize, sha256_hex
+from acef.models.records import RecordEnvelope
 from acef.models.urns import URNType
 from acef.package import Package
 from acef.redaction import RedactionPolicy
@@ -180,7 +181,7 @@ class TestRegulatorOnlyOneCallIsSelfContained:
     def test_bare_no_policy_report_incident_validates_clean_end_to_end(self, tmp_path: Path) -> None:
         """The bare no-policy regulator-only one-call path produces a bundle that
         validates clean (no ACEF-074 for a missing redaction policy version)."""
-        key_path, key = _write_ec_key(tmp_path)
+        key_path, _ = _write_ec_key(tmp_path)
         pkg = _pkg_no_policy_deterministic()
         pkg.add_subject("ai_system", name="Sys", risk_classification="high-risk", modalities=["text"])
         pkg.report_incident(
@@ -204,7 +205,9 @@ class TestRegulatorOnlyOneCallIsSelfContained:
     def test_explicit_redaction_policy_version_kwarg_is_honored(self) -> None:
         """The caller can supply ``redaction_policy_version`` explicitly on the
         regulator-only path; the supplied value is written to X1 verbatim while X2 is
-        still auto-minted (the builder self-supplies a policy for the attestation)."""
+        still auto-minted. On the bare no-policy path the builder DERIVES the
+        self-supplied default policy's version from the explicit value, so X2's
+        ``policy_version`` equals X1 (roborev Medium 1 consistency)."""
         pkg = _pkg_no_policy()
         env = pkg.report_incident(
             public_incident_id=_PUBLIC_ID,
@@ -216,8 +219,10 @@ class TestRegulatorOnlyOneCallIsSelfContained:
             redaction_policy_version="9.9.9",
         )
         assert env.redaction_policy_version == "9.9.9"
-        # X2 was minted even though the caller only supplied X1 explicitly.
+        # X2 was minted even though the caller only supplied X1 explicitly,
+        # and it carries the SAME version as X1.
         assert isinstance(env.redaction_attestation_ref, str) and env.redaction_attestation_ref
+        assert _attestation_policy_version(pkg, env) == "9.9.9"
 
     def test_explicit_redaction_policy_kwarg_is_honored(self) -> None:
         """A caller-supplied ``redaction_policy`` is used for X1/X2 auto-population
@@ -266,6 +271,202 @@ class TestRegulatorOnlyOneCallIsSelfContained:
             confidentiality=Confidentiality.PUBLIC,
         )
         assert env.record_type == "incident_report"
+
+
+def _attestation_policy_version(pkg: Package, env: RecordEnvelope) -> str:
+    """Return the ``policy_version`` recorded on the minted X2 event_log
+    attestation whose ``record_id`` is X2 on ``env``."""
+    ref = env.redaction_attestation_ref
+    assert isinstance(ref, str) and ref, "expected an X2 attestation ref on the record"
+    attestations = [r for r in pkg.records if r.record_id == ref]
+    assert len(attestations) == 1, f"expected exactly one X2 attestation for {ref}, got {len(attestations)}"
+    policy_version = attestations[0].payload["policy_version"]
+    assert isinstance(policy_version, str)
+    return policy_version
+
+
+# ===========================================================================
+# roborev Medium 1 — X1 (record) and X2 (attestation) policy versions MUST agree
+# when an explicit ``redaction_policy_version`` is supplied.
+# ===========================================================================
+
+
+class TestExplicitVersionX1X2Consistency:
+    def test_explicit_version_with_no_policy_derives_consistent_attestation(self) -> None:
+        """On the bare no-policy path an explicit ``redaction_policy_version`` is
+        threaded into BOTH X1 (record) and X2 (the auto-minted attestation): the
+        default policy the builder self-supplies is derived FROM the explicit
+        version, so the record-claimed version and the attestation policy version
+        agree. (Before the fix X1=='9.9.9' while the attestation defaulted to
+        '1.0.0' — a silent divergence.)"""
+        pkg = _pkg_no_policy()
+        env = pkg.report_incident(
+            public_incident_id=_PUBLIC_ID,
+            harm_core=dict(_HARM_CORE),
+            incident_type="operational_failure",
+            description="x",
+            awareness_date=_AWARENESS,
+            eu_ai_act_facts={"serious_incident_triggers": ["3.49.a"], "widespread": False, "death_involved": True},
+            redaction_policy_version="9.9.9",
+        )
+        assert env.redaction_policy_version == "9.9.9"
+        # X2 (attestation) policy version MUST equal X1 (record) — no divergence.
+        assert _attestation_policy_version(pkg, env) == "9.9.9"
+
+    def test_explicit_version_matching_attached_policy_is_consistent(self) -> None:
+        """When the explicit ``redaction_policy_version`` equals the attached
+        policy's version both X1 and X2 carry that version (no rejection — they
+        agree)."""
+        pkg = _pkg_with_policy()  # version 1.0.0
+        env = pkg.report_incident(
+            public_incident_id=_PUBLIC_ID,
+            harm_core=dict(_HARM_CORE),
+            incident_type="operational_failure",
+            description="x",
+            awareness_date=_AWARENESS,
+            eu_ai_act_facts={"serious_incident_triggers": ["3.49.a"], "widespread": False, "death_involved": True},
+            redaction_policy_version="1.0.0",
+        )
+        assert env.redaction_policy_version == "1.0.0"
+        assert _attestation_policy_version(pkg, env) == "1.0.0"
+
+    def test_explicit_version_diverging_from_attached_policy_is_rejected(self) -> None:
+        """When the package already has an effective policy (attached version
+        1.0.0) and the caller supplies a DIFFERENT explicit
+        ``redaction_policy_version``, the builder fails closed with a clear
+        ValueError naming BOTH versions — rather than silently shipping a bundle
+        whose record X1 and attestation X2 disagree."""
+        pkg = _pkg_with_policy()  # version 1.0.0
+        with pytest.raises(ValueError) as exc:
+            pkg.report_incident(
+                public_incident_id=_PUBLIC_ID,
+                harm_core=dict(_HARM_CORE),
+                incident_type="operational_failure",
+                description="x",
+                awareness_date=_AWARENESS,
+                eu_ai_act_facts={"serious_incident_triggers": ["3.49.a"], "widespread": False, "death_involved": True},
+                redaction_policy_version="9.9.9",
+            )
+        msg = str(exc.value)
+        assert "9.9.9" in msg
+        assert "1.0.0" in msg
+
+    def test_explicit_version_diverging_from_explicit_policy_is_rejected(self) -> None:
+        """Same fail-closed guard when BOTH an explicit ``redaction_policy`` and a
+        diverging explicit ``redaction_policy_version`` are supplied in one call."""
+        pkg = _pkg_no_policy()
+        with pytest.raises(ValueError) as exc:
+            pkg.report_incident(
+                public_incident_id=_PUBLIC_ID,
+                harm_core=dict(_HARM_CORE),
+                incident_type="operational_failure",
+                description="x",
+                awareness_date=_AWARENESS,
+                eu_ai_act_facts={"serious_incident_triggers": ["3.49.a"], "widespread": False, "death_involved": True},
+                redaction_policy=RedactionPolicy(version="2.3.4"),
+                redaction_policy_version="9.9.9",
+            )
+        msg = str(exc.value)
+        assert "9.9.9" in msg
+        assert "2.3.4" in msg
+
+
+# ===========================================================================
+# roborev Medium 2 — a per-call ``redaction_policy`` override is CALL-LOCAL and
+# MUST NOT leak into package state for later record()/report_incident() calls.
+# ===========================================================================
+
+
+class TestPerCallRedactionPolicyIsCallLocal:
+    def test_per_call_policy_does_not_leak_into_later_records(self) -> None:
+        """On a package WITH an attached policy P (1.0.0), a per-call
+        ``redaction_policy=Q`` (5.6.7) applies to THAT call only; a later
+        report_incident WITHOUT an override uses P again, not Q. Before the fix Q
+        permanently overwrote ``self._redaction_policy`` and leaked into the
+        second record."""
+        pkg = _pkg_with_policy()  # attached P, version 1.0.0
+        env1 = pkg.report_incident(
+            public_incident_id=_PUBLIC_ID,
+            harm_core=dict(_HARM_CORE),
+            incident_type="operational_failure",
+            description="first (override Q)",
+            awareness_date=_AWARENESS,
+            eu_ai_act_facts={"serious_incident_triggers": ["3.49.a"], "widespread": False, "death_involved": True},
+            redaction_policy=RedactionPolicy(version="5.6.7"),
+        )
+        # The override DID apply to the first call.
+        assert env1.redaction_policy_version == "5.6.7"
+        assert _attestation_policy_version(pkg, env1) == "5.6.7"
+
+        # A second record WITHOUT an override must see the ORIGINAL attached P.
+        env2 = pkg.report_incident(
+            public_incident_id=_PUBLIC_ID,
+            harm_core=dict(_HARM_CORE),
+            incident_type="operational_failure",
+            description="second (no override -> P)",
+            awareness_date=_AWARENESS,
+            eu_ai_act_facts={"serious_incident_triggers": ["3.49.a"], "widespread": False, "death_involved": True},
+        )
+        assert env2.redaction_policy_version == "1.0.0", "Q leaked into the second record (package state mutated)"
+        assert _attestation_policy_version(pkg, env2) == "1.0.0"
+
+    def test_attached_policy_object_is_unchanged_after_per_call_override(self) -> None:
+        """The package's attached RedactionPolicy object identity/version is the
+        same before and after a per-call override (no in-place mutation)."""
+        pkg = _pkg_with_policy()
+        before = pkg._redaction_policy
+        pkg.report_incident(
+            public_incident_id=_PUBLIC_ID,
+            harm_core=dict(_HARM_CORE),
+            incident_type="operational_failure",
+            description="x",
+            awareness_date=_AWARENESS,
+            eu_ai_act_facts={"serious_incident_triggers": ["3.49.a"], "widespread": False, "death_involved": True},
+            redaction_policy=RedactionPolicy(version="5.6.7"),
+        )
+        after = pkg._redaction_policy
+        assert after is before
+        assert after is not None and after.version == "1.0.0"
+
+    def test_per_call_policy_restored_even_on_exception(self) -> None:
+        """If ``record()`` raises mid-call, the per-call override is still restored
+        — the package keeps its original attached policy (try/finally)."""
+        pkg = _pkg_with_policy()  # attached P, 1.0.0
+        before = pkg._redaction_policy
+        # Diverging explicit version + an explicit policy raises (Medium 1 guard)
+        # AFTER the call-local swap would have happened; the finally must restore P.
+        with pytest.raises(ValueError):
+            pkg.report_incident(
+                public_incident_id=_PUBLIC_ID,
+                harm_core=dict(_HARM_CORE),
+                incident_type="operational_failure",
+                description="x",
+                awareness_date=_AWARENESS,
+                eu_ai_act_facts={"serious_incident_triggers": ["3.49.a"], "widespread": False, "death_involved": True},
+                redaction_policy=RedactionPolicy(version="5.6.7"),
+                redaction_policy_version="9.9.9",
+            )
+        assert pkg._redaction_policy is before
+        assert pkg._redaction_policy is not None and pkg._redaction_policy.version == "1.0.0"
+
+    def test_per_call_policy_on_bare_package_does_not_persist(self) -> None:
+        """On a package with NO attached policy, a per-call ``redaction_policy``
+        applies only to that call and does NOT persist: a later non-public record
+        with no override (and no auto-default available) goes back to the
+        no-policy state. We assert the package's policy is None after the override
+        call returns."""
+        pkg = _pkg_no_policy()
+        pkg.report_incident(
+            public_incident_id=_PUBLIC_ID,
+            harm_core=dict(_HARM_CORE),
+            incident_type="operational_failure",
+            description="x",
+            awareness_date=_AWARENESS,
+            eu_ai_act_facts={"serious_incident_triggers": ["3.49.a"], "widespread": False, "death_involved": True},
+            redaction_policy=RedactionPolicy(version="2.3.4"),
+        )
+        # The per-call override did not stick on the bare package.
+        assert pkg._redaction_policy is None
 
 
 # ===========================================================================
