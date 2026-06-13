@@ -115,6 +115,39 @@ def _build_raw_archive(src_dir: Path, out: Path) -> None:
             tar.add(str(path), arcname=arcname, recursive=False)
 
 
+def _build_source_backed_report_bundle(tmp_path: Path) -> tuple[Path, str]:
+    """Build + export a signed SOURCE-BACKED ``report_incident()`` bundle.
+
+    ``Package.report_incident()`` stores its evidence under the private
+    ``payload.card_source`` subtree (with the regulator-only ``eu_ai_act_facts``
+    block) and defaults the record to ``regulator-only`` confidentiality. This is
+    exactly the shape whose raw envelope MUST NOT be dumped by a plain
+    ``inspect --format json`` (the confidentiality LEAK). Returns
+    ``(bundle_dir, public_id)``.
+    """
+    key_path, key = _write_ec_key(tmp_path)
+    pkg = _new_incident_pkg()
+    minted = mint_incident_id("openai.com", key, year=2026)
+    pkg.add_subject("ai_system", name="Sys", risk_classification="high-risk", modalities=["text"])
+    pkg.report_incident(
+        public_incident_id=minted.public_incident_id,
+        harm_core=dict(_HARM_CORE),
+        incident_type="operational_failure",
+        description="Confidential Art.73 serious-incident report.",
+        awareness_date="2026-08-01T00:00:00Z",
+        eu_ai_act_facts={
+            "serious_incident_triggers": ["3.49.a"],
+            "widespread": False,
+            "death_involved": True,
+        },
+        severity_vector=_SEVERITY_VECTOR,
+    )
+    pkg.sign(key_path)
+    bundle_dir = tmp_path / "report.acef"
+    pkg.export(str(bundle_dir))
+    return bundle_dir, minted.public_incident_id
+
+
 class TestInspectIncidentAware:
     """``inspect`` surfaces incident EVIDENCE from a v1.1 incident bundle."""
 
@@ -170,6 +203,144 @@ class TestInspectIncidentAware:
 
         assert result.exit_code == 0, result.output
         assert "Incident Evidence" not in result.output
+
+
+class TestInspectJsonNoConfidentialityLeak:
+    """``inspect --format json`` MUST NOT leak regulator-only incident payloads.
+
+    ``Package.report_incident()`` stores its source-backed evidence under the
+    private ``payload.card_source`` subtree (with ``eu_ai_act_facts``) and emits the
+    record ``regulator-only``. Dumping the raw ``to_jsonl_dict()`` envelope would
+    publish that confidential subtree to anyone who can run ``inspect`` — a real
+    confidentiality breach through a summary command (roborev High). By DEFAULT the
+    JSON path MUST emit only a PROJECTION-SAFE summary (the same fields the console
+    path surfaces), never ``card_source`` / ``eu_ai_act_facts``.
+    """
+
+    def test_json_default_omits_card_source_and_eu_ai_act_facts(self, runner: CliRunner, tmp_path: Path) -> None:
+        bundle_dir, public_id = _build_source_backed_report_bundle(tmp_path)
+
+        result = runner.invoke(cli, ["inspect", str(bundle_dir), "--format", "json"])
+
+        assert result.exit_code == 0, result.output
+        # The leaked keys MUST be entirely absent from the default JSON output.
+        # RED (pre-fix): the raw envelope dump includes "card_source" and the
+        # regulator-only "eu_ai_act_facts" block.
+        assert "card_source" not in result.output, (
+            f"LEAK: regulator-only 'card_source' subtree present in default "
+            f"inspect --format json output: {result.output}"
+        )
+        assert "eu_ai_act_facts" not in result.output, (
+            f"LEAK: regulator-only 'eu_ai_act_facts' block present in default "
+            f"inspect --format json output: {result.output}"
+        )
+
+        payload = json.loads(result.output)
+        records = payload.get("incident_records")
+        assert records, "projection-safe incident summary missing from JSON output"
+        # The projection-safe summary still surfaces the public id, the derived
+        # severity band, and the harm class — resolved via the SAME render helpers.
+        summary = records[0]
+        assert summary["public_incident_id"] == public_id
+        assert summary["severity_band"] == "major"
+        assert summary["harm_class"] == "physical_health"
+        # And it carries NONE of the regulator-only subtree keys.
+        assert "card_source" not in summary
+        assert "eu_ai_act_facts" not in summary
+        assert "payload" not in summary
+
+    def test_json_include_private_flag_required_to_see_raw_payload(self, runner: CliRunner, tmp_path: Path) -> None:
+        """The raw envelope (with ``card_source``) is only emitted under the
+        EXPLICIT ``--include-private`` opt-in; absent the flag it is withheld."""
+        bundle_dir, _ = _build_source_backed_report_bundle(tmp_path)
+
+        # Without the flag: no raw payload.
+        default_result = runner.invoke(cli, ["inspect", str(bundle_dir), "--format", "json"])
+        assert default_result.exit_code == 0, default_result.output
+        assert "card_source" not in default_result.output
+
+        # With the explicit opt-in flag: the raw envelope (and its card_source) is
+        # surfaced for the operator who knowingly asked for it.
+        raw_result = runner.invoke(cli, ["inspect", str(bundle_dir), "--format", "json", "--include-private"])
+        assert raw_result.exit_code == 0, raw_result.output
+        assert "card_source" in raw_result.output
+        assert "eu_ai_act_facts" in raw_result.output
+
+    def test_console_path_unchanged_for_source_backed_report(self, runner: CliRunner, tmp_path: Path) -> None:
+        """The pretty/console path keeps surfacing the source-backed evidence
+        (public id, severity band, harm class) — the no-leak fix is JSON-only."""
+        bundle_dir, public_id = _build_source_backed_report_bundle(tmp_path)
+
+        result = runner.invoke(cli, ["inspect", str(bundle_dir)])
+
+        assert result.exit_code == 0, result.output
+        assert "Incident Evidence" in result.output
+        assert public_id in result.output
+        assert "Severity: major" in result.output
+        assert "physical_health" in result.output
+
+
+class TestInspectIncidentStreamsRecordsNoFullLoad:
+    """Incident enrichment MUST stream incident records from the manifest, not
+    call the whole-bundle :func:`acef.loader.load` (which reads EVERY record file
+    AND all artifacts, and extracts an archive a SECOND time) — roborev Medium.
+    """
+
+    def test_directory_enrichment_does_not_call_loader_load(
+        self, runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        bundle_dir, public_id = _build_source_backed_report_bundle(tmp_path)
+
+        import acef.loader as loader_mod
+
+        calls: list[str] = []
+        real_load = loader_mod.load
+
+        def _spy_load(path: str) -> Any:
+            calls.append(path)
+            return real_load(path)
+
+        monkeypatch.setattr(loader_mod, "load", _spy_load)
+
+        result = runner.invoke(cli, ["inspect", str(bundle_dir), "--format", "json"])
+
+        assert result.exit_code == 0, result.output
+        # The incident summary is still produced...
+        payload = json.loads(result.output)
+        assert payload.get("incident_records"), "incident summary missing"
+        # ...WITHOUT the whole-bundle loader.load() (no artifact load).
+        # RED (pre-fix): _load_incident_records called loader.load(path).
+        assert calls == [], (
+            f"inspect incident enrichment called the whole-bundle loader.load {len(calls)} time(s): {calls}"
+        )
+
+    def test_archive_not_extracted_twice(
+        self, runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        bundle_dir, public_id = _build_source_backed_report_bundle(tmp_path)
+        archive = tmp_path / "report.acef.tar.gz"
+        _build_raw_archive(bundle_dir, archive)
+
+        import acef.loader as loader_mod
+
+        extract_calls: list[str] = []
+        real_extract = loader_mod.extract_archive_raw
+
+        def _spy_extract(p: str) -> Any:
+            extract_calls.append(str(p))
+            return real_extract(p)
+
+        monkeypatch.setattr(loader_mod, "extract_archive_raw", _spy_extract)
+
+        result = runner.invoke(cli, ["inspect", str(archive), "--format", "json"])
+
+        assert result.exit_code == 0, result.output
+        payload = json.loads(result.output)
+        assert payload.get("incident_records"), "incident summary missing for archive"
+        # The archive is extracted exactly ONCE for the whole inspect run; the
+        # incident enrichment reuses that single raw extraction rather than
+        # round-tripping through loader.load() (a second extraction).
+        assert len(extract_calls) <= 1, f"archive extracted {len(extract_calls)} times (expected <= 1): {extract_calls}"
 
 
 class TestValidateVerifyIncidentBundle:
