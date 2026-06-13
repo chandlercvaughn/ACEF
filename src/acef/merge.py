@@ -34,12 +34,111 @@ from acef.package import Package
 _MERGE_PACKAGE_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_URL, "urn:acef:merge")
 
 
+class IncidentLink:
+    """A deterministic, NON-authority link between merged incident records.
+
+    RFC-0002 §5.5: ``incident_dedupe_key`` is the LOCAL cross-database linkage
+    spine — "link on equality; NO authority resolves merge/split until v1.2". When
+    two (or more) incident records in the merged bundle carry an EQUAL
+    ``incident_dedupe_key``, they are the same logical incident reported from
+    different sources. In v1.1 the merge SURFACES that linkage informationally; it
+    does NOT collapse the records, does NOT pick a winner, and does NOT synthesize
+    a v1.2 id-lifecycle edge (``supersedes`` / ``merged_from`` / ``split_into`` —
+    those are registry-level, §5.8/§11, not v1.1 manifest relationships).
+
+    An ``IncidentLink`` is therefore a pure annotation: the shared ``dedupe_key``
+    plus the SORTED tuple of ``record_ids`` it links — all of which remain present
+    in :attr:`MergeResult.package`. It carries no authority and no precedence.
+
+    Determinism: :attr:`record_ids` is an ascending-sorted tuple and the link list
+    on the result is sorted by ``dedupe_key``, so the surfaced linkage is a pure
+    function of the merged record set (no set-iteration / wall-clock / random
+    leakage), reproducible byte-for-byte across runs.
+    """
+
+    __slots__ = ("dedupe_key", "record_ids")
+
+    def __init__(self, dedupe_key: str, record_ids: tuple[str, ...]) -> None:
+        self.dedupe_key = dedupe_key
+        self.record_ids = record_ids
+
+    def __repr__(self) -> str:
+        return f"IncidentLink({self.dedupe_key!r}, {self.record_ids!r})"
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, IncidentLink):
+            return NotImplemented
+        return self.dedupe_key == other.dedupe_key and self.record_ids == other.record_ids
+
+    def __hash__(self) -> int:
+        return hash((self.dedupe_key, self.record_ids))
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize the link to a deterministic, JSON-friendly dict."""
+        return {"incident_dedupe_key": self.dedupe_key, "record_ids": list(self.record_ids)}
+
+
+# The §5.5 payload key that carries the cross-database incident_dedupe_key. It is
+# emitted ONLY on PUBLIC incident records (the §5.5 Q20 confidentiality MUST is
+# enforced by the builders), so a non-public record never carries it and a
+# subject-bearing key is never linked off a redacted record.
+_INCIDENT_DEDUPE_PAYLOAD_KEY = "incident_dedupe_key"
+
+
+def _compute_incident_links(records: list[RecordEnvelope]) -> list[IncidentLink]:
+    """Surface §5.5 link-on-equality across the FINAL merged record set.
+
+    Groups the merged records by their ``payload.incident_dedupe_key`` and emits
+    one :class:`IncidentLink` per key carried by TWO OR MORE records (a single
+    record bearing a key is not a link — there is nothing to link it to). Both the
+    record_ids within a link and the link list itself are sorted, so the output is
+    a deterministic pure function of the merged records — no collapse, no v1.2
+    edge, no authority, reproducible across runs.
+
+    Operates on the records that are ACTUALLY present in the merged package (the
+    post-conflict-resolution set), so a record dropped/kept by keep_latest is
+    linked exactly as it appears in the output bundle — the linkage can never
+    reference a record that is not in the merged bundle.
+    """
+    by_key: dict[str, list[str]] = {}
+    for record in records:
+        payload = record.payload
+        if not isinstance(payload, dict):
+            continue
+        key = payload.get(_INCIDENT_DEDUPE_PAYLOAD_KEY)
+        # Only a well-formed, non-empty string key links records. A malformed key
+        # is left for the validator (ACEF-082/085); the merge never invents one.
+        if not isinstance(key, str) or not key:
+            continue
+        by_key.setdefault(key, []).append(record.record_id)
+
+    links: list[IncidentLink] = []
+    for key in sorted(by_key):
+        record_ids = by_key[key]
+        if len(record_ids) < 2:
+            # A lone record carrying a key has nothing to link to — not a link.
+            continue
+        # Sort + dedupe record_ids deterministically (a record_id is unique within
+        # the merged package, but sorting guarantees input-order independence).
+        links.append(IncidentLink(key, tuple(sorted(set(record_ids)))))
+    return links
+
+
 class MergeResult:
     """Result of a package merge operation."""
 
-    def __init__(self, package: Package, conflicts: list[ValidationDiagnostic]) -> None:
+    def __init__(
+        self,
+        package: Package,
+        conflicts: list[ValidationDiagnostic],
+        incident_links: list[IncidentLink] | None = None,
+    ) -> None:
         self.package = package
         self.conflicts = conflicts
+        # §5.5 link-on-equality: deterministic, NON-authority linkage between
+        # merged incident records sharing an incident_dedupe_key. Empty when no
+        # two merged records share a key (incl. every non-incident merge).
+        self.incident_links: list[IncidentLink] = incident_links if incident_links is not None else []
 
     @property
     def has_conflicts(self) -> bool:
@@ -518,7 +617,16 @@ def merge_packages(
         attachments=resolved_attachments,
     )
 
-    return MergeResult(merged, conflicts)
+    # §5.5 link-on-equality: surface (do NOT resolve) the cross-database linkage
+    # between merged incident records sharing an incident_dedupe_key. Computed from
+    # the FINAL resolved records (the post-conflict set actually in the bundle), so
+    # the linkage never names a record that was dropped by keep_latest and never
+    # collapses two same-key records into one. This is informational v1.1 linkage —
+    # NO authority, NO v1.2 supersedes/merged_from/split_into edge (those are
+    # registry-level, §5.8/§11). A shared dedupe key is NOT an ACEF-060 conflict.
+    incident_links = _compute_incident_links(resolved_records)
+
+    return MergeResult(merged, conflicts, incident_links)
 
 
 def _rewrite_record_attachment_refs(record: RecordEnvelope, path_map: dict[str, str]) -> RecordEnvelope:
