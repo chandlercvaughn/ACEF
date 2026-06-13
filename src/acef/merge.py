@@ -17,7 +17,7 @@ from acef.models.manifest import AuditTrailEntry, ProfileEntry
 from acef.models.metadata import PackageMetadata, ProducerInfo, Versioning
 from acef.models.records import RecordEnvelope
 from acef.models.subjects import Subject
-from acef.models.urns import URNType, validate_urn
+from acef.models.urns import URNType, parse_urn, validate_urn
 from acef.package import Package
 
 # RFC 4122 §4.3 name-based (v5) namespace for ACEF merge package identifiers.
@@ -64,6 +64,67 @@ def _timestamp_is_newer_or_equal(new_ts: str, old_ts: str) -> bool:
             f"Cannot compare timestamps for keep_latest: {new_ts!r} vs {old_ts!r}",
             code="ACEF-060",
         )
+
+
+def _normalize_explicit_package_id(package_id: str) -> str:
+    """Validate + canonicalize a caller-supplied merged ``package_id``.
+
+    The frozen manifest schema requires a lowercase ``urn:acef:pkg:<uuid>``.
+    ``validate_urn`` alone is too permissive on two axes:
+
+    1. It accepts ANY ACEF URN type (e.g. ``urn:acef:rec:...``) — a record URN
+       would fail manifest schema validation. We REQUIRE ``URNType.PACKAGE``.
+    2. RFC 4122 textual form permits uppercase hex, so ``validate_urn`` accepts
+       an uppercase UUID — but the schema pattern pins lowercase hex. We
+       canonicalize the UUID segment to lowercase so the merged package_id
+       always satisfies the schema.
+
+    Returns the canonical ``urn:acef:pkg:<lowercase-uuid>``.
+
+    Raises:
+        ACEFMergeError: If ``package_id`` is not a syntactically valid ACEF URN
+            or is not a PACKAGE-typed URN.
+    """
+    if not validate_urn(package_id):
+        raise ACEFMergeError(
+            f"Invalid merged package_id URN: {package_id!r}",
+            code="ACEF-060",
+        )
+    parsed = parse_urn(package_id)
+    if parsed.urn_type is not URNType.PACKAGE:
+        raise ACEFMergeError(
+            f"Merged package_id must be a package URN (urn:acef:{URNType.PACKAGE.value}:<uuid>), got {package_id!r}",
+            code="ACEF-060",
+        )
+    # Canonicalize the UUID segment to lowercase so the result matches the
+    # frozen manifest schema's lowercase-hex pattern even if the caller passed
+    # an (RFC-4122-legal) uppercase UUID.
+    return f"urn:acef:{URNType.PACKAGE.value}:{parsed.uuid_str.lower()}"
+
+
+def _normalize_explicit_timestamp(timestamp: str) -> str:
+    """Validate + canonicalize a caller-supplied merged ``timestamp``.
+
+    Applies the SAME ISO-8601 parse the derived-timestamp path uses
+    (``_derive_merged_timestamp``) and renders the canonical UTC
+    ``%Y-%m-%dT%H:%M:%SZ`` form, so an explicit override cannot bypass the
+    parsing/canonicalization and inject an invalid or non-canonical instant
+    into the merged metadata + audit entries.
+
+    Raises:
+        ACEFMergeError: If ``timestamp`` cannot be parsed as ISO 8601.
+    """
+    try:
+        parsed = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+    except (ValueError, AttributeError):
+        raise ACEFMergeError(
+            f"Invalid explicit merged timestamp (not ISO 8601): {timestamp!r}",
+            code="ACEF-060",
+        )
+    # A naive instant (no offset) is treated as UTC, matching the derived path.
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _derive_merged_package_id(packages: list[Package]) -> str:
@@ -162,19 +223,20 @@ def merge_packages(
             code="ACEF-060",
         )
 
-    if package_id is not None and not validate_urn(package_id):
-        raise ACEFMergeError(
-            f"Invalid merged package_id URN: {package_id!r}",
-            code="ACEF-060",
-        )
-
     if producer is None:
         producer = {"name": "acef-merger", "version": "0.1.0"}
 
     # Deterministic merged identity (loader-roundtrip-6): derive from inputs
-    # unless the caller supplied explicit values.
-    merged_package_id = package_id if package_id is not None else _derive_merged_package_id(packages)
-    merged_timestamp = timestamp if timestamp is not None else _derive_merged_timestamp(packages)
+    # unless the caller supplied explicit values. An explicit package_id is
+    # validated as a PACKAGE-typed URN and lowercased; an explicit timestamp is
+    # parsed + canonicalized to UTC ...Z — so neither override can slip an
+    # identity past the frozen manifest schema (roborev MEDIUM/LOW).
+    merged_package_id = (
+        _normalize_explicit_package_id(package_id) if package_id is not None else _derive_merged_package_id(packages)
+    )
+    merged_timestamp = (
+        _normalize_explicit_timestamp(timestamp) if timestamp is not None else _derive_merged_timestamp(packages)
+    )
 
     conflicts: list[ValidationDiagnostic] = []
 
@@ -190,10 +252,20 @@ def merge_packages(
     # The first-seen entry is retained verbatim (deep copy) so vendor x-*
     # extensions survive; only applicable_provisions is recomputed at the end.
     merged_profiles: dict[str, tuple[ProfileEntry, set[str], str]] = {}
-    merged_records: list[RecordEnvelope] = []
+    # Records carry their owning pkg_id so that, after keep_all relocates a
+    # conflicting artifact, we can rewrite ONLY that owner's record→artifact
+    # refs to the relocated path (roborev HIGH). The element is
+    # (owning_pkg_id, RecordEnvelope copy).
+    merged_records: list[tuple[str, RecordEnvelope]] = []
     # Attachments keyed by path -> (content, owning_pkg_id) so we can compare
     # bytes and resolve same-path/different-bytes conflicts (loader-roundtrip-7).
     merged_attachments: dict[str, tuple[bytes, str]] = {}
+    # Per-package keep_all relocations: owning_pkg_id -> {original_path ->
+    # relocated_path}. Populated in the attachment-merge loop and applied to the
+    # owner's record attachment refs AFTER the main loop, so a record copied
+    # before its artifact was relocated still ends up pointing at the relocated
+    # bytes (roborev HIGH).
+    relocations: dict[str, dict[str, str]] = {}
 
     # Track what we've seen for conflict detection
     seen_subjects: dict[str, tuple[str, Any]] = {}  # name+type -> (pkg_id, subject)
@@ -314,15 +386,15 @@ def merge_packages(
                     old_pkg_id, old_record = seen_records[record.record_id]
                     if _timestamp_is_newer_or_equal(record.timestamp, old_record.timestamp):
                         # New record is same age or newer — replace
-                        merged_records = [r for r in merged_records if r.record_id != record.record_id]
+                        merged_records = [r for r in merged_records if r[1].record_id != record.record_id]
                         seen_records[record.record_id] = (pkg_id, record)
-                        merged_records.append(record.model_copy(deep=True))
+                        merged_records.append((pkg_id, record.model_copy(deep=True)))
                     # else: old record is newer, keep it
                 elif conflict_strategy == "keep_all":
-                    merged_records.append(record.model_copy(deep=True))
+                    merged_records.append((pkg_id, record.model_copy(deep=True)))
             else:
                 seen_records[record.record_id] = (pkg_id, record)
-                merged_records.append(record.model_copy(deep=True))
+                merged_records.append((pkg_id, record.model_copy(deep=True)))
 
         # Merge attachments (using public .attachments property). Same path +
         # IDENTICAL bytes is idempotent (no conflict). Same path + DIFFERENT
@@ -361,6 +433,11 @@ def merge_packages(
                 # (forward slashes, relative, NFC, no '..').
                 relocated = _relocate_attachment_path(att_path, pkg_id)
                 merged_attachments[relocated] = (content, pkg_id)
+                # Record the relocation so this package's records that referenced
+                # the ORIGINAL path get rewritten to the relocated path below;
+                # otherwise they would point at the FIRST package's (different)
+                # bytes and the relocated bytes would be orphaned (roborev HIGH).
+                relocations.setdefault(pkg_id, {})[att_path] = relocated
 
     # Deterministic merged metadata (loader-roundtrip-6).
     merged_metadata = PackageMetadata(
@@ -388,6 +465,15 @@ def merge_packages(
     ]
     resolved_attachments = {path: content for path, (content, _owner) in merged_attachments.items()}
 
+    # Apply keep_all relocations to each owning package's record→artifact refs
+    # so every record's attachments[].path resolves to its OWN (relocated) bytes
+    # and no relocated artifact is left unreferenced (roborev HIGH). Records from
+    # packages with no relocations pass through unchanged.
+    resolved_records = [
+        _rewrite_record_attachment_refs(record, relocations.get(owner_pkg_id, {}))
+        for owner_pkg_id, record in merged_records
+    ]
+
     # Construct merged package via _init_from_parts (M-R2-2)
     merged = Package._init_from_parts(
         metadata=merged_metadata,
@@ -395,12 +481,38 @@ def merge_packages(
         subjects=merged_subjects,
         entities=merged_entities,
         profiles=resolved_profiles,
-        records=merged_records,
+        records=resolved_records,
         audit_trail=merge_audit_trail,
         attachments=resolved_attachments,
     )
 
     return MergeResult(merged, conflicts)
+
+
+def _rewrite_record_attachment_refs(record: RecordEnvelope, path_map: dict[str, str]) -> RecordEnvelope:
+    """Rewrite a record's attachment refs through a relocation ``path_map``.
+
+    ``path_map`` maps ``original_attachment_path -> relocated_path`` for the
+    package that contributed ``record``. Any ``attachments[].path`` whose value
+    was relocated under keep_all is repointed to the relocated path; all other
+    paths (and records from packages with no relocations) are unchanged.
+
+    ``attachments[].path`` is the ONLY in-record reference to an artifact path
+    in the RecordEnvelope model (record-envelope.schema.json / AttachmentRef);
+    entity_refs hold entity URNs, not artifact paths, so they need no rewrite.
+
+    Returns the same record object when ``path_map`` is empty or no ref matched
+    (no needless copy); otherwise a deep copy with rewritten attachment paths.
+    """
+    if not path_map or not record.attachments:
+        return record
+    if not any(att.path in path_map for att in record.attachments):
+        return record
+    rewritten = record.model_copy(deep=True)
+    for att in rewritten.attachments:
+        if att.path in path_map:
+            att.path = path_map[att.path]
+    return rewritten
 
 
 def _relocate_attachment_path(att_path: str, pkg_id: str) -> str:
