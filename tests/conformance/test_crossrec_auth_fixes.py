@@ -27,12 +27,16 @@ RED-first tests for audit findings cross-record-authority-1/2/3/4/7
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
 
 import acef.validation.authority_matrix as authority_matrix
 import acef.validation.cross_record as cross_record
 import acef.validation.namespace_lints.bundled_freddy as bundled_freddy
 import acef.validation.v1_1_rules as v1_1_rules
+from acef.models.urns import URNType
+from acef.package import Package
 from acef.validation.engine import validate_bundle
 from acef.validation.v1_1_rules import (
     BANNED_CLAIM_LANGUAGE_TOKENS,
@@ -42,7 +46,6 @@ from tests.conformance._v1_1_bundle_helpers import (
     base_manifest,
     base_record,
     codes,
-    write_bundle,
 )
 
 # The normative ACEF-079 banned-lexicon tuple, taken VERBATIM from the spec
@@ -444,66 +447,111 @@ def _voice_rubric_payload() -> dict:
 # A v1.1 subject + EU AI Act profile bundle that produces NON-EMPTY rule
 # results and provision summaries, so the namespace-lint boundary can be
 # proven against REAL conformance OUTCOMES (not vacuously over empty lists).
-_BOUNDARY_SUBJECT = "urn:acef:sub:00000000-0000-0000-0000-000000000001"
+#
+# The bundle is built through the PRODUCTION Package exporter (Package →
+# add_subject → add_profile → record → export) so the manifest, profile
+# declaration (template_version + applicable_provisions), and per-record_type
+# record_files are schema-correct exactly as a real producer would emit them.
+# A hand-built manifest previously injected UNRELATED ACEF-002/004/025
+# structural diagnostics (non-schema ``provisions`` profile key; a
+# mixed-record_type JSONL file mislabeled all ``risk_register``), which meant
+# the namespace-lint boundary was NOT proven cleanly. Building via the
+# exporter yields a schema-clean bundle whose ONLY structural delta between
+# the with-/without-x-freddy runs is the ACEF-077 namespace lint
+# (roborev cross-record-authority Low).
+#
+# Determinism: a fixed clock + a per-URN-type counting urn_generator are
+# injected so BOTH runs mint identical subject/record/package URNs. This is
+# load-bearing — the §3.7 result projection includes ``subject_scope``, so
+# without a stable subject URN the two runs would carry different (random)
+# subject ids and the "outcomes identical" comparison would be a false
+# negative. The injection follows the VAL-SDK-007 determinism contract.
+#
+# Tolerated baseline: the exporter's package-creation audit-trail entry has
+# no actor_ref, which serializes to an empty string and fails the actor-URN
+# pattern → exactly one ACEF-002 at ``/audit_trail/0/actor_ref``. That single
+# exporter-intrinsic diagnostic is identical across both runs and is NOT the
+# x-freddy lint; the test tolerates it explicitly and asserts no OTHER
+# structural codes (ACEF-004/014/025) appear.
+_BOUNDARY_CLOCK_INSTANT = datetime(2026, 1, 1, tzinfo=UTC)
 
 
-def _boundary_manifest() -> dict:
-    """A v1.1 manifest declaring one high-risk subject and the EU AI Act
-    article-9 profile — enough to drive a non-empty rule evaluation."""
-    manifest = base_manifest()
-    manifest["subjects"] = [
-        {
-            "subject_id": _BOUNDARY_SUBJECT,
-            "subject_type": "ai_system",
-            "name": "Boundary System",
-            "risk_classification": "high-risk",
-            "modalities": ["text"],
-        }
-    ]
-    manifest["profiles"] = [{"profile_id": "eu-ai-act-2024", "provisions": ["article-9"]}]
-    return manifest
+def _boundary_urn_generator() -> Callable[[URNType], str]:
+    """A deterministic URN generator: a per-type 1-based counter so each
+    URN type (pkg/sub/rec/…) gets stable, repeatable ids across runs."""
+    counters: dict[URNType, int] = {}
+
+    def _gen(urn_type: URNType) -> str:
+        nxt = counters.get(urn_type, 0) + 1
+        counters[urn_type] = nxt
+        return f"urn:acef:{urn_type.value}:{nxt:08d}-0000-0000-0000-000000000000"
+
+    return _gen
 
 
-def _boundary_core_records() -> list[dict]:
-    """The two core records that satisfy article-9 — IDENTICAL across the
-    with-/without-freddy runs so the only delta is the x-freddy record."""
-    return [
-        base_record(
-            record_id="urn:acef:rec:00000000-0000-0000-0000-000000000001",
-            record_type="risk_register",
-            payload={"description": "Risk A", "likelihood": "high", "severity": "high"},
-            entity_refs={"subject_refs": [_BOUNDARY_SUBJECT]},
-        ),
-        base_record(
-            record_id="urn:acef:rec:00000000-0000-0000-0000-000000000002",
-            record_type="risk_treatment",
-            payload={"treatment_type": "mitigate", "description": "Treatment A"},
-            entity_refs={"subject_refs": [_BOUNDARY_SUBJECT]},
-        ),
-    ]
+def _build_boundary_package(*, with_freddy: bool) -> Package:
+    """Build a v1.1 boundary Package via the production exporter API.
+
+    The two core records (risk_register + risk_treatment) satisfy enough of
+    EU AI Act article-9 to yield non-empty results[]/provision_summary[].
+    When ``with_freddy`` is set, an ``x-freddy/voice-rubric-emission``
+    extension record carrying a banned claim-lexicon token (and neither a
+    proper rejection nor a paired harness attestation) is appended — the sole
+    trigger for the ACEF-077 namespace lint.
+    """
+    pkg = Package(
+        producer={"name": "crossrec-boundary-test", "version": "1.0.0"},
+        clock=lambda: _BOUNDARY_CLOCK_INSTANT,
+        urn_generator=_boundary_urn_generator(),
+    )
+    # core_version 1.1.0 routes validation through the v1.1 schema + rule
+    # families — the gate that activates the namespace-lint phase. A v1.0
+    # bundle would never run the lint (and ACEF-077 could not fire), so the
+    # boundary must be proven on a v1.1 bundle.
+    pkg.versioning.core_version = "1.1.0"
+    system = pkg.add_subject(
+        "ai_system",
+        name="Boundary System",
+        risk_classification="high-risk",
+        modalities=["text"],
+    )
+    pkg.add_profile("eu-ai-act-2024", provisions=["article-9"])
+    pkg.record(
+        "risk_register",
+        provisions=["article-9"],
+        payload={
+            "risk_id": "R-1",
+            "description": "Risk A",
+            "category": "safety",
+            "likelihood": "likely",
+            "severity": "major",
+            "risk_level": "high",
+        },
+        obligation_role="provider",
+        entity_refs={"subject_refs": [system.id]},
+    )
+    pkg.record(
+        "risk_treatment",
+        provisions=["article-9"],
+        payload={
+            "risk_id": "R-1",
+            "treatment_type": "mitigate",
+            "control_description": "Treatment A",
+            "implementation_status": "implemented",
+        },
+        obligation_role="provider",
+        entity_refs={"subject_refs": [system.id]},
+    )
+    if with_freddy:
+        pkg.record(FREDDY_NS, payload=_voice_rubric_payload())
+    return pkg
 
 
 def _run_boundary_bundle(bundle_dir: Path, *, with_freddy: bool) -> object:
-    """Write + validate a boundary bundle, optionally including the x-freddy
+    """Export + validate a boundary bundle, optionally including the x-freddy
     namespace-lint-triggering record. Validates WITH the eu-ai-act-2024
     profile so results[]/provision_summary[] are non-empty."""
-    records = _boundary_core_records()
-    if with_freddy:
-        records.append(
-            base_record(
-                record_id="urn:acef:rec:bd000000-0000-0000-0000-000000000001",
-                record_type=FREDDY_NS,
-                payload=_voice_rubric_payload(),
-            )
-        )
-    manifest = _boundary_manifest()
-    # Pin record_files explicitly so the ONLY structural delta between the two
-    # runs is the freddy record itself (and its ACEF-077), not the auto-filled
-    # record_files count/type heuristic.
-    manifest["record_files"] = [
-        {"path": "records/all.jsonl", "record_type": "risk_register", "count": len(records)},
-    ]
-    write_bundle(bundle_dir, manifest=manifest, records=records)
+    _build_boundary_package(with_freddy=with_freddy).export(str(bundle_dir))
     return validate_bundle(
         bundle_dir,
         profiles=["eu-ai-act-2024"],
@@ -557,6 +605,24 @@ def test_namespace_lint_does_not_alter_conformance_outcomes(tmp_path: Path) -> N
     #     structural_errors.
     assert "ACEF-077" not in codes(no_freddy.structural_errors), "no-freddy run must not carry ACEF-077"
     assert "ACEF-077" in codes(with_freddy.structural_errors), "x-freddy record must add ACEF-077 to structural_errors"
+
+    # (c-clean) The fixture is a SCHEMA-CLEAN bundle: its only tolerated
+    #     structural baseline is the single exporter-intrinsic ACEF-002 on
+    #     the package-creation audit-trail entry's empty actor_ref. NO
+    #     unrelated structural diagnostics (ACEF-004 payload-schema /
+    #     ACEF-025 record_files type-mismatch / ACEF-014 integrity) may be
+    #     present — otherwise the boundary is not cleanly proven (the lint
+    #     would no longer be the SOLE structural effect of the x-freddy
+    #     record). roborev cross-record-authority Low.
+    for _code in ("ACEF-004", "ACEF-014", "ACEF-025"):
+        assert _code not in codes(no_freddy.structural_errors), (
+            f"clean fixture must not carry spurious {_code}: {no_freddy.structural_errors!r}"
+        )
+    # The ONLY structural delta WITH the x-freddy record is ACEF-077.
+    assert sorted(codes(with_freddy.structural_errors)) == sorted([*codes(no_freddy.structural_errors), "ACEF-077"]), (
+        "the SOLE structural delta of the x-freddy record must be ACEF-077 — "
+        f"no-freddy={no_freddy.structural_errors!r} with-freddy={with_freddy.structural_errors!r}"
+    )
 
     # ACEF-077 must not leak into any serialized rule result or provision
     # summary in the with-freddy run.
