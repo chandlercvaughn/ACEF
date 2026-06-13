@@ -1388,3 +1388,135 @@ class TestDedupeKeyShapeValidation:
     def test_non_string_dedupe_key_fails_086(self) -> None:
         card = _dedupe_card(confidentiality="public", payload_extra={"incident_dedupe_key": 12345})
         assert "ACEF-086" in _codes(ir.check_dedupe_key_confidentiality([card]))
+
+
+# ---------------------------------------------------------------------------
+# check_incident_edges — public_projection_of SEMANTIC validation (§5.8 / §5.1)
+# ---------------------------------------------------------------------------
+
+_EDGE_RPT = "urn:acef:rec:00000000-0000-0000-0000-0000000000d1"
+_EDGE_CARD = "urn:acef:rec:00000000-0000-0000-0000-0000000000d2"
+_EDGE_PID = f"AIIC-OPENAI-2026-{_SUFFIX}"
+# A DISTINCT but individually pattern-valid Crockford suffix (excludes I/L/O/U).
+_EDGE_PID_OTHER = "AIIC-OPENAI-2026-TVWXYZ9876543210ABCDEFGHJK"
+
+
+def _edge_record(
+    record_id: str,
+    record_type: str,
+    *,
+    pid: str | None = None,
+    pid_on_card_source: bool = False,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {}
+    if pid is not None:
+        if pid_on_card_source:
+            payload["card_source"] = {"public_incident_id": pid}
+        else:
+            payload["public_incident_id"] = pid
+    return {"record_id": record_id, "record_type": record_type, "payload": payload}
+
+
+def _edge_manifest(
+    *,
+    relationship_type: str = "public_projection_of",
+    source_ref: str = _EDGE_RPT,
+    target_ref: str = _EDGE_CARD,
+) -> dict[str, Any]:
+    return {
+        "entities": {
+            "relationships": [
+                {"source_ref": source_ref, "target_ref": target_ref, "relationship_type": relationship_type}
+            ]
+        }
+    }
+
+
+def _well_formed_projection_records() -> list[dict[str, Any]]:
+    return [
+        _edge_record(_EDGE_RPT, "incident_report", pid=_EDGE_PID, pid_on_card_source=True),
+        _edge_record(_EDGE_CARD, "incident_card", pid=_EDGE_PID),
+    ]
+
+
+class TestCheckIncidentEdges:
+    def test_correct_report_to_card_same_pid_passes(self) -> None:
+        diags = ir.check_incident_edges(_edge_manifest(), _well_formed_projection_records())
+        assert _codes(diags) == [], f"a correct report→card projection must pass, got {_codes(diags)}"
+
+    def test_source_not_incident_report_fails_083(self) -> None:
+        records = [
+            _edge_record(_EDGE_RPT, "risk_register"),
+            _edge_record(_EDGE_CARD, "incident_card", pid=_EDGE_PID),
+        ]
+        diags = ir.check_incident_edges(_edge_manifest(), records)
+        assert "ACEF-083" in _codes(diags)
+        assert "incident_report" in next(d for d in diags if d.code == "ACEF-083").message
+
+    def test_target_not_incident_card_fails_083(self) -> None:
+        records = [
+            _edge_record(_EDGE_RPT, "incident_report", pid=_EDGE_PID, pid_on_card_source=True),
+            _edge_record(_EDGE_CARD, "incident_report", pid=_EDGE_PID, pid_on_card_source=True),
+        ]
+        diags = ir.check_incident_edges(_edge_manifest(), records)
+        assert "ACEF-083" in _codes(diags)
+        assert "incident_card" in next(d for d in diags if d.code == "ACEF-083").message
+
+    def test_mismatched_public_incident_id_fails_083(self) -> None:
+        records = [
+            _edge_record(_EDGE_RPT, "incident_report", pid=_EDGE_PID, pid_on_card_source=True),
+            _edge_record(_EDGE_CARD, "incident_card", pid=_EDGE_PID_OTHER),
+        ]
+        diags = ir.check_incident_edges(_edge_manifest(), records)
+        assert "ACEF-083" in _codes(diags)
+        assert "public_incident_id" in next(d for d in diags if d.code == "ACEF-083").message
+
+    def test_reversed_direction_card_to_report_fails_083(self) -> None:
+        # The edge runs source=card → target=report: BOTH type checks fail.
+        records = [
+            _edge_record(_EDGE_RPT, "incident_card", pid=_EDGE_PID),
+            _edge_record(_EDGE_CARD, "incident_report", pid=_EDGE_PID, pid_on_card_source=True),
+        ]
+        diags = ir.check_incident_edges(_edge_manifest(), records)
+        assert "ACEF-083" in _codes(diags)
+
+    def test_missing_pid_on_card_fails_083(self) -> None:
+        records = [
+            _edge_record(_EDGE_RPT, "incident_report", pid=_EDGE_PID, pid_on_card_source=True),
+            _edge_record(_EDGE_CARD, "incident_card"),  # no public_incident_id
+        ]
+        diags = ir.check_incident_edges(_edge_manifest(), records)
+        assert "ACEF-083" in _codes(diags)
+
+    def test_dangling_endpoint_not_judged_here(self) -> None:
+        # An endpoint that resolves to NO in-bundle record is the reference
+        # checker's ACEF-020 concern, not this rule's — check_incident_edges is
+        # silent so the dangling-ref is never double-reported.
+        records = [_edge_record(_EDGE_RPT, "incident_report", pid=_EDGE_PID, pid_on_card_source=True)]
+        diags = ir.check_incident_edges(_edge_manifest(), records)  # _EDGE_CARD absent
+        assert _codes(diags) == [], "a dangling projection endpoint must be left to the reference checker"
+
+    def test_other_incident_edges_not_over_constrained(self) -> None:
+        # caused_by / harms / mitigated_by / transferable_to are general in-bundle
+        # record-graph edges; §5.8 does not pin their endpoint types, so this rule
+        # must NOT raise on them even with non-report/non-card endpoints.
+        records = [
+            _edge_record(_EDGE_RPT, "risk_register"),
+            _edge_record(_EDGE_CARD, "dataset_card"),
+        ]
+        for edge in ("caused_by", "harms", "mitigated_by", "transferable_to"):
+            diags = ir.check_incident_edges(_edge_manifest(relationship_type=edge), records)
+            assert _codes(diags) == [], f"edge {edge!r} must not be semantically over-constrained, got {_codes(diags)}"
+
+    def test_no_relationships_is_noop(self) -> None:
+        assert ir.check_incident_edges({}, _well_formed_projection_records()) == []
+        assert ir.check_incident_edges({"entities": {}}, _well_formed_projection_records()) == []
+
+    def test_report_pid_on_root_also_resolves(self) -> None:
+        # A report that carries public_incident_id at the payload root (not only on
+        # card_source) is accepted by _public_incident_id_of.
+        records = [
+            _edge_record(_EDGE_RPT, "incident_report", pid=_EDGE_PID),
+            _edge_record(_EDGE_CARD, "incident_card", pid=_EDGE_PID),
+        ]
+        assert ir.check_incident_edges(_edge_manifest(), records) == []

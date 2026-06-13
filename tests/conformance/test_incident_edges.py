@@ -355,6 +355,97 @@ class TestPublicProjectionOfEmission:
 
 
 # --------------------------------------------------------------------------- #
+# Finding 1 (roborev): add_relationship version-gates the v1.1 incident edges  #
+# --------------------------------------------------------------------------- #
+
+
+class TestAddRelationshipVersionGate:
+    """An incident edge added via ``add_relationship`` on a fresh (default
+    1.0.0) package MUST bump ``core_version`` to 1.1.0 — exactly as ``record()``
+    / the dedupe / the typed incident builders do via ``_ensure_v1_1``.
+
+    Without the bump, a default-1.0.0 package can emit a ``public_projection_of``
+    edge while declaring 1.0.0; the validator then resolves the v1 schema (no
+    incident edges) and rejects the manifest with ACEF-002.
+    """
+
+    def test_public_projection_of_bumps_core_version(self) -> None:
+        pkg = _new_pkg()
+        assert pkg.build_manifest().versioning.core_version == "1.0.0"
+        pkg.add_relationship(_REC, _REC2, relationship_type="public_projection_of")
+        assert pkg.build_manifest().versioning.core_version == "1.1.0", (
+            "an incident relationship edge must bump core_version to 1.1.0 so the "
+            "validator resolves the v1.1 schema that defines the incident edge"
+        )
+
+    def test_each_incident_edge_bumps_core_version(self) -> None:
+        for edge in _INCIDENT_EDGES:
+            pkg = _new_pkg()
+            pkg.add_relationship(_REC, _REC2, relationship_type=edge)
+            assert pkg.build_manifest().versioning.core_version == "1.1.0", (
+                f"incident edge {edge!r} must bump core_version to 1.1.0"
+            )
+
+    def test_original_entity_edge_does_not_bump_core_version(self) -> None:
+        # A pre-amendment entity edge stays on the default 1.0.0 (additive contract).
+        pkg = _new_pkg()
+        pkg.add_relationship(_SUB, _REC, relationship_type="wraps")
+        assert pkg.build_manifest().versioning.core_version == "1.0.0", "a v1.0 entity edge must NOT bump core_version"
+
+    def test_incident_edge_enum_arg_also_bumps(self) -> None:
+        # The bump fires whether the edge is passed as a string or a RelationshipType.
+        pkg = _new_pkg()
+        pkg.add_relationship(_REC, _REC2, relationship_type=RelationshipType.CAUSED_BY)
+        assert pkg.build_manifest().versioning.core_version == "1.1.0"
+
+    def test_default_package_projection_edge_validates_after_bump(self, tmp_path: Path) -> None:
+        # RED proof: a default-package public_projection_of edge would declare 1.0.0
+        # and be rejected by the v1 schema; after the bump the bundle validates.
+        key_path, key = _write_ec_key(tmp_path)
+        pkg = _new_pkg()
+        minted = mint_incident_id("openai.com", key, year=2026)
+        pkg.add_subject("ai_system", name="Sys", risk_classification="high-risk", modalities=["text"])
+        report = pkg.report_incident(
+            public_incident_id=minted.public_incident_id,
+            harm_core=dict(_HARM_CORE),
+            incident_type="operational_failure",
+            description="Confidential Art.73 serious-incident report.",
+            awareness_date="2026-08-01T00:00:00Z",
+            eu_ai_act_facts={
+                "serious_incident_triggers": ["3.49.a"],
+                "widespread": False,
+                "death_involved": True,
+            },
+        )
+        card = pkg.incident_card(
+            public_incident_id=minted.public_incident_id,
+            harm_core=dict(_HARM_CORE),
+            severity_vector="ACEF-SEV:1.0/HT:P/HG:H/RV:A/SC:U/BR:I",
+            awareness_date="2026-08-01T00:00:00Z",
+            eu_ai_act_facts={
+                "serious_incident_triggers": ["3.49.a"],
+                "widespread": False,
+                "death_involved": False,
+            },
+        )
+        # Add the projection edge via the LOW-LEVEL add_relationship (not the typed
+        # helper) to exercise the version-gate on add_relationship directly.
+        pkg.add_relationship(
+            report.record_id,
+            card.record_id,
+            relationship_type="public_projection_of",
+        )
+        assert pkg.build_manifest().versioning.core_version == "1.1.0"
+
+        pkg.sign(key_path)
+        bundle_dir = tmp_path / "gate.acef"
+        pkg.export(str(bundle_dir))
+        assessment = validate_bundle(bundle_dir, profiles=["eu-ai-act-art73-2026"])
+        errors = _error_diags(assessment)
+        assert errors == [], f"unexpected ERROR/FATAL diagnostics: {errors}"
+
+
+# --------------------------------------------------------------------------- #
 # End-to-end conformance: report + card bundle with a public_projection_of edge #
 # --------------------------------------------------------------------------- #
 
@@ -428,3 +519,82 @@ class TestReportAndCardBundleEdge:
         assert errors == [], f"unexpected ERROR/FATAL diagnostics: {errors}"
         # No dangling-ref false positive on the record-URN relationship endpoints.
         assert "ACEF-020" not in _codes(assessment)
+
+
+# --------------------------------------------------------------------------- #
+# Finding 2 (roborev): public_projection_of SEMANTIC validation                #
+# --------------------------------------------------------------------------- #
+
+# Record URNs used by the in-memory semantic-validation fixtures.
+_RPT = "urn:acef:rec:00000000-0000-0000-0000-0000000000c1"
+_CARD = "urn:acef:rec:00000000-0000-0000-0000-0000000000c2"
+# Two DISTINCT but individually pattern-VALID Crockford-base32 suffixes (>=26
+# chars; Crockford excludes I, L, O, U). Both ids pass the ACEF-083 OFFLINE
+# pattern check, so a mismatched-pid failure isolates the SEMANTIC edge rule,
+# never the pattern rule.
+_SUFFIX = "0123456789ABCDEFGHJKMNPQRS"
+_SUFFIX_OTHER = "TVWXYZ9876543210ABCDEFGHJK"
+_PID = f"AIIC-OPENAI-2026-{_SUFFIX}"
+_PID_OTHER = f"AIIC-OPENAI-2026-{_SUFFIX_OTHER}"
+
+
+def _proj_records(
+    *,
+    src_type: str = "incident_report",
+    tgt_type: str = "incident_card",
+    src_pid: str = _PID,
+    tgt_pid: str = _PID,
+) -> list[dict[str, Any]]:
+    """Two records for a public_projection_of edge: a report (source) carrying
+    its public_incident_id on card_source, and a card (target) carrying it on the
+    public payload. The *_type / *_pid knobs synthesize the negative cases."""
+    report: dict[str, Any] = {
+        "record_id": _RPT,
+        "record_type": src_type,
+        "payload": {"card_source": {"public_incident_id": src_pid}},
+    }
+    card: dict[str, Any] = {
+        "record_id": _CARD,
+        "record_type": tgt_type,
+        "payload": {"public_incident_id": tgt_pid},
+    }
+    return [report, card]
+
+
+def _proj_manifest() -> dict[str, Any]:
+    rel = {"source_ref": _RPT, "target_ref": _CARD, "relationship_type": "public_projection_of"}
+    return _manifest_with_relationship(rel)
+
+
+def _edge_codes(manifest: dict[str, Any], records: list[dict[str, Any]]) -> list[str]:
+    from acef.validation.incident_rules import run_incident_rules
+
+    return [d.code for d in run_incident_rules(manifest, records)]
+
+
+class TestPublicProjectionOfSemantics:
+    def test_correct_report_to_card_same_pid_passes(self) -> None:
+        codes = _edge_codes(_proj_manifest(), _proj_records())
+        assert "ACEF-083" not in codes, f"a correct report→card projection must pass, got {codes}"
+
+    def test_source_not_incident_report_fails(self) -> None:
+        # source resolves to a non-incident_report record -> ACEF-083.
+        codes = _edge_codes(_proj_manifest(), _proj_records(src_type="risk_register"))
+        assert "ACEF-083" in codes, "public_projection_of source must be an incident_report"
+
+    def test_target_not_incident_card_fails(self) -> None:
+        codes = _edge_codes(_proj_manifest(), _proj_records(tgt_type="incident_report"))
+        assert "ACEF-083" in codes, "public_projection_of target must be an incident_card"
+
+    def test_mismatched_public_incident_id_fails(self) -> None:
+        codes = _edge_codes(_proj_manifest(), _proj_records(tgt_pid=_PID_OTHER))
+        assert "ACEF-083" in codes, "report and card must share the same public_incident_id"
+
+    def test_wrong_direction_card_to_report_fails(self) -> None:
+        # The edge points card(source)→report(target): direction is report→card,
+        # so a reversed edge must fail (source is a card, not a report).
+        codes = _edge_codes(
+            _proj_manifest(),
+            _proj_records(src_type="incident_card", tgt_type="incident_report"),
+        )
+        assert "ACEF-083" in codes, "public_projection_of direction must be report→card"

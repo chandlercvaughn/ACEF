@@ -326,6 +326,31 @@ def compute_incident_dedupe_key_hmac(
     return "hmac-sha256:" + mac
 
 
+# The five v1.1-only in-bundle incident relationship edges (RFC-0002 §5.8 / §8 #4).
+# These edge values exist ONLY in the v1.1 manifest schema's broadened
+# ``relationship_type`` enum (the v1 schema keeps the original seven entity
+# edges); adding one to a v1.0-declared package's ``relationships[]`` MUST bump
+# ``core_version`` to 1.1.0 so the validator resolves the v1.1 schema, exactly as
+# a v1.1-only ``record()`` does. Derived from the :class:`RelationshipType` enum
+# (NOT a hand-maintained literal list) so it can never drift out of sync: it is
+# the enum's incident-edge members minus the original seven entity edges. If a
+# new edge is added to the enum it is picked up here automatically; a registry-
+# level id-lifecycle edge (supersedes/merged_from/split_into) is deliberately NOT
+# a member of the manifest enum, so it never appears here.
+_V1_0_ENTITY_EDGES: frozenset[RelationshipType] = frozenset(
+    {
+        RelationshipType.WRAPS,
+        RelationshipType.CALLS,
+        RelationshipType.FINE_TUNES,
+        RelationshipType.DEPLOYS,
+        RelationshipType.TRAINS_ON,
+        RelationshipType.EVALUATES_WITH,
+        RelationshipType.OVERSEES,
+    }
+)
+_V1_1_INCIDENT_RELATIONSHIP_EDGES: frozenset[RelationshipType] = frozenset(RelationshipType) - _V1_0_ENTITY_EDGES
+
+
 @lru_cache(maxsize=1)
 def _v1_1_only_record_types() -> frozenset[str]:
     """Record types in ``RECORD_TYPES`` that exist ONLY in the v1.1 schema set.
@@ -1008,6 +1033,21 @@ class Package:
         """
         if isinstance(relationship_type, str):
             relationship_type = RelationshipType(relationship_type)
+
+        # The five v1.1-only incident edges (public_projection_of, caused_by,
+        # harms, mitigated_by, transferable_to) exist ONLY in the v1.1 manifest
+        # schema's broadened relationship_type enum. A default Package declares
+        # core_version 1.0.0, whose validator resolves the v1 manifest schema —
+        # which keeps the original seven entity edges and does NOT define the
+        # incident edges (and does not accept record-URN endpoints). Emitting an
+        # incident edge while still declaring 1.0.0 produces a manifest the SDK's
+        # own validator rejects (ACEF-002). Bump to 1.1.0 here so the v1.1 schema
+        # set resolves, exactly as record() / the dedupe / the typed incident
+        # builders do via _ensure_v1_1() (roborev F-M8-EDGES Finding 1). The
+        # original seven entity edges leave core_version untouched (additive
+        # contract: v1.0 entity-graph bundles stay 1.0.0).
+        if relationship_type in _V1_1_INCIDENT_RELATIONSHIP_EDGES:
+            self._ensure_v1_1()
 
         rel = Relationship(
             source_ref=source_ref,

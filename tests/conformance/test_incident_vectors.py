@@ -197,6 +197,7 @@ _EXPECTED_INVENTORY: dict[tuple[str, str], frozenset[str]] = {
         {
             "fail-severity-vector-parse-082",
             "fail-public-id-offline-083",
+            "fail-projection-edge-mismatch-083",
             "fail-harm-core-crosswalk-085",
             "fail-severity-band-088",
             "fail-publishability-086",

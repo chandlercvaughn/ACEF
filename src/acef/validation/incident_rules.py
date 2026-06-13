@@ -1462,6 +1462,144 @@ def check_dedupe_key_confidentiality(records: list[dict[str, Any]]) -> list[Vali
 
 
 # ---------------------------------------------------------------------------
+# ACEF-083 — public_projection_of edge SEMANTIC validation (§5.8 / §5.1)
+# ---------------------------------------------------------------------------
+
+# The §5.8 in-bundle incident graph edges added to the manifest relationship_type
+# enum (§8 #4). Only ``public_projection_of`` carries a PRECISE endpoint contract
+# (report→card, shared public_incident_id; §5.1/§5.8); the other four are general
+# in-bundle record-graph edges (§5.8 leaves their endpoints unconstrained beyond
+# the schema-level record/entity URN grammar and the reference checker's
+# endpoint-existence check), so they are NOT semantically over-constrained here.
+PUBLIC_PROJECTION_OF = "public_projection_of"
+_INCIDENT_GRAPH_EDGES: frozenset[str] = frozenset(
+    {PUBLIC_PROJECTION_OF, "caused_by", "harms", "mitigated_by", "transferable_to"}
+)
+
+
+def _public_incident_id_of(payload: dict[str, Any]) -> str | None:
+    """Return a record's ``public_incident_id`` — read from the public card payload
+    root OR, for a confidential ``incident_report``, from its ``card_source`` block
+    (§5.1). Returns ``None`` when neither path carries a non-empty string id."""
+    pid = payload.get("public_incident_id")
+    if isinstance(pid, str) and pid:
+        return pid
+    cs = _as_dict(payload.get("card_source"))
+    pid2 = cs.get("public_incident_id")
+    return pid2 if isinstance(pid2, str) and pid2 else None
+
+
+def check_incident_edges(
+    manifest: dict[str, Any],
+    records: list[dict[str, Any]],
+) -> list[ValidationDiagnostic]:
+    """ACEF-083: SEMANTIC validation of the §5.8 ``public_projection_of`` edge.
+
+    The reference checker (Phase 3) only verifies that a relationship's endpoints
+    EXIST (entity URN or in-bundle record URN); it does not verify that a
+    ``public_projection_of`` edge is semantically well-formed. Per §5.1/§5.8 the
+    card is the deterministic public projection of the report, and the two are
+    linked by a typed ``public_projection_of`` relationship whose direction is
+    **report→card** and which shares a single ``public_incident_id``. This rule
+    enforces, for every ``public_projection_of`` edge in
+    ``manifest.entities.relationships[]`` whose BOTH endpoints resolve to in-bundle
+    records:
+
+    - the SOURCE record is an ``incident_report``;
+    - the TARGET record is an ``incident_card``;
+    - both records carry the SAME ``public_incident_id`` (the report's id is read
+      from its ``card_source`` block, the card's from its public payload root).
+
+    Any violation raises ACEF-083 (id-trust/integrity band — the edge asserts the
+    card is the projection of the report under a shared id; a wrong-type, reversed,
+    or mismatched-id edge is a public_incident_id-linkage integrity failure). An
+    endpoint that does NOT resolve to an in-bundle record (e.g. a dangling URN, or
+    an entity URN) is left to the reference checker's ACEF-020 dangling-ref /
+    schema endpoint grammar — this rule only judges edges whose endpoints both
+    resolve to records, so it never double-reports a dangling endpoint.
+
+    The other four §5.8 incident edges (``caused_by`` / ``harms`` / ``mitigated_by``
+    / ``transferable_to``) are general in-bundle record-graph edges; §5.8 does not
+    pin their endpoint types, so they are NOT semantically constrained here (no
+    over-constraint) — they are governed by the schema's URN grammar + the
+    reference checker's endpoint-existence check.
+    """
+    relationships = _as_list(_as_dict(manifest.get("entities")).get("relationships"))
+    if not relationships:
+        return []
+
+    # Index records by record URN for endpoint resolution.
+    records_by_urn: dict[str, dict[str, Any]] = {}
+    for _idx, rec in _records_iter(records):
+        rid = _record_id_of(rec)
+        if rid:
+            records_by_urn[rid] = rec
+
+    diags: list[ValidationDiagnostic] = []
+    for i, rel in enumerate(relationships):
+        if not isinstance(rel, dict):
+            continue
+        if rel.get("relationship_type") != PUBLIC_PROJECTION_OF:
+            continue
+        source_ref = rel.get("source_ref")
+        target_ref = rel.get("target_ref")
+        if not isinstance(source_ref, str) or not isinstance(target_ref, str):
+            continue
+        source_rec = records_by_urn.get(source_ref)
+        target_rec = records_by_urn.get(target_ref)
+        # Only judge edges whose BOTH endpoints resolve to in-bundle records; a
+        # non-resolving (dangling / entity-URN) endpoint is the reference
+        # checker's concern (ACEF-020 / schema grammar), not this rule's.
+        if source_rec is None or target_rec is None:
+            continue
+
+        src_type = _record_type_of(source_rec)
+        tgt_type = _record_type_of(target_rec)
+        src_pid = _public_incident_id_of(_payload_of(source_rec))
+        tgt_pid = _public_incident_id_of(_payload_of(target_rec))
+
+        problems: list[str] = []
+        if src_type != "incident_report":
+            problems.append(
+                f"source record {source_ref!r} is record_type {src_type!r}, not 'incident_report' "
+                f"(the projection's SOURCE must be the private report)"
+            )
+        if tgt_type != "incident_card":
+            problems.append(
+                f"target record {target_ref!r} is record_type {tgt_type!r}, not 'incident_card' "
+                f"(the projection's TARGET must be the public card)"
+            )
+        # Shared-id check only when both ids are present; a missing id on either
+        # side is reported as its own problem so the diagnostic is actionable.
+        if src_pid is None:
+            problems.append(f"source record {source_ref!r} carries no public_incident_id")
+        if tgt_pid is None:
+            problems.append(f"target record {target_ref!r} carries no public_incident_id")
+        if src_pid is not None and tgt_pid is not None and src_pid != tgt_pid:
+            problems.append(
+                f"the report's public_incident_id ({src_pid!r}) and the card's ({tgt_pid!r}) differ — "
+                f"a public_projection_of edge MUST link a report and card sharing ONE public_incident_id"
+            )
+
+        if problems:
+            joined = "; ".join(problems)
+            diags.append(
+                ValidationDiagnostic(
+                    "ACEF-083",
+                    (
+                        f"public_projection_of relationship {i} is semantically malformed (§5.1/§5.8): "
+                        f"{joined}. The card is the deterministic public projection of the report; the "
+                        f"edge MUST run report→card (source=incident_report, target=incident_card) and "
+                        f"both records MUST share the same public_incident_id. Correct the edge endpoints, "
+                        f"the record types, or the public_incident_id linkage."
+                    ),
+                    path=f"/entities/relationships/{i}",
+                )
+            )
+    return diags
+
+
+# ---------------------------------------------------------------------------
 # Top-level entry point — invoked from the engine's v1.1 dispatch.
 # ---------------------------------------------------------------------------
 
@@ -1531,6 +1669,7 @@ def run_incident_rules(
     diags.extend(check_art73_clock(records, profiles=profiles))
     diags.extend(check_art73_existential(records, profiles=profiles))
     diags.extend(check_crosswalk_harm_core_consistency(records))
+    diags.extend(check_incident_edges(manifest, records))
     diags.extend(check_publishability(records, source_backed=source_backed))
     diags.extend(check_dedupe_key_confidentiality(records))
     diags.extend(check_near_miss_marker(records))

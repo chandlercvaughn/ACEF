@@ -67,6 +67,11 @@ _INCIDENT_DIR = Path(__file__).resolve().parent
 # A >=26-char Crockford-base32 suffix (>=128 bits — the §5.3 pattern minimum).
 _SUFFIX = "0123456789ABCDEFGHJKMNPQRS"
 _VALID_ID = f"AIIC-OPENAI-2026-{_SUFFIX}"
+# A SECOND distinct but individually pattern-valid id (Crockford excludes I/L/O/U),
+# used by the §5.8 projection-edge mismatch vector to make the report's and card's
+# public_incident_id DIFFER while both pass the ACEF-083 offline pattern check.
+_SUFFIX_OTHER = "TVWXYZ9876543210ABCDEFGHJK"
+_VALID_ID_OTHER = f"AIIC-OPENAI-2026-{_SUFFIX_OTHER}"
 _FORGED_ASSIGNER = "OPENAI"
 
 _FIXED_CLOCK = datetime(2026, 8, 1, 0, 0, 0, tzinfo=UTC)
@@ -168,6 +173,8 @@ def _build_bundle(
     record_type: str,
     payload: dict[str, Any],
     confidentiality: str = "public",
+    second_record: dict[str, Any] | None = None,
+    projection_edge: bool = False,
 ) -> None:
     """Materialize a v1.1 incident bundle directory carrying ONE incident record.
 
@@ -204,14 +211,19 @@ def _build_bundle(
         shutil.rmtree(bundle_dir)
     bundle_dir.parent.mkdir(parents=True, exist_ok=True)
 
-    is_non_public = confidentiality != "public"
+    # A redaction policy is attached when ANY record in the bundle is non-public,
+    # so the SDK auto-populates the X1/X2 envelope fields + the attestation record
+    # for that record (clean validation, no ACEF-074/078).
+    any_non_public = confidentiality != "public" or (
+        second_record is not None and second_record.get("confidentiality", "public") != "public"
+    )
     redaction_policy = (
         RedactionPolicy(
             version=_REDACTION_POLICY_VERSION,
             method="sha256-hash-commitment",
             description="Confidential Art.73 source-backed redaction policy (regulator-only card_source).",
         )
-        if is_non_public
+        if any_non_public
         else None
     )
 
@@ -232,12 +244,31 @@ def _build_bundle(
         modalities=["text"],
         lifecycle_phase="deployment",
     )
-    pkg.record(
+    first_env = pkg.record(
         record_type,
         payload=payload,
         confidentiality=confidentiality,
         timestamp=_RECORD_TS,
     )
+    # Optional second record + a typed public_projection_of edge (report→card). Used
+    # by the §5.8 incident-edge SEMANTIC vector: the edge endpoints are the two
+    # record URNs, and the edge is authored via the production add_relationship (which
+    # version-gates to 1.1.0 — already 1.1.0 here). A deliberately MALFORMED projection
+    # (wrong endpoint type / mismatched public_incident_id) is what the negative vector
+    # exercises; a well-formed one validates clean.
+    if second_record is not None:
+        second_env = pkg.record(
+            second_record["record_type"],
+            payload=second_record["payload"],
+            confidentiality=second_record.get("confidentiality", "public"),
+            timestamp=second_record.get("timestamp", _RECORD_TS),
+        )
+        if projection_edge:
+            pkg.add_relationship(
+                first_env.record_id,
+                second_env.record_id,
+                relationship_type="public_projection_of",
+            )
     # The SDK constructor seeds an audit_trail entry with no actor_ref, which fails
     # the manifest schema's actor_ref URN pattern. An empty audit_trail is schema-valid
     # (the v1.0 golden + freddy bundles ship with `"audit_trail": []`), so clear it for
@@ -681,6 +712,70 @@ def _vector_specs() -> list[dict[str, Any]]:
         }
     )
 
+    # F6 (roborev F-M8-EDGES Finding 2): ACEF-083 — public_projection_of edge
+    # SEMANTIC failure (§5.1/§5.8). A non-public incident_report (source) and a
+    # public incident_card (target) are linked by a typed `public_projection_of`
+    # edge running report→card, but the report's card_source.public_incident_id and
+    # the card's public_incident_id are DIFFERENT (both individually pattern-valid,
+    # so this isolates the edge-semantic check, not the offline pattern check). The
+    # edge claims the card is the projection of the report under a shared id, but the
+    # ids differ → ACEF-083. The reference checker must NOT also raise ACEF-020 (both
+    # record-URN endpoints resolve), so ACEF-020 is forbidden.
+    specs.append(
+        {
+            "name": "fail-projection-edge-mismatch-083",
+            "conformance_class": "offline-deterministic",
+            "disposition": "fail",
+            "confidentiality": _CONFIDENTIAL,
+            "profiles": [],
+            "record_type": "incident_report",
+            "title": "public_projection_of edge mismatched public_incident_id (ACEF-083)",
+            "body": (
+                "A non-public incident_report (source) and a public incident_card (target) "
+                "linked by a typed `public_projection_of` relationship running report→card, "
+                "but the report's `card_source.public_incident_id` and the card's "
+                "`public_incident_id` DIFFER (both individually pattern-valid). The §5.1/§5.8 "
+                "projection-edge semantic check requires the report and card to share ONE "
+                "public_incident_id → ACEF-083. Both record-URN endpoints resolve, so no "
+                "ACEF-020 dangling-ref is raised."
+            ),
+            "payload": {
+                "incident_type": "operational_failure",
+                "severity": "major",
+                "description": "Confidential source report with a mismatched projection edge.",
+                "card_source": {
+                    "public_incident_id": _VALID_ID,
+                    "id_grade": "self-asserted",
+                    "id_state": "RESERVED",
+                    "harm_core": dict(_VALID_HARM_CORE),
+                    "publishability_map": {"/root_cause_analysis": "regulator-only"},
+                    # card_source requires an eu_ai_act_facts block. No Art.73 profile
+                    # is declared here, so the profile-gated ACEF-084 clock checks do
+                    # not fire — this vector isolates the edge-semantic ACEF-083.
+                    "eu_ai_act_facts": {
+                        "edition": "reg-2024-1689",
+                        "serious_incident_triggers": ["3.49.a"],
+                        "widespread": False,
+                        "death_involved": False,
+                    },
+                },
+                "root_cause_analysis": "Privileged analysis withheld from the public projection.",
+            },
+            "second_record": {
+                "record_type": "incident_card",
+                "confidentiality": "public",
+                "payload": {
+                    "public_incident_id": _VALID_ID_OTHER,
+                    "id_grade": "self-asserted",
+                    "harm_core": dict(_VALID_HARM_CORE),
+                },
+            },
+            "projection_edge": True,
+            "expect_codes": ["ACEF-083"],
+            "forbid_codes": ["ACEF-020"],
+        }
+    )
+
     # === FAIL — source-backed ===
 
     # F6: ACEF-084 — Art.73 compound (death + critical-infra) with a WRONG deadline.
@@ -1043,6 +1138,8 @@ def generate() -> None:
             record_type=spec["record_type"],
             payload=spec["payload"],
             confidentiality=confidentiality,
+            second_record=spec.get("second_record"),
+            projection_edge=bool(spec.get("projection_edge", False)),
         )
 
         if spec.get("expect_codes"):
