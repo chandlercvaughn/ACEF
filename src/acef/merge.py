@@ -153,19 +153,68 @@ def _compute_incident_links(records: list[RecordEnvelope]) -> list[IncidentLink]
 _V1_1_CORE_VERSION = "1.1.0"
 
 
-def _core_version_sort_key(core_version: str) -> tuple[int, int]:
+def _core_version_sort_key(core_version: str) -> tuple[int, int, int]:
     """Total-order key for a ``core_version`` string via the SINGLE semver parse.
 
-    Reuses :func:`acef.schemas.registry.parse_core_version_minor` (never a
-    lexicographic string compare): ``None`` parse (legacy/unparseable) sorts
-    lowest as ``(-1, -1)``; a parsed major with a malformed/absent minor sorts as
-    ``(major, -1)`` so a numeric minor outranks a malformed one at the same major.
+    Reuses :func:`acef.schemas.registry.parse_core_version_minor` for the
+    major/minor (never a lexicographic string compare): ``None`` parse
+    (legacy/unparseable) sorts lowest as ``(-1, -1, -1)``; a parsed major with a
+    malformed/absent minor sorts as ``(major, -1, -1)`` so a numeric minor
+    outranks a malformed one at the same major.
+
+    The key compares the FULL semver tuple INCLUDING PATCH (roborev LOW on
+    7151416a): the prior ``(major, minor)`` key ignored the patch segment, so
+    ``1.1.0`` and ``1.1.7`` sorted EQUAL and ``max()`` returned whichever input
+    appeared first — order-dependent and able to DOWNGRADE the merged manifest
+    below an input ``core_version``. The patch is parsed from the SAME
+    dotted-segment split the reused parser uses (no separate fragile splitter):
+    a present numeric patch (``parts[2]``) is its integer value; an absent patch
+    (a ``major.minor`` string) defaults to ``0`` so ``1.1`` and ``1.1.0`` compare
+    equal (semver-equivalent); a malformed/non-numeric patch sorts as ``-1`` (the
+    same below-zero sentinel the malformed minor uses), so a numeric patch
+    outranks a malformed one at the same major.minor. Patch is only consulted
+    when the major AND minor both parse numerically; a malformed minor already
+    pins patch to ``-1`` (the version is malformed past the minor).
     """
     parsed = parse_core_version_minor(core_version)
     if parsed is None:
-        return (-1, -1)
+        return (-1, -1, -1)
     major, minor = parsed
-    return (major, minor if minor is not None else -1)
+    if minor is None:
+        # Major parses but minor is malformed/absent-as-malformed — the version
+        # is already malformed at the minor, so the patch is meaningless: pin it
+        # to the same below-zero sentinel.
+        return (major, -1, -1)
+    patch = _parse_patch_segment(core_version)
+    return (major, minor, patch)
+
+
+def _parse_patch_segment(core_version: str) -> int:
+    """Parse the PATCH integer from a ``core_version`` whose major.minor parsed.
+
+    Splits on ``.`` exactly as :func:`parse_core_version_minor` does (the single
+    semver split — no second drifting splitter) and reads the THIRD segment:
+
+      * a present, numeric ``parts[2]`` -> its ``int`` value;
+      * NO third segment (a bare ``major.minor`` string) -> ``0`` so ``1.1`` and
+        ``1.1.0`` compare equal (semver patch defaults to 0);
+      * a present but non-numeric ``parts[2]`` (e.g. ``1.1.x``) -> ``-1``, the
+        same below-zero sentinel a malformed minor uses, so a numeric patch
+        outranks a malformed one at the same major.minor.
+
+    A trailing pre-release/build segment beyond patch (``parts[3:]``) is ignored
+    for this ordering: ``core_version`` is the manifest's plain ``major.minor.patch``
+    semver and the merge only needs a deterministic max over the numeric core.
+    """
+    parts = core_version.split(".")
+    if len(parts) < 3:
+        # major.minor with no patch segment — semver patch defaults to 0.
+        return 0
+    try:
+        return int(parts[2])
+    except ValueError:
+        # Non-numeric patch (e.g. "1.1.x") — malformed, sorts below any numeric.
+        return -1
 
 
 def _merged_content_requires_v1_1(
@@ -174,18 +223,31 @@ def _merged_content_requires_v1_1(
 ) -> bool:
     """True when the RESOLVED merged content can only live on a v1.1 manifest.
 
-    Mirrors the EXACT version-gate predicates the builders use (package.py), so the
-    merged ``core_version`` decision can never drift from the per-record gate:
+    Mirrors the EXACT version-gate predicates ``Package.record`` uses (package.py),
+    so the merged ``core_version`` decision can never drift from the per-record
+    gate — and SHARES the SAME record-type guard the linkage path
+    (:func:`_compute_incident_links`) applies, so the v1.1 floor and the §5.5
+    linkage never disagree on what counts as incident content:
 
-      * any v1.1-only incident record type — ``incident_card`` /
-        ``incident_report`` carrying a v1.1-only ``incident_report`` payload field
-        (``card_source`` or a §5.5 dedupe field, via
-        :func:`_v1_1_only_incident_report_fields`); ``incident_card`` is itself a
-        v1.1-only type so it always qualifies;
-      * any record carrying a §5.5 ``incident_dedupe_key`` (the spine is a v1.1
-        field even when its host record's schema keeps additionalProperties);
+      * ``incident_card`` is itself a v1.1-only record type
+        (:func:`_v1_1_only_record_types`) so it ALWAYS qualifies;
+      * an ``incident_report`` carrying a v1.1-only ``incident_report`` payload
+        field — ``card_source`` OR a §5.5 dedupe field
+        (``incident_dedupe_key`` / ``incident_dedupe_key_hmac``), both members of
+        :func:`_v1_1_only_incident_report_fields`;
       * any v1.1-only incident relationship edge
         (:data:`_V1_1_INCIDENT_RELATIONSHIP_EDGES` — ``public_projection_of`` …).
+
+    The §5.5 ``incident_dedupe_key`` trigger is RESTRICTED to the supported
+    incident record types (it is one of :func:`_v1_1_only_incident_report_fields`
+    and ``incident_card`` always gates) — it is NOT an unconditional "any record
+    with this field name" trigger. A vendor ``x-*`` (or any non-incident core)
+    record skips payload validation, so it could carry a field literally named
+    ``incident_dedupe_key``; that is NOT incident content and MUST NOT drive an
+    otherwise-v1.0 merge to v1.1 (roborev MEDIUM on 7151416a — the SAME
+    false-positive the linkage path already avoids, restated for the version
+    path). This is the EXACT record-type-guarded gate ``Package.record`` applies:
+    the per-record dedupe-key bump there is also scoped to ``incident_report``.
 
     A plain v1.0 ``incident_report`` WITHOUT any v1.1-only member is NOT a trigger
     (it predates RFC-0002), exactly as ``Package.record`` does not bump for it.
@@ -193,12 +255,18 @@ def _merged_content_requires_v1_1(
     v1_1_report_fields = _v1_1_only_incident_report_fields()
     for record in records:
         rtype = record.record_type
-        payload = record.payload if isinstance(record.payload, dict) else {}
+        # Only a SUPPORTED incident record type can carry v1.1-only incident
+        # content — a non-incident record (x-* or core) bearing a same-named
+        # payload field is NOT incident content (roborev MEDIUM). Mirrors the
+        # linkage path's guard and Package.record's per-record gate.
+        if rtype not in _INCIDENT_RECORD_TYPES:
+            continue
         if rtype == "incident_card":
             return True
-        if rtype == "incident_report" and not v1_1_report_fields.isdisjoint(payload):
-            return True
-        if _INCIDENT_DEDUPE_PAYLOAD_KEY in payload:
+        # incident_report: gate ONLY on a v1.1-only field (card_source or a §5.5
+        # dedupe field), exactly as Package.record's incident_report bump does.
+        payload = record.payload if isinstance(record.payload, dict) else {}
+        if not v1_1_report_fields.isdisjoint(payload):
             return True
     for rel in relationships:
         if rel.relationship_type in _V1_1_INCIDENT_RELATIONSHIP_EDGES:

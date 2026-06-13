@@ -324,3 +324,180 @@ class TestLinkageRestrictedToIncidentRecordTypes:
             "a non-incident core record carrying a same-named field MUST NOT be linked"
         )
         assert len(result.incident_links) == 1
+
+
+# ---------------------------------------------------------------------------
+# MEDIUM (roborev on 7151416a) — the v1.1 VERSION trigger must share the
+# linkage path's record-type guard: a NON-incident record (x-* or core)
+# carrying a field literally named ``incident_dedupe_key`` MUST NOT drive an
+# otherwise-v1.0 merge to 1.1.0. Pre-fix ``_merged_content_requires_v1_1``
+# returned True for ANY record whose payload had that field name, regardless
+# of ``record_type`` (merge.py:201) — the same false-positive the linkage path
+# already avoids, reintroduced in the version path.
+# ---------------------------------------------------------------------------
+
+
+class TestVersionTriggerRestrictedToIncidentRecordTypes:
+    def test_red_vendor_x_record_with_dedupe_field_does_not_bump_to_v1_1(self) -> None:
+        """A pure-v1.0 merge with a NON-incident x-* record carrying a field named
+        ``incident_dedupe_key`` MUST stay core_version 1.0.0.
+
+        Pre-fix (7151416a) ``_merged_content_requires_v1_1`` hit the unconditional
+        ``if _INCIDENT_DEDUPE_PAYLOAD_KEY in payload: return True`` (merge.py:201),
+        which ignored ``record_type`` — so a vendor ``x-foo`` record (payload
+        validation skipped) carrying a same-named field wrongly floored the merged
+        manifest to 1.1.0, forcing v1.1-only validation on an otherwise-v1.0 merge.
+        RED: this asserts the merged core_version stays 1.0.0; pre-fix it is 1.1.0.
+        """
+        plain_a = _plain_pkg("Org-A", subject_name="Sys A")
+
+        pkg_x = Package(producer={"name": "Org-X", "version": "1.0"})
+        sub_x = pkg_x.add_subject("ai_system", name="Sys X")
+        pkg_x.record(
+            "x-foo",
+            payload={"incident_dedupe_key": "sha256:" + "a" * 64, "vendor_field": 1},
+            entity_refs={"subject_refs": [sub_x.id]},
+        )
+        # The x-* record never bumps its own package off v1.0 (Package.record's
+        # incident_dedupe_key trigger is scoped to incident_report).
+        assert plain_a.versioning.core_version == "1.0.0"
+        assert pkg_x.versioning.core_version == "1.0.0"
+
+        result = merge_packages([plain_a, pkg_x])
+
+        assert result.package.versioning.core_version == "1.0.0", (
+            "a non-incident vendor x-* record carrying a same-named incident_dedupe_key field "
+            "MUST NOT drive an otherwise-v1.0 merge to 1.1.0 — the version trigger must share "
+            "the linkage path's record-type guard"
+        )
+
+    def test_red_non_incident_core_record_with_dedupe_field_does_not_bump(self) -> None:
+        """A non-incident CORE record carrying the same field name also stays 1.0.0."""
+        plain_a = _plain_pkg("Org-A", subject_name="Sys A")
+
+        pkg_c = Package(producer={"name": "Org-C", "version": "1.0"})
+        sub_c = pkg_c.add_subject("ai_system", name="Sys C")
+        pkg_c.record(
+            "risk_register",
+            payload={
+                "risk_id": "risk-c",
+                "description": "A documented risk.",
+                "category": "safety",
+                "incident_dedupe_key": "sha256:" + "b" * 64,
+            },
+            entity_refs={"subject_refs": [sub_c.id]},
+        )
+        assert plain_a.versioning.core_version == "1.0.0"
+        assert pkg_c.versioning.core_version == "1.0.0"
+
+        result = merge_packages([plain_a, pkg_c])
+
+        assert result.package.versioning.core_version == "1.0.0", (
+            "a non-incident core record carrying a same-named incident_dedupe_key field "
+            "MUST NOT drive an otherwise-v1.0 merge to 1.1.0"
+        )
+
+    def test_real_incident_card_still_drives_v1_1(self) -> None:
+        """Regression: a REAL incident_card still floors the merge to 1.1.0.
+
+        Restricting the version trigger to incident record types must NOT regress
+        the legitimate v1.1 content path — an incident_card is a v1.1-only record
+        type and always gates, exactly as Package.record() does.
+        """
+        plain = _plain_pkg("Org-A", subject_name="Sys A")
+        incident, _ = _incident_card_pkg(
+            "Org-B", public_incident_id=_PID_B, subject_identity=("OpenAI", "GPT-X", "4.0"), subject_name="Sys B"
+        )
+        result = merge_packages([plain, incident])
+        assert result.package.versioning.core_version == "1.1.0"
+
+    def test_incident_report_with_dedupe_key_still_drives_v1_1(self) -> None:
+        """Regression: a dedupe_key on a REAL incident_report record still gates.
+
+        ``incident_dedupe_key`` is a v1.1-only ``incident_report`` field
+        (_v1_1_only_incident_report_fields includes _RESERVED_DEDUPE_FIELDS), so a
+        record-typed incident_report carrying it floors the merge to 1.1.0 — the
+        dedupe-key-on-an-incident-record case the dispatch requires.
+        """
+        plain = _plain_pkg("Org-A", subject_name="Sys A")
+
+        pkg_ir = Package(producer={"name": "Org-IR", "version": "1.0"})
+        sub_ir = pkg_ir.add_subject("ai_system", name="Sys IR")
+        pkg_ir.record(
+            "incident_report",
+            payload={
+                "report_id": "ir-1",
+                "incident_dedupe_key": "sha256:" + "c" * 64,
+            },
+            entity_refs={"subject_refs": [sub_ir.id]},
+        )
+        # The incident_report+dedupe_key payload bumped its own package to v1.1.
+        assert pkg_ir.versioning.core_version == "1.1.0"
+
+        result = merge_packages([plain, pkg_ir])
+        assert result.package.versioning.core_version == "1.1.0", (
+            "a §5.5 incident_dedupe_key on a REAL incident_report record MUST still floor "
+            "the merged core_version to 1.1.0"
+        )
+
+
+# ---------------------------------------------------------------------------
+# LOW (roborev on 7151416a) — the merged core_version max must compare the
+# FULL semver tuple INCLUDING patch. Pre-fix ``_core_version_sort_key``
+# returned only ``(major, minor)`` (merge.py:156), so ``1.1.0`` and ``1.1.7``
+# compared EQUAL and ``max()`` returned whichever input appeared first —
+# order-dependent and capable of DOWNGRADING the merged manifest below an
+# input core_version.
+# ---------------------------------------------------------------------------
+
+
+class TestMergedCoreVersionPatchAware:
+    def test_red_patch_segment_wins_regardless_of_input_order(self) -> None:
+        """Merging 1.1.0 and 1.1.7 yields 1.1.7 in BOTH input orders.
+
+        Pre-fix ``_core_version_sort_key`` ignored the patch segment, so 1.1.0 and
+        1.1.7 sorted EQUAL and ``max()`` returned the FIRST-appearing input — the
+        result was order-dependent and dropped the higher patch (a downgrade below
+        an input core_version). RED: this asserts 1.1.7 regardless of order; pre-fix
+        the ``[1.1.0, 1.1.7]`` order returns 1.1.0.
+        """
+        low, _ = _incident_card_pkg(
+            "Org-A", public_incident_id=_PID_A, subject_identity=("OpenAI", "GPT-X", "4.0"), subject_name="Sys A"
+        )
+        high, _ = _incident_card_pkg(
+            "Org-B",
+            public_incident_id=_PID_B,
+            subject_identity=("Acme AI", "Vision-Pro", "2.1.0"),
+            subject_name="Sys B",
+        )
+        low.versioning.core_version = "1.1.0"
+        high.versioning.core_version = "1.1.7"
+
+        forward = merge_packages([low, high])
+        reverse = merge_packages([high, low])
+
+        assert forward.package.versioning.core_version == "1.1.7", (
+            "merged core_version MUST take the higher PATCH (1.1.7), not the first-appearing "
+            "input — the version max must compare the full semver tuple including patch"
+        )
+        assert reverse.package.versioning.core_version == "1.1.7", (
+            "merged core_version must be order-INDEPENDENT — reversing the inputs must not change the result from 1.1.7"
+        )
+
+    def test_higher_patch_input_is_never_downgraded(self) -> None:
+        """The merged result is never below the highest input patch (no downgrade)."""
+        a, _ = _incident_card_pkg(
+            "Org-A", public_incident_id=_PID_A, subject_identity=("OpenAI", "GPT-X", "4.0"), subject_name="Sys A"
+        )
+        b, _ = _incident_card_pkg(
+            "Org-B",
+            public_incident_id=_PID_B,
+            subject_identity=("Acme AI", "Vision-Pro", "2.1.0"),
+            subject_name="Sys B",
+        )
+        a.versioning.core_version = "1.1.3"
+        b.versioning.core_version = "1.1.12"
+
+        # 12 > 3 numerically; a lexicographic or minor-only compare would mishandle this.
+        result = merge_packages([a, b])
+        assert result.package.versioning.core_version == "1.1.12"
