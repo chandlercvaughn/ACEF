@@ -2563,6 +2563,40 @@ class Package:
             record_id=record_id,
         )
 
+    def link_incident_projection(
+        self,
+        report: RecordEnvelope | str,
+        card: RecordEnvelope | str,
+        *,
+        description: str = "",
+    ) -> Relationship:
+        """Emit the typed ``public_projection_of`` edge linking a private
+        ``incident_report`` to its public ``incident_card`` (RFC-0002 §5.1/§5.8).
+
+        The card is the deterministic public projection of the report; the two
+        are linked by a shared ``public_incident_id`` AND a typed
+        ``public_projection_of`` relationship whose direction is **report→card**
+        (the report is the source of the projection). Because the edge connects
+        records — not entities — its endpoints are record URNs
+        (``urn:acef:rec:<uuid>``), which the v1.1 manifest schema's broadened
+        ``relationships[].source_ref``/``target_ref`` patterns accept (§8 #4).
+
+        Both ``report`` and ``card`` may be the :class:`RecordEnvelope` returned
+        by :meth:`report_incident` / :meth:`incident_card`, or a bare record-URN
+        string.
+
+        Returns:
+            The created :class:`~acef.models.entities.Relationship`.
+        """
+        source_ref = report.record_id if isinstance(report, RecordEnvelope) else report
+        target_ref = card.record_id if isinstance(card, RecordEnvelope) else card
+        return self.add_relationship(
+            source_ref,
+            target_ref,
+            RelationshipType.PUBLIC_PROJECTION_OF,
+            description=description,
+        )
+
     def sign(self, key: str, *, method: str = "jws") -> None:
         """Mark this package for signing during export.
 

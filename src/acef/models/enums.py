@@ -112,7 +112,17 @@ class AuthorityClass(str, Enum):
 
 
 class RelationshipType(str, Enum):
-    """Entity relationship types (W3C PROV-compatible)."""
+    """Entity / incident relationship types (W3C PROV-compatible).
+
+    The seven original entity edges plus the five v1.1 in-bundle incident graph
+    edges (RFC-0002 §5.8 / §8 #4): ``public_projection_of`` (report→card),
+    ``caused_by``, ``harms``, ``mitigated_by``, ``transferable_to``. These
+    connect records/incidents, so the manifest schema also broadens
+    ``relationships[].source_ref``/``target_ref`` to accept record URNs
+    (``urn:acef:rec:<uuid>``). The id-lifecycle edges
+    (``supersedes``/``merged_from``/``split_into``) are registry-level v1.2 and
+    are NOT part of this manifest enum.
+    """
 
     WRAPS = "wraps"
     CALLS = "calls"
@@ -121,6 +131,12 @@ class RelationshipType(str, Enum):
     TRAINS_ON = "trains_on"
     EVALUATES_WITH = "evaluates_with"
     OVERSEES = "oversees"
+    # v1.1 in-bundle incident graph edges (RFC-0002 §5.8).
+    PUBLIC_PROJECTION_OF = "public_projection_of"
+    CAUSED_BY = "caused_by"
+    HARMS = "harms"
+    MITIGATED_BY = "mitigated_by"
+    TRANSFERABLE_TO = "transferable_to"
 
 
 class ObligationRole(str, Enum):

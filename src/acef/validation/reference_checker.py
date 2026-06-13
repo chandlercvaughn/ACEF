@@ -83,13 +83,25 @@ def check_references(
         if act_id:
             _add_urn(defined_urns, urn_sources, act_id, f"/entities/actors/{i}", diagnostics)
 
+    # Record URNs are also valid relationship endpoints. The v1.1 incident graph
+    # (RFC-0002 §5.8 / §8 #4) connects RECORDS — e.g. the public_projection_of
+    # edge links an incident_report record URN to its incident_card record URN —
+    # so the manifest schema broadens relationships[].source_ref/target_ref to
+    # accept urn:acef:rec:<uuid>. A relationship endpoint therefore resolves
+    # against either a defined entity URN OR an in-bundle record URN. Collect the
+    # record URNs up front (the per-record loop below re-collects them for the
+    # ACEF-026 duplicate check; this set is endpoint-resolution only).
+    record_urns: set[str] = {
+        rec.get("record_id", "") for rec in records if isinstance(rec, dict) and rec.get("record_id")
+    }
+
     # Check relationship refs
     for i, rel in enumerate(_list_or_empty(entities.get("relationships"))):
         if not isinstance(rel, dict):
             continue
         for ref_field in ("source_ref", "target_ref"):
             ref = rel.get(ref_field, "")
-            if ref and ref not in defined_urns:
+            if ref and ref not in defined_urns and ref not in record_urns:
                 diagnostics.append(
                     ValidationDiagnostic(
                         "ACEF-020",

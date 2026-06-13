@@ -323,18 +323,18 @@
             "properties": {
               "source_ref": {
                 "type": "string",
-                "description": "URN of source entity.",
-                "pattern": "^urn:acef:(sub|cmp|dat|act):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                "description": "URN of the source endpoint. An entity URN (sub|cmp|dat|act) or — for the v1.1 incident graph (RFC-0002 §5.8) — a record URN (rec), since the in-bundle incident edges connect records/incidents.",
+                "pattern": "^urn:acef:(sub|cmp|dat|act|rec):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
               },
               "target_ref": {
                 "type": "string",
-                "description": "URN of target entity.",
-                "pattern": "^urn:acef:(sub|cmp|dat|act):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                "description": "URN of the target endpoint. An entity URN (sub|cmp|dat|act) or — for the v1.1 incident graph (RFC-0002 §5.8) — a record URN (rec), since the in-bundle incident edges connect records/incidents.",
+                "pattern": "^urn:acef:(sub|cmp|dat|act|rec):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
               },
               "relationship_type": {
                 "type": "string",
-                "description": "Type of relationship between entities.",
-                "enum": ["wraps", "calls", "fine_tunes", "deploys", "trains_on", "evaluates_with", "oversees"]
+                "description": "Type of relationship. The seven original entity edges, plus the five v1.1 in-bundle incident graph edges (RFC-0002 §5.8): public_projection_of (report→card), caused_by, harms, mitigated_by, transferable_to. The id-lifecycle edges (supersedes|merged_from|split_into) are registry-level v1.2, NOT manifest edges.",
+                "enum": ["wraps", "calls", "fine_tunes", "deploys", "trains_on", "evaluates_with", "oversees", "public_projection_of", "caused_by", "harms", "mitigated_by", "transferable_to"]
               },
               "description": {
                 "type": "string",

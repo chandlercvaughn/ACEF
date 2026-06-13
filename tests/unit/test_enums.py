@@ -78,7 +78,24 @@ class TestActorRole:
 
 class TestRelationshipType:
     def test_all_values(self):
-        expected = {"wraps", "calls", "fine_tunes", "deploys", "trains_on", "evaluates_with", "oversees"}
+        # The seven original entity edges plus the five v1.1 in-bundle incident
+        # graph edges (RFC-0002 §5.8 / §8 #4). The id-lifecycle edges
+        # (supersedes|merged_from|split_into) are registry-level v1.2 and are NOT
+        # part of this manifest-level enum.
+        expected = {
+            "wraps",
+            "calls",
+            "fine_tunes",
+            "deploys",
+            "trains_on",
+            "evaluates_with",
+            "oversees",
+            "public_projection_of",
+            "caused_by",
+            "harms",
+            "mitigated_by",
+            "transferable_to",
+        }
         actual = {rt.value for rt in RelationshipType}
         assert actual == expected
 
