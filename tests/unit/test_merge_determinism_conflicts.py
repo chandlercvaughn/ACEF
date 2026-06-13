@@ -408,6 +408,195 @@ class TestKeepAllRewritesRecordRefs:
 
 
 # ---------------------------------------------------------------------------
+# VAL-FIX-LOADER (roborev MEDIUM) — keep_all relocation target collision
+#
+# _relocate_attachment_path maps a conflicting artifact to
+#   artifacts/_merged/<owning-pkg-uuid>/<remainder>.
+# That target is NOT guaranteed unique:
+#   (a) an input package may already contain a REAL artifact at exactly the
+#       generated target path (e.g. a re-merge of a previously merged bundle, or
+#       a hand-crafted package), OR
+#   (b) two input packages sharing the same package_id generate the SAME target.
+# Pre-fix: `merged_attachments[relocated] = (content, pkg_id)` OVERWRITES the
+# pre-existing/colliding bytes and leaves any record that referenced the original
+# target pointing at the WRONG bytes (silent data loss). Post-fix: a colliding
+# target is disambiguated to a deterministic, content-hash-derived path so both
+# byte streams survive, every record ref resolves to its OWN bytes, and identical
+# bytes at a colliding target stay idempotent (single artifact, shared ref).
+# ---------------------------------------------------------------------------
+
+
+class TestKeepAllRelocationTargetCollision:
+    @staticmethod
+    def _record_att_paths(pkg) -> dict[str, list[str]]:
+        out: dict[str, list[str]] = {}
+        for rec in pkg.records:
+            key = rec.payload.get("k", rec.record_id)
+            out[key] = [att.path for att in rec.attachments]
+        return out
+
+    @staticmethod
+    def _relocation_target(pkg, original: str = "artifacts/eval.pdf") -> str:
+        """Compute the legacy relocation target for a package's UUID."""
+        from acef.merge import _relocate_attachment_path
+
+        return _relocate_attachment_path(original, pkg.metadata.package_id)
+
+    def test_relocation_target_preexisting_artifact_not_overwritten(self) -> None:
+        """RED proof (a): pkg1 already holds a REAL artifact at the exact path the
+        merge would relocate pkg2's conflicting bytes to. Pre-fix, pkg2's bytes
+        overwrite pkg1's pre-existing artifact at that target."""
+        from acef.merge import merge_packages
+
+        # pkg2 carries the conflicting artifact (artifacts/eval.pdf, b"C2") and a
+        # record referencing it.
+        pkg2 = _make_package(
+            "B", attachment=("eval.pdf", b"C2"), timestamp="2026-01-02T00:00:00Z", record_refs_attachment=True
+        )
+        # The path pkg2's conflicting artifact would relocate to.
+        target = self._relocation_target(pkg2)
+        target_remainder = target[len("artifacts/") :]  # strip leading artifacts/
+
+        # pkg1 ALSO conflicts at artifacts/eval.pdf (b"C1") AND legitimately holds
+        # a DIFFERENT real artifact at exactly pkg2's relocation target, referenced
+        # by its own record.
+        pkg1 = Package(producer={"name": "A", "version": "1.0"})
+        sub = pkg1.add_subject("ai_system", name="Sys A")
+        pkg1.record(
+            "risk_register",
+            payload={"k": "A"},
+            entity_refs={"subject_refs": [sub.id]},
+            attachments=[{"path": "artifacts/eval.pdf"}],
+        )
+        pkg1.record(
+            "risk_register",
+            payload={"k": "A_pre"},
+            entity_refs={"subject_refs": [sub.id]},
+            attachments=[{"path": target}],
+        )
+        pkg1.add_attachment("eval.pdf", b"C1")
+        pkg1.add_attachment(target_remainder, b"PRE-EXISTING")
+        pkg1.metadata.timestamp = "2026-01-01T00:00:00Z"
+
+        result = merge_packages([pkg1, pkg2], conflict_strategy="keep_all")
+        attachments = result.package.attachments
+
+        # The pre-existing artifact's bytes MUST survive (not overwritten by C2).
+        assert attachments[target] == b"PRE-EXISTING", (
+            "pkg2's relocated bytes overwrote pkg1's pre-existing artifact at the relocation target (silent data loss)"
+        )
+        # pkg2's bytes must still be present somewhere distinct.
+        values = list(attachments.values())
+        assert b"C2" in values
+        assert b"C1" in values
+
+        # Every record ref resolves and points at its OWN bytes.
+        record_refs = self._record_att_paths(result.package)
+        att_keys = set(attachments.keys())
+        for paths in record_refs.values():
+            for p in paths:
+                assert p in att_keys, f"record ref {p!r} does not resolve"
+        # pkg1's pre-existing record still references the pre-existing bytes.
+        assert attachments[record_refs["A_pre"][0]] == b"PRE-EXISTING"
+        # pkg2's relocated record references its OWN C2 bytes.
+        assert attachments[record_refs["B"][0]] == b"C2"
+        # pkg1's eval record references the original (C1) bytes.
+        assert attachments[record_refs["A"][0]] == b"C1"
+
+    def test_duplicate_pkg_id_different_bytes_distinct_targets(self) -> None:
+        """RED proof (b): THREE input packages with the SAME package_id and
+        DIFFERENT bytes at the same conflicting path. The first holds the original
+        path; the second and third both relocate to the SAME base target
+        (artifacts/_merged/<uuid>/eval.pdf). Pre-fix the third overwrites the
+        second at that shared target (silent data loss)."""
+        from acef.merge import merge_packages
+
+        pkg1 = _make_package(
+            "A", attachment=("eval.pdf", b"BYTES-1"), timestamp="2026-01-01T00:00:00Z", record_refs_attachment=True
+        )
+        pkg2 = _make_package(
+            "B", attachment=("eval.pdf", b"BYTES-2"), timestamp="2026-01-02T00:00:00Z", record_refs_attachment=True
+        )
+        pkg3 = _make_package(
+            "C", attachment=("eval.pdf", b"BYTES-3"), timestamp="2026-01-03T00:00:00Z", record_refs_attachment=True
+        )
+        # Force a duplicate package_id so pkg2 + pkg3 relocate to the SAME target.
+        pkg2.metadata.package_id = pkg1.metadata.package_id
+        pkg3.metadata.package_id = pkg1.metadata.package_id
+
+        result = merge_packages([pkg1, pkg2, pkg3], conflict_strategy="keep_all")
+        attachments = result.package.attachments
+        values = list(attachments.values())
+
+        # All three byte streams must survive at DISTINCT targets.
+        assert values.count(b"BYTES-1") == 1
+        assert values.count(b"BYTES-2") == 1
+        assert values.count(b"BYTES-3") == 1
+
+        # Neither relocation was dropped: original eval.pdf + 2 relocations.
+        assert len(attachments) >= 3
+
+        # Each relocated record references its OWN bytes.
+        record_refs = self._record_att_paths(result.package)
+        att_keys = set(attachments.keys())
+        for paths in record_refs.values():
+            for p in paths:
+                assert p in att_keys, f"record ref {p!r} does not resolve"
+        assert attachments[record_refs["A"][0]] == b"BYTES-1"
+        assert attachments[record_refs["B"][0]] == b"BYTES-2"
+        assert attachments[record_refs["C"][0]] == b"BYTES-3"
+
+    def test_colliding_target_same_bytes_is_idempotent(self) -> None:
+        """Identical bytes at a colliding relocation target collapse to a single
+        artifact; both referencing records share that one path."""
+        from acef.merge import merge_packages
+
+        pkg1 = _make_package(
+            "A", attachment=("eval.pdf", b"DUP"), timestamp="2026-01-01T00:00:00Z", record_refs_attachment=True
+        )
+        pkg2 = _make_package(
+            "B", attachment=("eval.pdf", b"DUP"), timestamp="2026-01-02T00:00:00Z", record_refs_attachment=True
+        )
+        pkg2.metadata.package_id = pkg1.metadata.package_id
+
+        result = merge_packages([pkg1, pkg2], conflict_strategy="keep_all")
+        attachments = result.package.attachments
+        # Same path + same bytes is idempotent (no conflict, no relocation): only
+        # the original artifacts/eval.pdf survives.
+        dup_keys = [k for k, v in attachments.items() if v == b"DUP"]
+        assert len(dup_keys) == 1
+        record_refs = self._record_att_paths(result.package)
+        assert record_refs["A"] == dup_keys
+        assert record_refs["B"] == dup_keys
+
+    def test_relocation_targets_deterministic_across_runs(self) -> None:
+        """Two merges of the same collision inputs produce identical relocation
+        targets + identical merged bytes (no random component)."""
+        from acef.merge import merge_packages
+
+        def build() -> tuple[Package, Package]:
+            p1 = _make_package(
+                "A", attachment=("eval.pdf", b"BYTES-1"), timestamp="2026-01-01T00:00:00Z", record_refs_attachment=True
+            )
+            p2 = _make_package(
+                "B", attachment=("eval.pdf", b"BYTES-2"), timestamp="2026-01-02T00:00:00Z", record_refs_attachment=True
+            )
+            p2.metadata.package_id = p1.metadata.package_id
+            return p1, p2
+
+        a1, b1 = build()
+        a2, b2 = build()
+        # Force identical input package_ids so the only variable is merge_packages.
+        a2.metadata.package_id = a1.metadata.package_id
+        b2.metadata.package_id = b1.metadata.package_id
+
+        r1 = merge_packages([a1, b1], conflict_strategy="keep_all")
+        r2 = merge_packages([a2, b2], conflict_strategy="keep_all")
+        assert r1.package.attachments == r2.package.attachments
+        assert self._record_att_paths(r1.package) == self._record_att_paths(r2.package)
+
+
+# ---------------------------------------------------------------------------
 # VAL-FIX-LOADER-009 — profile provisions union + template_version conflict
 # ---------------------------------------------------------------------------
 

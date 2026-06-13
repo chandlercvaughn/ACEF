@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from acef.errors import ACEFMergeError, ValidationDiagnostic
+from acef.integrity import sha256_hex
 from acef.models.entities import EntitiesBlock
 from acef.models.enums import AuditEventType
 from acef.models.manifest import AuditTrailEntry, ProfileEntry
@@ -252,20 +253,25 @@ def merge_packages(
     # The first-seen entry is retained verbatim (deep copy) so vendor x-*
     # extensions survive; only applicable_provisions is recomputed at the end.
     merged_profiles: dict[str, tuple[ProfileEntry, set[str], str]] = {}
-    # Records carry their owning pkg_id so that, after keep_all relocates a
-    # conflicting artifact, we can rewrite ONLY that owner's record→artifact
-    # refs to the relocated path (roborev HIGH). The element is
-    # (owning_pkg_id, RecordEnvelope copy).
-    merged_records: list[tuple[str, RecordEnvelope]] = []
+    # Records carry their owning package INDEX (not package_id) so that, after
+    # keep_all relocates a conflicting artifact, we rewrite ONLY that owner's
+    # record→artifact refs to the relocated path (roborev HIGH). The index is the
+    # input-package position — unique per input INSTANCE even when two inputs
+    # share a package_id, so a duplicate-id input cannot collapse two packages'
+    # relocation maps into one (roborev MEDIUM). The element is
+    # (owning_pkg_index, RecordEnvelope copy).
+    merged_records: list[tuple[int, RecordEnvelope]] = []
     # Attachments keyed by path -> (content, owning_pkg_id) so we can compare
     # bytes and resolve same-path/different-bytes conflicts (loader-roundtrip-7).
     merged_attachments: dict[str, tuple[bytes, str]] = {}
-    # Per-package keep_all relocations: owning_pkg_id -> {original_path ->
-    # relocated_path}. Populated in the attachment-merge loop and applied to the
-    # owner's record attachment refs AFTER the main loop, so a record copied
-    # before its artifact was relocated still ends up pointing at the relocated
-    # bytes (roborev HIGH).
-    relocations: dict[str, dict[str, str]] = {}
+    # Per-package keep_all relocations: owning_pkg_INDEX -> {original_path ->
+    # relocated_path}. Keyed by input index (not package_id) so two inputs that
+    # share a package_id keep SEPARATE relocation maps and each package's records
+    # rewrite to their OWN relocated bytes (roborev MEDIUM). Populated in the
+    # attachment-merge loop and applied to the owner's record attachment refs
+    # AFTER the main loop, so a record copied before its artifact was relocated
+    # still ends up pointing at the relocated bytes (roborev HIGH).
+    relocations: dict[int, dict[str, str]] = {}
 
     # Track what we've seen for conflict detection
     seen_subjects: dict[str, tuple[str, Any]] = {}  # name+type -> (pkg_id, subject)
@@ -275,7 +281,7 @@ def merge_packages(
     # Dedup relationships by (source_ref, target_ref, type) — see below.
     seen_relationships: set[tuple[str, str, str]] = set()
 
-    for pkg in packages:
+    for pkg_index, pkg in enumerate(packages):
         pkg_id = pkg.metadata.package_id
 
         # Merge subjects (using public .subjects property)
@@ -388,13 +394,13 @@ def merge_packages(
                         # New record is same age or newer — replace
                         merged_records = [r for r in merged_records if r[1].record_id != record.record_id]
                         seen_records[record.record_id] = (pkg_id, record)
-                        merged_records.append((pkg_id, record.model_copy(deep=True)))
+                        merged_records.append((pkg_index, record.model_copy(deep=True)))
                     # else: old record is newer, keep it
                 elif conflict_strategy == "keep_all":
-                    merged_records.append((pkg_id, record.model_copy(deep=True)))
+                    merged_records.append((pkg_index, record.model_copy(deep=True)))
             else:
                 seen_records[record.record_id] = (pkg_id, record)
-                merged_records.append((pkg_id, record.model_copy(deep=True)))
+                merged_records.append((pkg_index, record.model_copy(deep=True)))
 
         # Merge attachments (using public .attachments property). Same path +
         # IDENTICAL bytes is idempotent (no conflict). Same path + DIFFERENT
@@ -431,13 +437,23 @@ def merge_packages(
                 # package-scoped subpath so both byte streams survive. The
                 # owning package's UUID keeps the relocated path schema-valid
                 # (forward slashes, relative, NFC, no '..').
-                relocated = _relocate_attachment_path(att_path, pkg_id)
+                base_target = _relocate_attachment_path(att_path, pkg_id)
+                # The base target is NOT guaranteed unique: an input package may
+                # already hold a real artifact there (e.g. a re-merge of a prior
+                # merged bundle), OR two inputs sharing a package_id derive the
+                # SAME target. Resolve a collision-free, content-hash-derived
+                # final path so a different-bytes collision never overwrites the
+                # pre-existing/colliding artifact, while identical bytes stay
+                # idempotent (same path) (roborev MEDIUM).
+                relocated = _resolve_collision_free_target(base_target, content, merged_attachments)
                 merged_attachments[relocated] = (content, pkg_id)
                 # Record the relocation so this package's records that referenced
-                # the ORIGINAL path get rewritten to the relocated path below;
-                # otherwise they would point at the FIRST package's (different)
-                # bytes and the relocated bytes would be orphaned (roborev HIGH).
-                relocations.setdefault(pkg_id, {})[att_path] = relocated
+                # the ORIGINAL path get rewritten to the FINAL relocated path
+                # below; otherwise they would point at the FIRST package's
+                # (different) bytes and the relocated bytes would be orphaned
+                # (roborev HIGH). Keyed by pkg_index so a duplicate package_id
+                # does not merge two inputs' relocation maps (roborev MEDIUM).
+                relocations.setdefault(pkg_index, {})[att_path] = relocated
 
     # Deterministic merged metadata (loader-roundtrip-6).
     merged_metadata = PackageMetadata(
@@ -467,11 +483,13 @@ def merge_packages(
 
     # Apply keep_all relocations to each owning package's record→artifact refs
     # so every record's attachments[].path resolves to its OWN (relocated) bytes
-    # and no relocated artifact is left unreferenced (roborev HIGH). Records from
-    # packages with no relocations pass through unchanged.
+    # and no relocated artifact is left unreferenced (roborev HIGH). Keyed by the
+    # owning package INDEX so duplicate package_ids never cross-rewrite one
+    # package's records to another package's relocated bytes (roborev MEDIUM).
+    # Records from packages with no relocations pass through unchanged.
     resolved_records = [
-        _rewrite_record_attachment_refs(record, relocations.get(owner_pkg_id, {}))
-        for owner_pkg_id, record in merged_records
+        _rewrite_record_attachment_refs(record, relocations.get(owner_pkg_index, {}))
+        for owner_pkg_index, record in merged_records
     ]
 
     # Construct merged package via _init_from_parts (M-R2-2)
@@ -529,3 +547,69 @@ def _relocate_attachment_path(att_path: str, pkg_id: str) -> str:
     else:
         remainder = att_path
     return f"artifacts/_merged/{uuid_segment}/{remainder}"
+
+
+def _hash_disambiguated_target(base_target: str, content: bytes) -> str:
+    """Insert a content-hash segment into ``base_target`` for disambiguation.
+
+    Splits ``base_target`` into ``<dir>/<leaf>`` and inserts the SHA-256 hex of
+    ``content`` as a path segment before the leaf:
+    ``artifacts/_merged/<uuid>/<sha256>/<leaf>``. The hash is a pure function of
+    the bytes, so identical bytes always derive the SAME path (idempotent) while
+    different bytes derive distinct paths (no SHA-256 second-preimage in
+    practice). The inserted segment is lowercase hex — schema-valid (forward
+    slashes, relative, NFC, no '..').
+    """
+    digest = sha256_hex(content)
+    head, sep, leaf = base_target.rpartition("/")
+    if sep:
+        return f"{head}/{digest}/{leaf}"
+    # No '/' in base_target (defensive; relocation targets always contain one).
+    return f"{digest}/{base_target}"
+
+
+def _resolve_collision_free_target(
+    base_target: str,
+    content: bytes,
+    merged_attachments: dict[str, tuple[bytes, str]],
+) -> str:
+    """Resolve a collision-free, deterministic keep_all relocation target.
+
+    The package-scoped ``base_target`` from :func:`_relocate_attachment_path` is
+    NOT guaranteed unique: an input package may already hold a real artifact
+    there (a re-merge of a prior merged bundle, or a hand-crafted package), OR
+    two inputs sharing a package_id derive the SAME target. Assigning
+    ``merged_attachments[base_target]`` unconditionally would OVERWRITE the
+    pre-existing/colliding bytes and leave records that referenced that target
+    pointing at the wrong bytes (roborev MEDIUM).
+
+    Resolution (deterministic — no random/wall-clock component, so two merges of
+    the same inputs produce identical targets):
+
+    * ``base_target`` free, or already holding IDENTICAL bytes  -> use it
+      (idempotent: identical bytes collapse to one artifact).
+    * otherwise -> a content-hash-disambiguated path
+      (``.../<sha256>/<leaf>``). Identical bytes always map to the same hashed
+      path (idempotent); different bytes get a distinct path. If even the hashed
+      path is occupied by DIFFERENT bytes (only possible if an input deliberately
+      pre-placed an artifact there), append further hash segments until free —
+      guaranteeing a collision-free target for ANY input.
+
+    Returns the final target path; the caller stores ``content`` there and maps
+    the original ref to this path so record refs resolve to the correct bytes.
+    """
+    existing = merged_attachments.get(base_target)
+    if existing is None or existing[0] == content:
+        # Free target, or identical bytes already there (idempotent reuse).
+        return base_target
+
+    # Different bytes occupy base_target: derive a content-hash-disambiguated
+    # path. Loop only to defend against an input that pre-placed DIFFERENT bytes
+    # at the hashed path itself (a SHA-256 second-preimage otherwise).
+    candidate = _hash_disambiguated_target(base_target, content)
+    while True:
+        occupant = merged_attachments.get(candidate)
+        if occupant is None or occupant[0] == content:
+            return candidate
+        # Occupied by different bytes — extend deterministically by re-hashing.
+        candidate = _hash_disambiguated_target(candidate, content)
