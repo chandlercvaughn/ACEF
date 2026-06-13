@@ -6,8 +6,10 @@ The primary API for creating ACEF Evidence Bundles.
 from __future__ import annotations
 
 import hashlib
+import hmac
 import re
 import secrets
+import unicodedata
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -80,6 +82,178 @@ _ROLE_SPLIT_RECORD_TYPES: frozenset[str] = frozenset({"transparency_marking", "d
 # front (audit records-payloads-3) rather than authoring a record the SDK's own
 # validator later rejects ACEF-003.
 _ASSESSMENT_ONLY_RECORD_TYPES: frozenset[str] = frozenset({"coverage_cell"})
+
+
+# ---------------------------------------------------------------------------
+# RFC-0002 §5.5 — the canonical cross-database incident_dedupe_key.
+#
+# The dedupe spine is ACEF's own ``incident_dedupe_key``, built like RFC-0001's
+# ``finding_record.dedupe_key``: an RFC 8785 (JCS) canonicalization of a 4-key
+# OBJECT (NOT a delimiter-joined string), SHA-256, ``"sha256:"`` prefix. The
+# preimage and primitives REUSE :func:`acef.integrity.canonicalize` + SHA-256,
+# the same path :meth:`Package.record_finding` uses for RFC-0001's key, so the
+# two key families share one deterministic computation.
+# ---------------------------------------------------------------------------
+
+
+def _normalize_subject_identity(provider: str, name: str, version: str) -> str:
+    """NFC-normalize then case-fold the ``provider|name|version`` triple (§5.5).
+
+    The subject_identity is the cross-DB stable spelling of the affected subject
+    — NOT the per-bundle subject UUID (which never matches across databases). It
+    is the ``"provider|name|version"`` triple, UTF-8 **NFC-normalized** and
+    **case-folded**, so two databases that spell the same provider with different
+    Unicode composition or letter case derive the SAME key (the interop property
+    the whole spine depends on).
+    """
+    triple = f"{provider}|{name}|{version}"
+    return unicodedata.normalize("NFC", triple).casefold()
+
+
+def _occurrence_date_utc(occurrence_date: str | None, detection_date: str | None) -> str | None:
+    """Project the incident date to a UTC ``YYYY-MM-DD`` calendar date (§5.5).
+
+    Uses ``occurrence_date`` when present, else ``detection_date``. The value is
+    an ISO-8601 instant (Zulu or offset); it is converted to UTC and reduced to
+    the calendar date so the key keys on the UTC day, not a local day. Returns
+    ``None`` when neither date is supplied or the supplied value is unparseable
+    (the key is then simply not emitted — it is never computed from a partial
+    preimage).
+    """
+    raw = occurrence_date if occurrence_date else detection_date
+    if not isinstance(raw, str) or not raw:
+        return None
+    candidate = raw.strip()
+    if candidate.endswith("Z"):
+        candidate = candidate[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(candidate)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC).strftime("%Y-%m-%d")
+
+
+def _coerce_subject_identity_parts(
+    subject_identity: tuple[str, str, str] | list[str] | dict[str, str] | Subject | None,
+) -> tuple[str, str, str] | None:
+    """Coerce a subject_identity input to a ``(provider, name, version)`` triple.
+
+    Accepts a ``(provider, name, version)`` tuple/list, a ``{provider, name,
+    version}`` mapping, or a :class:`~acef.models.subjects.Subject` (whose
+    ``provider``/``name``/``version`` fields back the triple). Returns ``None``
+    when the input is absent or does not yield all three string parts (the key is
+    then omitted rather than computed from a partial identity).
+    """
+    if subject_identity is None:
+        return None
+    if isinstance(subject_identity, Subject):
+        return (subject_identity.provider, subject_identity.name, subject_identity.version)
+    if isinstance(subject_identity, dict):
+        provider = subject_identity.get("provider")
+        name = subject_identity.get("name")
+        version = subject_identity.get("version")
+        if isinstance(provider, str) and isinstance(name, str) and isinstance(version, str):
+            return (provider, name, version)
+        return None
+    if isinstance(subject_identity, (tuple, list)) and len(subject_identity) == 3:
+        provider, name, version = subject_identity
+        if isinstance(provider, str) and isinstance(name, str) and isinstance(version, str):
+            return (provider, name, version)
+        return None
+    return None
+
+
+def _incident_dedupe_preimage(
+    *,
+    value_chain_role: str,
+    subject_identity: str,
+    harm_class: str,
+    occurrence_date_utc: str,
+) -> dict[str, str]:
+    """The 4-key §5.5 dedupe preimage OBJECT (the JCS input)."""
+    return {
+        "value_chain_role": value_chain_role,
+        "subject_identity": subject_identity,
+        "harm_class": harm_class,
+        "occurrence_date_utc": occurrence_date_utc,
+    }
+
+
+def compute_incident_dedupe_key(
+    *,
+    value_chain_role: str | None,
+    subject_identity: tuple[str, str, str] | list[str] | dict[str, str] | Subject | None,
+    harm_class: str | None,
+    occurrence_date: str | None,
+    detection_date: str | None = None,
+) -> str | None:
+    """Compute the §5.5 ``incident_dedupe_key``, or ``None`` if not derivable.
+
+    ``incident_dedupe_key = "sha256:" + hex(SHA-256(JCS({value_chain_role,
+    subject_identity, harm_class, occurrence_date_utc})))``. All four inputs are
+    REQUIRED; when any is absent/underivable the function returns ``None`` (the
+    caller omits the field rather than emit a key over a partial preimage). The
+    SHA-256 over the RFC 8785-canonicalized object is the ONLY computation — no
+    entropy, no wall-clock — so identical inputs yield a byte-equal key.
+    """
+    if not isinstance(value_chain_role, str) or not value_chain_role:
+        return None
+    if not isinstance(harm_class, str) or not harm_class:
+        return None
+    parts = _coerce_subject_identity_parts(subject_identity)
+    if parts is None:
+        return None
+    date_utc = _occurrence_date_utc(occurrence_date, detection_date)
+    if date_utc is None:
+        return None
+    preimage = _incident_dedupe_preimage(
+        value_chain_role=value_chain_role,
+        subject_identity=_normalize_subject_identity(*parts),
+        harm_class=harm_class,
+        occurrence_date_utc=date_utc,
+    )
+    return "sha256:" + hashlib.sha256(canonicalize(preimage)).hexdigest()
+
+
+def compute_incident_dedupe_key_hmac(
+    *,
+    pepper: bytes | str,
+    value_chain_role: str | None,
+    subject_identity: tuple[str, str, str] | list[str] | dict[str, str] | Subject | None,
+    harm_class: str | None,
+    occurrence_date: str | None,
+    detection_date: str | None = None,
+) -> str | None:
+    """Compute the §5.5 keyed ``incident_dedupe_key_hmac``, or ``None``.
+
+    ``incident_dedupe_key_hmac = "hmac-sha256:" + hex(HMAC-SHA-256(pepper,
+    JCS(K)))`` over the SAME 4-key preimage ``K`` as the plaintext key. The
+    ``pepper`` is the §5.3 resolver secret (held only by the central id/dedupe
+    resolver); a ``str`` pepper is UTF-8 encoded. Returns ``None`` when the
+    preimage is not derivable. Absent a pepper the keyed variant degrades to
+    link-only and the caller emits nothing.
+    """
+    if not isinstance(value_chain_role, str) or not value_chain_role:
+        return None
+    if not isinstance(harm_class, str) or not harm_class:
+        return None
+    parts = _coerce_subject_identity_parts(subject_identity)
+    if parts is None:
+        return None
+    date_utc = _occurrence_date_utc(occurrence_date, detection_date)
+    if date_utc is None:
+        return None
+    key_bytes = pepper.encode("utf-8") if isinstance(pepper, str) else pepper
+    preimage = _incident_dedupe_preimage(
+        value_chain_role=value_chain_role,
+        subject_identity=_normalize_subject_identity(*parts),
+        harm_class=harm_class,
+        occurrence_date_utc=date_utc,
+    )
+    mac = hmac.new(key_bytes, canonicalize(preimage), hashlib.sha256).hexdigest()
+    return "hmac-sha256:" + mac
 
 
 @lru_cache(maxsize=1)
@@ -1995,6 +2169,11 @@ class Package:
         severity: str = "major",
         severity_vector: str | None = None,
         id_state: str = "RESERVED",
+        value_chain_role: str | None = None,
+        subject_identity: tuple[str, str, str] | list[str] | dict[str, str] | Subject | None = None,
+        occurrence_date: str | None = None,
+        detection_date: str | None = None,
+        pepper: bytes | str | None = None,
         publishability_map: dict[str, str] | None = None,
         root_cause_analysis: str | None = None,
         disclosure_status: str = "coordinated",
@@ -2085,6 +2264,42 @@ class Package:
         }
         if root_cause_analysis is not None:
             payload["root_cause_analysis"] = root_cause_analysis
+        if occurrence_date is not None:
+            payload["occurrence_date"] = occurrence_date
+        if detection_date is not None:
+            payload["detection_date"] = detection_date
+
+        # §5.5 incident_dedupe_key. report_incident is the CONFIDENTIAL Art.73
+        # path (regulator-only by default), so the subject-bearing plaintext key
+        # is OMITTED unless the record is explicitly emitted public (the §5.5 Q20
+        # confidentiality MUST — the same public-only gate the public card applies).
+        # The keyed HMAC variant (pepper supplied) is the redacted-subject dedupe
+        # path and is emitted regardless of confidentiality (it is pepper-keyed).
+        resolved_confidentiality = (
+            Confidentiality(confidentiality) if isinstance(confidentiality, str) else confidentiality
+        )
+        harm_class = harm_core.get("harm_class") if isinstance(harm_core, dict) else None
+        if resolved_confidentiality == Confidentiality.PUBLIC:
+            dedupe_key = compute_incident_dedupe_key(
+                value_chain_role=value_chain_role,
+                subject_identity=subject_identity,
+                harm_class=harm_class,
+                occurrence_date=occurrence_date,
+                detection_date=detection_date,
+            )
+            if dedupe_key is not None:
+                payload["incident_dedupe_key"] = dedupe_key
+        if pepper is not None:
+            dedupe_hmac = compute_incident_dedupe_key_hmac(
+                pepper=pepper,
+                value_chain_role=value_chain_role,
+                subject_identity=subject_identity,
+                harm_class=harm_class,
+                occurrence_date=occurrence_date,
+                detection_date=detection_date,
+            )
+            if dedupe_hmac is not None:
+                payload["incident_dedupe_key_hmac"] = dedupe_hmac
 
         return self.record(
             record_type="incident_report",
@@ -2105,6 +2320,11 @@ class Package:
         awareness_date: str,
         eu_ai_act_facts: dict[str, Any],
         autonomy_level: str | None = None,
+        value_chain_role: str | None = None,
+        subject_identity: tuple[str, str, str] | list[str] | dict[str, str] | Subject | None = None,
+        occurrence_date: str | None = None,
+        detection_date: str | None = None,
+        pepper: bytes | str | None = None,
         harm_distribution_basis: list[str] | None = None,
         declared_publication_basis: dict[str, Any] | None = None,
         commitments: dict[str, Any] | None = None,
@@ -2136,6 +2356,21 @@ class Package:
           (REUSING the same RFC-8785 + SHA-256 primitive
           :func:`acef.redaction.apply_redaction` uses), so a privileged field can be
           hash-committed instead of disclosed;
+        - emits the §5.5 cross-database ``incident_dedupe_key`` =
+          ``"sha256:" + hex(SHA-256(JCS({value_chain_role, subject_identity,
+          harm_class, occurrence_date_utc})))`` — but ONLY on a PUBLIC card
+          (``confidentiality == public``), and only when all four recipe inputs
+          (``value_chain_role`` + ``subject_identity`` + ``harm_core.harm_class``
+          + ``occurrence_date`` or ``detection_date``) are supplied. The
+          subject-bearing key is OMITTED on any non-public record (§5.5 Q20: the
+          triple is low-entropy/enumerable, so a published unsalted key would be
+          offline-enumerable). When a ``pepper`` is supplied the keyed
+          ``incident_dedupe_key_hmac`` = ``"hmac-sha256:" + hex(HMAC-SHA-256(
+          pepper, JCS(K)))`` is ALSO emitted (the redacted-subject dedupe path);
+          absent a pepper the keyed variant degrades to link-only and nothing is
+          emitted for it. ``subject_identity`` is the cross-DB-stable
+          ``provider|name|version`` triple (NFC-normalized + case-folded), NOT
+          the per-bundle subject UUID;
         - emits ``id_grade: self-asserted``, sets ``core_version 1.1.0``, and declares
           the ``eu-ai-act-art73-2026`` profile.
 
@@ -2176,6 +2411,8 @@ class Package:
             payload["severity"] = band_value
         if autonomy_level is not None:
             payload["autonomy_level"] = autonomy_level
+        if value_chain_role is not None:
+            payload["value_chain_role"] = value_chain_role
         if harm_distribution_basis is not None:
             payload["harm_distribution_basis"] = sorted(harm_distribution_basis)
         if declared_publication_basis is not None:
@@ -2184,6 +2421,41 @@ class Package:
         if commitments:
             for field_name, value in commitments.items():
                 payload[f"{field_name}_commitment"] = "sha256:" + sha256_hex(canonicalize(value))
+
+        # §5.5 cross-database incident_dedupe_key. The subject-bearing key is
+        # emitted ONLY on a PUBLIC card (the confidentiality MUST, §5.5 Q20); on
+        # any non-public record it is OMITTED. harm_class comes from harm_core;
+        # occurrence_date (else detection_date) is normalized to a UTC YYYY-MM-DD
+        # calendar date; subject_identity is the NFC+case-folded provider|name|
+        # version triple. The keyed HMAC variant (when a pepper is supplied) is
+        # the redacted-subject dedupe path and is emitted regardless of
+        # confidentiality because it is pepper-keyed (not enumerable).
+        resolved_confidentiality = (
+            Confidentiality(confidentiality) if isinstance(confidentiality, str) else confidentiality
+        )
+        harm_class = harm_core.get("harm_class") if isinstance(harm_core, dict) else None
+        if resolved_confidentiality == Confidentiality.PUBLIC:
+            dedupe_key = compute_incident_dedupe_key(
+                value_chain_role=value_chain_role,
+                subject_identity=subject_identity,
+                harm_class=harm_class,
+                occurrence_date=occurrence_date,
+                detection_date=detection_date,
+            )
+            if dedupe_key is not None:
+                payload["incident_dedupe_key"] = dedupe_key
+        if pepper is not None:
+            dedupe_hmac = compute_incident_dedupe_key_hmac(
+                pepper=pepper,
+                value_chain_role=value_chain_role,
+                subject_identity=subject_identity,
+                harm_class=harm_class,
+                occurrence_date=occurrence_date,
+                detection_date=detection_date,
+            )
+            if dedupe_hmac is not None:
+                payload["incident_dedupe_key_hmac"] = dedupe_hmac
+
         if extra_payload:
             for key, value in extra_payload.items():
                 payload.setdefault(key, value)

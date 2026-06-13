@@ -1182,3 +1182,109 @@ class TestACEF088:
         }
         diags = ir.check_severity_band_consistency([report])
         assert "ACEF-088" not in _codes(diags)
+
+
+# ---------------------------------------------------------------------------
+# §5.5 incident_dedupe_key emit/omit confidentiality rule (ACEF-086).
+#
+# The subject-bearing incident_dedupe_key MUST be emitted ONLY on a
+# PUBLISHED/public record; on ANY non-public record it MUST be OMITTED (three of
+# four inputs are low-entropy/enumerable, so a published unsalted key would be
+# offline-enumerable — §5.5, resolves Q20). A non-public record that EMITS
+# incident_dedupe_key is a forged emit-on-non-public and FAILS validation. The
+# keyed incident_dedupe_key_hmac variant is safe (pepper-keyed) and is NOT
+# subject to the omit rule.
+# ---------------------------------------------------------------------------
+
+_GOOD_DEDUPE_KEY = "sha256:" + "a" * 64
+_GOOD_DEDUPE_HMAC = "hmac-sha256:" + "b" * 64
+
+
+def _dedupe_card(*, confidentiality: str, payload_extra: dict[str, Any]) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "public_incident_id": _VALID_ID,
+        "id_grade": "self-asserted",
+        "harm_core": dict(_VALID_HARM_CORE),
+    }
+    payload.update(payload_extra)
+    return {
+        "record_id": "rec-dedupe-1",
+        "record_type": "incident_card",
+        "confidentiality": confidentiality,
+        "payload": payload,
+    }
+
+
+class TestDedupeKeyConfidentiality:
+    def test_public_card_with_dedupe_key_passes(self) -> None:
+        card = _dedupe_card(
+            confidentiality="public",
+            payload_extra={"incident_dedupe_key": _GOOD_DEDUPE_KEY},
+        )
+        diags = ir.check_dedupe_key_confidentiality([card])
+        assert "ACEF-086" not in _codes(diags)
+
+    def test_non_public_card_emitting_dedupe_key_fails_086(self) -> None:
+        # The forged emit-on-non-public: a regulator-only record MUST NOT carry the
+        # subject-bearing key.
+        card = _dedupe_card(
+            confidentiality="regulator-only",
+            payload_extra={"incident_dedupe_key": _GOOD_DEDUPE_KEY},
+        )
+        diags = ir.check_dedupe_key_confidentiality([card])
+        assert "ACEF-086" in _codes(diags)
+        # The reserved §5.11 publishability code is used — NOT ACEF-022.
+        assert "ACEF-022" not in _codes(diags)
+        d = next(d for d in diags if d.code == "ACEF-086")
+        assert "incident_dedupe_key" in d.message
+
+    def test_redacted_card_emitting_dedupe_key_fails_086(self) -> None:
+        card = _dedupe_card(
+            confidentiality="redacted",
+            payload_extra={"incident_dedupe_key": _GOOD_DEDUPE_KEY},
+        )
+        assert "ACEF-086" in _codes(ir.check_dedupe_key_confidentiality([card]))
+
+    def test_hash_committed_card_emitting_dedupe_key_fails_086(self) -> None:
+        card = _dedupe_card(
+            confidentiality="hash-committed",
+            payload_extra={"incident_dedupe_key": _GOOD_DEDUPE_KEY},
+        )
+        assert "ACEF-086" in _codes(ir.check_dedupe_key_confidentiality([card]))
+
+    def test_non_public_card_omitting_dedupe_key_passes(self) -> None:
+        card = _dedupe_card(confidentiality="regulator-only", payload_extra={})
+        assert "ACEF-086" not in _codes(ir.check_dedupe_key_confidentiality([card]))
+
+    def test_non_public_card_with_only_hmac_variant_passes(self) -> None:
+        # The keyed HMAC variant is safe (pepper-keyed) and is NOT subject to the
+        # public-only omit rule — a non-public record MAY carry it.
+        card = _dedupe_card(
+            confidentiality="regulator-only",
+            payload_extra={"incident_dedupe_key_hmac": _GOOD_DEDUPE_HMAC},
+        )
+        assert "ACEF-086" not in _codes(ir.check_dedupe_key_confidentiality([card]))
+
+    def test_incident_report_non_public_emitting_key_fails_086(self) -> None:
+        report = {
+            "record_id": "rec-report-1",
+            "record_type": "incident_report",
+            "confidentiality": "regulator-only",
+            "payload": {
+                "incident_type": "malfunction",
+                "severity": "major",
+                "description": "x",
+                "incident_dedupe_key": _GOOD_DEDUPE_KEY,
+            },
+        }
+        assert "ACEF-086" in _codes(ir.check_dedupe_key_confidentiality([report]))
+
+    def test_rule_is_wired_into_run_incident_rules(self) -> None:
+        # End-to-end: the aggregate run_incident_rules surfaces the emit-on-non-public
+        # failure (the rule is registered in the dispatch).
+        card = _dedupe_card(
+            confidentiality="regulator-only",
+            payload_extra={"incident_dedupe_key": _GOOD_DEDUPE_KEY},
+        )
+        diags = ir.run_incident_rules({}, [card])
+        assert "ACEF-086" in _codes(diags)

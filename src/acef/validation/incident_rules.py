@@ -1355,6 +1355,67 @@ def check_publishability(
 
 
 # ---------------------------------------------------------------------------
+# §5.5 incident_dedupe_key emit/omit confidentiality rule (ACEF-086).
+# ---------------------------------------------------------------------------
+
+
+def _record_confidentiality_of(rec: dict[str, Any]) -> str:
+    """The record-envelope ``confidentiality`` of an on-disk record.
+
+    The serialized record carries ``confidentiality`` at the envelope level
+    (sibling of ``payload``); it defaults to ``"public"`` when absent (the
+    envelope default). A record with ANY non-public confidentiality is treated
+    as non-public for the §5.5 emit/omit gate (fail-closed: an unrecognized /
+    missing value is NOT treated as public when it carries a subject-bearing
+    key, so a forged emit-on-non-public cannot slip through)."""
+    conf = rec.get("confidentiality")
+    return conf if isinstance(conf, str) and conf else "public"
+
+
+def check_dedupe_key_confidentiality(records: list[dict[str, Any]]) -> list[ValidationDiagnostic]:
+    """ACEF-086: the §5.5 ``incident_dedupe_key`` confidentiality MUST (resolves Q20).
+
+    The subject-bearing ``incident_dedupe_key`` MUST be emitted ONLY on a
+    PUBLISHED/public record; on ANY non-public record it MUST be OMITTED. Three
+    of the four dedupe inputs are low-entropy/enumerable, so a published unsalted
+    key over a non-public (often guessable) subject would be offline-enumerable —
+    a confidentiality leak. A non-public record (``confidentiality != public``)
+    that EMITS ``incident_dedupe_key`` is a forged emit-on-non-public and FAILS
+    validation with the reserved §5.11 publishability code ACEF-086 (NOT ACEF-022).
+
+    The keyed ``incident_dedupe_key_hmac`` variant is the redacted-subject dedupe
+    path; because it is pepper-keyed (held by the §5.3 resolver) it is NOT
+    enumerable and is therefore NOT subject to this public-only omit rule — a
+    non-public record MAY carry it.
+    """
+    diags: list[ValidationDiagnostic] = []
+    for _idx, rec in _records_iter(records):
+        if _record_type_of(rec) not in ("incident_card", "incident_report"):
+            continue
+        payload = _payload_of(rec)
+        if "incident_dedupe_key" not in payload:
+            continue
+        confidentiality = _record_confidentiality_of(rec)
+        if confidentiality == "public":
+            continue
+        diags.append(
+            ValidationDiagnostic(
+                "ACEF-086",
+                (
+                    f"Record {_record_id_of(rec)!r}: the subject-bearing incident_dedupe_key is "
+                    f"emitted on a NON-public record (confidentiality={confidentiality!r}), violating "
+                    f"the §5.5 confidentiality MUST. Three of the four dedupe inputs are low-entropy, "
+                    f"so a published unsalted key over a non-public subject is offline-enumerable. Omit "
+                    f"incident_dedupe_key on any non-public record; for redacted-subject dedupe emit the "
+                    f"pepper-keyed incident_dedupe_key_hmac instead, or publish the record."
+                ),
+                path=f"/{_record_id_of(rec)}/incident_dedupe_key",
+            )
+        )
+    return diags
+
+
+# ---------------------------------------------------------------------------
 # Top-level entry point — invoked from the engine's v1.1 dispatch.
 # ---------------------------------------------------------------------------
 
@@ -1425,6 +1486,7 @@ def run_incident_rules(
     diags.extend(check_art73_existential(records, profiles=profiles))
     diags.extend(check_crosswalk_harm_core_consistency(records))
     diags.extend(check_publishability(records, source_backed=source_backed))
+    diags.extend(check_dedupe_key_confidentiality(records))
     diags.extend(check_near_miss_marker(records))
     diags.extend(check_severity_band_consistency(records))
     return diags

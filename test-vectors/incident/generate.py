@@ -49,7 +49,11 @@ from acef.domain_control import (
 )
 from acef.models.metadata import Versioning
 from acef.models.urns import URNType
-from acef.package import Package
+from acef.package import (
+    Package,
+    compute_incident_dedupe_key,
+    compute_incident_dedupe_key_hmac,
+)
 from acef.redaction import RedactionPolicy
 from acef.signing import _derive_jwk
 from acef.validation.engine import validate_bundle
@@ -105,6 +109,32 @@ _SEV_VECTOR_MAJOR = "ACEF-SEV:1.0/HT:P/HG:H/RV:A/SC:U/BR:I"
 _ART73_PROFILE = "eu-ai-act-art73-2026"
 _OECD_PROFILE = "oecd-ai-incidents-2025"
 _OECD_MANDATORY = [1, 2, 3, 4, 7, 10, 11]
+
+# §5.5 incident_dedupe_key recipe inputs for the dedupe conformance vectors. All
+# fixed literals (no wall-clock / random), so the derived key + HMAC are
+# byte-stable across regenerations. The subject_identity triple is the
+# NFC+case-folded provider|name|version of the vector subject; the pepper is the
+# §5.3 resolver secret stand-in for the keyed redacted-subject variant.
+_DEDUPE_VALUE_CHAIN_ROLE = "foundation_model"
+_DEDUPE_SUBJECT_IDENTITY = ("ACEF Conformance", "Vector Subject", "1.0.0")
+_DEDUPE_OCCURRENCE_DATE = "2026-07-15T00:00:00Z"
+_DEDUPE_PEPPER = b"acef-conformance-vector-pepper!!"
+
+# The derived §5.5 values (computed through the PRODUCTION recipe so the vectors
+# can never diverge from the builder/validator).
+_DEDUPE_KEY = compute_incident_dedupe_key(
+    value_chain_role=_DEDUPE_VALUE_CHAIN_ROLE,
+    subject_identity=_DEDUPE_SUBJECT_IDENTITY,
+    harm_class=_VALID_HARM_CORE["harm_class"],
+    occurrence_date=_DEDUPE_OCCURRENCE_DATE,
+)
+_DEDUPE_KEY_HMAC = compute_incident_dedupe_key_hmac(
+    pepper=_DEDUPE_PEPPER,
+    value_chain_role=_DEDUPE_VALUE_CHAIN_ROLE,
+    subject_identity=_DEDUPE_SUBJECT_IDENTITY,
+    harm_class=_VALID_HARM_CORE["harm_class"],
+    occurrence_date=_DEDUPE_OCCURRENCE_DATE,
+)
 
 
 def _deterministic_urn_generator() -> Any:
@@ -784,6 +814,146 @@ def _vector_specs() -> list[dict[str, Any]]:
         }
     )
 
+    # === §5.5 incident_dedupe_key emit/omit confidentiality vectors (F-M8-DEDUPE) ===
+
+    # D1 (PASS): a PUBLISHED public incident_card carrying a CORRECT §5.5
+    # incident_dedupe_key. The key is sha256:hex(SHA-256(JCS({value_chain_role,
+    # subject_identity, harm_class, occurrence_date_utc}))); emitting it on a public
+    # card is conformant (no ACEF-086). The conformance driver independently
+    # recomputes the recipe and asserts byte-equality.
+    specs.append(
+        {
+            "name": "pass-dedupe-key-public-card",
+            "conformance_class": "offline-deterministic",
+            "disposition": "pass",
+            "profiles": [],
+            "record_type": "incident_card",
+            "title": "Public card carries a correct §5.5 incident_dedupe_key",
+            "body": (
+                "A PUBLISHED public incident_card carrying a correct cross-database "
+                "`incident_dedupe_key` = `sha256:` + hex(SHA-256(JCS({value_chain_role, "
+                "subject_identity, harm_class, occurrence_date_utc}))) (§5.5). The "
+                "subject_identity is the NFC-normalized + case-folded `provider|name|version` "
+                "triple of the affected subject. Emitting the subject-bearing key on a PUBLIC "
+                "record is conformant — no ACEF-086. The driver independently recomputes the "
+                "recipe and asserts the emitted value byte-for-byte."
+            ),
+            "payload": {
+                "public_incident_id": _VALID_ID,
+                "id_grade": "self-asserted",
+                "harm_core": dict(_VALID_HARM_CORE),
+                "value_chain_role": _DEDUPE_VALUE_CHAIN_ROLE,
+                "incident_dedupe_key": _DEDUPE_KEY,
+            },
+            "forbid_codes": ["ACEF-086", "ACEF-022"],
+            "dedupe_recipe": {
+                "value_chain_role": _DEDUPE_VALUE_CHAIN_ROLE,
+                "subject_identity": list(_DEDUPE_SUBJECT_IDENTITY),
+                "harm_class": _VALID_HARM_CORE["harm_class"],
+                "occurrence_date": _DEDUPE_OCCURRENCE_DATE,
+                "expected_key": _DEDUPE_KEY,
+            },
+        }
+    )
+
+    # D2 (PASS): a NON-public (regulator-only) source-backed incident_report that
+    # OMITS the subject-bearing key (the §5.5 Q20 confidentiality MUST — three of the
+    # four inputs are low-entropy, so a non-public unsalted key would be enumerable).
+    # No ACEF-086.
+    specs.append(
+        {
+            "name": "pass-dedupe-key-omitted-non-public",
+            "conformance_class": "source-backed",
+            "disposition": "pass",
+            "confidentiality": _CONFIDENTIAL,
+            "profiles": [_ART73_PROFILE],
+            "record_type": "incident_report",
+            "title": "Non-public record OMITS the subject-bearing incident_dedupe_key",
+            "body": (
+                "A confidential (regulator-only) source-backed incident_report that correctly "
+                "OMITS `incident_dedupe_key` (§5.5 Q20 confidentiality MUST). Three of the four "
+                "dedupe inputs are low-entropy, so a published unsalted key over a non-public "
+                "subject would be offline-enumerable — the subject-bearing key MUST NOT appear "
+                "on a non-public record. No ACEF-086."
+            ),
+            "payload": _card_source_report_payload(
+                triggers=["3.49.a"], widespread=False, death=False, deadline="2026-08-16T00:00:00Z"
+            ),
+            "forbid_codes": ["ACEF-086", "ACEF-084", "ACEF-022"],
+        }
+    )
+
+    # D3 (FAIL): a forged NON-public incident_report that EMITS the subject-bearing
+    # incident_dedupe_key — the emit-on-non-public confidentiality violation. The
+    # validator raises ACEF-086 (the reserved §5.11 publishability code, NEVER
+    # ACEF-022).
+    forged_dedupe_payload = _card_source_report_payload(
+        triggers=["3.49.a"], widespread=False, death=False, deadline="2026-08-16T00:00:00Z"
+    )
+    forged_dedupe_payload["incident_dedupe_key"] = _DEDUPE_KEY
+    specs.append(
+        {
+            "name": "fail-dedupe-key-emit-non-public-086",
+            "conformance_class": "source-backed",
+            "disposition": "fail",
+            "confidentiality": _CONFIDENTIAL,
+            "profiles": [_ART73_PROFILE],
+            "record_type": "incident_report",
+            "title": "Forged emit-on-non-public incident_dedupe_key (ACEF-086)",
+            "body": (
+                "A confidential (regulator-only) source-backed incident_report that EMITS the "
+                "subject-bearing `incident_dedupe_key` on a NON-public record — the forged "
+                "emit-on-non-public confidentiality violation (§5.5 Q20). The validator raises "
+                "ACEF-086 (the reserved §5.11 publishability code), NEVER ACEF-022. Omit the "
+                "key on a non-public record, or publish the record."
+            ),
+            "payload": forged_dedupe_payload,
+            "expect_codes": ["ACEF-086"],
+            "forbid_codes": ["ACEF-022"],
+        }
+    )
+
+    # D4 (PASS): the keyed HMAC variant. A NON-public source-backed incident_report
+    # carrying ONLY the pepper-keyed `incident_dedupe_key_hmac` (the redacted-subject
+    # dedupe path) — safe because it is pepper-keyed (not enumerable), so the
+    # public-only omit rule does NOT apply. The driver recomputes the HMAC and asserts
+    # byte-equality. No ACEF-086.
+    hmac_payload = _card_source_report_payload(
+        triggers=["3.49.a"], widespread=False, death=False, deadline="2026-08-16T00:00:00Z"
+    )
+    hmac_payload["incident_dedupe_key_hmac"] = _DEDUPE_KEY_HMAC
+    specs.append(
+        {
+            "name": "pass-dedupe-key-hmac-variant",
+            "conformance_class": "source-backed",
+            "disposition": "pass",
+            "confidentiality": _CONFIDENTIAL,
+            "profiles": [_ART73_PROFILE],
+            "record_type": "incident_report",
+            "title": "Keyed incident_dedupe_key_hmac on a non-public record (redacted-subject dedupe)",
+            "body": (
+                "A confidential (regulator-only) source-backed incident_report carrying ONLY "
+                "the pepper-keyed `incident_dedupe_key_hmac` = `hmac-sha256:` + "
+                "hex(HMAC-SHA-256(pepper, JCS(K))) over the SAME 4-key preimage K as the "
+                "plaintext key (§5.5). The keyed variant is the redacted-subject dedupe path: "
+                "because it is pepper-keyed (held by the §5.3 resolver) it is NOT enumerable, "
+                "so the public-only omit rule does NOT apply and a non-public record MAY carry "
+                "it. No ACEF-086. The driver independently recomputes the HMAC and asserts "
+                "byte-equality."
+            ),
+            "payload": hmac_payload,
+            "forbid_codes": ["ACEF-086", "ACEF-084", "ACEF-022"],
+            "dedupe_hmac_recipe": {
+                "value_chain_role": _DEDUPE_VALUE_CHAIN_ROLE,
+                "subject_identity": list(_DEDUPE_SUBJECT_IDENTITY),
+                "harm_class": _VALID_HARM_CORE["harm_class"],
+                "occurrence_date": _DEDUPE_OCCURRENCE_DATE,
+                "pepper_hex": _DEDUPE_PEPPER.hex(),
+                "expected_key_hmac": _DEDUPE_KEY_HMAC,
+            },
+        }
+    )
+
     return specs
 
 
@@ -905,6 +1075,8 @@ def generate() -> None:
             "online_disposition",
             "public_incident_id",
             "assigner",
+            "dedupe_recipe",
+            "dedupe_hmac_recipe",
         ):
             if optional in spec:
                 entry[optional] = spec[optional]

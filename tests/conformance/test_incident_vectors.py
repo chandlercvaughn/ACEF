@@ -190,6 +190,7 @@ _EXPECTED_INVENTORY: dict[tuple[str, str], frozenset[str]] = {
             "pass-multi-profile-card",
             "pass-oecd-voluntary-advisory",
             "pass-near-miss-info",
+            "pass-dedupe-key-public-card",
         }
     ),
     ("offline-deterministic", "fail"): frozenset(
@@ -207,11 +208,14 @@ _EXPECTED_INVENTORY: dict[tuple[str, str], frozenset[str]] = {
             "pass-art73-compound-2day",
             "reserved-id-death-10day",
             "reserved-id-death-compound-2day",
+            "pass-dedupe-key-omitted-non-public",
+            "pass-dedupe-key-hmac-variant",
         }
     ),
     ("source-backed", "fail"): frozenset(
         {
             "fail-art73-compound-wrong-clock-084",
+            "fail-dedupe-key-emit-non-public-086",
         }
     ),
     ("online-conformance", "reject"): frozenset(
@@ -739,3 +743,141 @@ def test_reserved_id_death_clock_vector(vector: dict[str, Any]) -> None:
             if str(d.get("code")) == "ACEF-084"
         )
     )
+
+
+# ---------------------------------------------------------------------------
+# VAL-BUILD-DEDUPE-001 — §5.5 incident_dedupe_key emit/omit + recipe oracle.
+#
+# The four dedupe vectors prove: (a) a published card carries a CORRECT
+# incident_dedupe_key whose value byte-equals the §5.5 recipe recomputed
+# INDEPENDENTLY here; (b) a non-public record OMITS it (valid); (c) a forged
+# non-public record that EMITS it FAILS with ACEF-086; (d) the keyed HMAC variant
+# is byte-stable and valid on a non-public record. The recipe is recomputed from
+# the vector's own declared inputs (carried on vectors.json), so a builder/
+# validator drift that changed the preimage shape is caught at the conformance
+# layer, not just in the unit oracle.
+# ---------------------------------------------------------------------------
+
+
+def _vector_by_name(name: str) -> dict[str, Any]:
+    for v in _VECTORS:
+        if v.get("name") == name:
+            return v
+    raise AssertionError(f"required dedupe vector {name!r} not declared in vectors.json")
+
+
+def _payload_of_only_incident_record(vector: dict[str, Any]) -> dict[str, Any]:
+    """Read the single incident record's payload from the vector's on-disk bundle."""
+    bundle_dir = _bundle_dir(vector)
+    record_type = str(vector.get("record_type"))
+    record_path = bundle_dir / "records" / f"{record_type}.jsonl"
+    assert record_path.is_file(), f"{vector.get('name')!r} missing {record_type}.jsonl"
+    record = json.loads(record_path.read_text(encoding="utf-8").splitlines()[0])
+    payload = record.get("payload")
+    assert isinstance(payload, dict), f"{vector.get('name')!r} record has no payload object"
+    return payload
+
+
+def _independent_dedupe_key(recipe: dict[str, Any]) -> str:
+    """Recompute the §5.5 key INDEPENDENTLY (object -> JCS -> SHA-256) from the
+    vector's declared recipe inputs — NOT via the production helper."""
+    import hashlib
+    import unicodedata
+
+    from acef.integrity import canonicalize
+
+    provider, name, version = recipe["subject_identity"]
+    triple = f"{provider}|{name}|{version}"
+    preimage = {
+        "value_chain_role": recipe["value_chain_role"],
+        "subject_identity": unicodedata.normalize("NFC", triple).casefold(),
+        "harm_class": recipe["harm_class"],
+        "occurrence_date_utc": str(recipe["occurrence_date"])[:10],
+    }
+    return "sha256:" + hashlib.sha256(canonicalize(preimage)).hexdigest()
+
+
+def _independent_dedupe_hmac(recipe: dict[str, Any]) -> str:
+    import hashlib
+    import hmac
+    import unicodedata
+
+    from acef.integrity import canonicalize
+
+    provider, name, version = recipe["subject_identity"]
+    triple = f"{provider}|{name}|{version}"
+    preimage = {
+        "value_chain_role": recipe["value_chain_role"],
+        "subject_identity": unicodedata.normalize("NFC", triple).casefold(),
+        "harm_class": recipe["harm_class"],
+        "occurrence_date_utc": str(recipe["occurrence_date"])[:10],
+    }
+    pepper = bytes.fromhex(recipe["pepper_hex"])
+    return "hmac-sha256:" + hmac.new(pepper, canonicalize(preimage), hashlib.sha256).hexdigest()
+
+
+@pytest.mark.conformance
+def test_public_card_dedupe_key_equals_independent_5_5_recipe() -> None:
+    """(a) The PUBLISHED card's on-disk incident_dedupe_key byte-equals the §5.5
+    recipe recomputed independently from the vector's declared inputs, and the card
+    validates CLEAN (no ACEF-086)."""
+    vector = _vector_by_name("pass-dedupe-key-public-card")
+    payload = _payload_of_only_incident_record(vector)
+    emitted = payload.get("incident_dedupe_key")
+    assert emitted is not None, "the published dedupe vector must carry incident_dedupe_key"
+    recipe = vector.get("dedupe_recipe")
+    assert isinstance(recipe, dict), "the public dedupe vector must declare its dedupe_recipe"
+    assert emitted == _independent_dedupe_key(recipe), (
+        "the on-disk incident_dedupe_key does not equal the §5.5 recipe recomputed independently"
+    )
+    assert "ACEF-086" not in _emitted_codes(_validate(vector))
+
+
+@pytest.mark.conformance
+def test_non_public_record_omits_dedupe_key_and_passes() -> None:
+    """(b) The non-public record OMITS the subject-bearing key and validates with no
+    ACEF-086."""
+    vector = _vector_by_name("pass-dedupe-key-omitted-non-public")
+    payload = _payload_of_only_incident_record(vector)
+    assert "incident_dedupe_key" not in payload, (
+        "the non-public dedupe vector MUST OMIT the subject-bearing incident_dedupe_key (§5.5 Q20)"
+    )
+    assert "ACEF-086" not in _emitted_codes(_validate(vector))
+
+
+@pytest.mark.conformance
+def test_forged_emit_on_non_public_fails_086() -> None:
+    """(c) The forged non-public record that EMITS incident_dedupe_key FAILS with
+    ACEF-086 (the reserved §5.11 code, never ACEF-022)."""
+    vector = _vector_by_name("fail-dedupe-key-emit-non-public-086")
+    payload = _payload_of_only_incident_record(vector)
+    # The forged record DOES carry the subject-bearing key on a non-public record.
+    assert payload.get("incident_dedupe_key") is not None, (
+        "the forged vector must EMIT incident_dedupe_key on its non-public record"
+    )
+    record_path = _bundle_dir(vector) / "records" / f"{vector.get('record_type')}.jsonl"
+    record = json.loads(record_path.read_text(encoding="utf-8").splitlines()[0])
+    assert record.get("confidentiality") not in (None, "public"), "the forged vector record must be non-public"
+    codes = _emitted_codes(_validate(vector))
+    assert "ACEF-086" in codes, f"a forged emit-on-non-public must raise ACEF-086; got {sorted(set(codes))!r}"
+    assert "ACEF-022" not in codes, "the dedupe confidentiality gate must use ACEF-086, never ACEF-022"
+
+
+@pytest.mark.conformance
+def test_hmac_variant_equals_independent_recipe_and_passes() -> None:
+    """(d) The keyed HMAC variant on a non-public record byte-equals the §5.5 HMAC
+    recipe recomputed independently and validates CLEAN (no ACEF-086 — the keyed
+    variant is exempt from the public-only omit rule)."""
+    vector = _vector_by_name("pass-dedupe-key-hmac-variant")
+    payload = _payload_of_only_incident_record(vector)
+    emitted = payload.get("incident_dedupe_key_hmac")
+    assert emitted is not None, "the HMAC dedupe vector must carry incident_dedupe_key_hmac"
+    assert "incident_dedupe_key" not in payload, (
+        "the HMAC vector must carry ONLY the keyed variant on its non-public record"
+    )
+    recipe = vector.get("dedupe_hmac_recipe")
+    assert isinstance(recipe, dict), "the HMAC dedupe vector must declare its dedupe_hmac_recipe"
+    assert emitted == _independent_dedupe_hmac(recipe), (
+        "the on-disk incident_dedupe_key_hmac does not equal the §5.5 HMAC recipe recomputed independently"
+    )
+    assert "ACEF-086" not in _emitted_codes(_validate(vector))
