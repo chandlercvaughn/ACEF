@@ -889,6 +889,157 @@ class TestACEF086PublishabilityGate:
         diags = ir.check_publishability([card, report], source_backed=True)
         assert "ACEF-086" not in _codes(diags)
 
+    # --- INCVAL-003 over-correction repair: explicit /card_source/<field>
+    #     -> incident_card-root projection map. The single-segment-root filter
+    #     introduced in 42873f56 dropped the LEGITIMATE source-to-card projection
+    #     pointers (/card_source/severity_vector etc.), a real ACEF-086
+    #     false-NEGATIVE. The projection map restores them WITHOUT reintroducing
+    #     the nested-pointer false-positive. ----------------------------------
+
+    _SEV_VECTOR = "ACEF-SEV:1.0/HT:P/HG:H/RV:A/SC:U/BR:I"
+
+    def _report_with_card_source_disposition(
+        self,
+        *,
+        pointer: str,
+        disposition: str,
+        cs_extra: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """An incident_report whose publishability_map disposes ``pointer`` (a
+        ``/card_source/<field>`` projection input that DOES resolve in the source,
+        because card_source carries the field). Isolates the disposition-honored
+        check for the source-to-card projection map."""
+        card_source: dict[str, Any] = {
+            "public_incident_id": _VALID_ID,
+            "id_grade": "self-asserted",
+            "id_state": "PUBLISHED",
+            "harm_core": dict(_VALID_HARM_CORE),
+            "severity_vector": self._SEV_VECTOR,
+            "coordinated_disclosure": {"status": "public", "reporter_role": "internal"},
+            "publishability_map": {pointer: disposition},
+            "eu_ai_act_facts": {
+                "edition": "reg-2024-1689",
+                "serious_incident_triggers": ["3.49.a"],
+                "widespread": False,
+                "death_involved": False,
+            },
+        }
+        if cs_extra:
+            card_source.update(cs_extra)
+        return _report_record(card_source)
+
+    def test_card_source_severity_vector_regulator_only_present_raises_086(self) -> None:
+        # THE roborev RED: /card_source/severity_vector (a REAL projection pointer)
+        # disposed regulator-only while severity_vector IS published on the card ->
+        # ACEF-086. Pre-fix (42873f56) the single-segment filter SKIPS this 3-segment
+        # pointer entirely -> false-NEGATIVE (no ACEF-086). The projection map fires it.
+        report = self._report_with_card_source_disposition(
+            pointer="/card_source/severity_vector", disposition="regulator-only"
+        )
+        card = _published_card({"severity_vector": self._SEV_VECTOR})
+        diags = ir.check_publishability([card, report], source_backed=True)
+        assert "ACEF-086" in _codes(diags)
+
+    def test_card_source_severity_vector_omitted_present_raises_086(self) -> None:
+        report = self._report_with_card_source_disposition(
+            pointer="/card_source/severity_vector", disposition="omitted"
+        )
+        card = _published_card({"severity_vector": self._SEV_VECTOR})
+        diags = ir.check_publishability([card, report], source_backed=True)
+        assert "ACEF-086" in _codes(diags)
+
+    def test_card_source_severity_vector_regulator_only_absent_passes(self) -> None:
+        # Disposition HONORED: regulator-only and severity_vector NOT on the card.
+        report = self._report_with_card_source_disposition(
+            pointer="/card_source/severity_vector", disposition="regulator-only"
+        )
+        card = _published_card({})  # no severity_vector projected
+        diags = ir.check_publishability([card, report], source_backed=True)
+        assert "ACEF-086" not in _codes(diags)
+
+    def test_card_source_coordinated_disclosure_regulator_only_present_raises_086(self) -> None:
+        # /card_source/coordinated_disclosure -> card root coordinated_disclosure.
+        report = self._report_with_card_source_disposition(
+            pointer="/card_source/coordinated_disclosure", disposition="regulator-only"
+        )
+        # _published_card always carries coordinated_disclosure (public boundary) ->
+        # disposing it regulator-only while it is published is DISHONORED.
+        card = _published_card({})
+        diags = ir.check_publishability([card, report], source_backed=True)
+        assert "ACEF-086" in _codes(diags)
+
+    def test_card_source_harm_core_regulator_only_present_raises_086(self) -> None:
+        # /card_source/harm_core -> card root harm_core (always present on the card).
+        report = self._report_with_card_source_disposition(pointer="/card_source/harm_core", disposition="omitted")
+        card = _published_card({})
+        diags = ir.check_publishability([card, report], source_backed=True)
+        assert "ACEF-086" in _codes(diags)
+
+    def test_card_source_public_incident_id_regulator_only_present_raises_086(self) -> None:
+        # /card_source/public_incident_id -> card root public_incident_id (always present).
+        report = self._report_with_card_source_disposition(
+            pointer="/card_source/public_incident_id", disposition="regulator-only"
+        )
+        card = _published_card({})
+        diags = ir.check_publishability([card, report], source_backed=True)
+        assert "ACEF-086" in _codes(diags)
+
+    def test_card_source_id_grade_regulator_only_present_raises_086(self) -> None:
+        # /card_source/id_grade -> card root id_grade (always present).
+        report = self._report_with_card_source_disposition(
+            pointer="/card_source/id_grade", disposition="regulator-only"
+        )
+        card = _published_card({})
+        diags = ir.check_publishability([card, report], source_backed=True)
+        assert "ACEF-086" in _codes(diags)
+
+    def test_card_source_non_projecting_field_disposition_no_086(self) -> None:
+        # A card_source field WITHOUT a card-root counterpart (id_state) is NOT in
+        # the projection map, so disposing it regulator-only is not a card-leak
+        # check at all -> no ACEF-086 from the disposition-honored rule. (The card
+        # carries no 'id_state' root field; id_state lives only on card_source.)
+        report = self._report_with_card_source_disposition(
+            pointer="/card_source/id_state", disposition="regulator-only"
+        )
+        card = _published_card({})
+        diags = ir.check_publishability([card, report], source_backed=True)
+        assert "ACEF-086" not in _codes(diags)
+
+    def test_root_severity_regulator_only_present_still_raises_086(self) -> None:
+        # RETAIN INCVAL-003: the incident_report-ROOT /severity projection ->
+        # card root severity. Disposed regulator-only + severity on card -> ACEF-086.
+        report = self._report_with_severity_disposition("regulator-only")
+        card = _published_card({"severity": "major"})
+        diags = ir.check_publishability([card, report], source_backed=True)
+        assert "ACEF-086" in _codes(diags)
+
+    def test_arbitrary_nested_card_source_pointer_no_086(self) -> None:
+        # RETAIN the 42873f56 false-positive fix: a DEEPER nested pointer under
+        # card_source (/card_source/coordinated_disclosure/foo) is NOT in the
+        # projection map -> ignored, no ACEF-086, even with an unrelated card root.
+        report = self._report_with_card_source_disposition(
+            pointer="/card_source/coordinated_disclosure/foo",
+            disposition="regulator-only",
+            cs_extra={"coordinated_disclosure": {"status": "public", "foo": "internal"}},
+        )
+        card = _published_card({})
+        diags = ir.check_publishability([card, report], source_backed=True)
+        assert "ACEF-086" not in _codes(diags), (
+            "a deeper-nested /card_source/<field>/<sub> pointer is not a projection-map "
+            "entry and must not false-positive ACEF-086"
+        )
+
+    def test_unrelated_root_pointer_details_severity_no_086(self) -> None:
+        # RETAIN: an unrelated root-nested pointer /details/severity is not in the
+        # projection map (its only single root segment is 'details', not a card-root
+        # field) -> no ACEF-086 even with an unrelated card-root severity.
+        report = self._report_with_nested_pointer_disposition(
+            root_key="details", leaf="severity", disposition="regulator-only"
+        )
+        card = _published_card({"severity": "major"})
+        diags = ir.check_publishability([card, report], source_backed=True)
+        assert "ACEF-086" not in _codes(diags)
+
 
 # ---------------------------------------------------------------------------
 # ACEF-081 — incident profile declared but crosswalk missing a mandatory member

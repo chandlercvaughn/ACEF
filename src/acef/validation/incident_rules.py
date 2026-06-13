@@ -1309,6 +1309,82 @@ def _resolve_json_pointer(doc: dict[str, Any], pointer: str) -> tuple[bool, Any]
     return True, current
 
 
+# ---------------------------------------------------------------------------
+# §5.11 source-to-card projection map (disposition-honored check, ACEF-086)
+# ---------------------------------------------------------------------------
+
+
+def _v1_1_schema_path(filename: str) -> Path:
+    """Resolve a v1.1 schema file path (editable checkout + wheel install).
+
+    Mirrors ``_harm_core_taxonomy_path``'s ancestor-walk so loading is robust to
+    both layouts. The schema is read-only here (frozen: never written)."""
+    here = Path(__file__).resolve()
+    for ancestor in here.parents:
+        candidate = ancestor / "acef-conventions" / "v1.1" / filename
+        if candidate.is_file():
+            return candidate
+    return Path("acef-conventions/v1.1") / filename
+
+
+@lru_cache(maxsize=8)
+def _load_v1_1_schema(filename: str) -> dict[str, Any]:
+    """Load a v1.1 schema JSON once per process (defensive: {} on error)."""
+    try:
+        data = json.loads(_v1_1_schema_path(filename).read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError, OSError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+@lru_cache(maxsize=1)
+def _source_to_card_projection_map() -> dict[str, str]:
+    """The EXPLICIT, auditable §5.11 source-to-card projection map.
+
+    Maps each publishability_map source JSON Pointer that PROJECTS to a public
+    ``incident_card`` ROOT field onto that card-root field name. The
+    disposition-honored check (ACEF-086) uses ONLY this map: a pointer that is a
+    KEY here and is disposed ``omitted``/``regulator-only`` MUST NOT appear as the
+    mapped card-root field on the public card. Pointers NOT in this map (arbitrary
+    or deeper-nested) are IGNORED — no leaf-name inference, no false-positive.
+
+    Derivation (schema-read, not hardcoded):
+
+    - ``/card_source/<field>`` -> card root ``<field>`` for every ``card_source``
+      overlay property whose name is ALSO an ``incident_card`` root property. This
+      yields exactly the projection inputs (severity_vector, harm_core,
+      coordinated_disclosure, public_incident_id, id_grade); card_source-only
+      fields (id_state, disputed, eu_ai_act_facts, publishability_map) have no
+      card-root counterpart and are excluded.
+    - PLUS the one incident_report-ROOT overlapping field ``/severity`` -> card
+      root ``severity`` (the original INCVAL-003 surface: ``severity`` is the only
+      property shared between the frozen incident_report payload root and the
+      incident_card root). ``severity`` is NOT a card_source property, so it is
+      added explicitly rather than derived from the card_source overlay.
+
+    Both schemas are read read-only from ``acef-conventions/v1.1/``; the map is
+    cached for the process. If a schema cannot be read the map degrades to just
+    the explicit ``/severity`` edge (the surface the original finding established),
+    so the check never silently disappears.
+    """
+    card_schema = _load_v1_1_schema("incident_card.schema.json")
+    source_schema = _load_v1_1_schema("incident_report.card_source.schema.json")
+
+    card_root_props = _as_dict(card_schema.get("properties"))
+    card_source_props = _as_dict(source_schema.get("properties"))
+
+    projection: dict[str, str] = {}
+    for field in card_source_props:
+        if isinstance(field, str) and field in card_root_props:
+            projection[f"/card_source/{field}"] = field
+
+    # The incident_report-ROOT overlapping field (not a card_source property).
+    if "severity" in card_root_props or not card_root_props:
+        projection["/severity"] = "severity"
+
+    return projection
+
+
 def _is_public_disclosure(card_payload: dict[str, Any], source_payload: dict[str, Any] | None) -> bool:
     """True iff the §5.11 publishability gate applies: the card is at the public
     disclosure boundary (``coordinated_disclosure.status: public`` OR the
@@ -1450,12 +1526,8 @@ def check_publishability(
 
         # Disposition-honored check (INCVAL-003): §5.11 source-backed mode MUST
         # verify the publishability_map dispositions were HONORED in the public
-        # projection. For a field disposed 'omitted' or 'regulator-only', the source
-        # field MUST NOT appear on the public incident_card. The card schema's
-        # additionalProperties:false closes most leak surfaces, but 'severity' is
-        # the one field shared between the incident_report root and the
-        # incident_card root — a producer declaring /severity 'regulator-only' yet
-        # copying severity onto the public card dishonors the disposition.
+        # projection. For a source field disposed 'omitted' or 'regulator-only',
+        # the field it PROJECTS to MUST NOT appear on the public incident_card.
         #
         # This runs ONLY when ``rec`` is a genuine ``incident_card`` (the PUBLIC
         # projection, distinct from its source report). It is NOT run on the source
@@ -1464,43 +1536,40 @@ def check_publishability(
         # source) — comparing the source against its own map would be a guaranteed
         # false-positive. ``card_payload`` here is the incident_card's payload.
         #
-        # SCOPE — single-segment ROOT pointers ONLY. A pointer that names a card-root
-        # field is exactly one root segment: ``/<name>``. We MUST NOT infer a card
-        # root field from an arbitrary pointer's LEAF token: a nested source pointer
-        # like ``/details/severity`` or ``/internal/public_incident_id`` does NOT map
-        # to a card-root field, so collapsing it to its leaf (``severity`` /
-        # ``public_incident_id``) and matching that against an unrelated card-root
-        # field is a false-positive (spurious ACEF-086 against a conformant bundle).
-        # The §5.11 finding establishes ``severity`` is the ONLY property shared
-        # between the incident_report payload root and the incident_card root, so the
-        # single-root-segment rule covers the entire exploitable leak surface.
+        # SCOPE — EXPLICIT source-to-card projection map, never leaf-name inference.
+        # ``_source_to_card_projection_map()`` derives, from the v1.1 schemas, the
+        # set of publishability_map pointers that ACTUALLY project to a card ROOT
+        # field: ``/card_source/<field>`` for each card_source overlay field that is
+        # also an incident_card root property (severity_vector, harm_core,
+        # coordinated_disclosure, public_incident_id, id_grade) plus the one
+        # incident_report-ROOT overlapping field ``/severity`` -> card root
+        # ``severity``. A pointer NOT in this map (an arbitrary or deeper-nested
+        # pointer such as ``/details/severity`` or ``/card_source/coordinated_disclosure/foo``)
+        # does NOT name a card-root field, so it is IGNORED — no collapse to a leaf
+        # token, no spurious ACEF-086 against a conformant bundle. This both catches
+        # the real ``/card_source/<field>`` projection leaks AND keeps the
+        # nested-pointer false-positive fix.
         if rtype == "incident_card":
+            projection_map = _source_to_card_projection_map()
             for pointer, disposition in pub_map.items():
                 if not isinstance(pointer, str) or disposition not in ("omitted", "regulator-only"):
                     continue
-                # A card-root field is named by EXACTLY one root segment: "/<name>".
-                # split("/") on "/severity" -> ["", "severity"]; reject anything
-                # that is not a two-element split with a non-empty leading "" (i.e.
-                # nested "/a/b" -> 3 segments, "severity" -> no leading "/").
-                segments = pointer.split("/")
-                if len(segments) != 2 or segments[0] != "":
-                    continue
-                field_name = segments[1].replace("~1", "/").replace("~0", "~")
-                if not field_name:
-                    continue
-                if field_name in card_payload:
+                card_field = projection_map.get(pointer)
+                if card_field is None:
+                    continue  # not a source-to-card projection pointer -> ignore
+                if card_field in card_payload:
                     diags.append(
                         ValidationDiagnostic(
                             "ACEF-086",
                             (
                                 f"Record {_record_id_of(rec)!r}: source field {pointer!r} is disposed "
-                                f"{disposition!r} in card_source.publishability_map but the field "
-                                f"{field_name!r} IS present on the public incident_card — the disposition "
+                                f"{disposition!r} in card_source.publishability_map but the projected field "
+                                f"{card_field!r} IS present on the public incident_card — the disposition "
                                 f"was NOT honored (§5.11). A {disposition!r} field MUST NOT appear in the "
-                                f"public projection. Remove {field_name!r} from the public card, or change "
+                                f"public projection. Remove {card_field!r} from the public card, or change "
                                 f"its disposition to 'public'/'anonymized'/'hash-committed'."
                             ),
-                            path=f"/{_record_id_of(rec)}/{field_name}",
+                            path=f"/{_record_id_of(rec)}/{card_field}",
                         )
                     )
 
