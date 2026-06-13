@@ -559,6 +559,18 @@ def _run_boundary_bundle(bundle_dir: Path, *, with_freddy: bool) -> object:
     )
 
 
+def _code_paths(diagnostics: list[dict]) -> list[tuple[str | None, str | None]]:
+    """Project structural_errors to a sorted list of (code, path) tuples.
+
+    Unlike ``codes`` (which extracts only ``.code``), this pins BOTH the
+    diagnostic code AND its JSON-pointer path, so the boundary fixture's
+    structural baseline can be asserted by EXACT set/sorted-list equality
+    rather than a denylist of a hand-picked subset of codes. ``path`` is
+    absent from a diagnostic dict when unset, so ``.get("path")`` yields
+    ``None`` (e.g. the path-less ACEF-077 namespace lint)."""
+    return sorted((d.get("code"), d.get("path")) for d in diagnostics if isinstance(d, dict))
+
+
 def test_namespace_lint_does_not_alter_conformance_outcomes(tmp_path: Path) -> None:
     """The x-freddy namespace lint contributes ONLY to structural_errors and
     NEVER to results[]/provision_summary[] — proven on a REAL profile that
@@ -606,21 +618,34 @@ def test_namespace_lint_does_not_alter_conformance_outcomes(tmp_path: Path) -> N
     assert "ACEF-077" not in codes(no_freddy.structural_errors), "no-freddy run must not carry ACEF-077"
     assert "ACEF-077" in codes(with_freddy.structural_errors), "x-freddy record must add ACEF-077 to structural_errors"
 
-    # (c-clean) The fixture is a SCHEMA-CLEAN bundle: its only tolerated
-    #     structural baseline is the single exporter-intrinsic ACEF-002 on
-    #     the package-creation audit-trail entry's empty actor_ref. NO
-    #     unrelated structural diagnostics (ACEF-004 payload-schema /
-    #     ACEF-025 record_files type-mismatch / ACEF-014 integrity) may be
-    #     present — otherwise the boundary is not cleanly proven (the lint
-    #     would no longer be the SOLE structural effect of the x-freddy
-    #     record). roborev cross-record-authority Low.
-    for _code in ("ACEF-004", "ACEF-014", "ACEF-025"):
-        assert _code not in codes(no_freddy.structural_errors), (
-            f"clean fixture must not carry spurious {_code}: {no_freddy.structural_errors!r}"
-        )
-    # The ONLY structural delta WITH the x-freddy record is ACEF-077.
-    assert sorted(codes(with_freddy.structural_errors)) == sorted([*codes(no_freddy.structural_errors), "ACEF-077"]), (
-        "the SOLE structural delta of the x-freddy record must be ACEF-077 — "
+    # (c-clean) The fixture is a SCHEMA-CLEAN bundle: assert its FULL
+    #     structural baseline EXACTLY — by (code, path) — rather than denying a
+    #     hand-picked subset of codes. The denylist form (excluding only
+    #     ACEF-004/014/025) was a Low finding: any OTHER shared structural
+    #     diagnostic (ACEF-020/021/050/080/…) on BOTH runs would slip through,
+    #     and the bare-code delta check could not tell a spurious shared code
+    #     from the tolerated baseline. Pinning the EXACT (code, path) set
+    #     proves the clean bundle carries precisely ONE exporter-intrinsic
+    #     structural diagnostic and nothing else, so any new spurious
+    #     structural error fails this test. roborev cross-record-authority Low.
+    #
+    #     The single tolerated baseline entry is the exporter's
+    #     package-creation audit-trail entry, whose absent actor_ref serializes
+    #     to an empty string and fails the actor-URN pattern → exactly one
+    #     ACEF-002 at ``/audit_trail/0/actor_ref``. This is exporter-intrinsic
+    #     (identical across both runs) and is NOT the x-freddy lint.
+    exporter_intrinsic_baseline = [("ACEF-002", "/audit_trail/0/actor_ref")]
+    assert _code_paths(no_freddy.structural_errors) == exporter_intrinsic_baseline, (
+        "clean fixture structural baseline must be EXACTLY the one exporter-intrinsic "
+        f"ACEF-002 at /audit_trail/0/actor_ref — got {no_freddy.structural_errors!r}"
+    )
+    # The ONLY structural delta WITH the x-freddy record is the single ACEF-077
+    # namespace lint (which carries no path). Assert exact (code, path) set
+    # equality: with-freddy == baseline + the one ACEF-077, nothing else.
+    expected_with_freddy = sorted([*exporter_intrinsic_baseline, ("ACEF-077", None)])
+    assert _code_paths(with_freddy.structural_errors) == expected_with_freddy, (
+        "the SOLE structural delta of the x-freddy record must be the single "
+        "ACEF-077 namespace lint (with no path) — "
         f"no-freddy={no_freddy.structural_errors!r} with-freddy={with_freddy.structural_errors!r}"
     )
 
