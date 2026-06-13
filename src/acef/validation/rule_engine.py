@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from acef.errors import ACEFEvaluationError
 from acef.models.assessment import RuleResult
 from acef.models.enums import RuleOutcome, RuleSeverity
 from acef.models.records import RecordEnvelope
@@ -285,7 +286,26 @@ def _evaluate_single_rule(
             subject_scope=[subject_id] if subject_id else [],
         )
 
+    except ACEFEvaluationError as e:
+        # A structured evaluation error (ACEF-043 invalid pointer, ACEF-045
+        # invalid regex / malformed date param, ACEF-050 malformed JSONL).
+        # Preserve the machine-readable taxonomy code on the RuleResult so a
+        # downstream consumer can programmatically distinguish the failure mode
+        # rather than parsing free text (validation-engine-dsl-4).
+        return RuleResult(
+            rule_id=rule.rule_id,
+            provision_id=provision_id,
+            profile_id=profile_id,
+            rule_severity=severity,
+            outcome=RuleOutcome.ERROR,
+            message=f"Rule evaluation error: {e}",
+            error_code=e.code,
+            subject_scope=[subject_id] if subject_id else [],
+        )
     except Exception as e:
+        # Genuinely unexpected internal failure — no ACEF taxonomy code applies,
+        # so error_code stays None to distinguish it from a structured
+        # evaluation error above.
         return RuleResult(
             rule_id=rule.rule_id,
             provision_id=provision_id,

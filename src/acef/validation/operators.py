@@ -73,12 +73,13 @@ def _validate_ecma262_compatible(pattern: str) -> None:
     """Reject patterns that contain Python-specific (non-ECMA-262) constructs.
 
     Spec §3.5 requires patterns to be valid ECMA-262 RegExp; this is a
-    static pre-validator. Patterns that pass this check still execute on
-    Python's ``re`` engine, so behaviors may still diverge at the
-    character-class level (e.g., ``\\d`` matches Unicode digits in Python
-    by default, vs ASCII-only in ECMA-262 without the ``u`` flag).
-    Documented as a known limitation; a future v0.5 may embed a JS engine
-    or a JS-to-Python transpiler for stricter conformance.
+    static pre-validator for syntax constructs that have no ECMA-262
+    equivalent (named-group spelling, inline flags, possessive quantifiers,
+    ``\\A``/``\\Z`` anchors). Character-class SEMANTICS are aligned separately:
+    :func:`_safe_regex_search` compiles with :data:`re.ASCII` so ``\\d``/``\\w``/
+    ``\\s``/``\\b`` follow ASCII semantics matching default (no ``u`` flag)
+    ECMA-262, rather than Python's Unicode-by-default classes
+    (validation-engine-dsl-5).
     """
     for compiled_check, message in _NON_ECMA262_CONSTRUCTS:
         if compiled_check.search(pattern):
@@ -97,6 +98,11 @@ def _safe_regex_search(pattern: str, text: str) -> bool:
     3. Applying a SIGALRM-based timeout on Unix systems (main thread only)
     4. Pre-validating against known Python-only (non-ECMA-262) constructs
        per :func:`_validate_ecma262_compatible`
+
+    The pattern is compiled with :data:`re.ASCII` so the ``\\d``/``\\w``/``\\s``/
+    ``\\b`` character classes follow ASCII semantics, matching default (no ``u``
+    flag) ECMA-262 — Python's ``re`` matches Unicode by default, which would let
+    two conformant validators disagree on the same bundle (validation-engine-dsl-5).
 
     Args:
         pattern: ECMA-262 regex pattern from DSL rule.
@@ -131,7 +137,7 @@ def _safe_regex_search(pattern: str, text: str) -> bool:
         old_handler = signal.signal(signal.SIGALRM, _regex_timeout_handler)
         signal.alarm(_REGEX_TIMEOUT_SECONDS)
         try:
-            result = re.search(pattern, text) is not None
+            result = re.search(pattern, text, re.ASCII) is not None
         except _RegexTimeoutError:
             raise ACEFEvaluationError(
                 f"Regex evaluation timed out after {_REGEX_TIMEOUT_SECONDS}s "
@@ -144,7 +150,7 @@ def _safe_regex_search(pattern: str, text: str) -> bool:
         return result
     else:
         # On non-Unix systems or non-main threads, rely on pattern and input length limits only.
-        return re.search(pattern, text) is not None
+        return re.search(pattern, text, re.ASCII) is not None
 
 
 def _validate_pointer_syntax(pointer: str) -> None:
@@ -289,6 +295,11 @@ def op_field_present(
     """
     record_type = params["record_type"]
     field = params["field"]
+    # Validate the pointer ONCE before the empty-set short-circuit so a
+    # malformed ``field`` raises ACEF-043 regardless of how many records match
+    # (validation-engine-dsl-3/-7). ACEF-043 is a property of the rule's field
+    # parameter, not contingent on data presence (spec §3.6 line 1265).
+    _validate_pointer_syntax(field)
     matching = _filter_by_type(records, record_type)
 
     if not matching:
@@ -319,6 +330,9 @@ def op_field_value(
     field = params["field"]
     op = params["op"]
     value = params["value"]
+    # Validate the pointer ONCE before the empty-set short-circuit
+    # (validation-engine-dsl-3/-7); ACEF-043 is not contingent on data presence.
+    _validate_pointer_syntax(field)
     matching = _filter_by_type(records, record_type)
 
     if not matching:
@@ -499,6 +513,10 @@ def op_exists_where(
     value = params["value"]
     min_count = params.get("min_count", 1)
 
+    # Validate the pointer ONCE up front so a malformed ``field`` raises
+    # ACEF-043 even when zero records match and the per-record loop below never
+    # runs (validation-engine-dsl-3/-7).
+    _validate_pointer_syntax(field)
     matching = _filter_by_type(records, record_type)
 
     evidence_refs: list[str] = []
@@ -551,7 +569,21 @@ def op_bundle_signed(
 
     effective_count = signature_count
     if required_alg and signature_algorithms:
-        effective_count = sum(1 for a in signature_algorithms if a in required_alg)
+        # Normalize a bare-string ``required_alg`` to a single-element list so
+        # membership is EXACT, not substring. A template author who writes
+        # ``required_alg: "ES256"`` (string) instead of ``["ES256"]`` would
+        # otherwise turn ``a in required_alg`` into a substring test, wrongly
+        # crediting e.g. "S256" or "S2" (validation-engine-dsl-6).
+        if isinstance(required_alg, str):
+            required_set = {required_alg}
+        elif isinstance(required_alg, list):
+            required_set = set(required_alg)
+        else:
+            raise ACEFEvaluationError(
+                f"bundle_signed required_alg must be a string or list of strings, got {type(required_alg).__name__}",
+                code="ACEF-045",
+            )
+        effective_count = sum(1 for a in signature_algorithms if a in required_set)
 
     return effective_count >= min_signatures, []
 

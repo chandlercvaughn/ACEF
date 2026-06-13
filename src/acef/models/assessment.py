@@ -38,6 +38,14 @@ class RuleResult(ACEFBaseModel):
     message: str | None = None
     evidence_refs: list[str] = Field(default_factory=list)
     subject_scope: list[str] = Field(default_factory=list)
+    # Machine-readable ACEF taxonomy code for an ERROR-outcome result raised by
+    # an operator (e.g. ACEF-043 invalid JSON Pointer, ACEF-045 invalid regex /
+    # malformed date param, ACEF-050 malformed JSONL). ``None`` for passed,
+    # failed, skipped results and for genuinely unexpected internal failures, so
+    # consumers can distinguish a taxonomy code from an opaque crash
+    # (validation-engine-dsl-4). Optional + default None keeps this backward
+    # compatible with existing assessment payloads.
+    error_code: str | None = None
 
 
 class ProvisionSummary(ACEFBaseModel):

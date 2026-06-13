@@ -259,7 +259,21 @@ def validate_against_schema(
     except ACEFSchemaError:
         return [ValidationError(f"Schema {schema_name} not found")]
 
-    validator = Draft202012Validator(schema, registry=build_schema_registry(version))
+    # Register the draft2020-12 FORMAT_CHECKER so ``"format": "date-time"`` /
+    # ``"format": "date"`` assertions FIRE (in jsonschema, ``format`` is
+    # annotation-only and does NOT assert without a checker). This enforces the
+    # ISO 8601 MUST on every timestamp/date field in the envelope/record hash
+    # domain (metadata.timestamp, audit_trail[].timestamp,
+    # lifecycle_timeline.start_date/end_date, record-envelope.timestamp) so a
+    # non-ISO value surfaces as ACEF-002 (manifest) / ACEF-004 (record payload)
+    # rather than passing silently and corrupting the deterministic
+    # timestamp-ascending JSONL ordering (envelope-manifest-1). ``date-time``
+    # checking relies on the installed ``rfc3339-validator`` dependency.
+    validator = Draft202012Validator(
+        schema,
+        registry=build_schema_registry(version),
+        format_checker=Draft202012Validator.FORMAT_CHECKER,
+    )
     return list(validator.iter_errors(data))
 
 
