@@ -516,7 +516,6 @@ _ACEF_STIX_DROPLIST: dict[str, str | None] = {
 }
 
 
-@lru_cache(maxsize=1)
 def acef_stix_droplist() -> dict[str, str | None]:
     """Return the documented ACEF -> STIX 2.1 emit-direction drop-list (RFC §5.8).
 
@@ -536,8 +535,13 @@ def acef_stix_droplist() -> dict[str, str | None]:
     have a STIX home so a producer knows where each maps.
 
     Returns:
-        A COPY of the drop-list mapping (cached source; the copy keeps callers
-        from mutating the shared constant).
+        A FRESH, caller-owned ``dict`` built anew on every call. Callers may
+        mutate the returned mapping freely without affecting the shared module
+        constant (:data:`_ACEF_STIX_DROPLIST`) or any other call's result. The
+        function is intentionally NOT memoized: returning a cached object would
+        share one mutable dict across all callers, so a single mutation would
+        leak process-wide. The values are immutable scalars (``str``/``None``),
+        so a shallow per-call rebuild is sufficient.
     """
     from acef.validation.incident_rules import _derivation_rows_by_class
 

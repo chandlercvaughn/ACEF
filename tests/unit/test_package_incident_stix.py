@@ -252,3 +252,27 @@ class TestStixDropList:
                 assert re.match(r"^[a-z][a-z0-9-]{2,}$", value), (
                     f"STIX SDO type token {value!r} is not a lowercase STIX type token"
                 )
+
+    def test_droplist_returns_fresh_caller_owned_dict_each_call(self) -> None:
+        # The public contract is "returns a fresh, caller-owned dict": a caller may
+        # mutate the returned mapping freely and a SUBSEQUENT call must be pristine.
+        # (Regression: the function was lru_cache'd and returned the cached dict, so
+        # the first returned object became the shared cache and caller mutation
+        # corrupted every later call process-wide — the docstring's "copy" was false.)
+        first = acef_stix_droplist()
+        second = acef_stix_droplist()
+        # Distinct objects each call (no shared cached instance).
+        assert first is not second
+        baseline = dict(acef_stix_droplist())
+
+        # A canonical documented key the caller can delete to prove deletions don't leak.
+        assert "public_incident_id" in first
+        # Mutate the first returned dict: add a poison key and delete a real one.
+        first["__poison__"] = "leaked"
+        del first["public_incident_id"]
+
+        # A fresh call is UNAFFECTED by the prior caller's mutation.
+        third = acef_stix_droplist()
+        assert "__poison__" not in third, "caller mutation leaked into a later call"
+        assert "public_incident_id" in third, "caller deletion leaked into a later call"
+        assert third == baseline, "each call must return a pristine drop-list"
