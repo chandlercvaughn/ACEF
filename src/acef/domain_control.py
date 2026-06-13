@@ -224,6 +224,16 @@ class DomainControlResult:
     ``verified`` and ``unverified`` it is ``None`` — ``unverified`` is an explicit
     non-result, never an error. ``method`` records which proof channel produced the
     verdict (``"dns-01"`` / ``"well-known"`` / ``""`` when no proof was found).
+
+    ``checked_at`` is the instant the check ran; ``valid_until`` is
+    ``checked_at + freshness`` — the instant this verdict's cache-TTL window
+    EXPIRES, recorded so a caller that persists/caches the result has an
+    unambiguous expiry (VAL-FIX-DOMCTL-001). The module only RECORDS expiry; it
+    does NOT enforce it: freshness ENFORCEMENT is the caller's responsibility in
+    v1.1 (cache-TTL is profile-pinnable / non-normative in v1.1 — RFC-0002 §5.3
+    domain-proof underspec list). ``valid_until`` is ``None`` when no
+    ``checked_at`` is available (e.g. a bare result constructed without running a
+    check) — never a synthesized wall-clock value.
     """
 
     verdict: DomainControlVerdict
@@ -232,6 +242,7 @@ class DomainControlResult:
     domain: str
     method: str = ""
     checked_at: datetime | None = None
+    valid_until: datetime | None = None
     diagnostic: ValidationDiagnostic | None = None
     details: dict[str, Any] = field(default_factory=dict)
 
@@ -604,7 +615,7 @@ def _eval_http_channel(
     return _ChannelOutcome.PRESENT_INVALID
 
 
-def _combine(outcomes: list[_ChannelOutcome]) -> tuple[DomainControlVerdict, str]:
+def _combine(outcomes: list[_ChannelOutcome]) -> DomainControlVerdict:
     """Combine per-channel outcomes into a final verdict (§5.3 invariant).
 
     Precedence:
@@ -614,17 +625,21 @@ def _combine(outcomes: list[_ChannelOutcome]) -> tuple[DomainControlVerdict, str
     3. Else → ``unverified`` (total absence and/or cannot-complete — an explicit
        non-result, never an error).
 
-    Returns the verdict and the winning channel ``method`` tag (or ``""``).
+    Returns ONLY the verdict. The winning channel ``method`` tag is resolved by the
+    caller from the per-channel outcomes (the verdict alone does not name which
+    channel produced it). This function used to return a ``(verdict, tag)`` tuple
+    whose tag was always ``""`` — a dead, misleading second element the caller
+    discarded; it has been dropped (VAL-FIX-DOMCTL-002).
     """
     # 1. A current, valid proof on ANY channel.
     if _ChannelOutcome.MATCH in outcomes:
-        return DomainControlVerdict.VERIFIED, ""  # method tag set by caller
+        return DomainControlVerdict.VERIFIED
     # 2. A presented-but-invalid proof on ANY channel → reject (never masked by an
     #    absent/cannot-complete sibling channel; presence-but-invalid is positive).
     if _ChannelOutcome.PRESENT_INVALID in outcomes:
-        return DomainControlVerdict.REJECT, ""
+        return DomainControlVerdict.REJECT
     # 3. Total absence and/or cannot-complete → unverified.
-    return DomainControlVerdict.UNVERIFIED, ""
+    return DomainControlVerdict.UNVERIFIED
 
 
 # ---------------------------------------------------------------------------
@@ -668,16 +683,28 @@ def verify_domain_control(
             (profile-pinnable; default :func:`assigner_to_registrable_domain`).
         now: the check-time instant (injectable clock). Defaults to ``datetime.now(UTC)``
             ONLY when omitted; tests should pass an explicit ``now`` for determinism.
-        freshness: the cache-TTL window a ``verified`` verdict is valid for. Recorded
-            on the result for the caller; the proof itself is observed live, so a
-            successful observation is fresh by construction at ``now``.
+        freshness: the cache-TTL window a ``verified`` verdict is valid for. The
+            proof itself is observed live, so a successful observation is fresh by
+            construction at ``now``. ``freshness`` is RECORDED on the result — both
+            as ``details['freshness_seconds']`` and as the explicit expiry instant
+            ``DomainControlResult.valid_until = checked_at + freshness`` — but it
+            does NOT gate the verdict. Freshness ENFORCEMENT (refusing to reuse a
+            persisted verdict after ``valid_until``) is the CALLER's responsibility
+            in v1.1: cache-TTL is profile-pinnable / non-normative in v1.1 (RFC-0002
+            §5.3 domain-proof underspec list), so this module records expiry rather
+            than enforcing it.
 
     Returns:
         A :class:`DomainControlResult`. ``diagnostic`` is an ACEF-083
         ``class: online-conformance`` :class:`ValidationDiagnostic` ONLY for
-        ``reject``; ``None`` for ``verified`` / ``unverified``.
+        ``reject``; ``None`` for ``verified`` / ``unverified``. ``valid_until``
+        records ``checked_at + freshness`` so a persisted verdict's expiry is
+        unambiguous to a caching caller (the module records, never enforces).
     """
     checked_at = now if now is not None else datetime.now(UTC)
+    # The cache-TTL expiry instant, RECORDED for a caching caller (never enforced
+    # here — see the ``freshness`` arg docs / VAL-FIX-DOMCTL-001).
+    valid_until = checked_at + freshness
     dns = dns_resolver if dns_resolver is not None else _default_dns_resolver
     http = http_fetcher if http_fetcher is not None else _default_http_fetcher
     mapper = label_to_domain if label_to_domain is not None else assigner_to_registrable_domain
@@ -694,6 +721,7 @@ def verify_domain_control(
             domain="",
             method="",
             checked_at=checked_at,
+            valid_until=valid_until,
             diagnostic=None,
             details={"reason": "public_incident_id does not parse — no online attribution attempted"},
         )
@@ -714,6 +742,7 @@ def verify_domain_control(
             domain=domain,
             method="",
             checked_at=checked_at,
+            valid_until=valid_until,
             diagnostic=None,
             details={"reason": "card_jwk is not a usable public JWK for RFC-7638 thumbprint binding"},
         )
@@ -721,7 +750,7 @@ def verify_domain_control(
     dns_outcome = _eval_dns_channel(dns, domain, expected)
     http_outcome = _eval_http_channel(http, domain, expected)
 
-    verdict, _ = _combine([dns_outcome, http_outcome])
+    verdict = _combine([dns_outcome, http_outcome])
 
     # Resolve the winning channel method tag for the result (DNS preferred when both
     # match; whichever produced the reject when rejecting).
@@ -750,6 +779,7 @@ def verify_domain_control(
         domain=domain,
         method=method,
         checked_at=checked_at,
+        valid_until=valid_until,
         diagnostic=diagnostic,
         details=details,
     )

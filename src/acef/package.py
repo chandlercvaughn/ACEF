@@ -559,6 +559,16 @@ if TYPE_CHECKING:  # pragma: no cover — type-only import to avoid a runtime co
 _ASSIGNER_LABEL_PATTERN = re.compile(r"^[A-Z0-9]{2,8}$")
 _PUBLIC_INCIDENT_ID_PATTERN = re.compile(r"^AIIC-([A-Z0-9]{2,8})-([0-9]{4})-[0-9A-HJKMNP-TV-Z]{26,}$")
 
+# RFC-0002 §5.11 whole-value hash commitments. The incident_card schema admits
+# commitment keys ONLY under the pattern ``^[a-z0-9_]+_commitment$`` with
+# ``additionalProperties: false``, so the COMMITTED FIELD NAME (the part before the
+# ``_commitment`` suffix the builder appends) MUST itself be ``[a-z0-9_]+``. The
+# builder validates each caller-supplied commitment field name against this grammar
+# up front (VAL-FIX-INCBUILD-001) and raises a clear ValueError naming the offending
+# key — it does NOT silently normalize, because the field name is the committed
+# identity (lowercasing ``rootCause`` would change WHICH field the commitment binds).
+_COMMITMENT_FIELD_NAME_PATTERN = re.compile(r"^[a-z0-9_]+$")
+
 # Crockford base32 alphabet (RFC-0002 §5.3 / Crockford spec): 0-9 then A-Z
 # EXCLUDING I, L, O, U (the ambiguous letters), giving 32 symbols. The suffix
 # encodes >=128 bits of CSPRNG entropy; 26 symbols carry 26 * 5 = 130 bits.
@@ -2797,6 +2807,8 @@ class Package:
         reporter_role: str | None = None,
         extra_card_source: dict[str, Any] | None = None,
         confidentiality: str | Confidentiality = Confidentiality.REGULATOR_ONLY,
+        redaction_policy: Any = None,
+        redaction_policy_version: str | None = None,
         entity_refs: dict[str, list[str]] | EntityRefs | None = None,
         obligation_role: str | ObligationRole | None = None,
         timestamp: str | None = None,
@@ -2822,9 +2834,40 @@ class Package:
           ``RESERVED``), sets ``core_version 1.1.0``, and declares the
           ``eu-ai-act-art73-2026`` profile.
 
-        The record is emitted ``regulator-only`` by default, so the package's
-        attached :class:`~acef.redaction.RedactionPolicy` (if any) auto-populates the
-        X1/X2 redaction envelope fields the v1.1 cross-record validator requires.
+        The record is emitted ``regulator-only`` by default (a source-backed report
+        carrying ``card_source`` is always EFFECTIVELY non-public — even an explicit
+        ``confidentiality=public`` is coerced to ``regulator-only`` so the private
+        ``eu_ai_act_facts`` block is never published). A non-public v1.1 record
+        requires the X1/X2 redaction envelope fields (``redaction_policy_version`` +
+        ``redaction_attestation_ref``) the cross-record validator enforces
+        (ACEF-074). To keep the documented ONE-call path self-contained
+        (VAL-DX-001 / VAL-FIX-INCBUILD-002), the X1/X2 fields are auto-populated
+        from, in priority order: (1) an explicit ``redaction_policy_version`` kwarg;
+        (2) an explicit ``redaction_policy`` kwarg; (3) a RedactionPolicy already
+        attached to the Package; (4) a sensible builder-supplied DEFAULT
+        RedactionPolicy. So a first-time ``Package(...).report_incident(...)`` with
+        NO pre-attached policy now emits a valid, signable bundle rather than raising
+        — without weakening ``record()``'s X1 enforcement for other callers.
+
+        Args:
+            redaction_policy: an optional :class:`~acef.redaction.RedactionPolicy`
+                used to auto-populate X1/X2 on the non-public record when the Package
+                has none attached. Mint a Core ``event_log`` redaction attestation
+                (X2) and supply the policy version (X1).
+            redaction_policy_version: an optional explicit X1 value. When supplied it
+                is written verbatim to the record's ``redaction_policy_version`` (the
+                caller then owns supplying X2 / pre-redaction, exactly as on
+                ``record()``).
+
+        Note:
+            ``awareness_date`` (and the derived Art.73 ``deadline``) is stored at
+            SECOND precision: a caller-supplied sub-second component is truncated when
+            the instant is re-emitted as ``YYYY-MM-DDTHH:MM:SSZ`` (the byte-stable
+            form the conformance vectors and the validator's parser use). This is
+            conformance-neutral — the validator reparses the truncated value and
+            recomputes the same deadline (no ACEF-084) — but downstream consumers that
+            need sub-second fidelity on awareness_date should know second precision is
+            what is persisted (VAL-FIX-INCBUILD-003).
 
         Raises:
             ValueError: if ``awareness_date`` is not a parseable ISO-8601 instant.
@@ -2943,12 +2986,41 @@ class Package:
         # the record is hashed/serialized; notification_timeline stays order-significant.
         self._sort_incident_arrays(payload)
 
+        # VAL-FIX-INCBUILD-002 — self-contained one-call path. A source-backed report
+        # is EFFECTIVELY non-public (``resolved_confidentiality`` above), so record()
+        # requires the X1/X2 redaction envelope fields. record() auto-populates X1
+        # (redaction_policy_version) and X2 (a minted event_log attestation) from the
+        # Package's attached RedactionPolicy — but a first-time caller has none. So,
+        # for the non-public path, ensure a policy is attached so record() can mint
+        # X2 (and supply X1 when no explicit version is given): the headline
+        # "one call -> valid signable bundle" must hold WITHOUT the caller pre-wiring
+        # a policy. Priority for the policy object: explicit ``redaction_policy``
+        # kwarg > already-attached package policy > a sensible builder DEFAULT. An
+        # explicit ``redaction_policy_version`` still wins for X1 (threaded to record()
+        # below); the attached policy is what mints X2. We never CLOBBER an
+        # already-attached policy (the pre-existing contract).
+        if resolved_confidentiality != Confidentiality.PUBLIC:
+            if redaction_policy is not None:
+                self._redaction_policy = redaction_policy
+            elif self._redaction_policy is None:
+                from acef.redaction import RedactionPolicy
+
+                self._redaction_policy = RedactionPolicy(
+                    version="1.0.0",
+                    description=(
+                        "Default regulator-only incident-report redaction policy "
+                        "auto-attached by Package.report_incident (VAL-FIX-INCBUILD-002) "
+                        "so the source-backed Art.73 one-call path is self-contained."
+                    ),
+                )
+
         return self.record(
             record_type="incident_report",
             payload=payload,
             entity_refs=entity_refs,
             confidentiality=confidentiality,
             obligation_role=obligation_role,
+            redaction_policy_version=redaction_policy_version,
             timestamp=timestamp,
             record_id=record_id,
         )
@@ -3017,8 +3089,23 @@ class Package:
         - emits ``id_grade: self-asserted``, sets ``core_version 1.1.0``, and declares
           the ``eu-ai-act-art73-2026`` profile.
 
+        Note:
+            ``awareness_date`` (and the derived Art.73 ``deadline``) is stored at
+            SECOND precision: a caller-supplied sub-second component is truncated
+            when the instant is re-emitted as ``YYYY-MM-DDTHH:MM:SSZ`` (the
+            byte-stable form the conformance vectors and the validator's parser use).
+            This is conformance-neutral — the validator reparses the truncated value
+            and recomputes the same deadline (no ACEF-084) — but downstream consumers
+            that need sub-second fidelity on awareness_date should be aware second
+            precision is what is persisted (VAL-FIX-INCBUILD-003).
+
         Raises:
-            ValueError: if ``awareness_date`` is not a parseable ISO-8601 instant.
+            ValueError: if ``awareness_date`` is not a parseable ISO-8601 instant, or
+                if a ``commitments`` field name does not match the grammar
+                ``[a-z0-9_]+`` (so the emitted ``<name>_commitment`` key satisfies the
+                incident_card schema's ``^[a-z0-9_]+_commitment$`` pattern;
+                VAL-FIX-INCBUILD-001). The field name is the committed identity and is
+                never normalized — it is rejected, not lowercased.
         """
         self._ensure_v1_1()
         self._declare_art73_profile()
@@ -3073,8 +3160,27 @@ class Package:
         if declared_publication_basis is not None:
             payload["declared_publication_basis"] = dict(declared_publication_basis)
         # §5.11 whole-value hash commitments — REUSE the RFC-8785 + SHA-256 primitive.
+        # The committed FIELD NAME is validated against the schema grammar
+        # ``[a-z0-9_]+`` BEFORE the ``_commitment`` suffix is appended, so an invalid
+        # key (e.g. ``rootCause`` / ``"Root Cause"``) is rejected at THIS call site
+        # with a clear ValueError naming the offending key — never emitted as a
+        # ``rootCause_commitment`` record that the incident_card schema's
+        # ``^[a-z0-9_]+_commitment$`` + ``additionalProperties:false`` would later
+        # reject as an opaque ACEF-004 at export/validation (VAL-FIX-INCBUILD-001).
+        # The name is NOT normalized: it is the committed identity, so lowercasing it
+        # would silently change WHICH field the commitment binds.
         if commitments:
             for field_name, value in commitments.items():
+                if not isinstance(field_name, str) or not _COMMITMENT_FIELD_NAME_PATTERN.match(field_name):
+                    raise ValueError(
+                        f"incident_card: commitment field name {field_name!r} is invalid — a "
+                        "commitment field name must match the grammar '[a-z0-9_]+' (lowercase "
+                        "letters, digits, and underscores only) so the emitted "
+                        f"'{field_name}_commitment' key satisfies the incident_card schema's "
+                        "'^[a-z0-9_]+_commitment$' pattern. Rename the field (e.g. 'rootCause' "
+                        "-> 'root_cause'); the name is the committed identity and is never "
+                        "normalized for you."
+                    )
                 payload[f"{field_name}_commitment"] = "sha256:" + sha256_hex(canonicalize(value))
 
         # §5.5 cross-database incident_dedupe_key. The subject-bearing key is
