@@ -1372,46 +1372,92 @@ def _record_confidentiality_of(rec: dict[str, Any]) -> str:
     return conf if isinstance(conf, str) and conf else "public"
 
 
-def check_dedupe_key_confidentiality(records: list[dict[str, Any]]) -> list[ValidationDiagnostic]:
-    """ACEF-086: the §5.5 ``incident_dedupe_key`` confidentiality MUST (resolves Q20).
+# §5.5 dedupe-field SHAPE patterns — MIRRORED from incident_card.schema.json
+# (#/properties/incident_dedupe_key.pattern and
+# #/properties/incident_dedupe_key_hmac.pattern). The v1.1 incident_report schema
+# has additionalProperties:true and does NOT define these two properties, so a
+# malformed dedupe value on an incident_report payload is NOT caught at the schema
+# phase — the rule enforces the shape for BOTH record types.
+_DEDUPE_KEY_SHAPE = re.compile(r"^sha256:[0-9a-f]{64}$")
+_DEDUPE_HMAC_SHAPE = re.compile(r"^hmac-sha256:[0-9a-f]{64}$")
 
-    The subject-bearing ``incident_dedupe_key`` MUST be emitted ONLY on a
-    PUBLISHED/public record; on ANY non-public record it MUST be OMITTED. Three
-    of the four dedupe inputs are low-entropy/enumerable, so a published unsalted
-    key over a non-public (often guessable) subject would be offline-enumerable —
-    a confidentiality leak. A non-public record (``confidentiality != public``)
-    that EMITS ``incident_dedupe_key`` is a forged emit-on-non-public and FAILS
-    validation with the reserved §5.11 publishability code ACEF-086 (NOT ACEF-022).
+
+def check_dedupe_key_confidentiality(records: list[dict[str, Any]]) -> list[ValidationDiagnostic]:
+    """ACEF-086: the §5.5 ``incident_dedupe_key`` confidentiality MUST + dedupe-field
+    SHAPE validation on BOTH incident record types (resolves Q20, Finding 3).
+
+    **Confidentiality (subject-bearing plaintext key).** The subject-bearing
+    ``incident_dedupe_key`` MUST be emitted ONLY on a PUBLISHED/public record; on
+    ANY non-public record it MUST be OMITTED. Three of the four dedupe inputs are
+    low-entropy/enumerable, so a published unsalted key over a non-public (often
+    guessable) subject would be offline-enumerable — a confidentiality leak. A
+    non-public record (``confidentiality != public``) that EMITS
+    ``incident_dedupe_key`` is a forged emit-on-non-public and FAILS validation
+    with the reserved §5.11 publishability code ACEF-086 (NOT ACEF-022). This
+    applies identically to an ``incident_report`` (which is non-public by nature):
+    the report's dedupe path is the pepper-keyed hmac, not the plaintext key.
 
     The keyed ``incident_dedupe_key_hmac`` variant is the redacted-subject dedupe
     path; because it is pepper-keyed (held by the §5.3 resolver) it is NOT
     enumerable and is therefore NOT subject to this public-only omit rule — a
     non-public record MAY carry it.
+
+    **Shape (both fields, both record types).** A PRESENT ``incident_dedupe_key``
+    MUST match ``^sha256:[0-9a-f]{64}$`` and a PRESENT ``incident_dedupe_key_hmac``
+    MUST match ``^hmac-sha256:[0-9a-f]{64}$`` (mirrored from
+    incident_card.schema.json). The ``incident_report`` schema's
+    ``additionalProperties:true`` does not constrain these properties, so a
+    malformed value on a report would otherwise pass unchecked; the rule enforces
+    the shape for either record type (malformed -> ACEF-086).
     """
     diags: list[ValidationDiagnostic] = []
     for _idx, rec in _records_iter(records):
         if _record_type_of(rec) not in ("incident_card", "incident_report"):
             continue
         payload = _payload_of(rec)
-        if "incident_dedupe_key" not in payload:
-            continue
+        rid = _record_id_of(rec)
         confidentiality = _record_confidentiality_of(rec)
-        if confidentiality == "public":
-            continue
-        diags.append(
-            ValidationDiagnostic(
-                "ACEF-086",
-                (
-                    f"Record {_record_id_of(rec)!r}: the subject-bearing incident_dedupe_key is "
-                    f"emitted on a NON-public record (confidentiality={confidentiality!r}), violating "
-                    f"the §5.5 confidentiality MUST. Three of the four dedupe inputs are low-entropy, "
-                    f"so a published unsalted key over a non-public subject is offline-enumerable. Omit "
-                    f"incident_dedupe_key on any non-public record; for redacted-subject dedupe emit the "
-                    f"pepper-keyed incident_dedupe_key_hmac instead, or publish the record."
-                ),
-                path=f"/{_record_id_of(rec)}/incident_dedupe_key",
+
+        # Confidentiality omit rule (subject-bearing plaintext key only).
+        if "incident_dedupe_key" in payload and confidentiality != "public":
+            diags.append(
+                ValidationDiagnostic(
+                    "ACEF-086",
+                    (
+                        f"Record {rid!r}: the subject-bearing incident_dedupe_key is "
+                        f"emitted on a NON-public record (confidentiality={confidentiality!r}), violating "
+                        f"the §5.5 confidentiality MUST. Three of the four dedupe inputs are low-entropy, "
+                        f"so a published unsalted key over a non-public subject is offline-enumerable. Omit "
+                        f"incident_dedupe_key on any non-public record; for redacted-subject dedupe emit the "
+                        f"pepper-keyed incident_dedupe_key_hmac instead, or publish the record."
+                    ),
+                    path=f"/{rid}/incident_dedupe_key",
+                )
             )
-        )
+
+        # Shape validation (both fields, both record types). A non-string or a
+        # pattern-mismatched value fails — the incident_report schema does not
+        # constrain these properties (additionalProperties: true).
+        for field, shape, sample in (
+            ("incident_dedupe_key", _DEDUPE_KEY_SHAPE, "sha256:<64 lowercase hex>"),
+            ("incident_dedupe_key_hmac", _DEDUPE_HMAC_SHAPE, "hmac-sha256:<64 lowercase hex>"),
+        ):
+            if field not in payload:
+                continue
+            value = payload[field]
+            if not (isinstance(value, str) and shape.match(value)):
+                diags.append(
+                    ValidationDiagnostic(
+                        "ACEF-086",
+                        (
+                            f"Record {rid!r}: {field} value {value!r} is malformed — it MUST match "
+                            f"{sample} (§5.5, mirrored from incident_card.schema.json). The "
+                            f"incident_report schema does not constrain this field, so the rule enforces "
+                            f"its shape; recompute the value or remove it."
+                        ),
+                        path=f"/{rid}/{field}",
+                    )
+                )
     return diags
 
 

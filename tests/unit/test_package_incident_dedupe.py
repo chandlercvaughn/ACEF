@@ -35,6 +35,8 @@ import hmac
 import re
 import unicodedata
 
+import pytest
+
 from acef.integrity import canonicalize
 from acef.models.enums import Confidentiality
 from acef.package import Package
@@ -55,6 +57,12 @@ _EU_FACTS = {
 }
 _SEV_VECTOR = "ACEF-SEV:1.0/HT:P/HG:H/RV:A/SC:U/BR:I"
 _PID = "AIIC-OPENAI-2026-0123456789ABCDEFGHJKMNPQRS"
+
+# Well-formed reserved-field values an attacker would try to inject (Finding 1).
+_GOOD_RESERVED = {
+    "incident_dedupe_key": "sha256:" + "a" * 64,
+    "incident_dedupe_key_hmac": "hmac-sha256:" + "b" * 64,
+}
 
 
 def _new_pkg() -> Package:
@@ -389,7 +397,10 @@ class TestHmacVariant:
         assert "incident_dedupe_key_hmac" not in env.payload
 
     def test_str_pepper_is_utf8_encoded(self) -> None:
-        # A str pepper is accepted (UTF-8 encoded) and matches the bytes form.
+        # A str pepper is accepted (UTF-8 encoded) and matches the bytes form. The
+        # pepper meets the §5.5 256-bit entropy floor (32 ASCII chars = 32 bytes).
+        pepper_str = "my-secret-resolver-pepper-32byte"  # exactly 32 bytes
+        assert len(pepper_str.encode("utf-8")) == 32
         pkg_s = _new_pkg()
         env_s = pkg_s.incident_card(
             public_incident_id=_PID,
@@ -401,10 +412,10 @@ class TestHmacVariant:
             subject_identity=("OpenAI", "GPT-X", "4.0"),
             occurrence_date="2026-07-15T00:00:00Z",
             confidentiality=Confidentiality.PUBLIC,
-            pepper="my-secret",
+            pepper=pepper_str,
         )
         expected = _expected_dedupe_hmac(
-            pepper=b"my-secret",
+            pepper=pepper_str.encode("utf-8"),
             value_chain_role="foundation_model",
             provider="OpenAI",
             name="GPT-X",
@@ -462,3 +473,201 @@ class TestIncompleteInputsOmitKey:
             confidentiality=Confidentiality.PUBLIC,
         )
         assert "incident_dedupe_key" not in env.payload
+
+
+# ---------------------------------------------------------------------------
+# Finding 1 — reserved computed dedupe fields cannot be injected via the
+# caller-supplied extra blocks (extra_payload / extra_card_source). The two
+# dedupe fields are COMPUTED-ONLY; a caller MUST NOT be able to slip a forged
+# subject-bearing key onto a non-public record (the §5.5 confidentiality MUST is
+# enforced ONLY along the computed path). Decision: REJECT with a clear "reserved
+# computed field" error so a caller never silently loses data.
+# ---------------------------------------------------------------------------
+
+_RESERVED = ("incident_dedupe_key", "incident_dedupe_key_hmac")
+
+
+class TestReservedDedupeFieldsRejected:
+    @pytest.mark.parametrize("field", _RESERVED)
+    def test_incident_card_extra_payload_with_reserved_field_rejected(self, field: str) -> None:
+        # The exploit: a non-public card injecting the subject-bearing key via
+        # extra_payload (merged AFTER the public-only gate) would emit it on a
+        # regulator-only card. The builder MUST reject the reserved field instead.
+        pkg = _new_pkg()
+        with pytest.raises(ValueError, match="reserved computed field"):
+            pkg.incident_card(
+                public_incident_id=_PID,
+                harm_core=dict(_HARM_CORE),
+                severity_vector=_SEV_VECTOR,
+                awareness_date="2026-08-01T00:00:00Z",
+                eu_ai_act_facts=dict(_EU_FACTS),
+                value_chain_role="foundation_model",
+                subject_identity=("OpenAI", "GPT-X", "4.0"),
+                occurrence_date="2026-07-15T00:00:00Z",
+                confidentiality=Confidentiality.REGULATOR_ONLY,
+                extra_payload={field: _GOOD_RESERVED[field]},
+            )
+
+    def test_non_public_card_never_emits_injected_key(self) -> None:
+        # Defense-in-depth assertion of the observable outcome: even with the
+        # injection attempt, no non-public card carries the subject-bearing key.
+        pkg = _new_pkg()
+        with pytest.raises(ValueError):
+            pkg.incident_card(
+                public_incident_id=_PID,
+                harm_core=dict(_HARM_CORE),
+                severity_vector=_SEV_VECTOR,
+                awareness_date="2026-08-01T00:00:00Z",
+                eu_ai_act_facts=dict(_EU_FACTS),
+                value_chain_role="foundation_model",
+                subject_identity=("OpenAI", "GPT-X", "4.0"),
+                occurrence_date="2026-07-15T00:00:00Z",
+                confidentiality=Confidentiality.REGULATOR_ONLY,
+                extra_payload={"incident_dedupe_key": _GOOD_RESERVED["incident_dedupe_key"]},
+            )
+
+    @pytest.mark.parametrize("field", _RESERVED)
+    def test_report_incident_extra_card_source_with_reserved_field_rejected(self, field: str) -> None:
+        pkg = _new_pkg()
+        with pytest.raises(ValueError, match="reserved computed field"):
+            pkg.report_incident(
+                public_incident_id=_PID,
+                harm_core=dict(_HARM_CORE),
+                incident_type="operational_failure",
+                description="x",
+                awareness_date="2026-08-01T00:00:00Z",
+                eu_ai_act_facts=dict(_EU_FACTS),
+                value_chain_role="foundation_model",
+                subject_identity=("OpenAI", "GPT-X", "4.0"),
+                occurrence_date="2026-07-15T00:00:00Z",
+                extra_card_source={field: _GOOD_RESERVED[field]},
+            )
+
+    def test_extra_payload_without_reserved_field_still_merges(self) -> None:
+        # A benign extra_payload key is unaffected by the reserved-field guard.
+        pkg = _new_pkg()
+        env = pkg.incident_card(
+            public_incident_id=_PID,
+            harm_core=dict(_HARM_CORE),
+            severity_vector=_SEV_VECTOR,
+            awareness_date="2026-08-01T00:00:00Z",
+            eu_ai_act_facts=dict(_EU_FACTS),
+            value_chain_role="foundation_model",
+            subject_identity=("OpenAI", "GPT-X", "4.0"),
+            occurrence_date="2026-07-15T00:00:00Z",
+            confidentiality=Confidentiality.PUBLIC,
+            extra_payload={"affected_user_count": 42},
+        )
+        assert env.payload["affected_user_count"] == 42
+
+
+# ---------------------------------------------------------------------------
+# Finding 2 — the resolver pepper MUST carry real entropy. The hmac's whole
+# purpose is to resist OFFLINE enumeration of the low-entropy 4-key triple, so a
+# pepper that is empty / too short produces an hmac that is NOT secret-backed and
+# is itself offline-enumerable. The builder enforces a >=32-byte (256-bit) floor
+# and rejects a weak pepper rather than emit a falsely-protective hmac.
+# ---------------------------------------------------------------------------
+
+_STRONG_PEPPER = b"x" * 32  # exactly the 32-byte (256-bit) floor
+
+
+class TestPepperStrengthFloor:
+    @pytest.mark.parametrize("weak", ["", b"", "short", b"too-short", b"x" * 31])
+    def test_incident_card_weak_pepper_rejected(self, weak: str | bytes) -> None:
+        pkg = _new_pkg()
+        with pytest.raises(ValueError, match="pepper"):
+            pkg.incident_card(
+                public_incident_id=_PID,
+                harm_core=dict(_HARM_CORE),
+                severity_vector=_SEV_VECTOR,
+                awareness_date="2026-08-01T00:00:00Z",
+                eu_ai_act_facts=dict(_EU_FACTS),
+                value_chain_role="foundation_model",
+                subject_identity=("OpenAI", "GPT-X", "4.0"),
+                occurrence_date="2026-07-15T00:00:00Z",
+                confidentiality=Confidentiality.PUBLIC,
+                pepper=weak,
+            )
+
+    @pytest.mark.parametrize("weak", ["", b"", b"x" * 31])
+    def test_report_incident_weak_pepper_rejected(self, weak: str | bytes) -> None:
+        pkg = _new_pkg()
+        with pytest.raises(ValueError, match="pepper"):
+            pkg.report_incident(
+                public_incident_id=_PID,
+                harm_core=dict(_HARM_CORE),
+                incident_type="operational_failure",
+                description="x",
+                awareness_date="2026-08-01T00:00:00Z",
+                eu_ai_act_facts=dict(_EU_FACTS),
+                value_chain_role="foundation_model",
+                subject_identity=("OpenAI", "GPT-X", "4.0"),
+                occurrence_date="2026-07-15T00:00:00Z",
+                pepper=weak,
+            )
+
+    def test_strong_pepper_emits_correct_hmac(self) -> None:
+        # A proper >=32-byte pepper still emits a correct hmac (no regression).
+        pkg = _new_pkg()
+        env = pkg.incident_card(
+            public_incident_id=_PID,
+            harm_core=dict(_HARM_CORE),
+            severity_vector=_SEV_VECTOR,
+            awareness_date="2026-08-01T00:00:00Z",
+            eu_ai_act_facts=dict(_EU_FACTS),
+            value_chain_role="foundation_model",
+            subject_identity=("OpenAI", "GPT-X", "4.0"),
+            occurrence_date="2026-07-15T00:00:00Z",
+            confidentiality=Confidentiality.PUBLIC,
+            pepper=_STRONG_PEPPER,
+        )
+        expected = _expected_dedupe_hmac(
+            pepper=_STRONG_PEPPER,
+            value_chain_role="foundation_model",
+            provider="OpenAI",
+            name="GPT-X",
+            version="4.0",
+            harm_class="physical_health",
+            occurrence_date_utc="2026-07-15",
+        )
+        assert env.payload["incident_dedupe_key_hmac"] == expected
+
+    def test_strong_multibyte_str_pepper_meeting_floor_accepted(self) -> None:
+        # A str pepper is measured by its UTF-8 byte length, not character count.
+        # 16 two-byte chars = 32 bytes -> exactly meets the floor.
+        pepper_str = "é" * 16  # 32 UTF-8 bytes
+        assert len(pepper_str.encode("utf-8")) == 32
+        pkg = _new_pkg()
+        env = pkg.incident_card(
+            public_incident_id=_PID,
+            harm_core=dict(_HARM_CORE),
+            severity_vector=_SEV_VECTOR,
+            awareness_date="2026-08-01T00:00:00Z",
+            eu_ai_act_facts=dict(_EU_FACTS),
+            value_chain_role="foundation_model",
+            subject_identity=("OpenAI", "GPT-X", "4.0"),
+            occurrence_date="2026-07-15T00:00:00Z",
+            confidentiality=Confidentiality.PUBLIC,
+            pepper=pepper_str,
+        )
+        assert _DEDUPE_HMAC_PATTERN.match(env.payload["incident_dedupe_key_hmac"])
+
+    def test_short_multibyte_str_pepper_below_floor_rejected(self) -> None:
+        # 15 two-byte chars = 30 bytes -> below the 32-byte floor, rejected.
+        pepper_str = "é" * 15  # 30 UTF-8 bytes
+        assert len(pepper_str.encode("utf-8")) == 30
+        pkg = _new_pkg()
+        with pytest.raises(ValueError, match="pepper"):
+            pkg.incident_card(
+                public_incident_id=_PID,
+                harm_core=dict(_HARM_CORE),
+                severity_vector=_SEV_VECTOR,
+                awareness_date="2026-08-01T00:00:00Z",
+                eu_ai_act_facts=dict(_EU_FACTS),
+                value_chain_role="foundation_model",
+                subject_identity=("OpenAI", "GPT-X", "4.0"),
+                occurrence_date="2026-07-15T00:00:00Z",
+                confidentiality=Confidentiality.PUBLIC,
+                pepper=pepper_str,
+            )

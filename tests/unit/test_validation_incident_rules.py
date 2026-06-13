@@ -1288,3 +1288,103 @@ class TestDedupeKeyConfidentiality:
         )
         diags = ir.run_incident_rules({}, [card])
         assert "ACEF-086" in _codes(diags)
+
+
+# ---------------------------------------------------------------------------
+# Finding 3 — rule-level SHAPE validation of incident_dedupe_key /
+# incident_dedupe_key_hmac on BOTH record types (incident_card + incident_report).
+#
+# The v1.1 incident_report schema has additionalProperties: true and does NOT
+# define these two properties, so a MALFORMED dedupe value on a report payload is
+# NOT caught at the schema phase. The validator rule mirrors the incident_card
+# schema patterns (^sha256:[0-9a-f]{64}$ / ^hmac-sha256:[0-9a-f]{64}$) so a
+# malformed value FAILS validation with ACEF-086 regardless of record type.
+# ---------------------------------------------------------------------------
+
+# Malformed values an attacker / buggy producer might emit.
+_BAD_DEDUPE_KEY_UPPER = "sha256:" + "A" * 64  # uppercase hex — not [0-9a-f]
+_BAD_DEDUPE_KEY_SHORT = "sha256:" + "a" * 63  # 63 hex chars
+_BAD_DEDUPE_KEY_NOPREFIX = "a" * 64  # missing sha256: prefix
+_BAD_DEDUPE_HMAC_WRONG = "sha256:" + "b" * 64  # hmac field with non-hmac prefix
+
+
+class TestDedupeKeyShapeValidation:
+    def test_public_card_malformed_dedupe_key_fails_086(self) -> None:
+        card = _dedupe_card(confidentiality="public", payload_extra={"incident_dedupe_key": _BAD_DEDUPE_KEY_UPPER})
+        diags = ir.check_dedupe_key_confidentiality([card])
+        assert "ACEF-086" in _codes(diags)
+        d = next(d for d in diags if d.code == "ACEF-086")
+        assert "incident_dedupe_key" in d.message
+
+    def test_public_card_short_dedupe_key_fails_086(self) -> None:
+        card = _dedupe_card(confidentiality="public", payload_extra={"incident_dedupe_key": _BAD_DEDUPE_KEY_SHORT})
+        assert "ACEF-086" in _codes(ir.check_dedupe_key_confidentiality([card]))
+
+    def test_public_card_no_prefix_dedupe_key_fails_086(self) -> None:
+        card = _dedupe_card(confidentiality="public", payload_extra={"incident_dedupe_key": _BAD_DEDUPE_KEY_NOPREFIX})
+        assert "ACEF-086" in _codes(ir.check_dedupe_key_confidentiality([card]))
+
+    def test_public_card_malformed_hmac_fails_086(self) -> None:
+        card = _dedupe_card(
+            confidentiality="public", payload_extra={"incident_dedupe_key_hmac": _BAD_DEDUPE_HMAC_WRONG}
+        )
+        diags = ir.check_dedupe_key_confidentiality([card])
+        assert "ACEF-086" in _codes(diags)
+        d = next(d for d in diags if d.code == "ACEF-086")
+        assert "incident_dedupe_key_hmac" in d.message
+
+    def test_well_formed_hmac_on_public_card_passes(self) -> None:
+        card = _dedupe_card(confidentiality="public", payload_extra={"incident_dedupe_key_hmac": _GOOD_DEDUPE_HMAC})
+        assert "ACEF-086" not in _codes(ir.check_dedupe_key_confidentiality([card]))
+
+    def test_report_malformed_dedupe_key_fails_086(self) -> None:
+        # The incident_report path: schema additionalProperties:true does NOT catch
+        # a malformed dedupe key, so the rule MUST. (A well-formed key on a non-public
+        # report ALSO fails on the confidentiality rule — here we use a public report
+        # to isolate the SHAPE failure.)
+        report = {
+            "record_id": "rec-report-shape-1",
+            "record_type": "incident_report",
+            "confidentiality": "public",
+            "payload": {
+                "incident_type": "malfunction",
+                "severity": "major",
+                "description": "x",
+                "incident_dedupe_key": _BAD_DEDUPE_KEY_SHORT,
+            },
+        }
+        assert "ACEF-086" in _codes(ir.check_dedupe_key_confidentiality([report]))
+
+    def test_report_malformed_hmac_fails_086(self) -> None:
+        report = {
+            "record_id": "rec-report-shape-2",
+            "record_type": "incident_report",
+            "confidentiality": "regulator-only",
+            "payload": {
+                "incident_type": "malfunction",
+                "severity": "major",
+                "description": "x",
+                "incident_dedupe_key_hmac": _BAD_DEDUPE_HMAC_WRONG,
+            },
+        }
+        assert "ACEF-086" in _codes(ir.check_dedupe_key_confidentiality([report]))
+
+    def test_report_well_formed_hmac_on_non_public_passes(self) -> None:
+        # A well-formed hmac on a non-public report is the report's dedupe path —
+        # it is NOT subject to the confidentiality omit rule and its shape is valid.
+        report = {
+            "record_id": "rec-report-shape-3",
+            "record_type": "incident_report",
+            "confidentiality": "regulator-only",
+            "payload": {
+                "incident_type": "malfunction",
+                "severity": "major",
+                "description": "x",
+                "incident_dedupe_key_hmac": _GOOD_DEDUPE_HMAC,
+            },
+        }
+        assert "ACEF-086" not in _codes(ir.check_dedupe_key_confidentiality([report]))
+
+    def test_non_string_dedupe_key_fails_086(self) -> None:
+        card = _dedupe_card(confidentiality="public", payload_extra={"incident_dedupe_key": 12345})
+        assert "ACEF-086" in _codes(ir.check_dedupe_key_confidentiality([card]))

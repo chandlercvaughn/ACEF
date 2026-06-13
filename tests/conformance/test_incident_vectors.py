@@ -216,6 +216,7 @@ _EXPECTED_INVENTORY: dict[tuple[str, str], frozenset[str]] = {
         {
             "fail-art73-compound-wrong-clock-084",
             "fail-dedupe-key-emit-non-public-086",
+            "fail-dedupe-hmac-malformed-shape-086",
         }
     ),
     ("online-conformance", "reject"): frozenset(

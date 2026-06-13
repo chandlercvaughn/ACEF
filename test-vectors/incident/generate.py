@@ -954,6 +954,40 @@ def _vector_specs() -> list[dict[str, Any]]:
         }
     )
 
+    # D5 (FAIL): a source-backed incident_report carrying a MALFORMED
+    # `incident_dedupe_key_hmac` (an `hmac-sha256:` value with an under-length /
+    # non-hex digest). The v1.1 incident_report schema has additionalProperties:true
+    # and does NOT define this property, so the SCHEMA phase does not catch the bad
+    # value — the validator RULE enforces the shape (^hmac-sha256:[0-9a-f]{64}$,
+    # mirrored from incident_card.schema.json) and raises ACEF-086 (roborev Finding 3).
+    malformed_hmac_payload = _card_source_report_payload(
+        triggers=["3.49.a"], widespread=False, death=False, deadline="2026-08-16T00:00:00Z"
+    )
+    malformed_hmac_payload["incident_dedupe_key_hmac"] = "hmac-sha256:" + "a" * 32  # 32 hex, not 64
+    specs.append(
+        {
+            "name": "fail-dedupe-hmac-malformed-shape-086",
+            "conformance_class": "source-backed",
+            "disposition": "fail",
+            "confidentiality": _CONFIDENTIAL,
+            "profiles": [_ART73_PROFILE],
+            "record_type": "incident_report",
+            "title": "Malformed incident_dedupe_key_hmac shape on a report (ACEF-086)",
+            "body": (
+                "A source-backed incident_report whose `incident_dedupe_key_hmac` is malformed "
+                "(an under-length, non-64-hex digest). The v1.1 incident_report schema has "
+                "additionalProperties:true and does NOT constrain this property, so the schema "
+                "phase silently accepts the bad value; the validator RULE enforces the shape "
+                "`hmac-sha256:` + 64 lowercase hex (mirrored from incident_card.schema.json) and "
+                "raises ACEF-086 (the reserved §5.5/§5.11 code), NEVER ACEF-022. Recompute the "
+                "value over the canonical preimage, or remove it."
+            ),
+            "payload": malformed_hmac_payload,
+            "expect_codes": ["ACEF-086"],
+            "forbid_codes": ["ACEF-022"],
+        }
+    )
+
     return specs
 
 

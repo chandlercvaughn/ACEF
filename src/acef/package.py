@@ -181,6 +181,68 @@ def _incident_dedupe_preimage(
     }
 
 
+# RFC-0002 §5.5 — the two dedupe fields are COMPUTED-ONLY. They are populated
+# EXCLUSIVELY along the builder's public/pepper path (which enforces the §5.5
+# public-only confidentiality MUST on the plaintext key and the pepper-strength
+# floor on the keyed variant). A caller MUST NOT be able to inject them through
+# the free-form extra blocks (incident_card.extra_payload / report_incident.
+# extra_card_source), because those merge AFTER the computed gate — a forged
+# subject-bearing key on a non-public card would otherwise slip past the gate.
+# So they are RESERVED: an extra block carrying either field is REJECTED (a clear
+# error, never a silent strip, so a caller never silently loses data).
+_RESERVED_DEDUPE_FIELDS: frozenset[str] = frozenset({"incident_dedupe_key", "incident_dedupe_key_hmac"})
+
+# §5.5 — the keyed incident_dedupe_key_hmac exists to resist OFFLINE enumeration
+# of the low-entropy 4-key triple (three of four inputs are guessable). That
+# protection holds ONLY if the resolver pepper carries real entropy; an empty or
+# short pepper yields an hmac that is itself offline-enumerable (falsely
+# protective). The builder therefore requires a pepper of at least 256 bits
+# (32 bytes) — a defensible floor matching the SHA-256 output width the HMAC
+# keys — and rejects anything shorter rather than emit a weak hmac.
+_MIN_PEPPER_BYTES = 32
+
+
+def _reject_reserved_dedupe_fields(extra: dict[str, Any] | None, *, block_name: str) -> None:
+    """Raise ``ValueError`` if ``extra`` carries a reserved computed dedupe field.
+
+    ``incident_dedupe_key`` / ``incident_dedupe_key_hmac`` are populated only by
+    the builder's computed path (§5.5). A caller supplying either through a
+    free-form extra block (``block_name`` for the message) is rejected so a forged
+    key can never be injected past the public-only / pepper-strength gates.
+    """
+    if not extra:
+        return
+    for field in _RESERVED_DEDUPE_FIELDS:
+        if field in extra:
+            raise ValueError(
+                f"{field!r} is a reserved computed field (RFC-0002 §5.5) and MUST NOT be supplied "
+                f"via {block_name}; it is populated exclusively by the builder's public/pepper path. "
+                f"Remove it from {block_name} (supply subject_identity / value_chain_role / "
+                f"occurrence_date / pepper to have the builder compute it)."
+            )
+
+
+def _validate_pepper_strength(pepper: bytes | str) -> bytes:
+    """Validate a resolver pepper meets the §5.5 entropy floor; return its bytes.
+
+    A ``str`` pepper is measured by its UTF-8 byte length (not character count).
+    Raises ``ValueError`` when the pepper encodes to fewer than
+    :data:`_MIN_PEPPER_BYTES` (256 bits) — an empty/short pepper would produce a
+    falsely-protective, offline-enumerable hmac.
+    """
+    pepper_bytes = pepper.encode("utf-8") if isinstance(pepper, str) else pepper
+    if len(pepper_bytes) < _MIN_PEPPER_BYTES:
+        raise ValueError(
+            f"the dedupe pepper must be at least {_MIN_PEPPER_BYTES} bytes (256 bits) of secret "
+            f"entropy (RFC-0002 §5.5); got {len(pepper_bytes)} byte(s). The keyed "
+            f"incident_dedupe_key_hmac resists OFFLINE enumeration of the low-entropy dedupe triple "
+            f"only when the pepper carries real entropy — an empty/short pepper yields a "
+            f"falsely-protective hmac. Supply a >=32-byte resolver secret, or omit pepper to skip "
+            f"the keyed variant."
+        )
+    return pepper_bytes
+
+
 def compute_incident_dedupe_key(
     *,
     value_chain_role: str | None,
@@ -2215,6 +2277,14 @@ class Package:
         self._ensure_v1_1()
         self._declare_art73_profile()
 
+        # §5.5 — the computed dedupe fields are RESERVED; a caller MUST NOT inject
+        # them via extra_card_source (which merges below). Reject before any work.
+        _reject_reserved_dedupe_fields(extra_card_source, block_name="extra_card_source")
+        # §5.5 — a supplied pepper MUST meet the 256-bit entropy floor (else the
+        # keyed hmac is falsely protective). Validate up front (fail fast).
+        if pepper is not None:
+            _validate_pepper_strength(pepper)
+
         # ONE merged Art.73 fact block (harm_core-derived ∪ caller-supplied triggers).
         # The SAME block backs card_source.eu_ai_act_facts AND the deadline below, so
         # the persisted facts the validator reads and the builder's clock agree —
@@ -2379,6 +2449,15 @@ class Package:
         """
         self._ensure_v1_1()
         self._declare_art73_profile()
+
+        # §5.5 — the computed dedupe fields are RESERVED; a caller MUST NOT inject
+        # them via extra_payload (which merges below, AFTER the public-only gate).
+        # Reject before any work so a forged key cannot reach a non-public card.
+        _reject_reserved_dedupe_fields(extra_payload, block_name="extra_payload")
+        # §5.5 — a supplied pepper MUST meet the 256-bit entropy floor. Validate up
+        # front (fail fast) so a weak pepper never yields a falsely-protective hmac.
+        if pepper is not None:
+            _validate_pepper_strength(pepper)
 
         # ONE merged Art.73 fact block (harm_core-derived ∪ caller-supplied triggers).
         # It backs taxonomy_crosswalk.eu_ai_act (via _derive_taxonomy_crosswalk, which
