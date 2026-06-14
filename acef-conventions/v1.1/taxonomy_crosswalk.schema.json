@@ -247,7 +247,8 @@
         },
         "object_refs": {
           "type": "array",
-          "description": "Resolvable STIX 2.1 ids `<type>--<uuidv4>`; order-insensitive, sorted per §5.10.",
+          "uniqueItems": true,
+          "description": "Resolvable STIX 2.1 ids `<type>--<uuidv4>`; order-insensitive, sorted per §5.10. A SET (uniqueItems): duplicates are forbidden, matching the SDK's de-duplicating emission and the sibling serious_incident_triggers[]/harm_distribution_basis[] set arrays.",
           "items": {
             "type": "string",
             "pattern": "^[a-z][a-z0-9-]{2,249}--[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",

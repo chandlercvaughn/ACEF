@@ -54,3 +54,44 @@ class TestGenericRecordStixDedupParity:
         r1 = _stix_refs(_record_incident_card([_A, _B, _C]))
         r2 = _stix_refs(_record_incident_card([_C, _B, _A]))
         assert r1 == r2
+
+
+class TestStixObjectRefsSchemaUniqueItems:
+    """roborev follow-up: the SDK dedupes stix.object_refs, but the v1.1 schema
+    lacked uniqueItems, so a RAW (non-SDK) bundle with duplicate object_refs would
+    still validate. The schema now enforces the set semantics (ACEF-004 on a
+    duplicate), matching the sibling serious_incident_triggers/harm_distribution_basis
+    set arrays."""
+
+    def _object_refs_schema(self) -> dict:
+        import json
+        from pathlib import Path
+
+        sch = json.loads(
+            Path("acef-conventions/v1.1/taxonomy_crosswalk.schema.json").read_text(encoding="utf-8")
+        )
+        return sch["properties"]["stix"]["properties"]["object_refs"]
+
+    def test_schema_itself_valid(self) -> None:
+        import json
+        from pathlib import Path
+
+        from jsonschema import Draft202012Validator
+
+        sch = json.loads(
+            Path("acef-conventions/v1.1/taxonomy_crosswalk.schema.json").read_text(encoding="utf-8")
+        )
+        Draft202012Validator.check_schema(sch)
+        assert sch["properties"]["stix"]["properties"]["object_refs"]["uniqueItems"] is True
+
+    def test_duplicate_object_refs_rejected(self) -> None:
+        from jsonschema import Draft202012Validator
+
+        v = Draft202012Validator(self._object_refs_schema())
+        assert list(v.iter_errors([_A, _A]))  # duplicate -> error
+
+    def test_unique_object_refs_accepted(self) -> None:
+        from jsonschema import Draft202012Validator
+
+        v = Draft202012Validator(self._object_refs_schema())
+        assert not list(v.iter_errors([_A, _B, _C]))
