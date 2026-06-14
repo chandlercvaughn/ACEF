@@ -24,7 +24,6 @@ from acef.integrity import (
     canonicalize,
     path_nfc_utf8_problem,
     sha256_hex,
-    utf16_collation_key,
 )
 from acef.models.agent_reliability import (
     AuthorizedTestScopePayload,
@@ -3412,6 +3411,7 @@ class Package:
         Returns:
             A Manifest ready for serialization.
         """
+        from acef.export import record_type_collation_key
         from acef.records_util import compute_shard_boundaries, sort_records
 
         # Build record_files index by grouping records by type
@@ -3421,18 +3421,23 @@ class Package:
 
         record_files: list[RecordFileEntry] = []
         # Order record-type groups by RFC 8785 UTF-16 collation of the TYPE
-        # string (integrity.utf16_collation_key) — the single hash-domain source
-        # of truth reused by content-hashes.json key order, Merkle leaf order,
-        # and the tar member sort. The manifest record_files list is canonicalized
-        # into the content-hash domain, so its order is byte-significant. Python's
-        # default sorted() orders by code point, which DIVERGES from the TS
-        # exporter's Array.prototype.sort() (UTF-16) for supplementary-plane
-        # (U+10000+) record-type names — Package.record() accepts x-... extension
-        # types, so an x-<supplementary> type would otherwise emit record_files in
-        # a different order than TS, diverging the canonical manifest bytes (§3.1.3
-        # byte-identical MUST). ASCII/BMP types order identically under both, so
-        # this is byte-neutral for every golden bundle and existing vector.
-        for record_type, recs in sorted(records_by_type.items(), key=lambda kv: utf16_collation_key(kv[0])):
+        # string (export.record_type_collation_key, which is
+        # integrity.utf16_collation_key gated by the strict-UTF-8 / NFC path rule)
+        # — the single hash-domain source of truth reused by content-hashes.json
+        # key order, Merkle leaf order, and the tar member sort. The manifest
+        # record_files list is canonicalized into the content-hash domain, so its
+        # order is byte-significant. Python's default sorted() orders by code
+        # point, which DIVERGES from the TS exporter's Array.prototype.sort()
+        # (UTF-16) for supplementary-plane (U+10000+) record-type names —
+        # Package.record() accepts x-... extension types, so an x-<supplementary>
+        # type would otherwise emit record_files in a different order than TS,
+        # diverging the canonical manifest bytes (§3.1.3 byte-identical MUST).
+        # ASCII/BMP types order identically under both, so this is byte-neutral for
+        # every golden bundle and existing vector. record_type_collation_key also
+        # FAILS CLOSED (ACEF-052) on a surrogate-bearing / non-NFC extension type
+        # that Package.record() admitted, instead of raising a raw
+        # UnicodeEncodeError while keying the sort.
+        for record_type, recs in sorted(records_by_type.items(), key=lambda kv: record_type_collation_key(kv[0])):
             sorted_recs = sort_records(recs)
             shards = compute_shard_boundaries(sorted_recs)
 

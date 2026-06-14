@@ -141,6 +141,59 @@ _MANDATORY_FIXED_MEMBER_RELPATHS: tuple[str, ...] = (
 _DEFAULT_SIGNATURE_KID = "provider-key"
 
 
+def record_type_collation_key(record_type: str) -> bytes:
+    """Strict-UTF-8 / NFC-validated UTF-16 collation key for a record-type string.
+
+    Every site that orders record-type groups by RFC 8785 UTF-16 collation
+    (``integrity.utf16_collation_key`` == ``str.encode("utf-16-be")``) — the
+    export preflight (``_record_shard_relpaths``), the directory-export shard
+    emission loop, and the manifest ``record_files`` ordering
+    (``Package.build_manifest``) — MUST route the record-type string through
+    this function instead of calling ``utf16_collation_key`` directly.
+
+    ``Package.record()`` accepts ANY ``x-``-prefixed EXTENSION record type with
+    no strict-UTF-8 / NFC text check, so a surrogate-bearing type such as
+    ``"x-\\udce9"`` is admitted into the package. Such a string holds a lone
+    UTF-16 surrogate that ``str.encode("utf-16-be")`` CANNOT encode, so calling
+    ``utf16_collation_key`` on it raises a RAW ``UnicodeEncodeError`` mid-sort —
+    bypassing the structured ``ACEFExportError(ACEF-052)`` surface every other
+    invalid path byte uses (a record-type group always becomes the hash-domain
+    member ``records/<type>.jsonl`` / ``records/<type>/...`` and the manifest
+    ``record_files`` path, so the type text is itself a path-text constraint).
+
+    Fail CLOSED: validate the record-type text with the SAME hash-domain path
+    rule (``integrity.path_nfc_utf8_problem`` — strict UTF-8, then NFC) BEFORE
+    taking the collation key, so a surrogate-bearing / non-NFC type surfaces as
+    the designated path error code ``ACEF-052`` (identical to
+    ``_validate_ustar_member_name`` and ``_validate_export_attachment_path``),
+    never a raw ``UnicodeEncodeError``. A VALID supplementary-plane type
+    (``"x-\U00010000"`` -> a surrogate PAIR, encodable) passes the check and
+    still sorts by UTF-16 collation, preserving the cross-exporter determinism
+    fix for legitimate U+10000+ extension types.
+
+    Args:
+        record_type: The record-type string to key by.
+
+    Returns:
+        The big-endian UTF-16 byte encoding of ``record_type``, usable directly
+        as a sort key.
+
+    Raises:
+        ACEFExportError: If ``record_type`` is not strict UTF-8 (e.g. a lone
+            surrogate) or not NFC-normalized. Carries code ``ACEF-052``.
+    """
+    problem = path_nfc_utf8_problem(record_type)
+    if problem is not None:
+        raise ACEFExportError(
+            f"record_type violates the hash-domain path text contract "
+            f"(spec §3.1.1, {problem}); it cannot be encoded as the deterministic "
+            f"record-shard member 'records/{record_type!r}.jsonl' nor ordered by "
+            f"RFC 8785 UTF-16 collation: {record_type!r}",
+            code="ACEF-052",
+        )
+    return utf16_collation_key(record_type)
+
+
 def _record_shard_relpaths(package: Package) -> list[str]:
     """Derive the record-shard member relpaths the build loop will write.
 
@@ -160,10 +213,14 @@ def _record_shard_relpaths(package: Package) -> list[str]:
 
     # Mirror export_directory's record-writing block EXACTLY (see docstring),
     # including its record-type grouping order: both key by RFC 8785 UTF-16
-    # collation (integrity.utf16_collation_key), not Python code-point order, so
-    # this preflight enumerates member names in the same order the loop emits
-    # them for supplementary-plane (U+10000+) x-... extension record types.
-    for record_type, recs in sorted(records_by_type.items(), key=lambda kv: utf16_collation_key(kv[0])):
+    # collation (record_type_collation_key, which is utf16_collation_key gated by
+    # the strict-UTF-8 / NFC path rule), not Python code-point order, so this
+    # preflight enumerates member names in the same order the loop emits them for
+    # supplementary-plane (U+10000+) x-... extension record types. A
+    # surrogate-bearing extension type fails closed with ACEF-052 here, in the
+    # entry-point preflight, before any filesystem work — never a raw
+    # UnicodeEncodeError mid-sort.
+    for record_type, recs in sorted(records_by_type.items(), key=lambda kv: record_type_collation_key(kv[0])):
         sorted_recs = sort_records(recs)
         shards = compute_shard_boundaries(sorted_recs)
         if len(shards) == 1:
@@ -345,8 +402,12 @@ def export_directory(package: Package, output_path: str) -> Path:
         # keying the shard-emission loop by the same collation keeps this exporter
         # on one ordering with the manifest and the rest of the hash domain.
         # ASCII/BMP types order identically under both, so this is byte-neutral for
-        # every golden bundle and existing vector.
-        for record_type, recs in sorted(records_by_type.items(), key=lambda kv: utf16_collation_key(kv[0])):
+        # every golden bundle and existing vector. record_type_collation_key gates
+        # the collation key on the strict-UTF-8 / NFC path rule, so a
+        # surrogate-bearing extension type fails closed with ACEF-052 rather than
+        # raising a raw UnicodeEncodeError (the entry-point preflight already
+        # rejected it; this keeps the loop's own ordering on the same guarded key).
+        for record_type, recs in sorted(records_by_type.items(), key=lambda kv: record_type_collation_key(kv[0])):
             sorted_recs = sort_records(recs)
             shards = compute_shard_boundaries(sorted_recs)
 
