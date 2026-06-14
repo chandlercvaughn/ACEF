@@ -17,7 +17,7 @@ import json
 import re
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from cryptography.exceptions import InvalidSignature, UnsupportedAlgorithm
 from cryptography.hazmat.primitives import hashes, serialization
@@ -96,6 +96,14 @@ def _base64url_decode(s: str) -> bytes:
     function. JWK parameters (``n``/``e``/``x``/``y``) ARE base64url per
     RFC 7518 §2 (Base64urlUInt) and correctly share this strict path.
     """
+    # Reject a non-string BEFORE the regex: a malformed JWK whose Base64urlUInt
+    # member (n/e/x/y) is a non-string (e.g. an int) reaches here and would make
+    # ``re.fullmatch`` raise a raw ``TypeError`` instead of a structured error.
+    if not isinstance(s, str):
+        raise ACEFSigningError(
+            f"Invalid base64url segment: expected a string, got {type(s).__name__}",
+            code="ACEF-012",
+        )
     if not _BASE64URL_STRICT_RE.fullmatch(s):
         raise ACEFSigningError(
             "Invalid base64url segment: character(s) outside the RFC 4648 §5 "
@@ -821,9 +829,18 @@ def verify_detached_jws(
     # is a JSON object, so we narrow the type with cast (no runtime change — the
     # subsequent dict access preserves the pre-existing behavior for any input).
     try:
-        header = cast("dict[str, Any]", json.loads(_base64url_decode(header_b64)))
+        decoded_header = json.loads(_base64url_decode(header_b64))
     except (json.JSONDecodeError, ValueError, UnicodeDecodeError) as e:
         raise ACEFSigningError(f"Invalid JWS header: {e}", code="ACEF-012") from e
+    # A JWS protected header MUST be a JSON object. json.loads also yields
+    # arrays/scalars for `[]`/`"x"`/`5`/`true`/`null`, which would reach
+    # `header.get(...)` below and raise a raw AttributeError; reject here.
+    if not isinstance(decoded_header, dict):
+        raise ACEFSigningError(
+            f"JWS protected header MUST be a JSON object, not {type(decoded_header).__name__} (RFC 7515 §4)",
+            code="ACEF-012",
+        )
+    header: dict[str, Any] = decoded_header
 
     alg = header.get("alg", "")
     if alg not in _ALLOWED_ALGORITHMS:
