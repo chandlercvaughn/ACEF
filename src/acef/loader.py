@@ -445,7 +445,16 @@ def _load_directory(bundle_dir: Path) -> Package:
 
     try:
         manifest_data = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as e:
+    except (json.JSONDecodeError, UnicodeDecodeError, OSError) as e:
+        # The public ``acef.load()`` API must surface a malformed/unreadable
+        # manifest as a structured ACEF-050 verdict, never a raw exception
+        # traceback. ``read_text(encoding="utf-8")`` raises ``UnicodeDecodeError``
+        # (a ``ValueError`` subclass, NOT a ``json.JSONDecodeError``) on non-UTF-8
+        # manifest bytes and ``OSError`` on a read race / unreadable path; both
+        # escaped the prior ``json.JSONDecodeError``-only arm. Mirror the same
+        # caught set the integrity checker / CLI use for the manifest read. This
+        # is the SINGLE manifest decode for BOTH the directory and the archive
+        # load paths (``_load_archive`` funnels through ``_load_directory``).
         raise ACEFFormatError(f"Invalid JSON in manifest: {e}", code="ACEF-050") from e
 
     def _extras(raw: dict[str, Any], known: set[str]) -> dict[str, Any]:
