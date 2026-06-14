@@ -237,6 +237,69 @@ def dict_to_record_envelope(data: dict[str, Any]) -> RecordEnvelope:
                 code="ACEF-050",
             ) from exc
 
+    def _require_object(field: str, value: object, *, allow_str: bool = False) -> None:
+        """Type-guard one nested field. A PRESENT, non-None value MUST be a
+        ``dict`` (or ``str`` when ``allow_str`` — the ``collector`` oneOf string
+        form). A wrong-typed value — including the FALSY ``[]`` / ``False`` /
+        ``0`` / (when ``allow_str`` is False) ``""`` that a truthiness check would
+        silently drop — raises a precise, field-named ``ACEF-050`` BEFORE the
+        ``**`` splat reaches a constructor (which would otherwise leak a raw
+        ``TypeError`` / ``AttributeError``). Callers invoke this only when the key
+        is present and the value is not ``None`` (absent / null defaults cleanly).
+        """
+        if isinstance(value, dict):
+            return
+        if allow_str and isinstance(value, str):
+            return
+        shape = "a JSON object or string" if allow_str else "a JSON object"
+        raise ACEFFormatError(
+            f"Record {_record_id!r} field {field!r} must be {shape}, got {type(value).__name__}",
+            code="ACEF-050",
+        )
+
+    def _require_keys(field: str, value: dict[str, Any], required: tuple[str, ...]) -> None:
+        """Enforce schema-required-key PRESENCE on a nested object so the model's
+        per-field DEFAULTS cannot silently FABRICATE a value the wire never
+        carried. Applied to ``attestation`` (schema ``required: [method, signer,
+        signed_fields, signature]``): the ``Attestation`` model defaults every
+        field, so a present ``attestation: {}`` / ``{"method": "jws"}`` would
+        otherwise load + re-export FABRICATED signer / signed_fields / signature
+        material — a correctness + round-trip defect. A missing required key
+        raises a field-named ``ACEF-050``.
+        """
+        missing = [k for k in required if k not in value]
+        if missing:
+            raise ACEFFormatError(
+                f"Record {_record_id!r} field {field!r} is missing required "
+                f"key(s) {missing!r}; a present {field} object MUST carry all of "
+                f"{list(required)!r} (no fabricated defaults)",
+                code="ACEF-050",
+            )
+
+    def _build_nested(
+        model: Callable[..., _T],
+        field: str,
+        *,
+        required: tuple[str, ...] = (),
+    ) -> _T | None:
+        """Single auditable path for every nested OBJECT field
+        (``attestation`` / ``retention`` and any future addition): a present,
+        non-None value is type-guarded (``_require_object``), required-key-checked
+        (``_require_keys``), then constructed under the ``_nested`` ValidationError
+        /TypeError wrapper. An ABSENT key or explicit ``null`` yields ``None`` so
+        the model default applies. No present non-None malformed value is ever
+        silently dropped, leaks a raw exception, or fabricates a required field.
+        """
+        if field not in data:
+            return None
+        value = data[field]
+        if value is None:
+            return None
+        _require_object(field, value)
+        if required:
+            _require_keys(field, value, required)
+        return _nested(field, lambda: model(**value))
+
     # Handle entity_refs. Pass through any unknown nested keys so
     # vendor-prefixed extension refs (e.g., a custom relationship type)
     # round-trip losslessly. A PRESENT non-dict must RAISE (the historical
@@ -287,52 +350,62 @@ def dict_to_record_envelope(data: dict[str, Any]) -> RecordEnvelope:
         attachments.append(_nested("attachments", functools.partial(_build_attachment, att_data)))
 
     # Handle attestation. The record-envelope schema declares attestation as
-    # ``oneOf [object, null]`` — so the ONLY non-object value the wire may carry
-    # is an explicit ``null``. Distinguish key-PRESENCE from ``None``: a present,
-    # non-None value MUST be a ``dict`` (else RAISE ACEF-050). A truthiness check
-    # (``if data.get("attestation"):``) silently DROPPED a present, non-null,
-    # FALSY value (``[]`` / ``false`` / ``0`` / ``""``) to ``None`` — a data-loss
-    # / round-trip defect and a missed rejection. Only an ABSENT key or an
-    # explicit ``null`` yields ``attestation = None``.
-    attestation = None
-    if "attestation" in data:
-        attestation_data = data["attestation"]
-        if attestation_data is not None:
-            if not isinstance(attestation_data, dict):
-                raise ACEFFormatError(
-                    f"Record {_record_id!r} field 'attestation' must be a JSON object "
-                    f"or null, got {type(attestation_data).__name__}",
-                    code="ACEF-050",
-                )
-            attestation = _nested("attestation", lambda: Attestation(**attestation_data))
+    # ``oneOf [object, null]`` with the object form ``required: [method, signer,
+    # signed_fields, signature]``. Distinguish key-PRESENCE from ``None``: a
+    # present, non-None value MUST be a dict (else ACEF-050 via
+    # ``_require_object`` — covering the falsy ``[]`` / ``false`` / ``0`` / ``""``
+    # a truthiness guard would silently DROP). Because the ``Attestation`` model
+    # defaults EVERY field (``signer=""``, ``signed_fields=["/payload"]``,
+    # ``signature=""``), a present attestation dict that OMITS a required key
+    # would otherwise load + re-export FABRICATED signature material the wire
+    # never carried — a correctness + round-trip defect on the security-critical
+    # field. ``required=...`` enforces required-key PRESENCE before construction.
+    # Only an ABSENT key or explicit ``null`` yields ``attestation = None``.
+    attestation = _build_nested(
+        Attestation,
+        "attestation",
+        required=("method", "signer", "signed_fields", "signature"),
+    )
 
-    # Handle retention
-    retention = None
-    if data.get("retention"):
-        retention = RecordRetention(**data["retention"])
+    # Handle retention. The record-envelope schema declares retention
+    # ``oneOf [object, null]``; the ``RecordRetention`` model requires
+    # ``min_retention_days`` (no default, ``ge=0``). A truthiness guard
+    # (``if data.get("retention"):``) silently DROPPED a present falsy value
+    # (``[]`` / ``{}``) and an unwrapped ``RecordRetention(**...)`` leaked a raw
+    # ``pydantic.ValidationError`` (``min_retention_days: -1``) or ``TypeError``
+    # (``retention: "bad"``). No required-key enforcement is needed beyond the
+    # model's own (``RecordRetention`` fabricates no semantically-required value:
+    # ``min_retention_days`` has no default, so an empty object fails the model
+    # under the wrap and surfaces ACEF-050). ``_build_nested`` provides the
+    # presence/None + type guard + wrapped construction uniformly.
+    retention = _build_nested(RecordRetention, "retention")
 
-    # Handle collector. record-envelope.schema.json:47-69 declares the
-    # collector as oneOf [object, string]. The object form maps to
-    # CollectorInfo; the string form (e.g. "alice@example.com") is stored
-    # verbatim as a bare ``str`` so re-export emits the original wire shape.
-    # Wrapping a string into CollectorInfo(name=..., version="") would
-    # reshape the bytes (object instead of string) and break the §6.4
-    # lossless-export MUST (records-payloads-1).
+    # Handle collector. record-envelope.schema.json declares collector as
+    # oneOf [object, string]. The object form maps to CollectorInfo (schema
+    # ``required: [name]``, which the model already enforces — no default for
+    # ``name`` — so an empty/no-name object fails the model under the wrap and
+    # surfaces ACEF-050, no fabrication). The string form (e.g.
+    # "alice@example.com", incl. the no-minLength EMPTY string "") is stored
+    # verbatim as a bare ``str`` so re-export emits the original wire shape;
+    # wrapping it into CollectorInfo(name=..., version="") would reshape the
+    # bytes and break the §6.4 lossless-export MUST (records-payloads-1).
     #
-    # Use a key-PRESENCE check, not truthiness: the string branch carries no
-    # ``minLength``, so the EMPTY string "" is a valid wire shape that MUST
-    # round-trip verbatim. A truthiness check (``data.get("collector")``)
-    # drops "" (falsy), which then re-exports as the default collector OBJECT
-    # via ``to_jsonl_dict`` — a reshaped wire form that breaks lossless
-    # round-trip and Python/TS parity. The default is applied ONLY when the
-    # key is ABSENT (in ``to_jsonl_dict``).
+    # Use key-PRESENCE, not truthiness: a truthiness guard drops "" (falsy)
+    # which then re-exports as the default collector OBJECT via ``to_jsonl_dict``
+    # — a reshaped wire form that breaks lossless round-trip and Python/TS
+    # parity. A PRESENT, non-None value MUST be dict OR str (else ACEF-050 via
+    # ``_require_object(allow_str=True)`` — covering the falsy ``[]`` / ``0`` /
+    # ``False`` and truthy ``5`` that the old code silently dropped to None).
+    # Absent / explicit null defaults to None (default applied in ``to_jsonl_dict``).
     collector: CollectorInfo | str | None = None
     if "collector" in data:
         collector_data = data["collector"]
-        if isinstance(collector_data, dict):
-            collector = CollectorInfo(**collector_data)
-        elif isinstance(collector_data, str):
-            collector = collector_data
+        if collector_data is not None:
+            _require_object("collector", collector_data, allow_str=True)
+            if isinstance(collector_data, str):
+                collector = collector_data
+            else:
+                collector = _nested("collector", lambda: CollectorInfo(**collector_data))
 
     # Build kwargs from the data dict, letting Pydantic validate
     # required fields rather than using empty-string defaults
