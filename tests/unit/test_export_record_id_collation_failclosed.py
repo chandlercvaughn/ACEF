@@ -52,3 +52,15 @@ class TestSurrogateRecordIdFailsClosed:
         out = tmp_path / "ok"
         export_directory(pkg, str(out))
         assert (out / "acef-manifest.json").exists()
+
+
+class TestBuildManifestSurrogateRecordId:
+    """roborev follow-up: Package.build_manifest() is a third public path that
+    calls sort_records directly; it must also fail closed with ACEF-052 on a
+    surrogate-bearing record_id, not leak a raw UnicodeEncodeError."""
+
+    def test_build_manifest_surrogate_record_id_raises_acef_052(self) -> None:
+        pkg = _package_with_record_id("urn:acef:rec:\udce9")
+        with pytest.raises(ACEFExportError) as exc:
+            pkg.build_manifest()
+        assert exc.value.code == "ACEF-052"

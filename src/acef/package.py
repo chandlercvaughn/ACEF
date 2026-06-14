@@ -3506,7 +3506,7 @@ class Package:
         Returns:
             A Manifest ready for serialization.
         """
-        from acef.export import record_type_collation_key
+        from acef.export import _validate_records_collatable, record_type_collation_key
         from acef.records_util import compute_shard_boundaries, sort_records
 
         # Build record_files index by grouping records by type
@@ -3533,6 +3533,11 @@ class Package:
         # that Package.record() admitted, instead of raising a raw
         # UnicodeEncodeError while keying the sort.
         for record_type, recs in sorted(records_by_type.items(), key=lambda kv: record_type_collation_key(kv[0])):
+            # build_manifest is a public path that calls sort_records directly;
+            # like the two export sort sites, fail closed (ACEF-052) on a
+            # surrogate-bearing record_id/timestamp before the UTF-16 collation,
+            # never a raw UnicodeEncodeError.
+            _validate_records_collatable(recs)
             sorted_recs = sort_records(recs)
             shards = compute_shard_boundaries(sorted_recs)
 
