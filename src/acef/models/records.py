@@ -5,15 +5,44 @@ from __future__ import annotations
 import functools
 from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import Any, TypeVar
+from typing import Any, Literal, TypeVar
 
-from pydantic import Field, ValidationError
+from pydantic import Field, ValidationError, model_validator
 
 from acef.models.base import ACEFBaseModel
 from acef.models.enums import Confidentiality, LifecyclePhase, ObligationRole, TrustLevel
 from acef.models.urns import URNType, generate_urn
 
 _T = TypeVar("_T")
+
+
+def _reject_present_null(values: Any, fields: tuple[str, ...]) -> Any:
+    """Reject a PRESENT explicit ``null`` on a NON-nullable schema property.
+
+    The frozen ``record-envelope.schema.json`` types the listed properties as
+    ``integer`` / ``string`` (NOT ``["integer","null"]`` / ``["string","null"]``),
+    so an explicit ``null`` VALUE on a property that IS present is a type
+    violation — distinct from the property being ABSENT (which the model defaults
+    cleanly). Pydantic's ``X | None = None`` typing (needed to express OPTIONAL /
+    absent) ALSO silently accepts a present explicit ``null``, collapsing that
+    distinction; this ``mode="before"`` validator restores it by raising
+    ``ValueError`` (which Pydantic wraps as ``ValidationError`` — re-raised by the
+    loader's ``_nested`` wrapper as the structured ``ACEFFormatError(ACEF-050)``)
+    when a listed key is present in the RAW input with a ``None`` value. A missing
+    key is untouched, so absent → default is preserved.
+
+    Only operates on a raw ``dict`` input (the wire shape); non-dict inputs are
+    passed through unchanged for Pydantic's normal handling.
+    """
+    if isinstance(values, dict):
+        present_null = [f for f in fields if f in values and values[f] is None]
+        if present_null:
+            raise ValueError(
+                f"property {present_null!r} is present but null; the frozen schema "
+                f"types these properties as non-nullable (integer/string), so an "
+                f"explicit null is a type violation (omit the key instead)"
+            )
+    return values
 
 
 class EntityRefs(ACEFBaseModel):
@@ -26,7 +55,20 @@ class EntityRefs(ACEFBaseModel):
 
 
 class AttachmentRef(ACEFBaseModel):
-    """Reference to a file in the artifacts/ directory."""
+    """Reference to a file in the artifacts/ directory.
+
+    Mirrors the frozen record-envelope schema's ``attachments`` array-element
+    object (object ``required: [path, media_type]``; all properties typed
+    ``string``) at the property level. ``path`` is required (no default).
+    ``media_type`` keeps a lenient default so a MISSING ``media_type`` is a schema
+    violation surfaced by ``validate_bundle`` (ACEF-004) rather than blocking
+    ``load`` — the documented load-leniency boundary. ``hash`` /
+    ``attachment_type`` are OPTIONAL but NON-nullable (schema type ``string``, NOT
+    ``[..., "null"]``); ``description`` is non-nullable with an empty-string
+    default. A present explicit ``null`` on ``hash`` / ``attachment_type`` is a
+    type violation rejected by the ``mode="before"`` validator (→ ACEF-050 via the
+    loader wrap); an ABSENT key defaults cleanly and is omitted on re-export.
+    """
 
     path: str
     hash: str | None = None
@@ -34,11 +76,27 @@ class AttachmentRef(ACEFBaseModel):
     attachment_type: str | None = None
     description: str = ""
 
+    @model_validator(mode="before")
+    @classmethod
+    def _no_present_null(cls, values: Any) -> Any:
+        return _reject_present_null(values, ("hash", "attachment_type"))
+
 
 class Attestation(ACEFBaseModel):
-    """Cryptographic attestation of evidence authenticity."""
+    """Cryptographic attestation of evidence authenticity.
 
-    method: str = "jws"
+    Mirrors the frozen record-envelope schema's ``attestation`` object form
+    (``oneOf [object, null]``; object ``required: [method, signer, signed_fields,
+    signature]``) at the PROPERTY level. ``method`` is typed ``Literal["jws"]`` to
+    mirror the schema's ``const: "jws"`` — a present complete attestation whose
+    method is anything else is a structural divergence rejected at load
+    (ACEF-050 via the loader wrap), not silently round-tripped. ``signer`` /
+    ``signature`` are non-nullable ``str``; ``signed_fields`` is ``list[str]``.
+    Required-key PRESENCE is enforced by the loader's ``_require_keys`` so the
+    per-field defaults here never fabricate a value the wire omitted.
+    """
+
+    method: Literal["jws"] = "jws"
     signer: str = ""
     signed_fields: list[str] = Field(default_factory=lambda: ["/payload"])
     signature: str = ""
@@ -47,27 +105,59 @@ class Attestation(ACEFBaseModel):
 class RecordRetention(ACEFBaseModel):
     """Per-record retention requirements.
 
-    Aligned field-for-field to the FROZEN record-envelope schema's ``retention``
-    object form (``acef-conventions/v1`` and ``v1.1`` are byte-identical here):
-    the object declares NO ``required`` keys, so EVERY field is OPTIONAL. All
-    three default to ``None`` (not a non-None literal) so a wire ``retention: {}``
-    loads and re-exports as ``{}`` under ``exclude_none=True`` — no fabricated
-    ``retention_start_event`` / ``legal_basis`` the wire never carried (§6.4
-    lossless export). ``min_retention_days`` keeps ``ge=0`` to mirror the schema's
-    ``minimum: 0`` so an invalid VALUE (``-1``) is still rejected (ACEF-050 under
-    the loader's ValidationError wrap); a missing key is permitted.
+    A FAITHFUL TYPED MIRROR of the FROZEN record-envelope schema's ``retention``
+    object form (``acef-conventions/v1`` and ``v1.1`` are byte-identical here),
+    matched PROPERTY-by-PROPERTY:
+
+    - object declares NO ``required`` keys → EVERY field is OPTIONAL (default
+      ``None``), so a wire ``retention: {}`` loads and re-exports as ``{}`` under
+      ``exclude_none=True`` — no fabricated ``retention_start_event`` /
+      ``legal_basis`` the wire never carried (§6.4 lossless export).
+    - ``min_retention_days``: schema ``integer, minimum: 0`` → ``int | None`` with
+      ``ge=0`` so an invalid VALUE (``-1``) or wrong TYPE is rejected (ACEF-050
+      under the loader's ValidationError wrap).
+    - ``retention_start_event``: schema ``enum: [first_use, first_deployment,
+      record_creation, custom]`` → ``Literal[...]`` so a value outside the set
+      (``"bad"``) is rejected, not silently round-tripped.
+    - ``legal_basis``: schema ``string`` → ``str``.
+
+    PRESENT-NULL on these NON-nullable properties is rejected (the schema property
+    types are integer/string, NOT ``[..., "null"]``): an explicit
+    ``{"min_retention_days": null}`` / ``{"retention_start_event": null}`` /
+    ``{"legal_basis": null}`` is a type violation distinct from ABSENCE. The
+    ``mode="before"`` validator below raises (→ ACEF-050 via the loader wrap)
+    while leaving an ABSENT key to default to ``None``.
     """
 
     min_retention_days: int | None = Field(default=None, ge=0)
-    retention_start_event: str | None = None
+    retention_start_event: Literal["first_use", "first_deployment", "record_creation", "custom"] | None = None
     legal_basis: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _no_present_null(cls, values: Any) -> Any:
+        return _reject_present_null(values, ("min_retention_days", "retention_start_event", "legal_basis"))
 
 
 class CollectorInfo(ACEFBaseModel):
-    """Tool/person that collected this evidence."""
+    """Tool/person that collected this evidence.
+
+    Mirrors the frozen record-envelope schema's ``collector`` object form
+    (``oneOf [object, string]``; object ``required: [name]``) at the property
+    level: ``name`` is a required non-nullable ``str`` (no default — an object
+    form omitting it fails the model → ACEF-050 under the loader wrap);
+    ``version`` is an OPTIONAL non-nullable ``str`` (schema type ``string``, NOT
+    ``[..., "null"]``). A present ``version: null`` is a type violation rejected
+    by the ``mode="before"`` validator; an ABSENT ``version`` defaults to ``""``.
+    """
 
     name: str
     version: str = ""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _no_present_null(cls, values: Any) -> Any:
+        return _reject_present_null(values, ("version",))
 
 
 class RecordEnvelope(ACEFBaseModel):
@@ -186,6 +276,25 @@ def dict_to_record_envelope(data: dict[str, Any]) -> RecordEnvelope:
     attestation, retention, collector) and delegates final validation
     to Pydantic. Missing required fields will raise ACEFFormatError
     rather than silently fabricating blank defaults.
+
+    LOAD-LENIENCY vs VALIDATE-ENFORCEMENT boundary
+    ----------------------------------------------
+    The nested LOAD models (``EntityRefs`` / ``AttachmentRef`` / ``Attestation``
+    / ``RecordRetention`` / ``CollectorInfo``) are FAITHFUL TYPED MIRRORS of the
+    FROZEN ``record-envelope.schema.json`` property shapes: correct types, schema
+    ENUMS as ``Literal`` (``attestation.method`` const ``jws``;
+    ``retention.retention_start_event``), numeric bounds (``min_retention_days``
+    ``ge=0``), required-key presence, and present-null rejection on non-nullable
+    properties. So ``load`` REJECTS structural/type/enum/required-key violations
+    of the nested objects it dereferences — surfacing a structured ACEF-050 — so
+    ``load()`` never crashes, never fabricates a value the wire omitted, and
+    round-trips faithfully. ``load`` does NOT reimplement the full validator:
+    FULL record-payload schema conformance (and the envelope-level schema check
+    on the same nested objects) is enforced separately by ``validate_bundle``,
+    which emits ACEF-004 for any record-envelope/payload schema violation
+    (empirically, an invalid ``retention`` object surfaces ACEF-004 at
+    ``/records/<i>/retention``). The two layers are independent defences; neither
+    is expected to subsume the other.
 
     Args:
         data: Parsed JSON dict from a JSONL record line.

@@ -91,9 +91,23 @@ class TestForgedSignaturesNotCounted:
         assert refs == []
 
     def test_arbitrary_method_with_garbage_signature_not_counted(self) -> None:
-        """The audit's full repro: method='anything' + any non-empty string."""
+        """The audit's full repro: method='anything' + any non-empty string.
+
+        ``Attestation.method`` is now typed ``Literal["jws"]`` (mirroring the
+        frozen schema's ``const: "jws"``), so a non-jws method can no longer be
+        VALIDATED into the model — load() and validated construction reject it.
+        ``model_construct`` bypasses validation to forge an in-memory model that
+        still carries ``method="anything"``, proving the OPERATOR's own
+        ``att.method != "jws"`` defense-in-depth (operators.py) independently
+        refuses to count it even if such an object were fabricated.
+        """
         rec = _make_record()
-        rec.attestation = Attestation(method="anything", signer="attacker", signature="abc")
+        rec.attestation = Attestation.model_construct(
+            method="anything",  # type: ignore[arg-type]  # deliberately invalid: operator-guard repro
+            signer="attacker",
+            signed_fields=["/payload"],
+            signature="abc",
+        )
         passed, refs = op_record_attested({"record_type": "risk_register", "min_count": 1}, [rec])
         assert passed is False
         assert refs == []
@@ -145,10 +159,21 @@ class TestMethodRestriction:
     """v1 restricts attestation to JWS only — any other method does NOT count."""
 
     def test_non_jws_method_with_valid_signature_not_counted(self) -> None:
+        """Even a CRYPTOGRAPHICALLY VALID signature does not count when the
+        method is non-jws. ``Attestation.method`` is now ``Literal["jws"]``
+        (frozen schema ``const: "jws"``), so a non-jws method cannot be validated
+        into the model; ``model_construct`` forges one to prove the operator's
+        own ``att.method != "jws"`` guard rejects it independently of the model
+        constraint (defense-in-depth)."""
         rec = _make_record()
         key = _es256_key()
         signature = _sign_attestation(rec, key)  # cryptographically valid
-        rec.attestation = Attestation(method="c2pa", signer="provider", signature=signature)
+        rec.attestation = Attestation.model_construct(
+            method="c2pa",  # type: ignore[arg-type]  # deliberately invalid: operator-guard repro
+            signer="provider",
+            signed_fields=["/payload"],
+            signature=signature,
+        )
         passed, refs = op_record_attested({"record_type": "risk_register", "min_count": 1}, [rec])
         assert passed is False
         assert refs == []
