@@ -185,10 +185,35 @@ def dict_to_record_envelope(data: dict[str, Any]) -> RecordEnvelope:
     # Import here to avoid circular import (errors.py -> models -> errors)
     from acef.errors import ACEFFormatError
 
+    # ``acef.load()`` is a PUBLIC deserialization API consuming
+    # attacker-controlled bytes. A record line may be a well-formed JSON object
+    # yet carry a WRONG-TYPED sub-field (e.g. ``entity_refs: [1, 2]``,
+    # ``attachments: 5``, ``attestation: "x"``). Guard the TYPES of the three
+    # sub-fields that this function dereferences before use, raising the same
+    # structured ``ACEFFormatError(code="ACEF-050")`` the loader (loader.py) and
+    # validation engine (engine.py, via ``isinstance`` -> ACEF-050 for manifest
+    # sub-fields) use for malformed structure — so a malformed sub-field
+    # surfaces a structured diagnostic naming the offending field + record,
+    # never a leaked raw ``AttributeError`` / ``TypeError``. ``validate_bundle``
+    # routes the identical line through this function, so load() and validate()
+    # converge on the same verdict. This is deserialization hardening only — it
+    # does NOT add schema-validation logic (the validator's job); absent
+    # sub-fields default cleanly, and a well-formed dict still passes its
+    # vendor ``x-*`` extension keys through the ``**`` splat unchanged.
+    _record_id = data.get("record_id", "<unknown>")
+
     # Handle entity_refs. Pass through any unknown nested keys so
     # vendor-prefixed extension refs (e.g., a custom relationship type)
-    # round-trip losslessly.
-    entity_refs_data = data.get("entity_refs", {}) or {}
+    # round-trip losslessly. A PRESENT non-dict must RAISE (the historical
+    # ``or {}`` only rescued FALSY values, letting a truthy non-dict — list,
+    # str, number — fall through to ``.get`` and raise a raw AttributeError);
+    # an ABSENT entity_refs defaults to ``{}``.
+    entity_refs_data = data.get("entity_refs", {})
+    if not isinstance(entity_refs_data, dict):
+        raise ACEFFormatError(
+            f"Record {_record_id!r} field 'entity_refs' must be a JSON object, got {type(entity_refs_data).__name__}",
+            code="ACEF-050",
+        )
     _entity_refs_known = {"subject_refs", "component_refs", "dataset_refs", "actor_refs"}
     entity_refs = EntityRefs(
         subject_refs=entity_refs_data.get("subject_refs", []),
@@ -198,15 +223,40 @@ def dict_to_record_envelope(data: dict[str, Any]) -> RecordEnvelope:
         **{k: v for k, v in entity_refs_data.items() if k not in _entity_refs_known},
     )
 
-    # Handle attachments
+    # Handle attachments. A PRESENT non-list must RAISE (a bare scalar is not
+    # iterable; a dict would iterate its keys into ``AttachmentRef(**str)``);
+    # an ABSENT attachments defaults to ``[]``. Each list element must itself be
+    # a dict before the ``**`` splat, else a non-dict element (``[5]``) raises a
+    # raw ``TypeError: argument after ** must be a mapping``.
+    attachments_data = data.get("attachments", [])
+    if not isinstance(attachments_data, list):
+        raise ACEFFormatError(
+            f"Record {_record_id!r} field 'attachments' must be a JSON array, got {type(attachments_data).__name__}",
+            code="ACEF-050",
+        )
     attachments = []
-    for att_data in data.get("attachments", []):
+    for att_index, att_data in enumerate(attachments_data):
+        if not isinstance(att_data, dict):
+            raise ACEFFormatError(
+                f"Record {_record_id!r} field 'attachments[{att_index}]' must be a "
+                f"JSON object, got {type(att_data).__name__}",
+                code="ACEF-050",
+            )
         attachments.append(AttachmentRef(**att_data))
 
-    # Handle attestation
+    # Handle attestation. A PRESENT (truthy) non-dict must RAISE before the
+    # ``**`` splat (``Attestation(**"x")`` raises a raw TypeError). A falsy /
+    # absent attestation stays ``None``.
     attestation = None
-    if data.get("attestation"):
-        attestation = Attestation(**data["attestation"])
+    attestation_data = data.get("attestation")
+    if attestation_data:
+        if not isinstance(attestation_data, dict):
+            raise ACEFFormatError(
+                f"Record {_record_id!r} field 'attestation' must be a JSON object, "
+                f"got {type(attestation_data).__name__}",
+                code="ACEF-050",
+            )
+        attestation = Attestation(**attestation_data)
 
     # Handle retention
     retention = None
