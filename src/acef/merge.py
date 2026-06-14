@@ -298,9 +298,25 @@ def _derive_merged_core_version(
     for a legacy/unparseable highest); a highest input at ``>= 1.1.0`` already
     satisfies the floor and is returned unchanged, never downgraded.
     """
-    # Highest input core_version by the single semver parse (input order
-    # independent — pure max over the parsed tuples).
-    highest = max((pkg.versioning.core_version for pkg in packages), key=_core_version_sort_key)
+    # Highest input core_version by the single semver parse, with a DETERMINISTIC
+    # secondary key on a semver-equal tie so the result is independent of input
+    # ORDER (structural-review P2). The semver tuple from the single
+    # parse_core_version_minor-backed parse stays the PRIMARY order (no-downgrade,
+    # patch-aware, malformed-handling all unchanged — a strictly-higher tuple still
+    # wins and the secondary key never overrides it). The tie-break only fires when
+    # two inputs map to the SAME tuple — e.g. the bare ``major.minor`` form the
+    # lenient load() admits (``"1.1"``) and the canonical ``"1.1.0"`` both parse to
+    # ``(1, 1, 0)``: a bare ``max()`` would then return whichever input appears
+    # first, emitting a different merged-manifest STRING for the same input SET.
+    # Adding the raw string as the secondary key picks the deterministic string-max
+    # (``"1.1.0" > "1.1"``) regardless of order; malformed/legacy versions (all
+    # ``(-1, -1, -1)``) likewise tie-break by string instead of by arrival order.
+    # This only deduplicates the MULTI-input ordering — a single input is returned
+    # verbatim (never canonicalized).
+    highest = max(
+        (pkg.versioning.core_version for pkg in packages),
+        key=lambda cv: (_core_version_sort_key(cv), cv),
+    )
 
     if not _merged_content_requires_v1_1(records, relationships):
         return highest

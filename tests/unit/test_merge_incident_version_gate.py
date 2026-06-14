@@ -501,3 +501,99 @@ class TestMergedCoreVersionPatchAware:
         # 12 > 3 numerically; a lexicographic or minor-only compare would mishandle this.
         result = merge_packages([a, b])
         assert result.package.versioning.core_version == "1.1.12"
+
+
+# ---------------------------------------------------------------------------
+# P2 (structural-review) — the merged core_version max must break ties among
+# SEMVER-EQUAL-but-string-different inputs DETERMINISTICALLY (order-independent).
+# Pre-fix ``_core_version_sort_key`` maps both ``"1.1"`` and ``"1.1.0"`` to the
+# SAME tuple ``(1, 1, 0)`` (the bare ``major.minor`` form the lenient ``load()``
+# admits has its patch default to 0). With equal keys ``max()`` returns the
+# FIRST-occurring input — so ``merge_packages([A="1.1", B="1.1.0"])`` emitted
+# ``"1.1"`` while ``merge_packages([B, A])`` emitted ``"1.1.0"``: the same
+# logical input SET produced DIFFERENT merged manifest bytes (a determinism
+# defect). Fix: a secondary string key (``(sort_key, cv)``) breaks the tuple tie
+# deterministically toward the string-max (``"1.1.0" > "1.1"``), order-independent.
+# ---------------------------------------------------------------------------
+
+
+class TestMergedCoreVersionSemverEqualTieIsDeterministic:
+    def test_red_semver_equal_string_different_inputs_are_order_independent(self) -> None:
+        """Merging ``"1.1"`` and ``"1.1.0"`` yields the SAME string in BOTH orders.
+
+        Pre-fix (b5d69eaa) ``_core_version_sort_key`` maps both strings to
+        ``(1, 1, 0)``, so ``max()`` returns the first input: the
+        ``["1.1", "1.1.0"]`` order emitted ``"1.1"`` and ``["1.1.0", "1.1"]``
+        emitted ``"1.1.0"`` — order-dependent merged manifest bytes. RED: this
+        asserts forward == reverse AND equals the deterministic string-max
+        ``"1.1.0"``; pre-fix forward is ``"1.1"`` and reverse is ``"1.1.0"``.
+        """
+        bare, _ = _incident_card_pkg(
+            "Org-A", public_incident_id=_PID_A, subject_identity=("OpenAI", "GPT-X", "4.0"), subject_name="Sys A"
+        )
+        full, _ = _incident_card_pkg(
+            "Org-B",
+            public_incident_id=_PID_B,
+            subject_identity=("Acme AI", "Vision-Pro", "2.1.0"),
+            subject_name="Sys B",
+        )
+        # The bare ``major.minor`` form is exactly what the intentionally-lenient
+        # load() path admits for a non-schema-conformant bundle; both are
+        # semver-equal ((1, 1, 0)) yet string-different.
+        bare.versioning.core_version = "1.1"
+        full.versioning.core_version = "1.1.0"
+
+        forward = merge_packages([bare, full])
+        reverse = merge_packages([full, bare])
+
+        assert forward.package.versioning.core_version == reverse.package.versioning.core_version, (
+            "the same logical input SET must produce the SAME merged core_version regardless of "
+            f"input order — got {forward.package.versioning.core_version!r} (forward) vs "
+            f"{reverse.package.versioning.core_version!r} (reverse)"
+        )
+        assert forward.package.versioning.core_version == "1.1.0", (
+            "the semver-equal tie must break deterministically toward the string-max "
+            '("1.1.0" > "1.1"), not the first-appearing input'
+        )
+
+    def test_no_downgrade_preserved_strictly_higher_semver_wins(self) -> None:
+        """A strictly-higher semver still wins regardless of order (secondary key inert on a tuple difference)."""
+        low, _ = _incident_card_pkg(
+            "Org-A", public_incident_id=_PID_A, subject_identity=("OpenAI", "GPT-X", "4.0"), subject_name="Sys A"
+        )
+        high, _ = _incident_card_pkg(
+            "Org-B",
+            public_incident_id=_PID_B,
+            subject_identity=("Acme AI", "Vision-Pro", "2.1.0"),
+            subject_name="Sys B",
+        )
+        low.versioning.core_version = "1.1.0"
+        high.versioning.core_version = "1.2.0"
+
+        forward = merge_packages([low, high])
+        reverse = merge_packages([high, low])
+        assert forward.package.versioning.core_version == "1.2.0", (
+            "a strictly-higher semver MUST win — the string tie-break only matters on a tuple tie, "
+            "never overriding the no-downgrade semver primary order"
+        )
+        assert reverse.package.versioning.core_version == "1.2.0"
+
+    def test_single_bare_minor_input_is_not_canonicalized(self) -> None:
+        """A SINGLE ``"1.1"`` input is returned unchanged (the fix only makes the MULTI-input tie deterministic).
+
+        The surgical tie-break must NOT normalize a lone bare ``major.minor``
+        string into ``major.minor.patch`` — single-input behavior is unchanged.
+        Here the lone input carries v1.1 incident content whose tuple already
+        satisfies the v1.1 floor ((1, 1, 0) >= (1, 1, 0)), so the highest is
+        returned verbatim.
+        """
+        only, _ = _incident_card_pkg(
+            "Org-A", public_incident_id=_PID_A, subject_identity=("OpenAI", "GPT-X", "4.0"), subject_name="Sys A"
+        )
+        only.versioning.core_version = "1.1"
+
+        result = merge_packages([only])
+        assert result.package.versioning.core_version == "1.1", (
+            "a single bare-minor input MUST be returned unchanged — the tie-break only "
+            "deduplicates the MULTI-input ordering, it does not canonicalize the string"
+        )
