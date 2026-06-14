@@ -69,6 +69,27 @@ Validate-path no-regression
     precision: the silently-dropped cases gain a diagnostic; the raw-leak cases
     keep their ACEF-004 but now quote a structured ACEF-050 instead of a raw
     pydantic message).
+
+ROUND-4 SCHEMA-ALIGNMENT CORRECTION (commit aligning to the frozen schema)
+    roborev (codex xhigh) on the round-3 commit found two of the round-3
+    assertions MIS-ALIGNED with the frozen ``record-envelope.schema.json``:
+
+      * GAP B over-corrected: the retention object form declares NO ``required``
+        keys, so ``retention: {}`` is schema-VALID and MUST LOAD (round-3
+        required ACEF-050 — an OVER-reject regression). The ``RecordRetention``
+        model now defaults every field to ``None``; the
+        ``retention-empty-dict-missing-required`` param is REMOVED here and the
+        clean-load case is pinned in
+        ``test_loader_nested_field_schema_alignment.py``. The other retention
+        params (``-1`` violates ``minimum: 0``; ``"bad"``/``5``/falsy non-objects)
+        remain ACEF-050.
+      * GAP C under-corrected: the schema declares collector ``oneOf [object,
+        string]`` with NO null branch, so a present ``collector: null`` is
+        schema-INVALID and MUST raise ACEF-050 — round-3 yielded ``None`` (an
+        UNDER-reject that re-exported a FABRICATED default object). ``collector``
+        is removed from ``test_explicit_null_nested_field_yields_none`` and the
+        rejection is pinned in ``test_present_null_collector_rejected_no_fabrication``.
+        attestation/retention keep ``null`` -> None (their schema HAS a null branch).
 """
 
 from __future__ import annotations
@@ -176,7 +197,10 @@ _MALFORMED = [
     pytest.param("retention", "", "retention", id="retention-falsy-empty-str"),
     pytest.param("retention", "bad", "retention", id="retention-truthy-str"),
     pytest.param("retention", 5, "retention", id="retention-truthy-int"),
-    pytest.param("retention", {}, "retention", id="retention-empty-dict-missing-required"),
+    # NB: ``retention: {}`` is NOT here — the frozen schema's retention object
+    # form declares NO required keys, so an empty object is schema-VALID and MUST
+    # LOAD. Round-4 (test_loader_nested_field_schema_alignment.py) pins that as a
+    # clean load; requiring ACEF-050 here was an OVER-reject regression.
     pytest.param("retention", {"min_retention_days": -1}, "retention", id="retention-negative-days"),
     pytest.param(
         "retention",
@@ -312,11 +336,29 @@ def test_absent_nested_fields_default_cleanly() -> None:
     assert env.attachments == []
 
 
-@pytest.mark.parametrize("field", ["attestation", "retention", "collector"])
+@pytest.mark.parametrize("field", ["attestation", "retention"])
 def test_explicit_null_nested_field_yields_none(field: str) -> None:
-    """An explicit ``null`` on a oneOf[..., null]-shaped field yields None."""
+    """An explicit ``null`` on a ``oneOf[object, null]``-shaped field (attestation
+    and retention both declare a ``{"type": "null"}`` branch) yields None.
+
+    ``collector`` is deliberately EXCLUDED: the frozen schema declares it
+    ``oneOf [object, string]`` with NO null branch, so a present ``collector:
+    null`` is schema-INVALID and rejects (see
+    ``test_present_null_collector_rejected_no_fabrication`` below) — yielding None
+    there would be an UNDER-reject + fabricated-default re-export."""
     env = dict_to_record_envelope(_base(**{field: None}))
     assert getattr(env, field) is None
+
+
+def test_present_null_collector_rejected_no_fabrication() -> None:
+    """``collector: null`` is schema-INVALID (collector is ``oneOf [object,
+    string]`` — no null branch). A present ``collector: null`` MUST raise ACEF-050
+    rather than be treated as ABSENT and re-exported as the FABRICATED default
+    ``{"name": "unknown", "version": ""}``."""
+    with pytest.raises(ACEFFormatError) as exc:
+        dict_to_record_envelope(_base(collector=None))
+    assert exc.value.code == "ACEF-050"
+    assert "collector" in exc.value.message
 
 
 def test_valid_retention_constructs() -> None:

@@ -45,11 +45,22 @@ class Attestation(ACEFBaseModel):
 
 
 class RecordRetention(ACEFBaseModel):
-    """Per-record retention requirements."""
+    """Per-record retention requirements.
 
-    min_retention_days: int = Field(ge=0)
-    retention_start_event: str = "record_creation"
-    legal_basis: str = ""
+    Aligned field-for-field to the FROZEN record-envelope schema's ``retention``
+    object form (``acef-conventions/v1`` and ``v1.1`` are byte-identical here):
+    the object declares NO ``required`` keys, so EVERY field is OPTIONAL. All
+    three default to ``None`` (not a non-None literal) so a wire ``retention: {}``
+    loads and re-exports as ``{}`` under ``exclude_none=True`` — no fabricated
+    ``retention_start_event`` / ``legal_basis`` the wire never carried (§6.4
+    lossless export). ``min_retention_days`` keeps ``ge=0`` to mirror the schema's
+    ``minimum: 0`` so an invalid VALUE (``-1``) is still rejected (ACEF-050 under
+    the loader's ValidationError wrap); a missing key is permitted.
+    """
+
+    min_retention_days: int | None = Field(default=None, ge=0)
+    retention_start_event: str | None = None
+    legal_basis: str | None = None
 
 
 class CollectorInfo(ACEFBaseModel):
@@ -367,17 +378,18 @@ def dict_to_record_envelope(data: dict[str, Any]) -> RecordEnvelope:
         required=("method", "signer", "signed_fields", "signature"),
     )
 
-    # Handle retention. The record-envelope schema declares retention
-    # ``oneOf [object, null]``; the ``RecordRetention`` model requires
-    # ``min_retention_days`` (no default, ``ge=0``). A truthiness guard
-    # (``if data.get("retention"):``) silently DROPPED a present falsy value
-    # (``[]`` / ``{}``) and an unwrapped ``RecordRetention(**...)`` leaked a raw
-    # ``pydantic.ValidationError`` (``min_retention_days: -1``) or ``TypeError``
-    # (``retention: "bad"``). No required-key enforcement is needed beyond the
-    # model's own (``RecordRetention`` fabricates no semantically-required value:
-    # ``min_retention_days`` has no default, so an empty object fails the model
-    # under the wrap and surfaces ACEF-050). ``_build_nested`` provides the
-    # presence/None + type guard + wrapped construction uniformly.
+    # Handle retention. The frozen record-envelope schema declares retention
+    # ``oneOf [object, null]`` and the object form has NO ``required`` keys, so an
+    # empty ``retention: {}`` is schema-VALID and MUST load (``RecordRetention``
+    # defaults every field to ``None`` to match — re-exporting ``{}`` verbatim
+    # under ``exclude_none``, no fabricated ``retention_start_event`` /
+    # ``legal_basis``). No ``required=`` is passed because the schema lists none.
+    # A present, non-None value MUST be a dict (else ACEF-050 via
+    # ``_require_object``, covering the falsy ``[]`` a truthiness guard would
+    # silently drop); construction is wrapped so an invalid VALUE — ``min_retention_days:
+    # -1`` (violates the schema's ``minimum: 0``, kept as model ``ge=0``) or a
+    # non-integer ``"lots"`` — raises ACEF-050 instead of leaking a raw
+    # ``pydantic.ValidationError``. Absent key or explicit ``null`` yields ``None``.
     retention = _build_nested(RecordRetention, "retention")
 
     # Handle collector. record-envelope.schema.json declares collector as
@@ -393,19 +405,24 @@ def dict_to_record_envelope(data: dict[str, Any]) -> RecordEnvelope:
     # Use key-PRESENCE, not truthiness: a truthiness guard drops "" (falsy)
     # which then re-exports as the default collector OBJECT via ``to_jsonl_dict``
     # — a reshaped wire form that breaks lossless round-trip and Python/TS
-    # parity. A PRESENT, non-None value MUST be dict OR str (else ACEF-050 via
-    # ``_require_object(allow_str=True)`` — covering the falsy ``[]`` / ``0`` /
-    # ``False`` and truthy ``5`` that the old code silently dropped to None).
-    # Absent / explicit null defaults to None (default applied in ``to_jsonl_dict``).
+    # parity. The schema declares collector ``oneOf [object, string]`` — UNLIKE
+    # attestation / retention (``oneOf [object, null]``), collector does NOT permit
+    # ``null``. So a PRESENT value (including explicit ``null``) MUST be dict OR
+    # str: a present ``collector: null`` raises ACEF-050 via
+    # ``_require_object(allow_str=True)`` (``None`` is neither dict nor str) rather
+    # than being silently treated as ABSENT and re-exported as the FABRICATED
+    # default ``{"name": "unknown", "version": ""}`` the wire never carried. Only
+    # an ABSENT key yields ``collector = None`` (default applied in
+    # ``to_jsonl_dict``). The same guard covers the falsy ``[]`` / ``0`` / ``False``
+    # and truthy ``5`` that the old code silently dropped to None.
     collector: CollectorInfo | str | None = None
     if "collector" in data:
         collector_data = data["collector"]
-        if collector_data is not None:
-            _require_object("collector", collector_data, allow_str=True)
-            if isinstance(collector_data, str):
-                collector = collector_data
-            else:
-                collector = _nested("collector", lambda: CollectorInfo(**collector_data))
+        _require_object("collector", collector_data, allow_str=True)
+        if isinstance(collector_data, str):
+            collector = collector_data
+        else:
+            collector = _nested("collector", lambda: CollectorInfo(**collector_data))
 
     # Build kwargs from the data dict, letting Pydantic validate
     # required fields rather than using empty-string defaults
