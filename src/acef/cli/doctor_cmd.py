@@ -154,8 +154,18 @@ def _check_manifest(bundle_path: Path, issues: list[tuple[str, str, str]]) -> No
     try:
         data = json.loads(manifest_path.read_text(encoding="utf-8"))
         console.print("  [green]Valid JSON[/green]")
-    except json.JSONDecodeError as e:
-        issues.append(("error", "manifest", f"Invalid JSON: {e}"))
+    except (json.JSONDecodeError, UnicodeDecodeError) as e:
+        # A malformed manifest — invalid JSON OR non-UTF-8 bytes — must surface as
+        # a clean ACEF-050 issue (counted as an error → exit 1), NEVER a raw
+        # traceback. ``read_text(encoding="utf-8")`` raises ``UnicodeDecodeError``
+        # (a ``ValueError`` subclass distinct from ``json.JSONDecodeError`` and NOT
+        # an ``OSError``) on non-UTF-8 manifest bytes, so it must be caught
+        # alongside the JSON error. Mirrors ``inspect``'s ACEF-050 decode handling
+        # (acef.cli.inspect_cmd._read_directory_inputs / _read_archive_inputs);
+        # both directory and archive manifests reach this branch because
+        # ``doctor`` extracts an archive to a temp dir and then reads the manifest
+        # from there via this same routine.
+        issues.append(("error", "manifest", f"[ACEF-050] Invalid manifest (not valid UTF-8 JSON): {e}"))
         return
 
     # Check required fields

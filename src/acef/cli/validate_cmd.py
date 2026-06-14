@@ -9,6 +9,7 @@ import click
 
 from acef.assessment_builder import validate
 from acef.cli.formatters import print_assessment
+from acef.errors import ACEFFormatError
 from acef.models.enums import ProvisionOutcome, RuleOutcome
 
 
@@ -37,7 +38,31 @@ def validate_cmd(path: str, profile: tuple[str, ...], output: str | None, fmt: s
     # performs the raw safe-extraction (no load→export healing), so the CLI no
     # longer duplicates extraction logic — directory and archive inputs share
     # one code path with identical integrity verdicts.
-    assessment = validate(path, profiles=profiles)
+    #
+    # A missing or malformed ARCHIVE (``extract_archive_raw`` raises
+    # ``ACEFFormatError`` ACEF-050 — "Archive not found" for a nonexistent path,
+    # "Malformed or corrupt archive: ... not a gzip file" for a non-gzip
+    # ``*.tar.gz``) must surface as a CLEAN error + the SAME non-zero exit code a
+    # missing/malformed DIRECTORY produces, not an uncaught traceback. A
+    # missing/malformed DIRECTORY returns an ``AssessmentBundle`` carrying a FATAL
+    # structural error (ACEF-002 / ACEF-050) → ``has_fatal`` → exit 2 below; we
+    # mirror that exit code (2) here so directory and archive inputs are
+    # SYMMETRIC. ``--format json`` emits a structured error object (the same
+    # ``structural_errors`` shape a fatal directory assessment carries) so a
+    # ``| jq`` consumer never receives a traceback on stdout.
+    try:
+        assessment = validate(path, profiles=profiles)
+    except ACEFFormatError as exc:
+        code = exc.code or "ACEF-050"
+        message = str(exc)
+        if fmt == "json":
+            error_obj = {"structural_errors": [{"code": code, "severity": "fatal", "message": message, "path": path}]}
+            click.echo(json.dumps(error_obj, indent=2))
+        else:
+            click.echo(f"Error: {message}", err=True)
+        # Match the missing/malformed-DIRECTORY exit code (FATAL → 2) so archive
+        # and directory inputs return the same code for the equivalent failure.
+        sys.exit(2)
 
     if fmt == "json":
         click.echo(json.dumps(assessment.to_dict(), indent=2))

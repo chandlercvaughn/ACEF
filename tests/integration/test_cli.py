@@ -10,6 +10,7 @@ import pytest
 from click.testing import CliRunner
 
 from acef.cli.main import cli
+from acef.errors import ACEFFormatError
 from acef.package import Package
 
 
@@ -408,3 +409,113 @@ class TestCLI:
         result = runner.invoke(cli, ["export", bundle_path, archive_path])
         assert result.exit_code == 0
         assert Path(archive_path).exists()
+
+
+# Non-UTF-8 manifest bytes used by the doctor crash tests below: a UTF-16-LE
+# encoded ``{}`` (BOM + braces) that is NOT decodable as UTF-8 — its leading
+# 0xff byte makes ``read_text(encoding="utf-8")`` raise ``UnicodeDecodeError``.
+_NON_UTF8_MANIFEST = b"\xff\xfe{\x00}\x00"
+
+
+class TestCLIDoctorNonUtf8Manifest:
+    """P2(a): ``acef doctor`` must not crash with an uncaught ``UnicodeDecodeError``
+    when ``acef-manifest.json`` contains non-UTF-8 bytes.
+
+    RED proof (before the fix): both a DIRECTORY bundle and a ``.acef.tar.gz``
+    archive whose manifest is ``b"\\xff\\xfe{\\x00}\\x00"`` make ``doctor`` read the
+    manifest via ``read_text(encoding="utf-8")`` and raise an UNCAUGHT
+    ``UnicodeDecodeError`` ("'utf-8' codec can't decode byte 0xff in position 0:
+    invalid start byte") — a raw traceback escapes instead of a clean
+    ``[ACEF-050]`` error. This is the SAME malformed-manifest class the
+    ``inspect`` fix already closed (``inspect`` catches
+    ``(json.JSONDecodeError, UnicodeDecodeError)`` → clean ``[ACEF-050]`` +
+    ``SystemExit(1)``); ``doctor`` was missed. After the fix doctor emits the same
+    clean ``[ACEF-050]`` error and exits non-zero (1) with NO traceback.
+    """
+
+    def test_doctor_directory_non_utf8_manifest_acef050_no_traceback(self, runner: CliRunner, tmp_dir: Path) -> None:
+        bundle = tmp_dir / "doctor-bad-utf8.acef"
+        bundle.mkdir()
+        (bundle / "acef-manifest.json").write_bytes(_NON_UTF8_MANIFEST)
+        (bundle / "records").mkdir()
+
+        result = runner.invoke(cli, ["doctor", str(bundle)], catch_exceptions=True)
+
+        # No uncaught exception (CliRunner only sets ``.exception`` to a non-exit
+        # error when the command crashed — ``SystemExit`` is the clean path).
+        assert not isinstance(result.exception, UnicodeDecodeError), result.exception
+        assert result.exit_code == 1, result.output
+        assert "ACEF-050" in result.output
+        assert "Traceback" not in result.output
+
+    def test_doctor_archive_non_utf8_manifest_acef050_no_traceback(self, runner: CliRunner, tmp_dir: Path) -> None:
+        # Build a real .acef.tar.gz whose nested manifest is non-UTF-8.
+        root = tmp_dir / "arc-src" / "bundle.acef"
+        root.mkdir(parents=True)
+        (root / "acef-manifest.json").write_bytes(_NON_UTF8_MANIFEST)
+        (root / "records").mkdir()
+        archive = tmp_dir / "doctor-bad-utf8.acef.tar.gz"
+        with tarfile.open(str(archive), "w:gz") as tar:
+            tar.add(str(root), arcname="bundle.acef")
+
+        result = runner.invoke(cli, ["doctor", str(archive)], catch_exceptions=True)
+
+        assert not isinstance(result.exception, UnicodeDecodeError), result.exception
+        assert result.exit_code == 1, result.output
+        assert "ACEF-050" in result.output
+        assert "Traceback" not in result.output
+
+
+class TestCLIValidateArchiveErrorSymmetry:
+    """P2(b): ``acef validate`` on a missing / malformed ARCHIVE must emit a clean
+    error + the SAME non-zero exit code as the equivalent DIRECTORY failure, for
+    both text and ``--format json``.
+
+    RED proof (before the fix): ``validate /no/such/bundle.acef.tar.gz`` and
+    ``validate <non-gzip *.tar.gz>`` let the loader's ``ACEFFormatError``
+    ("[ACEF-050] Archive not found: ..." / "[ACEF-050] Malformed or corrupt
+    archive: ...: not a gzip file") propagate UNCAUGHT out of ``validate_cmd`` —
+    a traceback — while a missing/malformed DIRECTORY input returns an
+    ``AssessmentBundle`` carrying a FATAL structural error → exit 2 cleanly. The
+    archive path was asymmetric. After the fix the archive path is caught and
+    surfaced as a clean ``ACEF-050`` error with exit code 2, matching the
+    directory case, in text and JSON.
+    """
+
+    def test_validate_missing_archive_clean_error_no_traceback(self, runner: CliRunner) -> None:
+        result = runner.invoke(cli, ["validate", "/no/such/bundle.acef.tar.gz"], catch_exceptions=True)
+        assert not isinstance(result.exception, ACEFFormatError), result.exception
+        assert result.exit_code == 2, result.output
+        assert "ACEF-050" in result.output
+        assert "Traceback" not in result.output
+
+    def test_validate_non_gzip_archive_clean_error_no_traceback(self, runner: CliRunner, tmp_dir: Path) -> None:
+        bad = tmp_dir / "corrupt.tar.gz"
+        bad.write_bytes(b"x")
+        result = runner.invoke(cli, ["validate", str(bad)], catch_exceptions=True)
+        assert not isinstance(result.exception, ACEFFormatError), result.exception
+        assert result.exit_code == 2, result.output
+        assert "ACEF-050" in result.output
+        assert "Traceback" not in result.output
+
+    def test_validate_missing_archive_json_format_emits_structured_error(self, runner: CliRunner) -> None:
+        result = runner.invoke(
+            cli,
+            ["validate", "/no/such/bundle.acef.tar.gz", "--format", "json"],
+            catch_exceptions=True,
+        )
+        assert not isinstance(result.exception, ACEFFormatError), result.exception
+        assert result.exit_code == 2, result.output
+        # --format json must emit parseable JSON carrying the ACEF-050 error, not
+        # a traceback, so a `| jq` consumer does not choke.
+        payload = json.loads(result.output)
+        assert "ACEF-050" in json.dumps(payload)
+
+    def test_validate_archive_and_directory_exit_codes_match(self, runner: CliRunner) -> None:
+        """Symmetry assertion: a missing ARCHIVE and a missing DIRECTORY produce
+        the SAME non-zero exit code (the established ACEF-050/fatal mapping)."""
+        archive_result = runner.invoke(cli, ["validate", "/no/such/bundle.acef.tar.gz"], catch_exceptions=True)
+        dir_result = runner.invoke(cli, ["validate", "/no/such/directory"], catch_exceptions=True)
+        assert not isinstance(archive_result.exception, ACEFFormatError), archive_result.exception
+        assert archive_result.exit_code == dir_result.exit_code
+        assert archive_result.exit_code == 2
