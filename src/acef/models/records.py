@@ -7,7 +7,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any, Literal, TypeVar
 
-from pydantic import Field, ValidationError, model_validator
+from pydantic import Field, StrictInt, ValidationError, model_validator
 
 from acef.models.base import ACEFBaseModel
 from acef.models.enums import Confidentiality, LifecyclePhase, ObligationRole, TrustLevel
@@ -113,9 +113,14 @@ class RecordRetention(ACEFBaseModel):
       ``None``), so a wire ``retention: {}`` loads and re-exports as ``{}`` under
       ``exclude_none=True`` — no fabricated ``retention_start_event`` /
       ``legal_basis`` the wire never carried (§6.4 lossless export).
-    - ``min_retention_days``: schema ``integer, minimum: 0`` → ``int | None`` with
-      ``ge=0`` so an invalid VALUE (``-1``) or wrong TYPE is rejected (ACEF-050
-      under the loader's ValidationError wrap).
+    - ``min_retention_days``: schema ``integer, minimum: 0`` → ``StrictInt | None``
+      with ``ge=0``. ``StrictInt`` (NOT Pydantic's default LAX ``int``) so a
+      present non-integer — a numeric STRING (``"180"``), a ``float`` (``1.5``),
+      or a ``bool`` (``True``/``False``, which lax int handling would coerce to
+      ``1``/``0``) — is a TYPE violation rejected at load (ACEF-050 under the
+      loader's ValidationError wrap) rather than silently COERCED-and-mutated on
+      re-export. A real JSON ``integer`` still loads, ``ge=0`` still rejects an
+      invalid VALUE (``-1``), and an ABSENT key still defaults to ``None``.
     - ``retention_start_event``: schema ``enum: [first_use, first_deployment,
       record_creation, custom]`` → ``Literal[...]`` so a value outside the set
       (``"bad"``) is rejected, not silently round-tripped.
@@ -129,7 +134,7 @@ class RecordRetention(ACEFBaseModel):
     while leaving an ABSENT key to default to ``None``.
     """
 
-    min_retention_days: int | None = Field(default=None, ge=0)
+    min_retention_days: StrictInt | None = Field(default=None, ge=0)
     retention_start_event: Literal["first_use", "first_deployment", "record_creation", "custom"] | None = None
     legal_basis: str | None = None
 
@@ -281,20 +286,23 @@ def dict_to_record_envelope(data: dict[str, Any]) -> RecordEnvelope:
     ----------------------------------------------
     The nested LOAD models (``EntityRefs`` / ``AttachmentRef`` / ``Attestation``
     / ``RecordRetention`` / ``CollectorInfo``) are FAITHFUL TYPED MIRRORS of the
-    FROZEN ``record-envelope.schema.json`` property shapes: correct types, schema
-    ENUMS as ``Literal`` (``attestation.method`` const ``jws``;
+    FROZEN ``record-envelope.schema.json`` property shapes: correct types
+    (including STRICT scalar typing — ``min_retention_days`` is ``StrictInt`` so a
+    numeric string / float / bool is rejected, NOT lax-coerced and re-exported
+    mutated), schema ENUMS as ``Literal`` (``attestation.method`` const ``jws``;
     ``retention.retention_start_event``), numeric bounds (``min_retention_days``
     ``ge=0``), required-key presence, and present-null rejection on non-nullable
     properties. So ``load`` REJECTS structural/type/enum/required-key violations
     of the nested objects it dereferences — surfacing a structured ACEF-050 — so
     ``load()`` never crashes, never fabricates a value the wire omitted, and
     round-trips faithfully. ``load`` does NOT reimplement the full validator:
-    FULL record-payload schema conformance (and the envelope-level schema check
-    on the same nested objects) is enforced separately by ``validate_bundle``,
+    FULL record-payload schema conformance — and, for the nested envelope objects,
+    deep scalar-type coercion on arbitrary fields (e.g. ``min_retention_days:
+    "180"`` as a JSON string) — is enforced separately by ``validate_bundle``,
     which emits ACEF-004 for any record-envelope/payload schema violation
-    (empirically, an invalid ``retention`` object surfaces ACEF-004 at
-    ``/records/<i>/retention``). The two layers are independent defences; neither
-    is expected to subsume the other.
+    (empirically, an invalid ``retention`` object — including a string
+    ``min_retention_days`` — surfaces ACEF-004 at ``/records/<i>/retention``). The
+    two layers are independent defences; neither is expected to subsume the other.
 
     Args:
         data: Parsed JSON dict from a JSONL record line.
@@ -497,8 +505,10 @@ def dict_to_record_envelope(data: dict[str, Any]) -> RecordEnvelope:
     # ``_require_object``, covering the falsy ``[]`` a truthiness guard would
     # silently drop); construction is wrapped so an invalid VALUE — ``min_retention_days:
     # -1`` (violates the schema's ``minimum: 0``, kept as model ``ge=0``) or a
-    # non-integer ``"lots"`` — raises ACEF-050 instead of leaking a raw
-    # ``pydantic.ValidationError``. Absent key or explicit ``null`` yields ``None``.
+    # wrong TYPE — a numeric STRING ``"180"`` / ``float`` ``1.5`` / ``bool`` (all
+    # rejected by the field's ``StrictInt`` typing, never lax-coerced to int) —
+    # raises ACEF-050 instead of leaking a raw ``pydantic.ValidationError`` or
+    # mutating the wire value on re-export. Absent key / explicit ``null`` -> ``None``.
     retention = _build_nested(RecordRetention, "retention")
 
     # Handle collector. record-envelope.schema.json declares collector as

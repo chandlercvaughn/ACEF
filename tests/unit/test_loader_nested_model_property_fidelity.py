@@ -79,6 +79,7 @@ import pytest
 
 from acef.errors import ACEFFormatError
 from acef.models.records import (
+    AttachmentRef,
     Attestation,
     CollectorInfo,
     RecordRetention,
@@ -217,6 +218,119 @@ def test_record_retention_model_rejects_bad_enum_directly() -> None:
     """The MODEL rejects a bad ``retention_start_event`` enum value."""
     with pytest.raises(Exception):  # pydantic ValidationError  # noqa: B017,PT011
         RecordRetention(retention_start_event="bad")  # type: ignore[arg-type]
+
+
+# ===========================================================================
+# RecordRetention.min_retention_days — schema ``integer`` ⇒ STRICT int.
+#
+# Structural-review P2, round 6. roborev (codex xhigh) on commit ``d846875c``
+# found ``min_retention_days`` still used Pydantic's DEFAULT (LAX) int handling,
+# so a schema-invalid numeric STRING ``"180"`` LOADED as integer ``180`` — even
+# though the frozen schema types the property as a JSON ``integer`` — and the
+# coerced value re-exported, MUTATING the invalid wire data. The fix is
+# ``pydantic.StrictInt`` (``StrictInt | None``) so a present non-int value
+# (string / float / bool) is a type violation rejected at load (ACEF-050 via the
+# nested-construction wrap), while a real JSON integer (keeping ``ge=0``) and an
+# absent / empty ``retention: {}`` still load cleanly.
+#
+# RED quote (pre-fix, commit d846875c):
+#     retention={'min_retention_days': '180'}  -> LOADS as int 180,
+#         env.retention.min_retention_days == 180  (string coerced to int),
+#         re-export {'min_retention_days': 180}    (invalid wire value MUTATED)
+#     retention={'min_retention_days': True}   -> LOADS as int 1  (bool coerced)
+# (float 1.5 already RAISED on d846875c — int-from-non-int-float is rejected —
+#  but is asserted here to lock the behaviour against any future config change.)
+# ===========================================================================
+
+
+@pytest.mark.parametrize(
+    ("bad_value", "label"),
+    [
+        ("180", "numeric string"),
+        (1.5, "float"),
+        (True, "bool true"),
+        (False, "bool false"),
+    ],
+)
+def test_retention_min_days_non_integer_rejected(bad_value: Any, label: str) -> None:
+    """RED: ``min_retention_days`` is a schema ``integer``. A present non-integer
+    value — a numeric STRING ``"180"``, a ``float`` ``1.5``, or a ``bool`` — is a
+    TYPE violation and MUST raise ACEF-050, NOT silently coerce-and-mutate.
+
+    On ``d846875c`` the string ``"180"`` LOADED as int ``180`` (re-exporting the
+    MUTATED value ``{'min_retention_days': 180}``) and ``True`` LOADED as int
+    ``1`` because the field used Pydantic's default lax int handling.
+    """
+    with pytest.raises(ACEFFormatError) as exc:
+        dict_to_record_envelope(_base(retention={"min_retention_days": bad_value}))
+    assert exc.value.code == "ACEF-050", label
+    assert "retention" in exc.value.message
+    assert _INJECTED_ID in exc.value.message
+
+
+def test_retention_min_days_valid_integer_loads_unmutated() -> None:
+    """Control: a real JSON ``integer`` loads and round-trips verbatim (no
+    coercion artifact)."""
+    env = dict_to_record_envelope(_base(retention={"min_retention_days": 180}))
+    assert env.retention is not None
+    assert env.retention.min_retention_days == 180
+    assert isinstance(env.retention.min_retention_days, int)
+    assert env.to_jsonl_dict()["retention"] == {"min_retention_days": 180}
+
+
+def test_retention_min_days_zero_loads() -> None:
+    """Control: ``0`` is a valid integer at the ``ge=0`` boundary and loads."""
+    env = dict_to_record_envelope(_base(retention={"min_retention_days": 0}))
+    assert env.retention is not None
+    assert env.retention.min_retention_days == 0
+
+
+def test_record_retention_model_rejects_non_integer_min_days_directly() -> None:
+    """The MODEL itself (not just the loader path) rejects a non-integer
+    ``min_retention_days`` — proof the strict typing lives in the model, available
+    to every constructor. ``ge=0`` and absent-defaulting are preserved."""
+    for bad in ("180", 1.5, True, False):
+        with pytest.raises(Exception):  # pydantic ValidationError  # noqa: B017,PT011
+            RecordRetention(min_retention_days=bad)  # type: ignore[arg-type]
+    # A real integer still constructs; absent still defaults to None.
+    assert RecordRetention(min_retention_days=180).min_retention_days == 180
+    assert RecordRetention().min_retention_days is None
+    # ge=0 still enforced.
+    with pytest.raises(Exception):  # noqa: B017,PT011
+        RecordRetention(min_retention_days=-1)
+
+
+# ===========================================================================
+# Bounded scalar-coercion audit (round 6): ``min_retention_days`` is the ONLY
+# non-string scalar across the five nested record-envelope models. The remaining
+# scalar properties are all ``str`` (or ``Literal`` / ``list[str]``). Pydantic's
+# default ``str`` typing already REJECTS a non-string input (it does NOT coerce
+# an ``int`` to its decimal string), so no ``Strict*`` typing is needed on those
+# fields. These tests PIN that audit conclusion: a non-string on a ``str``
+# property must raise (never silently become ``"123"``).
+# ===========================================================================
+
+
+@pytest.mark.parametrize(
+    "builder",
+    [
+        lambda: AttachmentRef(path=123),  # type: ignore[arg-type]
+        lambda: AttachmentRef(path="p", media_type=123),  # type: ignore[arg-type]
+        lambda: AttachmentRef(path="p", hash=123),  # type: ignore[arg-type]
+        lambda: AttachmentRef(path="p", attachment_type=123),  # type: ignore[arg-type]
+        lambda: CollectorInfo(name=123),  # type: ignore[arg-type]
+        lambda: CollectorInfo(name="x", version=123),  # type: ignore[arg-type]
+        lambda: Attestation(signer=123),  # type: ignore[arg-type]
+        lambda: Attestation(signature=123),  # type: ignore[arg-type]
+        lambda: RecordRetention(legal_basis=123),  # type: ignore[arg-type]
+    ],
+)
+def test_nested_str_properties_reject_non_string_no_coercion(builder: Any) -> None:
+    """Audit pin: every ``str`` property on the nested models REJECTS a non-string
+    input rather than coercing it (e.g. ``123`` must NOT become ``"123"``).
+    Confirms ``min_retention_days`` is the sole field that needed ``StrictInt``."""
+    with pytest.raises(Exception):  # pydantic ValidationError  # noqa: B017,PT011
+        builder()
 
 
 # ===========================================================================
@@ -430,6 +544,106 @@ def test_invalid_retention_object_surfaces_acef004_via_validate(tmp_path: Any) -
     assert retention_errs, (
         "validate_bundle must surface ACEF-004 at /records/0/retention for the "
         f"invalid retention object; codes={sorted({e.get('code') for e in assessment.structural_errors})}"
+    )
+
+
+def test_string_min_retention_days_surfaces_acef004_via_validate(tmp_path: Any) -> None:
+    """Backstop for the StrictInt fix: a record carrying
+    ``retention: {"min_retention_days": "180"}`` (a numeric STRING, schema-invalid
+    against the ``integer`` property type) surfaces ACEF-004 at
+    ``/records/0/retention`` from ``validate_bundle``'s record-envelope schema
+    phase — DEEP scalar-type coercion is the validator's job, EMPIRICALLY
+    confirmed here. The loader independently rejects the same record at load-time
+    (ACEF-050, exercised above); neither reimplements the other.
+    """
+    import json
+
+    from acef.validation.engine import validate_bundle
+
+    bundle_dir = tmp_path / "strret.acef"
+    (bundle_dir / "records").mkdir(parents=True)
+    manifest = {
+        "versioning": {"core_version": "1.0.0"},
+        "metadata": {
+            "package_id": "urn:acef:pkg:fuzz",
+            "timestamp": "2026-01-01T00:00:00Z",
+        },
+        "record_files": [{"path": "records/r.jsonl", "record_type": "risk_register", "count": 1}],
+    }
+    (bundle_dir / "acef-manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    rec = {
+        "record_id": _INJECTED_ID,
+        "record_type": "risk_register",
+        "provisions_addressed": [],
+        "timestamp": "2026-03-01T10:00:00Z",
+        "lifecycle_phase": "development",
+        "collector": {"name": "x"},
+        "obligation_role": "provider",
+        "confidentiality": "public",
+        "trust_level": "self-attested",
+        "entity_refs": {"subject_refs": []},
+        "payload": {},
+        "retention": {"min_retention_days": "180"},
+    }
+    (bundle_dir / "records" / "r.jsonl").write_text(json.dumps(rec) + "\n", encoding="utf-8")
+
+    assessment = validate_bundle(str(bundle_dir))
+    retention_errs = [
+        e
+        for e in assessment.structural_errors
+        if e.get("code") == "ACEF-004" and e.get("path") == "/records/0/retention"
+    ]
+    assert retention_errs, (
+        "validate_bundle must surface ACEF-004 at /records/0/retention for the "
+        "string min_retention_days; "
+        f"codes={sorted({e.get('code') for e in assessment.structural_errors})}"
+    )
+
+
+def test_valid_min_retention_days_validates_clean_no_retention_error(tmp_path: Any) -> None:
+    """Validate-path non-regression: a valid integer ``min_retention_days``
+    produces NO retention schema error from ``validate_bundle`` (proving the
+    StrictInt load-side change did not regress the validate path for valid data).
+    """
+    import json
+
+    from acef.validation.engine import validate_bundle
+
+    bundle_dir = tmp_path / "okint.acef"
+    (bundle_dir / "records").mkdir(parents=True)
+    manifest = {
+        "versioning": {"core_version": "1.0.0"},
+        "metadata": {
+            "package_id": "urn:acef:pkg:fuzz",
+            "timestamp": "2026-01-01T00:00:00Z",
+        },
+        "record_files": [{"path": "records/r.jsonl", "record_type": "risk_register", "count": 1}],
+    }
+    (bundle_dir / "acef-manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    rec = {
+        "record_id": _INJECTED_ID,
+        "record_type": "risk_register",
+        "provisions_addressed": [],
+        "timestamp": "2026-03-01T10:00:00Z",
+        "lifecycle_phase": "development",
+        "collector": {"name": "x"},
+        "obligation_role": "provider",
+        "confidentiality": "public",
+        "trust_level": "self-attested",
+        "entity_refs": {"subject_refs": []},
+        "payload": {
+            "risk_id": "r-1",
+            "description": "d",
+            "category": "safety",
+        },
+        "retention": {"min_retention_days": 180, "retention_start_event": "first_use"},
+    }
+    (bundle_dir / "records" / "r.jsonl").write_text(json.dumps(rec) + "\n", encoding="utf-8")
+
+    assessment = validate_bundle(str(bundle_dir))
+    retention_errs = [e for e in assessment.structural_errors if e.get("path") == "/records/0/retention"]
+    assert not retention_errs, (
+        f"valid integer min_retention_days must not produce a /records/0/retention diagnostic: {retention_errs!r}"
     )
 
 
