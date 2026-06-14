@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+import functools
+from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, TypeVar
 
 from pydantic import Field, ValidationError
 
 from acef.models.base import ACEFBaseModel
 from acef.models.enums import Confidentiality, LifecyclePhase, ObligationRole, TrustLevel
 from acef.models.urns import URNType, generate_urn
+
+_T = TypeVar("_T")
 
 
 class EntityRefs(ACEFBaseModel):
@@ -202,6 +206,37 @@ def dict_to_record_envelope(data: dict[str, Any]) -> RecordEnvelope:
     # vendor ``x-*`` extension keys through the ``**`` splat unchanged.
     _record_id = data.get("record_id", "<unknown>")
 
+    # ``EntityRefs`` / ``AttachmentRef`` / ``Attestation`` are Pydantic models.
+    # The CONTAINER-type guards below catch the wrong-OUTER-shape cases (a
+    # non-dict ``entity_refs``, a non-list ``attachments``, a non-dict
+    # ``attestation``) with a precise, field-named ``ACEF-050`` BEFORE the
+    # constructor runs. But a value that IS the right outer shape yet carries a
+    # schema-invalid INNER field (``attachments: [{}]`` — missing required
+    # ``path``; ``entity_refs: {"subject_refs": 5}`` — ``subject_refs`` not a
+    # list; ``attestation: {"signed_fields": 5}``) makes the Pydantic
+    # constructor raise a raw ``pydantic.ValidationError`` that, unwrapped, would
+    # leak out of the PUBLIC ``acef.load()``. ``_nested`` runs each nested-model
+    # construction under a wrapper that re-raises any ``ValidationError`` /
+    # ``TypeError`` as the same structured ``ACEFFormatError(ACEF-050)`` naming
+    # the offending field + record_id, so load() surfaces a uniform structured
+    # diagnostic and never leaks a raw exception. The validator (engine.py)
+    # routes the identical line through this function and already catches the
+    # ``ACEFFormatError`` into an ACEF-004 per-record diagnostic, so load() and
+    # validate() converge with no abort and no precision loss.
+    def _nested(field: str, builder: Callable[[], _T]) -> _T:
+        try:
+            return builder()
+        except ValidationError as exc:
+            raise ACEFFormatError(
+                f"Record {_record_id!r} field {field!r} is not a valid {field} object: {exc}",
+                code="ACEF-050",
+            ) from exc
+        except TypeError as exc:
+            raise ACEFFormatError(
+                f"Record {_record_id!r} field {field!r} is malformed: {exc}",
+                code="ACEF-050",
+            ) from exc
+
     # Handle entity_refs. Pass through any unknown nested keys so
     # vendor-prefixed extension refs (e.g., a custom relationship type)
     # round-trip losslessly. A PRESENT non-dict must RAISE (the historical
@@ -215,12 +250,15 @@ def dict_to_record_envelope(data: dict[str, Any]) -> RecordEnvelope:
             code="ACEF-050",
         )
     _entity_refs_known = {"subject_refs", "component_refs", "dataset_refs", "actor_refs"}
-    entity_refs = EntityRefs(
-        subject_refs=entity_refs_data.get("subject_refs", []),
-        component_refs=entity_refs_data.get("component_refs", []),
-        dataset_refs=entity_refs_data.get("dataset_refs", []),
-        actor_refs=entity_refs_data.get("actor_refs", []),
-        **{k: v for k, v in entity_refs_data.items() if k not in _entity_refs_known},
+    entity_refs = _nested(
+        "entity_refs",
+        lambda: EntityRefs(
+            subject_refs=entity_refs_data.get("subject_refs", []),
+            component_refs=entity_refs_data.get("component_refs", []),
+            dataset_refs=entity_refs_data.get("dataset_refs", []),
+            actor_refs=entity_refs_data.get("actor_refs", []),
+            **{k: v for k, v in entity_refs_data.items() if k not in _entity_refs_known},
+        ),
     )
 
     # Handle attachments. A PRESENT non-list must RAISE (a bare scalar is not
@@ -235,6 +273,10 @@ def dict_to_record_envelope(data: dict[str, Any]) -> RecordEnvelope:
             code="ACEF-050",
         )
     attachments = []
+
+    def _build_attachment(att: dict[str, Any]) -> AttachmentRef:
+        return AttachmentRef(**att)
+
     for att_index, att_data in enumerate(attachments_data):
         if not isinstance(att_data, dict):
             raise ACEFFormatError(
@@ -242,21 +284,27 @@ def dict_to_record_envelope(data: dict[str, Any]) -> RecordEnvelope:
                 f"JSON object, got {type(att_data).__name__}",
                 code="ACEF-050",
             )
-        attachments.append(AttachmentRef(**att_data))
+        attachments.append(_nested("attachments", functools.partial(_build_attachment, att_data)))
 
-    # Handle attestation. A PRESENT (truthy) non-dict must RAISE before the
-    # ``**`` splat (``Attestation(**"x")`` raises a raw TypeError). A falsy /
-    # absent attestation stays ``None``.
+    # Handle attestation. The record-envelope schema declares attestation as
+    # ``oneOf [object, null]`` — so the ONLY non-object value the wire may carry
+    # is an explicit ``null``. Distinguish key-PRESENCE from ``None``: a present,
+    # non-None value MUST be a ``dict`` (else RAISE ACEF-050). A truthiness check
+    # (``if data.get("attestation"):``) silently DROPPED a present, non-null,
+    # FALSY value (``[]`` / ``false`` / ``0`` / ``""``) to ``None`` — a data-loss
+    # / round-trip defect and a missed rejection. Only an ABSENT key or an
+    # explicit ``null`` yields ``attestation = None``.
     attestation = None
-    attestation_data = data.get("attestation")
-    if attestation_data:
-        if not isinstance(attestation_data, dict):
-            raise ACEFFormatError(
-                f"Record {_record_id!r} field 'attestation' must be a JSON object, "
-                f"got {type(attestation_data).__name__}",
-                code="ACEF-050",
-            )
-        attestation = Attestation(**attestation_data)
+    if "attestation" in data:
+        attestation_data = data["attestation"]
+        if attestation_data is not None:
+            if not isinstance(attestation_data, dict):
+                raise ACEFFormatError(
+                    f"Record {_record_id!r} field 'attestation' must be a JSON object "
+                    f"or null, got {type(attestation_data).__name__}",
+                    code="ACEF-050",
+                )
+            attestation = _nested("attestation", lambda: Attestation(**attestation_data))
 
     # Handle retention
     retention = None
