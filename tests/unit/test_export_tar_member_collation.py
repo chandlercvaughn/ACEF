@@ -72,6 +72,21 @@ def _ordered_artifact_members(archive: Path) -> list[str]:
     return out
 
 
+def _ordered_artifact_dir_members(archive: Path) -> list[str]:
+    """Return artifacts/* DIRECTORY member names in their on-disk tar order."""
+    with tarfile.open(str(archive), mode="r:gz") as tar:
+        members = [m.name for m in tar.getmembers() if m.isdir()]
+    out: list[str] = []
+    for name in members:
+        # ``getmembers`` may return dir names with or without a trailing slash;
+        # normalize away the trailing slash for stable comparison.
+        normalized = name.rstrip("/")
+        idx = normalized.find("/artifacts/")
+        if idx != -1:
+            out.append(normalized[idx + 1 :])  # ``artifacts/<dirname>``
+    return out
+
+
 def test_supplementary_plane_members_sorted_by_utf16_collation(
     tmp_path: Path,
 ) -> None:
@@ -124,3 +139,55 @@ def test_ascii_member_order_unchanged_control(tmp_path: Path) -> None:
     # For ASCII, code-point and UTF-16 collations coincide; assert both.
     assert sorted(relpaths) == sorted(relpaths, key=integrity.utf16_collation_key)
     assert emitted == sorted(relpaths, key=integrity.utf16_collation_key)
+
+
+# Supplementary-plane (U+10000) and BMP (U+FB00) DIRECTORY basenames carrying
+# nested artifact files. The production change also reorders DIRECTORY members
+# (``all_dirs.sort(key=utf16_collation_key)``), so the member-order MUST is
+# exercised for dir members too, not only file members.
+_DIR_BMP = "ﬀdir"  # U+FB00
+_DIR_SUPPLEMENTARY = "𐀀dir"  # U+10000
+
+
+def test_supplementary_plane_dir_members_sorted_by_utf16_collation(
+    tmp_path: Path,
+) -> None:
+    """Tar DIRECTORY member order for supplementary-plane artifact directory
+    names matches the UTF-16 collation (the TS exporter order), NOT Python
+    code-point order.
+
+    The production change sorts ``all_dirs`` (the tar directory members) by
+    ``integrity.utf16_collation_key`` exactly as it does ``all_files``; without
+    that, code-point order would emit ``artifacts/ﬀdir`` before
+    ``artifacts/𐀀dir`` while the TS exporter emits ``artifacts/𐀀dir`` first
+    (its first UTF-16 unit 0xD800 < 0xFB00) -> divergent ``.acef.tar.gz`` bytes.
+    """
+    pkg = _build_package_with([])
+    pkg.add_attachment(f"{_DIR_BMP}/x.txt", b"x")
+    pkg.add_attachment(f"{_DIR_SUPPLEMENTARY}/y.txt", b"y")
+
+    archive = tmp_path / "dir-collation.acef.tar.gz"
+    pkg.export(str(archive))
+
+    emitted_dirs = _ordered_artifact_dir_members(archive)
+
+    dir_relpaths = [f"artifacts/{_DIR_BMP}", f"artifacts/{_DIR_SUPPLEMENTARY}"]
+    expected_utf16 = sorted(dir_relpaths, key=integrity.utf16_collation_key)
+    expected_codepoint = sorted(dir_relpaths)
+
+    # Guard the premise: the two collations genuinely diverge for these dirs.
+    assert expected_utf16 != expected_codepoint, (
+        "premise broken: U+FB00 vs U+10000 dir names must order differently under code-point vs UTF-16 collation"
+    )
+
+    # The walk emits the bundle-root, records/, artifacts/, hashes/, signatures/
+    # directories too; restrict to the two artifact subdirectories under test
+    # and assert THEY appear in UTF-16 collation order relative to each other.
+    relevant = [d for d in emitted_dirs if d in set(dir_relpaths)]
+    assert relevant == expected_utf16, (
+        "Tar artifact DIRECTORY members must be emitted in UTF-16 collation "
+        "order to match the TS exporter and the rest of the hash domain.\n"
+        f"  emitted (on-disk order): {relevant!r}\n"
+        f"  expected (utf16):        {expected_utf16!r}\n"
+        f"  code-point order:        {expected_codepoint!r}"
+    )

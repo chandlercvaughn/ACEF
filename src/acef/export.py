@@ -158,7 +158,12 @@ def _record_shard_relpaths(package: Package) -> list[str]:
     for rec in package.records:
         records_by_type.setdefault(rec.record_type, []).append(rec)
 
-    for record_type, recs in sorted(records_by_type.items()):
+    # Mirror export_directory's record-writing block EXACTLY (see docstring),
+    # including its record-type grouping order: both key by RFC 8785 UTF-16
+    # collation (integrity.utf16_collation_key), not Python code-point order, so
+    # this preflight enumerates member names in the same order the loop emits
+    # them for supplementary-plane (U+10000+) x-... extension record types.
+    for record_type, recs in sorted(records_by_type.items(), key=lambda kv: utf16_collation_key(kv[0])):
         sorted_recs = sort_records(recs)
         shards = compute_shard_boundaries(sorted_recs)
         if len(shards) == 1:
@@ -330,7 +335,18 @@ def export_directory(package: Package, output_path: str) -> Path:
         for rec in package.records:
             records_by_type.setdefault(rec.record_type, []).append(rec)
 
-        for record_type, recs in sorted(records_by_type.items()):
+        # Emit record-type groups in RFC 8785 UTF-16 collation of the TYPE string
+        # (integrity.utf16_collation_key) — the single hash-domain source of truth
+        # reused by the manifest record_files order (Package.build_manifest),
+        # content-hashes.json key order, Merkle leaf order, and the tar member
+        # sort. Python's default sorted() orders by code point, which DIVERGES
+        # from the TS exporter (UTF-16) for supplementary-plane (U+10000+)
+        # record-type names — Package.record() accepts x-... extension types — so
+        # keying the shard-emission loop by the same collation keeps this exporter
+        # on one ordering with the manifest and the rest of the hash domain.
+        # ASCII/BMP types order identically under both, so this is byte-neutral for
+        # every golden bundle and existing vector.
+        for record_type, recs in sorted(records_by_type.items(), key=lambda kv: utf16_collation_key(kv[0])):
             sorted_recs = sort_records(recs)
             shards = compute_shard_boundaries(sorted_recs)
 
