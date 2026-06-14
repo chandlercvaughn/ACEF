@@ -74,3 +74,24 @@ class TestCanonicalizeJsonStrBrokenJson:
     def test_valid_json_still_canonicalizes(self) -> None:
         out = canonicalize_json_str('{"b":1,"a":2}')
         assert out == b'{"a":2,"b":1}'
+
+
+class TestDoctorFalsyNonObjectMetadataPrecision:
+    """roborev follow-up: a FALSY non-object metadata (``[]``/``""``/``0``/
+    ``false``) was reported as 'Missing metadata block' (truthiness checked
+    before type). The type-before-truthiness guard reports the precise ACEF-002
+    non-object diagnostic; absence/null/empty-object stay 'Missing'."""
+
+    @pytest.mark.parametrize("meta", ["[]", '""', "0", "false"])
+    def test_falsy_non_object_metadata_reports_acef_002(self, tmp_path: Path, meta: str) -> None:
+        bundle = _bundle(tmp_path, ('{"metadata": %s, "subjects": []}' % meta).encode())
+        result = CliRunner().invoke(cli, ["doctor", str(bundle)])
+        assert result.exception is None or isinstance(result.exception, SystemExit)
+        assert "metadata is not a JSON object" in result.output
+        assert result.exit_code != 0
+
+    @pytest.mark.parametrize("meta", ["null", "{}"])
+    def test_absent_or_empty_metadata_reports_missing(self, tmp_path: Path, meta: str) -> None:
+        bundle = _bundle(tmp_path, ('{"metadata": %s, "subjects": []}' % meta).encode())
+        result = CliRunner().invoke(cli, ["doctor", str(bundle)])
+        assert "Missing metadata block" in result.output

@@ -182,14 +182,18 @@ def _check_manifest(bundle_path: Path, issues: list[tuple[str, str, str]]) -> No
         )
         return
 
-    # Check required fields
+    # Check required fields. Distinguish ABSENCE (missing / explicit null /
+    # empty object -> "Missing metadata block") from a present-but-NON-OBJECT
+    # value (``[]`` / ``""`` / ``0`` / ``false`` / ``"x"`` / ``5`` -> ACEF-002),
+    # checking the TYPE before truthiness so a falsy non-object is not
+    # mis-reported as merely "missing" (and never reaches ``.get(...)``).
     metadata = data.get("metadata")
-    if not metadata:
+    if metadata is None:
         issues.append(("error", "manifest", "Missing metadata block"))
     elif not isinstance(metadata, dict):
-        # A present-but-non-object metadata (e.g. ``"metadata": "x"`` / ``5``)
-        # would raise a raw AttributeError on ``.get(...)``; report ACEF-002.
         issues.append(("error", "manifest", "[ACEF-002] metadata is not a JSON object"))
+    elif not metadata:
+        issues.append(("error", "manifest", "Missing metadata block"))
     else:
         if not metadata.get("package_id"):
             issues.append(("error", "manifest", "Missing metadata.package_id"))
