@@ -75,6 +75,8 @@ class TestRecordBadArgsCleanError:
         assert _clean(result)
         assert result.exit_code != 0
         assert "Error" in result.output
+        # An unknown record_type IS ACEF-003.
+        assert "ACEF-003" in result.output
 
     def test_bad_role_clean_error(self, tmp_path: Path) -> None:
         result = CliRunner().invoke(
@@ -93,3 +95,6 @@ class TestRecordBadArgsCleanError:
         assert _clean(result)
         assert result.exit_code != 0
         assert "Error" in result.output
+        # A bad --role is NOT an unknown-record_type error: it must not be
+        # mislabeled with ACEF-003.
+        assert "ACEF-003" not in result.output
