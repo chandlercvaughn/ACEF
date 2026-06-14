@@ -69,7 +69,9 @@ def _build_incident_bundle(
     profiles: list[str] | None = None,
     name: str = "inc.acef",
     sign_record: bool = False,
+    sign_with_x5c: bool = False,
     tamper_after_sign: bool = False,
+    omit_timestamp: bool = False,
 ) -> Path:
     """Build an on-disk bundle directory carrying ONE incident record.
 
@@ -81,9 +83,26 @@ def _build_incident_bundle(
     JWS over ``/payload`` is attached (ES256, key embedded in the JWS header). When
     ``tamper_after_sign`` is also True, the payload is mutated AFTER signing so the
     JWS no longer self-verifies (the §5.3(ii) self-inconsistency).
+
+    When ``sign_with_x5c`` is True the attestation JWS carries an ``x5c`` chain
+    (a self-signed leaf cert) instead of an embedded JWK — this is the ONLY path
+    whose §5.3(ii) self-consistency sub-check anchors certificate validity to the
+    manifest timestamp (``verify_x5c_chain``). A JWK-only JWS never reaches the
+    cert-validity branch, so the empty-timestamp coercion bug is observable only
+    via x5c.
+
+    When ``omit_timestamp`` is True the manifest is rewritten WITHOUT
+    ``metadata.timestamp`` (the missing-scalar case that ``_resolve_package_scalars``
+    coerces to the empty string ``""``).
     """
+    import base64
+    from datetime import UTC, datetime
+
     import jsonpointer
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
     from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.x509.oid import NameOID
 
     from acef.integrity import canonicalize
     from acef.signing import create_detached_jws
@@ -109,11 +128,28 @@ def _build_incident_bundle(
     if sign_record:
         key = ec.generate_private_key(ec.SECP256R1())
         subset = {"/payload": jsonpointer.resolve_pointer(rec, "/payload")}
+        x5c_chain: list[str] | None = None
+        if sign_with_x5c:
+            # Self-signed leaf cert -> x5c chain. The §5.3(ii) sub-check anchors
+            # this cert's validity to the manifest timestamp via verify_x5c_chain;
+            # a JWK-only JWS never reaches that branch.
+            cert_name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "acef-test-card")])
+            cert = (
+                x509.CertificateBuilder()
+                .subject_name(cert_name)
+                .issuer_name(cert_name)
+                .public_key(key.public_key())
+                .serial_number(x509.random_serial_number())
+                .not_valid_before(datetime(2020, 1, 1, tzinfo=UTC))
+                .not_valid_after(datetime(2035, 1, 1, tzinfo=UTC))
+                .sign(key, hashes.SHA256())
+            )
+            x5c_chain = [base64.b64encode(cert.public_bytes(serialization.Encoding.DER)).decode("ascii")]
         rec["attestation"] = {
             "method": "jws",
             "signer": "provider",
             "signed_fields": ["/payload"],
-            "signature": create_detached_jws(canonicalize(subset), key, kid="card-key"),
+            "signature": create_detached_jws(canonicalize(subset), key, kid="card-key", x5c=x5c_chain),
         }
         if tamper_after_sign:
             # Mutate the payload AFTER signing -> the JWS no longer self-verifies.
@@ -129,6 +165,12 @@ def _build_incident_bundle(
     manifest["record_files"] = [{"path": f"records/{record_type}.jsonl", "record_type": record_type, "record_count": 1}]
     if profiles is not None:
         manifest["profiles"] = [{"profile_id": pid, "applicable_provisions": []} for pid in profiles]
+    if omit_timestamp:
+        # Drop metadata.timestamp entirely -> _resolve_package_scalars coerces the
+        # missing scalar to "" (the case the incident-rule path must map to None).
+        _metadata = manifest.get("metadata")
+        if isinstance(_metadata, dict):
+            _metadata.pop("timestamp", None)
     manifest_path.write_text(json.dumps(manifest, separators=(",", ":"), sort_keys=True), encoding="utf-8")
 
     # Recompute content-hashes.json so Phase-2 integrity does not flood the
@@ -464,6 +506,91 @@ class TestOfflineId083Engine:
         assessment = validate_bundle(bundle)
         errors = _errors_for(assessment, "ACEF-083")
         assert errors, "tampered signed card must raise ACEF-083 via the engine"
+        assert any("offline-deterministic" in e.get("message", "") for e in errors)
+
+
+# ---------------------------------------------------------------------------
+# Structural-review P3: the incident-rule JWS path must coerce an empty
+# package_timestamp ("" from a MISSING metadata.timestamp) to None — matching
+# the rule_engine sibling (rule_engine.py:270) and the signing layer's
+# skip-if-not-provided contract. Otherwise verify_x5c_chain("") raises ACEF-012,
+# is swallowed by the broad except, and a self-CONSISTENT x5c-backed card emits a
+# SPURIOUS ACEF-083 in addition to the legitimate missing-timestamp diagnostic.
+# ---------------------------------------------------------------------------
+
+
+class TestIncidentTimestampCoercionP3:
+    def test_omitted_timestamp_x5c_signed_card_no_spurious_083(self, tmp_path: Path) -> None:
+        # RED (pre-fix): a v1.1 bundle that OMITS metadata.timestamp and carries a
+        # self-consistent x5c-backed JWS attestation emits a SPURIOUS ACEF-083 —
+        # package_timestamp="" reaches verify_x5c_chain, raises ACEF-012, is
+        # swallowed, and _attestation_self_inconsistent returns True. The JWS is
+        # actually fine. GREEN (post-fix): no ACEF-083; the x5c cert-validity anchor
+        # is correctly SKIPPED ("" -> None) while the legitimate missing-timestamp
+        # rejection remains.
+        payload = {
+            "public_incident_id": _VALID_ID,
+            "id_grade": "self-asserted",
+            "harm_core": dict(_VALID_HARM_CORE),
+        }
+        bundle = _build_incident_bundle(
+            tmp_path,
+            core_version="1.1.0",
+            record_type="incident_card",
+            payload=payload,
+            sign_record=True,
+            sign_with_x5c=True,
+            omit_timestamp=True,
+        )
+        assessment = validate_bundle(bundle)
+        assert "ACEF-083" not in _codes(assessment), (
+            "spurious ACEF-083 on a missing-timestamp bundle whose x5c JWS is "
+            "self-consistent — the empty package_timestamp must coerce to None "
+            "(rule_engine sibling idiom)"
+        )
+
+    def test_present_timestamp_x5c_self_consistent_no_083(self, tmp_path: Path) -> None:
+        # CONTROL (unchanged): WITH a valid metadata.timestamp + a self-consistent
+        # x5c-backed JWS -> no ACEF-083 (the cert validity covers the timestamp).
+        payload = {
+            "public_incident_id": _VALID_ID,
+            "id_grade": "self-asserted",
+            "harm_core": dict(_VALID_HARM_CORE),
+        }
+        bundle = _build_incident_bundle(
+            tmp_path,
+            core_version="1.1.0",
+            record_type="incident_card",
+            payload=payload,
+            sign_record=True,
+            sign_with_x5c=True,
+            omit_timestamp=False,
+        )
+        assessment = validate_bundle(bundle)
+        assert "ACEF-083" not in _codes(assessment)
+
+    def test_present_timestamp_x5c_tampered_still_raises_083(self, tmp_path: Path) -> None:
+        # CONTROL (must NOT be suppressed by the fix): WITH a valid timestamp + a
+        # GENUINELY self-INconsistent x5c-backed JWS (payload tampered after
+        # signing) -> ACEF-083 STILL fires. The fix must not blunt real detection.
+        payload = {
+            "public_incident_id": _VALID_ID,
+            "id_grade": "self-asserted",
+            "harm_core": dict(_VALID_HARM_CORE),
+        }
+        bundle = _build_incident_bundle(
+            tmp_path,
+            core_version="1.1.0",
+            record_type="incident_card",
+            payload=payload,
+            sign_record=True,
+            sign_with_x5c=True,
+            tamper_after_sign=True,
+            omit_timestamp=False,
+        )
+        assessment = validate_bundle(bundle)
+        errors = _errors_for(assessment, "ACEF-083")
+        assert errors, "tampered x5c-signed card must STILL raise ACEF-083"
         assert any("offline-deterministic" in e.get("message", "") for e in errors)
 
 

@@ -618,7 +618,12 @@ def _run_validation_phases(
             manifest_data,
             all_records_data,
             requested_profiles=profiles,
-            manifest_timestamp=package_timestamp,
+            # An empty string (MISSING/malformed metadata.timestamp, coerced by
+            # _resolve_package_scalars) maps to None — the signing layer's
+            # skip-if-not-provided semantics — instead of failing every x5c
+            # attestation on a timestamp parse error (a SPURIOUS ACEF-083).
+            # Mirrors the sibling rule_engine.py record_attested path.
+            manifest_timestamp=package_timestamp or None,
         )
         _flush(incident_rule_diagnostics)
 
