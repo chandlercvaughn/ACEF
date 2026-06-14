@@ -94,3 +94,16 @@ class TestMalformedHeaderShape:
         with pytest.raises(ACEFSigningError) as exc:
             verify_detached_jws(_jws(header), b"payload")
         assert exc.value.code == "ACEF-012"
+
+
+class TestUnhashableAlgHeader:
+    """roborev follow-up: an object header with an unhashable `alg` value
+    (`{"alg": []}`) reached `alg not in _ALLOWED_ALGORITHMS` (a frozenset) and
+    leaked a raw TypeError. Type-check before membership."""
+
+    @pytest.mark.parametrize("alg", [[], {}, [1, 2], {"k": "v"}, 5, 1.5, True, None])
+    def test_non_string_alg_raises_structured_not_typeerror(self, alg: object) -> None:
+        header = {"alg": alg, "kid": "k", "jwk": {"kty": "RSA"}}
+        with pytest.raises(ACEFSigningError) as exc:
+            verify_detached_jws(_jws(header), b"payload")
+        assert exc.value.code == "ACEF-013"

@@ -843,7 +843,10 @@ def verify_detached_jws(
     header: dict[str, Any] = decoded_header
 
     alg = header.get("alg", "")
-    if alg not in _ALLOWED_ALGORITHMS:
+    # Type-check before set-membership: an unhashable alg (e.g. `alg: []`/`{}`)
+    # would make `alg not in _ALLOWED_ALGORITHMS` raise a raw TypeError. A
+    # non-string alg is never an allowed algorithm, so it is rejected here.
+    if not isinstance(alg, str) or alg not in _ALLOWED_ALGORITHMS:
         raise ACEFSigningError(
             f"Unsupported JWS algorithm: {alg!r} (allowed: {sorted(_ALLOWED_ALGORITHMS)})",
             code="ACEF-013",
