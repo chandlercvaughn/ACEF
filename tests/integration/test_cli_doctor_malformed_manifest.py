@@ -77,10 +77,12 @@ class TestCanonicalizeJsonStrBrokenJson:
 
 
 class TestDoctorFalsyNonObjectMetadataPrecision:
-    """roborev follow-up: a FALSY non-object metadata (``[]``/``""``/``0``/
-    ``false``) was reported as 'Missing metadata block' (truthiness checked
-    before type). The type-before-truthiness guard reports the precise ACEF-002
-    non-object diagnostic; absence/null/empty-object stay 'Missing'."""
+    """roborev follow-up: doctor distinguishes the three metadata cases. Any
+    PRESENT non-object value — falsy (``[]``/``""``/``0``/``false``), explicit
+    ``null``, or truthy (``"x"``/``5``) — reports the precise ACEF-002 non-object
+    diagnostic (previously a falsy/null value was mis-reported as 'Missing'
+    because truthiness was checked before type). ONLY a truly absent key or an
+    empty object ``{}`` reports 'Missing metadata block'."""
 
     @pytest.mark.parametrize("meta", ["[]", '""', "0", "false", "null", '"x"', "5"])
     def test_present_non_object_metadata_reports_acef_002(self, tmp_path: Path, meta: str) -> None:
