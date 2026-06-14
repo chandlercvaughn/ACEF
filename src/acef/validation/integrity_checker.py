@@ -267,7 +267,15 @@ def _check_signatures(
             # AttributeError. Only accept a real string; ``None`` skips the
             # cert-anchor check (the manifest schema flags the wrong type).
             manifest_timestamp = _ts if isinstance(_ts, str) else None
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, UnicodeDecodeError, OSError):
+            # The manifest-timestamp is an OPTIONAL cert-validity anchor. A
+            # malformed (bad JSON), non-UTF-8 (UnicodeDecodeError, a ValueError
+            # subclass — NOT a json.JSONDecodeError), or unreadable (OSError on a
+            # read race after .exists()) manifest must degrade gracefully here:
+            # the anchor becomes unavailable and cert-validity falls back to its
+            # no-timestamp behavior, NEVER a raw traceback escaping the checker.
+            # Mirrors the sibling reads in this module (content-hashes.json,
+            # merkle-tree.json, the .jws files), which catch the same tuple.
             manifest_timestamp = None
 
     try:
@@ -458,7 +466,11 @@ def get_signature_info(
             # not reach the JWS cert-validity ``.endswith("Z")`` string op (see
             # the sibling guard in the signature-verification path above).
             manifest_timestamp = _ts if isinstance(_ts, str) else None
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, UnicodeDecodeError, OSError):
+            # Optional cert-validity anchor — degrade gracefully on malformed
+            # JSON, non-UTF-8 bytes (UnicodeDecodeError), or a read race
+            # (OSError), exactly as the sibling reads in this module do. See the
+            # matching guard in _check_signatures above.
             manifest_timestamp = None
 
     count = 0
