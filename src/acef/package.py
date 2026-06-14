@@ -2802,7 +2802,13 @@ class Package:
 
             stix = crosswalk.get("stix")
             if isinstance(stix, dict):
-                _sort_str_array(stix, "object_refs")
+                # stix.object_refs is a uniqueItems SET (§5.8): de-duplicate AND
+                # sort so the generic Package.record() path emits byte-identical
+                # output to the typed incident_card() builder, which de-dupes via
+                # _normalize_stix_object_refs. Without dedupe here, a duplicate
+                # object_ref supplied through record() survived, breaking
+                # generic-vs-typed parity (and the now-stricter v1.1 schema).
+                _sort_str_array(stix, "object_refs", dedupe=True)
 
     @staticmethod
     def _merged_eu_facts(
