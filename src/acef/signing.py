@@ -375,6 +375,11 @@ def verify_x5c_chain(
             ``trust_anchors`` is provided and the chain does not terminate
             at one of them.
     """
+    if not isinstance(x5c, list):
+        raise ACEFSigningError(
+            f"x5c header MUST be a JSON array of base64 DER certificates, not {type(x5c).__name__} (RFC 7515 §4.1.6)",
+            code="ACEF-012",
+        )
     if not x5c:
         raise ACEFSigningError("x5c chain is empty", code="ACEF-012")
 
@@ -610,6 +615,11 @@ def _load_public_key_from_jwk(jwk: dict[str, Any]) -> PublicKeyTypes:
     Raises:
         ACEFSigningError: If the JWK is malformed or uses unsupported parameters.
     """
+    if not isinstance(jwk, dict):
+        raise ACEFSigningError(
+            f"jwk header MUST be a JSON object, not {type(jwk).__name__} (RFC 7517)",
+            code="ACEF-012",
+        )
     kty = jwk.get("kty", "")
 
     if kty == "RSA":

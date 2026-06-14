@@ -1,0 +1,67 @@
+"""Stability-shakedown: ``verify_detached_jws`` must raise the structured
+``ACEFSigningError`` (never a raw framework exception) for a malformed JWS
+protected header — found by the whole-codebase review.
+
+Two gaps (empirically reproduced against the public ``acef.verify`` /
+``verify_detached_jws`` API, and reachable via ``acef doctor`` whose
+``check_integrity`` call has no try/except):
+
+* a truthy NON-LIST ``x5c`` (e.g. ``{"alg":"RS256","kid":"k","x5c":5}``) reached
+  ``verify_x5c_chain`` -> ``_parse_x5c_chain`` -> ``enumerate(5)`` -> raw
+  ``TypeError: 'int' object is not iterable``.
+* a NON-DICT ``jwk`` (e.g. ``{"alg":"ES256","kid":"k","jwk":"notadict"}``) reached
+  ``_load_public_key_from_jwk`` -> ``jwk.get("kty")`` -> raw
+  ``AttributeError: 'str' object has no attribute 'get'``.
+
+The ``verify_detached_jws`` contract documents ``Raises: ACEFSigningError`` only.
+"""
+
+from __future__ import annotations
+
+import base64
+import json
+
+import pytest
+
+from acef.errors import ACEFSigningError
+from acef.signing import _load_public_key_from_jwk, verify_detached_jws, verify_x5c_chain
+
+
+def _b64url(obj: object) -> str:
+    return base64.urlsafe_b64encode(json.dumps(obj).encode()).rstrip(b"=").decode()
+
+
+def _jws(header: dict) -> str:
+    # detached JWS: <protected>..<sig>; the malformed header is rejected during
+    # key resolution, before the signature is ever checked.
+    return _b64url(header) + "..AAAA"
+
+
+class TestMalformedX5cHeader:
+    @pytest.mark.parametrize("x5c", [5, 1.5, True, "notalist", {"a": 1}])
+    def test_non_list_x5c_raises_structured_not_typeerror(self, x5c: object) -> None:
+        header = {"alg": "RS256", "kid": "k", "x5c": x5c}
+        with pytest.raises(ACEFSigningError) as exc:
+            verify_detached_jws(_jws(header), b"payload")
+        assert exc.value.code == "ACEF-012"
+
+    @pytest.mark.parametrize("x5c", [5, "notalist", {"a": 1}])
+    def test_verify_x5c_chain_entry_guard(self, x5c: object) -> None:
+        with pytest.raises(ACEFSigningError) as exc:
+            verify_x5c_chain(x5c)  # type: ignore[arg-type]
+        assert exc.value.code == "ACEF-012"
+
+
+class TestMalformedJwkHeader:
+    @pytest.mark.parametrize("jwk", ["notadict", 5, [1, 2], True])
+    def test_non_dict_jwk_raises_structured_not_attributeerror(self, jwk: object) -> None:
+        header = {"alg": "ES256", "kid": "k", "jwk": jwk}
+        with pytest.raises(ACEFSigningError) as exc:
+            verify_detached_jws(_jws(header), b"payload")
+        assert exc.value.code == "ACEF-012"
+
+    @pytest.mark.parametrize("jwk", ["notadict", 5, [1, 2]])
+    def test_load_public_key_from_jwk_entry_guard(self, jwk: object) -> None:
+        with pytest.raises(ACEFSigningError) as exc:
+            _load_public_key_from_jwk(jwk)  # type: ignore[arg-type]
+        assert exc.value.code == "ACEF-012"
