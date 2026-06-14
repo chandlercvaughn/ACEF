@@ -77,7 +77,10 @@ def record_cmd(
         click.echo(f"Error: {exc}{suffix}", err=True)
         raise SystemExit(1) from exc
     except ValueError as exc:
-        click.echo(f"Error: invalid record argument [ACEF-003]: {exc}", err=True)
+        # A non-ACEFError ValueError (e.g. an invalid --role rejected by the
+        # ObligationRole enum) is an argument error; do NOT stamp it with
+        # ACEF-003 (which specifically denotes an unknown record_type).
+        click.echo(f"Error: invalid record argument: {exc}", err=True)
         raise SystemExit(1) from exc
 
     # Re-export. This will rmtree subdirectories of bundle_path that
