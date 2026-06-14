@@ -28,7 +28,7 @@ from acef.models.records import (
     dict_to_record_envelope,
 )
 from acef.models.subjects import LifecycleEntry, Subject
-from acef.package import Package
+from acef.package import Package, validate_analysis_mode, validate_namespaces
 
 # Tar bomb limits
 _MAX_EXTRACTED_SIZE = 10 * 1024 * 1024 * 1024  # 10 GB
@@ -628,8 +628,32 @@ def _load_directory(bundle_dir: Path) -> Package:
     # the §6.4/§6.5 lossless round-trip MUST (loader-roundtrip-1,
     # envelope-manifest-2). analysis_mode is load-bearing — it gates the
     # v1.1 conditional-required record-type rules.
-    analysis_mode = manifest_data.get("analysis_mode")
-    namespaces = manifest_data.get("namespaces")
+    # Validate analysis_mode/namespaces at LOAD time using the SAME structural
+    # domain checks the builder setters (set_analysis_mode/add_namespace) apply,
+    # so the loader reconstructs only VALID package state — matching the
+    # setters' documented invariant ("the builder cannot store invalid package
+    # state that would otherwise surface only as a raw Pydantic error at
+    # build_manifest/export time"). Without this, an out-of-domain value
+    # (analysis_mode="bogus_mode" / 5, namespaces="oops" / [...] / non-object
+    # value) loads silently but makes build_manifest()'s Manifest(...)
+    # construction raise a RAW pydantic.ValidationError that escapes uncaught
+    # from the public export()/export_directory()/export_archive(), breaking
+    # both the load→export round-trip and the "public surface raises structured
+    # ACEF errors, never raw framework exceptions" invariant. validate_* raise
+    # ACEFSchemaError (ACEF-002) here, naming the offending field+value.
+    #
+    # The loader is a documented LENIENT deserializer (test_loader_adversarial_
+    # manifest.test_valid_lenient_bundle_with_extensions_still_loads): it
+    # preserves non-strict ``namespaces`` keys (e.g. ``x-test/extension``) for
+    # round-trip. Such a key does NOT cause the raw-Pydantic crash (the Manifest
+    # model does not enforce the key pattern; strict ``validate_manifest`` does),
+    # so we pass strict_keys=False to enforce ONLY the dict-container/dict-value
+    # domain the model checks — the actual crash source — while keeping the
+    # lenient-key boundary intact.
+    analysis_mode_raw = manifest_data.get("analysis_mode")
+    analysis_mode = None if analysis_mode_raw is None else validate_analysis_mode(analysis_mode_raw)
+    namespaces_raw = manifest_data.get("namespaces")
+    namespaces = None if namespaces_raw is None else validate_namespaces(namespaces_raw, strict_keys=False)
     manifest_top_known = {
         "metadata",
         "versioning",

@@ -508,6 +508,110 @@ _ANALYSIS_MODES: frozenset[str] = frozenset({"subscriber", "public_artifact", "c
 _NAMESPACE_KEY_PATTERN = re.compile(r"^x-[a-z0-9-]+/?$")
 
 
+def validate_analysis_mode(mode: object) -> str:
+    """Validate an open-core v1.1 ``analysis_mode`` (X5) value.
+
+    The single source of truth for the ``analysis_mode`` domain check, shared
+    by the builder setter (:meth:`Package.set_analysis_mode`) and the loader
+    (``acef.loader.load``) so BOTH state-storing paths reject the same out-of-
+    domain values up front, raising a structured :class:`ACEFSchemaError`
+    (ACEF-002) rather than letting the value surface only as a raw Pydantic
+    error at ``build_manifest``/export time.
+
+    The accepted domain is exactly the Manifest model's ``Literal`` (which the
+    FROZEN v1.1 manifest schema enum mirrors); a non-string value is rejected
+    by the same membership test (no ``str`` outside ``_ANALYSIS_MODES``).
+
+    Args:
+        mode: The candidate analysis_mode (any type; only the four literals
+            are accepted).
+
+    Returns:
+        The validated mode string (unchanged).
+
+    Raises:
+        ACEFSchemaError: If ``mode`` is not one of the recognized
+            analysis_mode literals (ACEF-002).
+    """
+    if mode not in _ANALYSIS_MODES:
+        allowed = ", ".join(sorted(_ANALYSIS_MODES))
+        raise ACEFSchemaError(
+            f"Unknown analysis_mode {mode!r}: must be one of {allowed}.",
+            code="ACEF-002",
+        )
+    # ``mode in _ANALYSIS_MODES`` guarantees ``mode`` is one of the str literals.
+    return mode  # type: ignore[return-value]
+
+
+def validate_namespaces(namespaces: object, *, strict_keys: bool = True) -> dict[str, dict[str, Any]]:
+    """Validate an open-core v1.1 ``namespaces`` (X6) mapping.
+
+    The single source of truth for the ``namespaces`` STRUCTURAL shape check,
+    shared by the builder setter (:meth:`Package.add_namespace`) and the loader
+    so BOTH state-storing paths reject the out-of-domain values that would
+    otherwise surface only as a raw Pydantic error at ``build_manifest``/export
+    time, raising a structured :class:`ACEFSchemaError` (ACEF-002) instead.
+
+    The Manifest model types ``namespaces`` as ``dict[str, dict[str, Any]] |
+    None``, so ``Manifest(...)`` raises a raw ``ValidationError`` when the
+    container is not a dict OR any value is not a dict — these are the two
+    checks ALWAYS applied here (and the only ones the model enforces):
+
+    * ``namespaces`` MUST be an object/dict (a non-dict → model ``dict_type``).
+    * each value MUST be an object/dict (a non-dict value → model ``dict_type``;
+      schema also pins each value to ``type: object``).
+
+    The top-level KEY pattern (``_NAMESPACE_KEY_PATTERN``, the FROZEN v1.1
+    schema's ``patternProperties`` regex) is enforced ONLY when ``strict_keys``
+    is True. The builder setter authors NEW manifest state and so is strict (it
+    must not originate a key the schema rejects). The loader is a documented
+    LENIENT deserializer: it preserves non-strict ``namespaces`` keys (e.g.
+    ``x-test/extension``) verbatim for round-trip, because such a key does NOT
+    cause the raw-Pydantic crash this guard targets (the model does not enforce
+    the key pattern) — it is caught later by strict ``validate_manifest``. So
+    the loader calls with ``strict_keys=False``.
+
+    Args:
+        namespaces: The candidate namespaces mapping (any type).
+        strict_keys: When True (builder default), also enforce the x-vendor
+            key pattern. When False (loader), enforce only the structural
+            dict-container / dict-value domain the Manifest model checks.
+
+    Returns:
+        The validated mapping (a fresh dict; the caller stores a normalized
+        copy).
+
+    Raises:
+        ACEFSchemaError: If ``namespaces`` is not an object, has a non-object
+            value, or (when ``strict_keys``) a non-x-vendor key (ACEF-002).
+    """
+    if not isinstance(namespaces, dict):
+        raise ACEFSchemaError(
+            f"Invalid namespaces value: namespaces MUST be an object/dict, not "
+            f"{type(namespaces).__name__}. The v1.1 manifest schema types "
+            "namespaces as 'type: object'.",
+            code="ACEF-002",
+        )
+    validated: dict[str, dict[str, Any]] = {}
+    for key, value in namespaces.items():
+        if strict_keys and (not isinstance(key, str) or not _NAMESPACE_KEY_PATTERN.match(key)):
+            raise ACEFSchemaError(
+                f"Invalid namespace key {key!r}: top-level namespace keys MUST "
+                "be x-vendor-prefixed, matching the manifest schema pattern "
+                f"'{_NAMESPACE_KEY_PATTERN.pattern}'.",
+                code="ACEF-002",
+            )
+        if not isinstance(value, dict):
+            raise ACEFSchemaError(
+                f"Invalid namespace value for {key!r}: namespace values MUST be "
+                f"an object/dict, not {type(value).__name__}. The v1.1 manifest "
+                "schema pins each namespaces value to 'type: object'.",
+                code="ACEF-002",
+            )
+        validated[key] = value
+    return validated
+
+
 def _default_clock() -> datetime:
     """Wall-clock default; replaced by the injected ``clock`` callable."""
     return datetime.now(UTC)
@@ -1439,13 +1543,7 @@ class Package:
             ACEFSchemaError: If ``mode`` is not a recognized analysis_mode
                 (ACEF-002).
         """
-        if mode not in _ANALYSIS_MODES:
-            allowed = ", ".join(sorted(_ANALYSIS_MODES))
-            raise ACEFSchemaError(
-                f"Unknown analysis_mode {mode!r}: must be one of {allowed}.",
-                code="ACEF-002",
-            )
-        self._analysis_mode = mode
+        self._analysis_mode = validate_analysis_mode(mode)
         self._ensure_v1_1()
 
     def add_namespace(self, key: str, value: dict[str, Any]) -> None:
@@ -1478,23 +1576,14 @@ class Package:
                 Pydantic error at ``build_manifest``/export time (roborev
                 builder-input-validation).
         """
-        if not _NAMESPACE_KEY_PATTERN.match(key):
-            raise ACEFSchemaError(
-                f"Invalid namespace key {key!r}: top-level namespace keys MUST "
-                "be x-vendor-prefixed, matching the manifest schema pattern "
-                f"'{_NAMESPACE_KEY_PATTERN.pattern}'.",
-                code="ACEF-002",
-            )
-        if not isinstance(value, dict):
-            raise ACEFSchemaError(
-                f"Invalid namespace value for {key!r}: namespace values MUST be "
-                f"an object/dict, not {type(value).__name__}. The v1.1 manifest "
-                "schema pins each namespaces value to 'type: object'.",
-                code="ACEF-002",
-            )
+        # Reuse the shared namespaces validator (single source of truth for the
+        # key-pattern + value-is-object checks) by validating this one entry as
+        # a single-key mapping; ``validate_namespaces`` raises ACEF-002 on a
+        # non-x-vendor key or a non-object value with the same messages.
+        validated = validate_namespaces({key: value})
         if self._namespaces is None:
             self._namespaces = {}
-        self._namespaces[key] = value
+        self._namespaces.update(validated)
         self._ensure_v1_1()
 
     def record(
