@@ -90,9 +90,29 @@ def print_assessment(assessment: AssessmentBundle) -> None:
             console.print(f"  ... and {len(assessment.structural_errors) - 10} more")
 
 
+def _as_dict(value: Any) -> dict[str, Any]:
+    """Coerce a possibly-malformed manifest value to a dict for tolerant display."""
+    return value if isinstance(value, dict) else {}
+
+
+def _as_list(value: Any) -> list[Any]:
+    """Coerce a possibly-malformed manifest value to a list for tolerant display."""
+    return value if isinstance(value, list) else []
+
+
 def print_bundle_info(manifest_data: dict[str, Any]) -> None:
     """Print bundle inspection output."""
+    # ``inspect`` is a tolerant summary view: a malformed-but-JSON-object manifest
+    # may carry a non-object metadata / producer / non-array sections (schema
+    # conformance is ``validate``'s job). Coerce non-objects/arrays via
+    # _as_dict/_as_list so each access degrades to a placeholder instead of
+    # raising a raw AttributeError/TypeError.
     metadata = manifest_data.get("metadata", {})
+    if not isinstance(metadata, dict):
+        metadata = {}
+    producer = metadata.get("producer", {})
+    if not isinstance(producer, dict):
+        producer = {}
 
     console.print()
     console.print(
@@ -100,14 +120,14 @@ def print_bundle_info(manifest_data: dict[str, Any]) -> None:
             f"[bold]ACEF Evidence Bundle[/bold]\n"
             f"Package ID: {metadata.get('package_id', 'N/A')}\n"
             f"Timestamp: {metadata.get('timestamp', 'N/A')}\n"
-            f"Producer: {metadata.get('producer', {}).get('name', 'N/A')} "
-            f"v{metadata.get('producer', {}).get('version', 'N/A')}",
+            f"Producer: {producer.get('name', 'N/A')} "
+            f"v{producer.get('version', 'N/A')}",
             border_style="blue",
         )
     )
 
     # Subjects
-    subjects = manifest_data.get("subjects", [])
+    subjects = _as_list(manifest_data.get("subjects", []))
     if subjects:
         table = Table(title="Subjects")
         table.add_column("Name", style="cyan")
@@ -115,27 +135,28 @@ def print_bundle_info(manifest_data: dict[str, Any]) -> None:
         table.add_column("Risk Classification")
         table.add_column("Phase")
 
-        for sub in subjects:
+        for raw_sub in subjects:
+            sub = _as_dict(raw_sub)
             table.add_row(
-                sub.get("name", ""),
-                sub.get("subject_type", ""),
-                sub.get("risk_classification", ""),
-                sub.get("lifecycle_phase", ""),
+                str(sub.get("name", "")),
+                str(sub.get("subject_type", "")),
+                str(sub.get("risk_classification", "")),
+                str(sub.get("lifecycle_phase", "")),
             )
         console.print(table)
 
     # Entity counts
-    entities = manifest_data.get("entities", {})
+    entities = _as_dict(manifest_data.get("entities", {}))
     console.print(
         f"\nEntities: "
-        f"{len(entities.get('components', []))} components, "
-        f"{len(entities.get('datasets', []))} datasets, "
-        f"{len(entities.get('actors', []))} actors, "
-        f"{len(entities.get('relationships', []))} relationships"
+        f"{len(_as_list(entities.get('components', [])))} components, "
+        f"{len(_as_list(entities.get('datasets', [])))} datasets, "
+        f"{len(_as_list(entities.get('actors', [])))} actors, "
+        f"{len(_as_list(entities.get('relationships', [])))} relationships"
     )
 
     # Record files
-    record_files = manifest_data.get("record_files", [])
+    record_files = _as_list(manifest_data.get("record_files", []))
     if record_files:
         table = Table(title="Record Files")
         table.add_column("Type", style="cyan")
@@ -143,13 +164,17 @@ def print_bundle_info(manifest_data: dict[str, Any]) -> None:
         table.add_column("Count", justify="right")
 
         total_records = 0
-        for rf in record_files:
-            table.add_row(rf.get("record_type", ""), rf.get("path", ""), str(rf.get("count", 0)))
-            total_records += rf.get("count", 0)
+        for raw_rf in record_files:
+            rf = _as_dict(raw_rf)
+            count = rf.get("count", 0)
+            count_int = count if isinstance(count, int) and not isinstance(count, bool) else 0
+            table.add_row(str(rf.get("record_type", "")), str(rf.get("path", "")), str(count_int))
+            total_records += count_int
         console.print(table)
         console.print(f"Total records: {total_records}")
 
     # Profiles
-    profiles = manifest_data.get("profiles", [])
+    profiles = _as_list(manifest_data.get("profiles", []))
     if profiles:
-        console.print(f"\nProfiles: {', '.join(p.get('profile_id', '') for p in profiles)}")
+        profile_ids = ", ".join(str(_as_dict(p).get("profile_id", "")) for p in profiles)
+        console.print(f"\nProfiles: {profile_ids}")

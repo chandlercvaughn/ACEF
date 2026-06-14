@@ -6,6 +6,7 @@ import json
 
 import click
 
+from acef.errors import ACEFError
 from acef.loader import load
 
 
@@ -60,13 +61,24 @@ def record_cmd(
         click.echo(f"Error: Invalid JSON payload [ACEF-050]: {exc}", err=True)
         raise SystemExit(1) from exc
 
-    # Add record
-    record = pkg.record(
-        record_type=record_type,
-        provisions=list(provision),
-        payload=payload_data,
-        obligation_role=role,
-    )
+    # Add record. A bad --type (ACEFError ACEF-003 "Unknown record_type") or a
+    # bad --role (ValueError from the ObligationRole enum) must surface as a
+    # clean CLI error + exit 1, NEVER an uncaught traceback.
+    try:
+        record = pkg.record(
+            record_type=record_type,
+            provisions=list(provision),
+            payload=payload_data,
+            obligation_role=role,
+        )
+    except ACEFError as exc:
+        code = getattr(exc, "code", None)
+        suffix = f" [{code}]" if code else ""
+        click.echo(f"Error: {exc}{suffix}", err=True)
+        raise SystemExit(1) from exc
+    except ValueError as exc:
+        click.echo(f"Error: invalid record argument [ACEF-003]: {exc}", err=True)
+        raise SystemExit(1) from exc
 
     # Re-export. This will rmtree subdirectories of bundle_path that
     # Package.export manages (records/, artifacts/, hashes/, signatures/).

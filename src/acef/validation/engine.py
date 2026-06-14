@@ -414,7 +414,8 @@ def _run_validation_phases(
         rf_path = bundle_path / rf_path_str
         if rf_path.exists():
             try:
-                file_lines = open(rf_path, encoding="utf-8").readlines()
+                with open(rf_path, encoding="utf-8") as _record_file:
+                    file_lines = _record_file.readlines()
             except (OSError, UnicodeDecodeError) as exc:
                 early_load_diagnostics.append(
                     ValidationDiagnostic(
