@@ -182,19 +182,21 @@ def _check_manifest(bundle_path: Path, issues: list[tuple[str, str, str]]) -> No
         )
         return
 
-    # Check required fields. Distinguish ABSENCE (missing / explicit null /
-    # empty object -> "Missing metadata block") from a present-but-NON-OBJECT
-    # value (``[]`` / ``""`` / ``0`` / ``false`` / ``"x"`` / ``5`` -> ACEF-002),
-    # checking the TYPE before truthiness so a falsy non-object is not
-    # mis-reported as merely "missing" (and never reaches ``.get(...)``).
-    metadata = data.get("metadata")
-    if metadata is None:
+    # Check required fields. Distinguish the THREE cases precisely: a truly
+    # ABSENT key or an empty object ``{}`` -> "Missing metadata block"; any
+    # PRESENT non-object value (incl. explicit ``null``, ``[]``, ``""``, ``0``,
+    # ``false``, ``"x"``, ``5``) -> ACEF-002 (a present-but-invalid value, not an
+    # absence); a present object -> field checks. The type test precedes
+    # truthiness so a falsy non-object is never mis-reported and ``.get(...)`` is
+    # only ever called on a dict.
+    if "metadata" not in data:
         issues.append(("error", "manifest", "Missing metadata block"))
-    elif not isinstance(metadata, dict):
+    elif not isinstance(data["metadata"], dict):
         issues.append(("error", "manifest", "[ACEF-002] metadata is not a JSON object"))
-    elif not metadata:
+    elif not data["metadata"]:
         issues.append(("error", "manifest", "Missing metadata block"))
     else:
+        metadata = data["metadata"]
         if not metadata.get("package_id"):
             issues.append(("error", "manifest", "Missing metadata.package_id"))
         if not metadata.get("timestamp"):

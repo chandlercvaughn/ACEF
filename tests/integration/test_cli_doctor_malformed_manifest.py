@@ -82,16 +82,20 @@ class TestDoctorFalsyNonObjectMetadataPrecision:
     before type). The type-before-truthiness guard reports the precise ACEF-002
     non-object diagnostic; absence/null/empty-object stay 'Missing'."""
 
-    @pytest.mark.parametrize("meta", ["[]", '""', "0", "false"])
-    def test_falsy_non_object_metadata_reports_acef_002(self, tmp_path: Path, meta: str) -> None:
+    @pytest.mark.parametrize("meta", ["[]", '""', "0", "false", "null", '"x"', "5"])
+    def test_present_non_object_metadata_reports_acef_002(self, tmp_path: Path, meta: str) -> None:
+        """Any PRESENT non-object metadata value — including explicit ``null`` —
+        is a present-but-invalid value, reported as ACEF-002 (not 'Missing')."""
         bundle = _bundle(tmp_path, ('{"metadata": %s, "subjects": []}' % meta).encode())
         result = CliRunner().invoke(cli, ["doctor", str(bundle)])
         assert result.exception is None or isinstance(result.exception, SystemExit)
         assert "metadata is not a JSON object" in result.output
         assert result.exit_code != 0
 
-    @pytest.mark.parametrize("meta", ["null", "{}"])
-    def test_absent_or_empty_metadata_reports_missing(self, tmp_path: Path, meta: str) -> None:
-        bundle = _bundle(tmp_path, ('{"metadata": %s, "subjects": []}' % meta).encode())
-        result = CliRunner().invoke(cli, ["doctor", str(bundle)])
-        assert "Missing metadata block" in result.output
+    def test_absent_metadata_reports_missing(self, tmp_path: Path) -> None:
+        """A truly ABSENT metadata key (and an empty object ``{}``) is reported
+        as 'Missing metadata block', distinct from a present non-object value."""
+        for body in (b'{"subjects": []}', b'{"metadata": {}, "subjects": []}'):
+            bundle = _bundle(tmp_path / body.hex()[:8], body)
+            result = CliRunner().invoke(cli, ["doctor", str(bundle)])
+            assert "Missing metadata block" in result.output
