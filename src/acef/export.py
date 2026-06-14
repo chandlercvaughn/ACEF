@@ -25,6 +25,7 @@ from acef.integrity import (
     canonicalize,
     compute_content_hashes,
     path_nfc_utf8_problem,
+    utf16_collation_key,
 )
 from acef.records_util import canonicalize_record, compute_shard_boundaries, sort_records
 
@@ -445,7 +446,18 @@ def export_archive(package: Package, output_path: str) -> Path:
                     # Use PurePosixPath to ensure forward slashes on all platforms
                     rel = PurePosixPath(Path(root).relative_to(bundle_dir)) / f
                     all_files.append(str(rel))
-            all_files.sort()
+            # Sort tar member relpaths by RFC 8785 UTF-16 collation — the single
+            # hash-domain source of truth (integrity.utf16_collation_key, reused
+            # by content-hashes.json key order, Merkle leaf order, and the record
+            # sort). The TS exporter (packages/sdk-typescript/src/bundle_export.ts)
+            # sorts the SAME relpaths with Array.prototype.sort() == UTF-16
+            # code-unit order; Python's default str sort is code-point order,
+            # which DIVERGES from UTF-16 for supplementary-plane (U+10000+) names
+            # and would emit tar members in a different order -> different
+            # .acef.tar.gz bytes, breaking the §3.1.3 byte-identical-archive MUST.
+            # ASCII/BMP names order identically under both collations, so this is
+            # byte-neutral for every golden bundle and existing vector.
+            all_files.sort(key=utf16_collation_key)
 
             # Collect all directories
             all_dirs: list[str] = []
@@ -454,7 +466,9 @@ def export_archive(package: Package, output_path: str) -> Path:
                 for d in sorted(dirs):
                     rel = PurePosixPath(Path(os.path.join(root, d)).relative_to(bundle_dir))
                     all_dirs.append(str(rel))
-            all_dirs.sort()
+            # Same UTF-16 collation as all_files above (see rationale there): the
+            # final member order MUST match the TS exporter and the hash domain.
+            all_dirs.sort(key=utf16_collation_key)
 
             # Create deterministic tar.gz
             output = Path(output_path)
