@@ -346,7 +346,16 @@ def _parse_jsonl(path: Path) -> list[dict[str, Any]]:
         List of parsed JSON objects.
 
     Raises:
-        ACEFFormatError: If a line is not valid JSON.
+        ACEFFormatError: If a line is not valid JSON (ACEF-050), or is
+            well-formed JSON but not a JSON object (ACEF-050). A bare scalar,
+            array, or ``null`` line is valid JSON yet cannot be a record; left
+            unguarded it would reach ``dict_to_record_envelope`` and leak a raw
+            ``AttributeError`` (``'int'/'list'/'NoneType'/'str' object has no
+            attribute 'get'``) out of the public ``load()`` API on
+            attacker-controlled bytes. This mirrors the validation engine's
+            structured ACEF-050 verdict for the identical input so ``load()``
+            and ``validate_bundle()`` converge (never diverge) on malicious
+            records.
     """
     records: list[dict[str, Any]] = []
     with open(path, encoding="utf-8") as f:
@@ -355,12 +364,20 @@ def _parse_jsonl(path: Path) -> list[dict[str, Any]]:
             if not line:
                 continue
             try:
-                records.append(json.loads(line))
+                rec_data = json.loads(line)
             except json.JSONDecodeError as e:
                 raise ACEFFormatError(
                     f"Malformed JSONL at {path}:{line_num}: {e}",
                     code="ACEF-050",
                 ) from e
+            # JSONL lines must be JSON objects — null, arrays, strings, and
+            # numbers are well-formed JSON but cannot be records.
+            if not isinstance(rec_data, dict):
+                raise ACEFFormatError(
+                    f"JSONL line at {path}:{line_num} is not a JSON object (got {type(rec_data).__name__})",
+                    code="ACEF-050",
+                )
+            records.append(rec_data)
     return records
 
 
