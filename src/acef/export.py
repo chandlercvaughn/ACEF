@@ -194,6 +194,35 @@ def record_type_collation_key(record_type: str) -> bytes:
     return utf16_collation_key(record_type)
 
 
+def _validate_records_collatable(records: list[Any]) -> None:
+    """Fail closed (ACEF-052) before ``sort_records`` UTF-16-collates a record's
+    ``record_id`` / ``timestamp``.
+
+    ``sort_records`` orders records by ``utf16_collation_key(timestamp)`` then
+    ``utf16_collation_key(record_id)`` (== ``str.encode("utf-16-be")``).
+    ``Package.record()`` admits a ``record_id`` / ``timestamp`` carrying a lone
+    UTF-16 surrogate (no strict-UTF-8 check), and the loader reconstructs whatever
+    a bundle carries; such a value CANNOT be UTF-16-encoded and raises a RAW
+    ``UnicodeEncodeError`` mid-sort, bypassing the structured
+    ``ACEFExportError(ACEF-052)`` surface. Validate with the SAME strict-UTF-8/NFC
+    rule used for record-type and attachment paths, mirroring
+    :func:`record_type_collation_key` — a VALID supplementary-plane (U+10000+)
+    value (an encodable surrogate PAIR) still passes and collates correctly.
+    """
+    for record in records:
+        for field_name, value in (("record_id", record.record_id), ("timestamp", record.timestamp)):
+            if not isinstance(value, str):
+                continue
+            problem = path_nfc_utf8_problem(value)
+            if problem is not None:
+                raise ACEFExportError(
+                    f"Record {field_name} violates the strict-UTF-8/NFC text "
+                    f"contract ({problem}); it cannot be ordered by RFC 8785 "
+                    f"UTF-16 collation: {value!r}",
+                    code="ACEF-052",
+                )
+
+
 def _record_shard_relpaths(package: Package) -> list[str]:
     """Derive the record-shard member relpaths the build loop will write.
 
@@ -221,6 +250,7 @@ def _record_shard_relpaths(package: Package) -> list[str]:
     # entry-point preflight, before any filesystem work — never a raw
     # UnicodeEncodeError mid-sort.
     for record_type, recs in sorted(records_by_type.items(), key=lambda kv: record_type_collation_key(kv[0])):
+        _validate_records_collatable(recs)
         sorted_recs = sort_records(recs)
         shards = compute_shard_boundaries(sorted_recs)
         if len(shards) == 1:
@@ -408,6 +438,7 @@ def export_directory(package: Package, output_path: str) -> Path:
         # raising a raw UnicodeEncodeError (the entry-point preflight already
         # rejected it; this keeps the loop's own ordering on the same guarded key).
         for record_type, recs in sorted(records_by_type.items(), key=lambda kv: record_type_collation_key(kv[0])):
+            _validate_records_collatable(recs)
             sorted_recs = sort_records(recs)
             shards = compute_shard_boundaries(sorted_recs)
 
