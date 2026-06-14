@@ -1166,6 +1166,74 @@ class TestACEF086CommitmentSourceOutOfDomain:
         # And no generic FATAL ACEF-001 backstop must appear at the rule level.
         assert "ACEF-001" not in codes
 
+    # -- lone-surrogate (UnicodeEncodeError) surface: the SECOND non-encodable
+    # class the narrow CanonicalizationError-only guard misses. A committed
+    # source value whose object KEY holds a lone UTF-16 surrogate is valid
+    # UTF-8/NFC/BOM-free JSON that json.loads parses, but rfc8785.dumps must
+    # str.encode("utf-16-be") each key for the UTF-16 key sort, which CANNOT
+    # encode a lone surrogate and raises a raw UnicodeEncodeError (NOT a
+    # CanonicalizationError — mirroring integrity._canonicalize_hash_domain,
+    # which catches BOTH). Pre-fix this UnicodeEncodeError escapes the
+    # CanonicalizationError-only guard, propagates out of check_publishability,
+    # and collapses into a generic FATAL ACEF-001 abort. Post-fix: the same
+    # precise, non-fatal ACEF-086 commitment FAILURE, and downstream rules run.
+
+    # A source value object whose KEY is a lone UTF-16 surrogate (escaped
+    # \udce9). json.loads produces the unpaired-surrogate key from the file
+    # bytes; rfc8785.dumps then raises UnicodeEncodeError encoding it utf-16-be.
+    _LONE_SURROGATE_KEY_VALUE = json.loads('{"\\udce9": 1}')
+
+    def test_lone_surrogate_key_source_value_emits_086_not_crash(self) -> None:
+        # The committed source value at /foo is an object whose KEY is a lone
+        # UTF-16 surrogate — NON-ENCODABLE for RFC-8785's utf-16-be key sort.
+        # Pre-fix: canonicalize(source_value) raises UnicodeEncodeError (NOT a
+        # CanonicalizationError), which slips past the narrow guard, propagates
+        # out of check_publishability, and crashes the rule run into a generic
+        # FATAL ACEF-001. Post-fix: a PRECISE, non-fatal ACEF-086
+        # commitment-linkage diagnostic for /foo, and the call NEVER raises.
+        report, card = self._source_backed_pair_with_committed_source(
+            source_value=self._LONE_SURROGATE_KEY_VALUE,
+            commitment="sha256:" + "0" * 64,
+        )
+        # MUST NOT raise.
+        diags = ir.check_publishability([card, report], source_backed=True)
+        codes = _codes(diags)
+        assert "ACEF-086" in codes, (
+            "a lone-surrogate committed source value must yield a commitment-linkage "
+            "ACEF-086 (a valid sha256(JCS(source)) cannot exist for a non-encodable "
+            "value), not a crash"
+        )
+        # No generic FATAL ACEF-001 backstop — the guard handled it in-lane.
+        assert "ACEF-001" not in codes
+        # The diagnostic must localize the offending source pointer and read
+        # sensibly for a NON-ENCODABLE (surrogate) cause — not only the numeric
+        # one — so the producer can act on it.
+        linkage = [d for d in diags if d.code == "ACEF-086" and "/foo" in d.message]
+        assert linkage, "ACEF-086 must reference the non-encodable source pointer /foo"
+        assert any("RFC 8785" in d.message or "RFC-8785" in d.message or "I-JSON" in d.message for d in linkage), (
+            "the diagnostic must explain the source value is outside the RFC-8785/I-JSON/encodable domain"
+        )
+
+    def test_lone_surrogate_key_does_not_abort_downstream_rules_in_full_run(self) -> None:
+        # report-all-errors MUST hold for the UnicodeEncodeError class too: a
+        # lone-surrogate committed source value flagged by check_publishability
+        # MUST NOT abort the LATER incident rules in run_incident_rules. Arm the
+        # downstream ACEF-087 near_miss marker and assert BOTH the precise
+        # ACEF-086 (for /foo) AND the downstream ACEF-087 are produced.
+        report, card = self._source_backed_pair_with_committed_source(
+            source_value=self._LONE_SURROGATE_KEY_VALUE,
+            commitment="sha256:" + "0" * 64,
+        )
+        report["payload"]["card_source"]["harm_core"]["realization"] = "near_miss"
+        diags = ir.run_incident_rules({}, [card, report])
+        codes = _codes(diags)
+        assert "ACEF-086" in codes, "precise commitment-linkage ACEF-086 must be emitted"
+        assert "ACEF-087" in codes, (
+            "the downstream near-miss rule (ACEF-087) MUST still run — the "
+            "lone-surrogate canonicalize() must not abort the remaining incident rules"
+        )
+        assert "ACEF-001" not in codes
+
 
 # ---------------------------------------------------------------------------
 # ACEF-081 — incident profile declared but crosswalk missing a mandatory member

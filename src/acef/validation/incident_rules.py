@@ -1583,35 +1583,50 @@ def check_publishability(
                 continue  # pointer-resolution diagnostic already emitted above
             # The committed source value is attacker-controlled: it is whatever sits
             # at ``linked_pointer`` in the (additionalProperties:true) source payload,
-            # so it may be a number OUTSIDE the RFC-8785 / I-JSON domain — an integer
-            # with |value| > 2^53, or NaN/Infinity — which ``json.loads`` parses but
-            # ``rfc8785.dumps`` REJECTS (IntegerDomainError / FloatDomainError). The
-            # raw ``canonicalize`` contract re-raises that fault; if it propagated
-            # here it would escape ``run_incident_rules`` to the engine's outermost
-            # backstop, collapsing into ONE generic FATAL ACEF-001 and ABORTING the
-            # remaining incident rules + later phases — violating the "report ALL
-            # errors within each phase" MUST. So, mirroring the sibling guard in
-            # ``_attestation_self_inconsistent`` (canonicalize "must never crash
-            # offline validation"), we wrap ONLY the canonicalize call: a
-            # non-canonicalizable committed source value is a commitment FAILURE
-            # (no valid sha256(JCS(source_value)) can exist for it) — a precise,
-            # non-fatal, in-lane ACEF-086 — never a crash. The guard is scoped to
-            # JUST this evaluation so a legitimate in-domain mismatch still takes the
-            # existing ACEF-086 mismatch path below, unchanged.
+            # so it may be OUTSIDE the RFC-8785 / I-JSON / encodable domain in TWO
+            # distinct ways, BOTH of which ``json.loads`` parses but ``rfc8785.dumps``
+            # REJECTS:
+            #   (a) a number out of the I-JSON number domain — an integer with
+            #       |value| > 2^53, or NaN/Infinity — raising
+            #       ``rfc8785.CanonicalizationError`` (IntegerDomainError /
+            #       FloatDomainError); and
+            #   (b) a string or object KEY holding a LONE UTF-16 SURROGATE (e.g. an
+            #       escaped ``\udce9``), which ``rfc8785.dumps`` must
+            #       ``str.encode("utf-16-be")`` for its UTF-16 key sort and CANNOT
+            #       encode, raising a raw ``UnicodeEncodeError`` (NOT a
+            #       ``CanonicalizationError``).
+            # These are the SAME two non-canonicalizable classes that
+            # ``integrity._canonicalize_hash_domain`` catches together. The raw
+            # ``canonicalize`` contract re-raises both; if either propagated here it
+            # would escape ``run_incident_rules`` to the engine's outermost backstop,
+            # collapsing into ONE generic FATAL ACEF-001 and ABORTING the remaining
+            # incident rules + later phases — violating the "report ALL errors within
+            # each phase" MUST. So, mirroring the sibling guards (canonicalize "must
+            # never crash offline validation"), we wrap ONLY the canonicalize call: a
+            # non-canonicalizable committed source value is a commitment FAILURE (no
+            # valid sha256(JCS(source_value)) can exist for it) — a precise, non-fatal,
+            # in-lane ACEF-086 — never a crash. The guard is scoped to JUST this
+            # evaluation so a legitimate in-domain mismatch still takes the existing
+            # ACEF-086 mismatch path below, unchanged. The except tuple is held to
+            # exactly these two CONCRETE non-encodable classes (no broad
+            # ``except Exception``): they are the only faults ``rfc8785.dumps`` raises
+            # on attacker JSON the linkage pointer can resolve to.
             try:
                 expected = "sha256:" + sha256_hex(canonicalize(source_value))
-            except rfc8785.CanonicalizationError:
+            except (rfc8785.CanonicalizationError, UnicodeEncodeError):
                 diags.append(
                     ValidationDiagnostic(
                         "ACEF-086",
                         (
                             f"Record {_record_id_of(rec)!r}: the hash-committed source value at "
-                            f"{linked_pointer!r} is OUTSIDE the RFC-8785 / I-JSON domain (e.g. an "
-                            f"integer with magnitude > 2^53, or NaN/Infinity), so no valid "
+                            f"{linked_pointer!r} is OUTSIDE the RFC-8785 / I-JSON / encodable domain "
+                            f"(e.g. an integer with magnitude > 2^53, NaN/Infinity, or a string / "
+                            f"object key holding a lone UTF-16 surrogate), so no valid "
                             f"sha256(JCS(source_value)) commitment can exist for it (§5.11 "
-                            f"commitment-linkage). Bring the source value into the I-JSON number "
-                            f"domain (encode large integers as strings; remove NaN/Infinity), or "
-                            f"change the field's disposition so it is not hash-committed."
+                            f"commitment-linkage). Bring the source value into the I-JSON domain "
+                            f"(encode large integers as strings; remove NaN/Infinity; remove lone "
+                            f"surrogates), or change the field's disposition so it is not "
+                            f"hash-committed."
                         ),
                         path=f"/{_record_id_of(rec)}/{key}",
                     )
