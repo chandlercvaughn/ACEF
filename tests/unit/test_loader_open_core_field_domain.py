@@ -289,3 +289,31 @@ class TestSharedValidationReuse:
         with pytest.raises(ACEFSchemaError) as setter_exc:
             pkg.add_namespace("vendor", {"k": "v"})
         assert setter_exc.value.code == "ACEF-002"
+
+
+class TestUnhashableAnalysisModeFailsClosed:
+    """roborev follow-up on the P1 fix: ``validate_analysis_mode`` used set
+    membership (``mode not in _ANALYSIS_MODES``) on an arbitrary object, so an
+    unhashable JSON value (``[]`` / ``{}``) raised a raw ``TypeError:
+    unhashable type`` BEFORE the structured ``ACEFSchemaError`` — leaking an
+    unstructured exception for a malformed manifest. The type-check-first guard
+    rejects every non-string value with a clean ACEF-002."""
+
+    @pytest.mark.parametrize("bad", [[], {}, [1, 2], {"k": "v"}, 5, 1.5, True, None])
+    def test_validate_analysis_mode_rejects_non_string_without_raising_typeerror(self, bad: object) -> None:
+        from acef.package import validate_analysis_mode
+
+        with pytest.raises(ACEFSchemaError) as exc:
+            validate_analysis_mode(bad)
+        assert exc.value.code == "ACEF-002"
+
+    @pytest.mark.parametrize("bad", [[], {}, [1, 2]])
+    def test_load_unhashable_analysis_mode_raises_structured_not_typeerror(self, bad: object, tmp_path: Path) -> None:
+        """The same fail-closed behavior end-to-end through ``acef.load`` (the
+        loader applies the shared validator), so an unhashable ``analysis_mode``
+        in the manifest surfaces ACEF-002, never a raw ``TypeError``."""
+        bundle = tmp_path / "b"
+        _write_bundle(bundle, _manifest(analysis_mode=bad))
+        with pytest.raises(ACEFSchemaError) as exc:
+            acef.load(str(bundle))
+        assert exc.value.code == "ACEF-002"

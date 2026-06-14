@@ -533,14 +533,20 @@ def validate_analysis_mode(mode: object) -> str:
         ACEFSchemaError: If ``mode`` is not one of the recognized
             analysis_mode literals (ACEF-002).
     """
-    if mode not in _ANALYSIS_MODES:
+    # Type-check BEFORE the set-membership test: ``_ANALYSIS_MODES`` is a
+    # frozenset, so ``mode not in _ANALYSIS_MODES`` would raise a raw
+    # ``TypeError: unhashable type`` for an unhashable JSON value (``[]`` /
+    # ``{}``) before reaching the structured error. A non-str mode can never be
+    # one of the four string literals, so it is rejected here either way.
+    if not isinstance(mode, str) or mode not in _ANALYSIS_MODES:
         allowed = ", ".join(sorted(_ANALYSIS_MODES))
         raise ACEFSchemaError(
             f"Unknown analysis_mode {mode!r}: must be one of {allowed}.",
             code="ACEF-002",
         )
-    # ``mode in _ANALYSIS_MODES`` guarantees ``mode`` is one of the str literals.
-    return mode  # type: ignore[return-value]
+    # The ``isinstance(mode, str)`` + membership guard narrows ``mode`` to one
+    # of the str literals, so the return type checks without an ignore.
+    return mode
 
 
 def validate_namespaces(namespaces: object, *, strict_keys: bool = True) -> dict[str, dict[str, Any]]:
