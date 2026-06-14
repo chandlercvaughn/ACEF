@@ -56,12 +56,31 @@ def validate_cmd(path: str, profile: tuple[str, ...], output: str | None, fmt: s
         code = exc.code or "ACEF-050"
         message = str(exc)
         if fmt == "json":
-            error_obj = {"structural_errors": [{"code": code, "severity": "fatal", "message": message, "path": path}]}
-            click.echo(json.dumps(error_obj, indent=2))
+            # Emit a NORMAL AssessmentBundle — the SAME type+serialization the
+            # success path uses (``assessment.to_dict()`` below) — so a
+            # ``--format json`` consumer always receives the standard validate
+            # payload shape, never an ad-hoc partial object. The error is carried
+            # as a ``ValidationDiagnostic`` in ``structural_errors``, exactly as
+            # ``validation.engine`` records a structural failure (e.g.
+            # ``ValidationDiagnostic("ACEF-002", ...).to_dict()``). The diagnostic
+            # DERIVES its severity + category from the error registry for ``code``
+            # (ACEF-050 → fatal/format; a non-fatal ACEFFormatError code such as
+            # ACEF-052 → error/format) — it does NOT hard-code ``"fatal"`` or omit
+            # ``category``, which would misrepresent non-fatal format codes.
+            from acef.errors import ValidationDiagnostic
+            from acef.models.assessment import AssessmentBundle
+
+            error_assessment = AssessmentBundle()
+            error_assessment.structural_errors.append(ValidationDiagnostic(code, message, path=path).to_dict())
+            click.echo(json.dumps(error_assessment.to_dict(), indent=2))
         else:
             click.echo(f"Error: {message}", err=True)
         # Match the missing/malformed-DIRECTORY exit code (FATAL → 2) so archive
         # and directory inputs return the same code for the equivalent failure.
+        # Exit code and the diagnostic's registry severity are separate concerns:
+        # the CLI exits 2 for the archive-failure (mirroring the directory FATAL
+        # exit) even when the diagnostic's registry severity is non-fatal — the
+        # JSON BODY carries the diagnostic's TRUE registry severity/category.
         sys.exit(2)
 
     if fmt == "json":

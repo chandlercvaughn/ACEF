@@ -519,3 +519,93 @@ class TestCLIValidateArchiveErrorSymmetry:
         assert not isinstance(archive_result.exception, ACEFFormatError), archive_result.exception
         assert archive_result.exit_code == dir_result.exit_code
         assert archive_result.exit_code == 2
+
+    def test_validate_missing_archive_json_is_assessment_bundle_shaped(self, runner: CliRunner) -> None:
+        """roborev Medium (validate_cmd.py:59): the ``--format json`` archive-error
+        branch must emit a NORMAL ``AssessmentBundle`` dict — the SAME top-level
+        shape a successful/normal validation emits — not an ad-hoc partial object.
+
+        RED proof (before the fix) the branch emitted only::
+
+            {"structural_errors": [{"code": ..., "severity": "fatal",
+                                    "message": ..., "path": ...}]}
+
+        which (a) OMITS every other AssessmentBundle top-level key
+        (``assessment_id``, ``versioning``, ``results``, ``provision_summary``,
+        ``evaluation_instant``, ...), (b) OMITS the diagnostic ``category``, and
+        (c) HARD-CODES ``severity: "fatal"``. A consumer expecting the standard
+        validate JSON payload breaks. After the fix the body is a real
+        ``AssessmentBundle.to_dict()`` carrying a registry-derived diagnostic.
+        """
+        result = runner.invoke(
+            cli,
+            ["validate", "/no/such/bundle.acef.tar.gz", "--format", "json"],
+            catch_exceptions=True,
+        )
+        assert not isinstance(result.exception, ACEFFormatError), result.exception
+        assert result.exit_code == 2, result.output
+        payload = json.loads(result.output)
+
+        # SAME top-level shape as a normal validate --format json output: a full
+        # AssessmentBundle dict, not an object whose only key is structural_errors.
+        from acef.models.assessment import AssessmentBundle
+
+        expected_keys = set(AssessmentBundle().to_dict().keys())
+        assert set(payload.keys()) == expected_keys, (
+            f"archive-error JSON is not AssessmentBundle-shaped; got keys {sorted(payload.keys())}"
+        )
+
+        # The diagnostic is carried in structural_errors with the full
+        # ValidationDiagnostic shape: code, severity, category, message.
+        errors = payload["structural_errors"]
+        assert len(errors) == 1, errors
+        diag = errors[0]
+        assert diag["code"] == "ACEF-050"
+        assert "category" in diag, "ValidationDiagnostic category omitted from archive-error JSON"
+        assert "severity" in diag
+
+        # severity + category MUST be derived from the error registry for the
+        # code, not hard-coded. For ACEF-050 the registry says fatal/format.
+        from acef.errors import resolve_error_meta
+
+        sev, cat = resolve_error_meta("ACEF-050")
+        assert diag["severity"] == sev.value
+        assert diag["category"] == cat.value
+
+    def test_validate_json_non_fatal_format_error_carries_registry_severity(
+        self, runner: CliRunner, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The JSON archive-error branch must NOT hard-code ``"fatal"``: a
+        non-fatal ``ACEFFormatError`` code (e.g. ACEF-052, registry severity
+        ``error``) must serialize its TRUE registry severity/category in the
+        emitted AssessmentBundle body. The hard-coded ``"severity": "fatal"`` in
+        the prior commit MISREPRESENTS such codes — this is the core RED.
+
+        Exit code stays 2 (the directory-input FATAL-exit symmetry the prior
+        commit established) — exit code and the diagnostic's registry severity
+        are separate concerns.
+        """
+        from acef.cli import validate_cmd as vc
+        from acef.errors import ACEFFormatError, resolve_error_meta
+
+        def _raise_acef052(path: str, profiles: list[str] | None = None) -> None:
+            raise ACEFFormatError("Synthetic non-fatal format error", code="ACEF-052")
+
+        monkeypatch.setattr(vc, "validate", _raise_acef052)
+
+        result = runner.invoke(
+            cli,
+            ["validate", "/no/such/bundle.acef.tar.gz", "--format", "json"],
+            catch_exceptions=True,
+        )
+        # Exit-code symmetry preserved: still 2 even though the diagnostic
+        # registry severity is "error", not "fatal".
+        assert result.exit_code == 2, result.output
+        payload = json.loads(result.output)
+        diag = payload["structural_errors"][0]
+        assert diag["code"] == "ACEF-052"
+
+        sev, cat = resolve_error_meta("ACEF-052")
+        assert sev.value == "error", "precondition: ACEF-052 registry severity is 'error'"
+        assert diag["severity"] == "error", "JSON body hard-coded 'fatal' instead of the registry severity for ACEF-052"
+        assert diag["category"] == cat.value
