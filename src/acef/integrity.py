@@ -210,7 +210,19 @@ def canonicalize_json_str(json_str: str, *, path: Path | None = None) -> bytes:
         ACEFCanonicalizationError: If the parsed JSON contains a number outside
             the RFC 8785 domain (>2^53, NaN, or Infinity).
     """
-    data = json.loads(json_str)
+    # A hash-domain ``.json`` file that is syntactically BROKEN JSON (or non-UTF-8
+    # when read as a string) must surface as a structured ACEF-051, NOT a raw
+    # ``json.JSONDecodeError``/``UnicodeDecodeError``. Otherwise hashing a corrupt
+    # ``.json`` file (e.g. a tampered acef-manifest.json during ``acef doctor``'s
+    # integrity check) crashes with a raw traceback — the same availability /
+    # "report ALL errors" defect the domain-fault wrapper below already guards.
+    try:
+        data = json.loads(json_str)
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise ACEFCanonicalizationError(
+            f"JSON not canonicalizable per RFC 8785 (file is not well-formed JSON): {exc}",
+            path=path,
+        ) from exc
     return _canonicalize_hash_domain(data, path=path)
 
 

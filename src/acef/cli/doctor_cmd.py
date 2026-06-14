@@ -168,10 +168,28 @@ def _check_manifest(bundle_path: Path, issues: list[tuple[str, str, str]]) -> No
         issues.append(("error", "manifest", f"[ACEF-050] Invalid manifest (not valid UTF-8 JSON): {e}"))
         return
 
+    # A successfully-parsed manifest may still be a non-object (a bare JSON
+    # scalar/array like ``42`` / ``[]``). Calling ``.get(...)`` on it raises a
+    # raw AttributeError; surface a clean ACEF-002 issue instead and stop —
+    # ``validate`` reports the same non-object manifest as ACEF-002.
+    if not isinstance(data, dict):
+        issues.append(
+            (
+                "error",
+                "manifest",
+                f"[ACEF-002] Manifest is not a JSON object (got {type(data).__name__})",
+            )
+        )
+        return
+
     # Check required fields
     metadata = data.get("metadata")
     if not metadata:
         issues.append(("error", "manifest", "Missing metadata block"))
+    elif not isinstance(metadata, dict):
+        # A present-but-non-object metadata (e.g. ``"metadata": "x"`` / ``5``)
+        # would raise a raw AttributeError on ``.get(...)``; report ACEF-002.
+        issues.append(("error", "manifest", "[ACEF-002] metadata is not a JSON object"))
     else:
         if not metadata.get("package_id"):
             issues.append(("error", "manifest", "Missing metadata.package_id"))
@@ -186,9 +204,14 @@ def _check_manifest(bundle_path: Path, issues: list[tuple[str, str, str]]) -> No
         issues.append(("warning", "manifest", "Missing versioning block"))
 
     subjects = data.get("subjects", [])
-    console.print(f"  Subjects: {len(subjects)}")
-    if not subjects:
-        issues.append(("warning", "manifest", "No subjects declared"))
+    if not isinstance(subjects, list):
+        # A present-but-non-array subjects (e.g. ``"subjects": 5``) would raise a
+        # raw TypeError on ``len(...)``; report ACEF-002 instead.
+        issues.append(("error", "manifest", "[ACEF-002] subjects is not a JSON array"))
+    else:
+        console.print(f"  Subjects: {len(subjects)}")
+        if not subjects:
+            issues.append(("warning", "manifest", "No subjects declared"))
 
 
 # Map the canonical validator severities onto doctor's three console buckets.
