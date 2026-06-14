@@ -32,7 +32,7 @@ import jsonpointer
 import pytest
 from cryptography.hazmat.primitives.asymmetric import ec
 
-from acef.integrity import canonicalize
+from acef.integrity import canonicalize, sha256_hex
 from acef.signing import create_detached_jws
 from acef.validation import incident_rules as ir
 
@@ -1042,6 +1042,129 @@ class TestACEF086PublishabilityGate:
         card = _published_card({"severity": "major"})
         diags = ir.check_publishability([card, report], source_backed=True)
         assert "ACEF-086" not in _codes(diags)
+
+
+# ---------------------------------------------------------------------------
+# Structural-review P2 — the commitment-linkage canonicalize() of an
+# attacker-controlled hash-committed source value MUST NOT crash offline
+# validation. An out-of-domain source value (integer magnitude > 2^53, NaN,
+# Infinity) is one that json.loads parses but rfc8785.dumps rejects; feeding it
+# to canonicalize() raises rfc8785.CanonicalizationError. The fix wraps JUST the
+# canonicalize(source_value) call and treats the fault as a commitment FAILURE
+# (precise ACEF-086), NOT a crash — so a valid sha256(JCS(source_value))
+# commitment cannot exist for it. The in-domain mismatch path is unchanged.
+# ---------------------------------------------------------------------------
+
+
+# An integer with |value| > 2^53 — json.loads parses it; rfc8785.dumps rejects it
+# (IntegerDomainError). 2^53 == 9007199254740992; this is far above the boundary.
+_OUT_OF_DOMAIN_BIG_INT = 123456789012345678901234567890
+
+
+class TestACEF086CommitmentSourceOutOfDomain:
+    def _source_backed_pair_with_committed_source(
+        self, *, source_value: Any, commitment: str
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """A source-backed (report, card) pair where the report payload root
+        carries ``foo`` = ``source_value`` (the hash-committed source field) and
+        the public incident_card carries ``foo_commitment``. ``/foo`` is disposed
+        ``hash-committed`` in the source publishability_map, so the linkage block
+        computes ``sha256(JCS(source_value))`` over ``source_value`` at line 1583.
+        The card is at the public boundary (coordinated_disclosure.status:public)
+        with the matching public_incident_id."""
+        report = _report_record(
+            {
+                "public_incident_id": _VALID_ID,
+                "id_grade": "self-asserted",
+                "id_state": "PUBLISHED",
+                "harm_core": dict(_VALID_HARM_CORE),
+                "publishability_map": {"/foo": "hash-committed"},
+                "eu_ai_act_facts": {
+                    "edition": "reg-2024-1689",
+                    "serious_incident_triggers": ["3.49.a"],
+                    "widespread": False,
+                    "death_involved": False,
+                },
+            }
+        )
+        # The hash-committed source value lives at the report payload ROOT, where
+        # the /foo pointer resolves (commitment linkage reads source_payload).
+        report["payload"]["foo"] = source_value
+        card = _published_card({"foo_commitment": commitment})
+        return report, card
+
+    def test_out_of_domain_source_value_emits_086_not_crash(self) -> None:
+        # The committed source value at /foo is an integer with |value| > 2^53 —
+        # OUTSIDE the RFC-8785 / I-JSON domain. Pre-fix: canonicalize(source_value)
+        # raises rfc8785.CanonicalizationError, which propagates out of
+        # check_publishability (the call at line 1583 is unguarded) and crashes
+        # the rule run. Post-fix: a PRECISE, non-fatal ACEF-086 commitment-linkage
+        # diagnostic for /foo is emitted and the call NEVER raises.
+        report, card = self._source_backed_pair_with_committed_source(
+            source_value=_OUT_OF_DOMAIN_BIG_INT,
+            commitment="sha256:" + "0" * 64,
+        )
+        # MUST NOT raise.
+        diags = ir.check_publishability([card, report], source_backed=True)
+        codes = _codes(diags)
+        assert "ACEF-086" in codes, (
+            "an out-of-domain committed source value must yield a commitment-linkage "
+            "ACEF-086 (a valid sha256(JCS(source)) cannot exist for it), not a crash"
+        )
+        # The diagnostic must localize the offending source pointer and explain the
+        # out-of-domain cause precisely (so the producer can act on it).
+        linkage = [d for d in diags if d.code == "ACEF-086" and "/foo" in d.message]
+        assert linkage, "ACEF-086 must reference the out-of-domain source pointer /foo"
+        assert any("RFC 8785" in d.message or "RFC-8785" in d.message or "I-JSON" in d.message for d in linkage), (
+            "the diagnostic must explain the source value is outside the RFC-8785/I-JSON domain"
+        )
+
+    def test_in_domain_mismatch_still_emits_normal_086(self) -> None:
+        # CONTROL: an IN-DOMAIN source value whose commitment is WRONG must still
+        # take the EXISTING ACEF-086 mismatch path (unchanged by the guard — the
+        # guard is scoped to JUST the canonicalize call).
+        report, card = self._source_backed_pair_with_committed_source(
+            source_value="an ordinary in-domain string",
+            commitment="sha256:" + "1" * 64,  # deliberately wrong preimage
+        )
+        diags = ir.check_publishability([card, report], source_backed=True)
+        assert "ACEF-086" in _codes(diags)
+
+    def test_in_domain_correct_commitment_still_passes(self) -> None:
+        # CONTROL: an IN-DOMAIN source value with the CORRECT preimage must still
+        # pass (no ACEF-086) — the guard must not perturb the legitimate path.
+        source_value = "an ordinary in-domain string"
+        good_commit = "sha256:" + sha256_hex(canonicalize(source_value))
+        report, card = self._source_backed_pair_with_committed_source(
+            source_value=source_value,
+            commitment=good_commit,
+        )
+        diags = ir.check_publishability([card, report], source_backed=True)
+        assert "ACEF-086" not in _codes(diags)
+
+    def test_out_of_domain_does_not_abort_downstream_rules_in_full_run(self) -> None:
+        # report-all-errors MUST be preserved: an out-of-domain committed source
+        # value flagged by check_publishability MUST NOT abort the LATER incident
+        # rules in run_incident_rules. We arm a downstream rule (ACEF-087 near_miss
+        # marker, which runs AFTER check_publishability) and assert BOTH the precise
+        # ACEF-086 (for /foo) AND the downstream ACEF-087 are produced.
+        report, card = self._source_backed_pair_with_committed_source(
+            source_value=_OUT_OF_DOMAIN_BIG_INT,
+            commitment="sha256:" + "0" * 64,
+        )
+        # Arm the downstream near-miss rule on the SAME source: realization is
+        # near_miss in card_source.harm_core (the container check_near_miss_marker
+        # inspects), so ACEF-087 fires ONLY if check_publishability did not abort.
+        report["payload"]["card_source"]["harm_core"]["realization"] = "near_miss"
+        diags = ir.run_incident_rules({}, [card, report])
+        codes = _codes(diags)
+        assert "ACEF-086" in codes, "precise commitment-linkage ACEF-086 must be emitted"
+        assert "ACEF-087" in codes, (
+            "the downstream near-miss rule (ACEF-087) MUST still run — the "
+            "out-of-domain canonicalize() must not abort the remaining incident rules"
+        )
+        # And no generic FATAL ACEF-001 backstop must appear at the rule level.
+        assert "ACEF-001" not in codes
 
 
 # ---------------------------------------------------------------------------

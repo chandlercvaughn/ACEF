@@ -49,6 +49,7 @@ from pathlib import Path
 from typing import Any
 
 import jsonpointer  # type: ignore[import-untyped]  # no published stubs / py.typed (no types-jsonpointer on PyPI)
+import rfc8785
 
 from acef.errors import ACEFProfileError, Severity, ValidationDiagnostic
 from acef.integrity import canonicalize, sha256_hex
@@ -1580,7 +1581,42 @@ def check_publishability(
             resolved, source_value = _resolve_json_pointer(source_payload, linked_pointer)
             if not resolved:
                 continue  # pointer-resolution diagnostic already emitted above
-            expected = "sha256:" + sha256_hex(canonicalize(source_value))
+            # The committed source value is attacker-controlled: it is whatever sits
+            # at ``linked_pointer`` in the (additionalProperties:true) source payload,
+            # so it may be a number OUTSIDE the RFC-8785 / I-JSON domain — an integer
+            # with |value| > 2^53, or NaN/Infinity — which ``json.loads`` parses but
+            # ``rfc8785.dumps`` REJECTS (IntegerDomainError / FloatDomainError). The
+            # raw ``canonicalize`` contract re-raises that fault; if it propagated
+            # here it would escape ``run_incident_rules`` to the engine's outermost
+            # backstop, collapsing into ONE generic FATAL ACEF-001 and ABORTING the
+            # remaining incident rules + later phases — violating the "report ALL
+            # errors within each phase" MUST. So, mirroring the sibling guard in
+            # ``_attestation_self_inconsistent`` (canonicalize "must never crash
+            # offline validation"), we wrap ONLY the canonicalize call: a
+            # non-canonicalizable committed source value is a commitment FAILURE
+            # (no valid sha256(JCS(source_value)) can exist for it) — a precise,
+            # non-fatal, in-lane ACEF-086 — never a crash. The guard is scoped to
+            # JUST this evaluation so a legitimate in-domain mismatch still takes the
+            # existing ACEF-086 mismatch path below, unchanged.
+            try:
+                expected = "sha256:" + sha256_hex(canonicalize(source_value))
+            except rfc8785.CanonicalizationError:
+                diags.append(
+                    ValidationDiagnostic(
+                        "ACEF-086",
+                        (
+                            f"Record {_record_id_of(rec)!r}: the hash-committed source value at "
+                            f"{linked_pointer!r} is OUTSIDE the RFC-8785 / I-JSON domain (e.g. an "
+                            f"integer with magnitude > 2^53, or NaN/Infinity), so no valid "
+                            f"sha256(JCS(source_value)) commitment can exist for it (§5.11 "
+                            f"commitment-linkage). Bring the source value into the I-JSON number "
+                            f"domain (encode large integers as strings; remove NaN/Infinity), or "
+                            f"change the field's disposition so it is not hash-committed."
+                        ),
+                        path=f"/{_record_id_of(rec)}/{key}",
+                    )
+                )
+                continue
             if isinstance(value, str) and value != expected:
                 diags.append(
                     ValidationDiagnostic(

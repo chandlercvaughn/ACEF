@@ -453,6 +453,78 @@ class TestPublishabilityEngine:
         assessment = validate_bundle(bundle)
         assert "ACEF-086" in _codes(assessment)
 
+    def test_out_of_domain_committed_source_does_not_abort_validation(self, tmp_path: Path) -> None:
+        # Structural-review P2: a hash-committed source field at /foo whose value is
+        # an integer with |value| > 2^53 is OUTSIDE the RFC-8785 / I-JSON domain —
+        # json.loads parses it but rfc8785.dumps rejects it. Pre-fix, the unguarded
+        # canonicalize(source_value) in the commitment-linkage block raises
+        # rfc8785.CanonicalizationError, which propagates to the engine's outermost
+        # backstop and is converted to a SINGLE generic FATAL ACEF-001 — ABORTING
+        # the remaining incident rules (here the downstream ACEF-087 near-miss
+        # marker never runs). Post-fix: a PRECISE, non-fatal ACEF-086 is emitted for
+        # the /foo source value AND the downstream incident rules STILL run.
+        #
+        # The big int is INJECTED into the on-disk record AFTER the bundle is built
+        # with a hash-safe placeholder, because an honest producer's
+        # compute_content_hashes would itself reject the out-of-domain int (it
+        # canonicalizes record files). The attacker hand-writes the record bytes;
+        # json.loads still parses them and the record reaches the incident rules
+        # (the integrity phase merely emits a non-fatal hash/ACEF-051 diagnostic).
+        placeholder_payload = {
+            "incident_type": "malfunction",
+            "severity": "major",
+            "description": "x",
+            # Hash-safe placeholder; replaced on disk with the out-of-domain int.
+            "foo": 0,
+            # A public-card commitment over /foo (linked via publishability_map).
+            "foo_commitment": "sha256:" + "0" * 64,
+            "card_source": {
+                "public_incident_id": _VALID_ID,
+                "id_grade": "self-asserted",
+                "id_state": "PUBLISHED",
+                # Arm the downstream ACEF-087 near-miss rule (runs AFTER
+                # check_publishability): it fires ONLY if validation did not abort.
+                "harm_core": {**_VALID_HARM_CORE, "realization": "near_miss"},
+                "publishability_map": {"/foo": "hash-committed"},
+                "eu_ai_act_facts": {
+                    "edition": "reg-2024-1689",
+                    "serious_incident_triggers": ["3.49.a"],
+                    "widespread": False,
+                    "death_involved": False,
+                },
+                "coordinated_disclosure": {"status": "coordinated"},
+            },
+        }
+        bundle = _build_incident_bundle(
+            tmp_path, core_version="1.1.0", record_type="incident_report", payload=placeholder_payload
+        )
+        # Inject the out-of-domain integer directly into the on-disk record bytes
+        # (the attacker path). The records file carries exactly one JSONL line.
+        rec_path = bundle / "records" / "incident_report.jsonl"
+        rec_obj = json.loads(rec_path.read_text(encoding="utf-8").strip())
+        # Splice the literal big int into the JSON text so json.loads reconstructs
+        # the full-precision integer (Python ints are unbounded).
+        rec_text = json.dumps(rec_obj, separators=(",", ":"), sort_keys=True)
+        rec_text = rec_text.replace('"foo":0', '"foo":123456789012345678901234567890')
+        rec_path.write_text(rec_text + "\n", encoding="utf-8")
+
+        assessment = validate_bundle(bundle)
+        codes = _codes(assessment)
+        # Precise, non-fatal commitment-linkage diagnostic for the /foo source value.
+        linkage = [
+            e
+            for e in assessment.structural_errors
+            if e.get("code") == "ACEF-086" and "/foo" in str(e.get("message", ""))
+        ]
+        assert linkage, "out-of-domain committed source value must yield a precise ACEF-086 for /foo"
+        # report-all-errors preserved: the DOWNSTREAM near-miss rule still ran.
+        assert "ACEF-087" in codes, (
+            "the downstream ACEF-087 near-miss rule MUST still run — the out-of-domain "
+            "canonicalize() must not abort validation"
+        )
+        # No generic FATAL ACEF-001 backstop from the aborted run.
+        assert "ACEF-001" not in codes, "validation must NOT abort to a generic FATAL ACEF-001"
+
 
 # ---------------------------------------------------------------------------
 # Offline ACEF-083 honesty: a forged but self-consistent card PASSES offline.
