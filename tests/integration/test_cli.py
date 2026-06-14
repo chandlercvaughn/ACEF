@@ -609,3 +609,61 @@ class TestCLIValidateArchiveErrorSymmetry:
         assert sev.value == "error", "precondition: ACEF-052 registry severity is 'error'"
         assert diag["severity"] == "error", "JSON body hard-coded 'fatal' instead of the registry severity for ACEF-052"
         assert diag["category"] == cat.value
+
+    def test_validate_archive_error_json_message_not_code_prefixed(self, runner: CliRunner) -> None:
+        """roborev Low (validate_cmd.py:74): the ``--format json`` archive-error
+        ``ValidationDiagnostic`` message must NOT embed the ``[ACEF-050]`` code
+        prefix, because the diagnostic already carries the code in its SEPARATE
+        ``code`` field. Normal (engine) ``ValidationDiagnostic`` messages read as
+        bare text (e.g. ``"acef-manifest.json not found"``) with no embedded
+        ``[CODE]`` — duplicating the code (once in ``code``, once inside
+        ``message``) breaks that convention and double-shows the code to a
+        machine consumer.
+
+        RED proof (before the fix): the branch built ``message = str(exc)`` which
+        serializes the exception as ``"[ACEF-050] Archive not found: ..."`` — so
+        ``payload["structural_errors"][0]["message"]`` STARTED WITH the literal
+        ``"[ACEF-050]"`` prefix while ``["code"] == "ACEF-050"`` — the code
+        appeared TWICE. After the fix the JSON message uses ``exc.message`` (the
+        un-prefixed text), so ``code`` is the ONLY place the code appears.
+        """
+        result = runner.invoke(
+            cli,
+            ["validate", "/no/such/bundle.acef.tar.gz", "--format", "json"],
+            catch_exceptions=True,
+        )
+        assert not isinstance(result.exception, ACEFFormatError), result.exception
+        assert result.exit_code == 2, result.output
+        payload = json.loads(result.output)
+        diag = payload["structural_errors"][0]
+        code = diag["code"]
+        assert code == "ACEF-050"
+        message = diag["message"]
+        # The JSON diagnostic message must be the BARE message — no ``[ACEF-050]``
+        # prefix and no embedded ``[<code>]`` token anywhere — so the code is not
+        # duplicated between ``code`` and ``message``.
+        assert not message.startswith(f"[{code}]"), (
+            f"JSON diagnostic message embeds the code prefix (duplicated with the 'code' field): {message!r}"
+        )
+        assert f"[{code}]" not in message, (
+            f"JSON diagnostic message embeds the code token (duplicated with the 'code' field): {message!r}"
+        )
+        # Sanity: the underlying error text is still present (just un-prefixed),
+        # matching the bare-message convention of normal engine diagnostics.
+        assert message, "JSON diagnostic message is empty"
+
+    def test_validate_archive_error_text_path_still_inline_code(self, runner: CliRunner) -> None:
+        """The human-readable text/stderr path MUST keep the inline ``[ACEF-050]``
+        prefix (it reads ``Error: [ACEF-050] Archive not found: ...``) — only the
+        machine-readable JSON ``message`` field is de-prefixed. This guards
+        against a fix that strips the code from BOTH paths.
+        """
+        result = runner.invoke(
+            cli,
+            ["validate", "/no/such/bundle.acef.tar.gz"],
+            catch_exceptions=True,
+        )
+        assert not isinstance(result.exception, ACEFFormatError), result.exception
+        assert result.exit_code == 2, result.output
+        # Text path keeps the inline code prefix for human readers.
+        assert "[ACEF-050]" in result.output, f"text path lost the inline [ACEF-050] code prefix: {result.output!r}"

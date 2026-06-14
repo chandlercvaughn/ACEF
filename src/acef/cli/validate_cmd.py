@@ -54,7 +54,16 @@ def validate_cmd(path: str, profile: tuple[str, ...], output: str | None, fmt: s
         assessment = validate(path, profiles=profiles)
     except ACEFFormatError as exc:
         code = exc.code or "ACEF-050"
-        message = str(exc)
+        # ``str(exc)`` is ``"[ACEF-050] <message>"`` (the ``ACEFError.__str__``
+        # prefixes the code) — appropriate for the HUMAN text/stderr path, where an
+        # inline ``[ACEF-050]`` reads naturally. ``exc.message`` is the SAME text
+        # WITHOUT the ``[CODE]`` prefix — the right form for the machine-readable
+        # JSON ``ValidationDiagnostic``, whose separate ``code`` field already
+        # carries the code. Embedding the prefix in the JSON ``message`` too would
+        # DUPLICATE the code (engine-emitted diagnostics carry a bare message, e.g.
+        # ``"acef-manifest.json not found"``, with no embedded ``[CODE]``).
+        text_message = str(exc)
+        json_message = exc.message
         if fmt == "json":
             # Emit a NORMAL AssessmentBundle — the SAME type+serialization the
             # success path uses (``assessment.to_dict()`` below) — so a
@@ -71,10 +80,10 @@ def validate_cmd(path: str, profile: tuple[str, ...], output: str | None, fmt: s
             from acef.models.assessment import AssessmentBundle
 
             error_assessment = AssessmentBundle()
-            error_assessment.structural_errors.append(ValidationDiagnostic(code, message, path=path).to_dict())
+            error_assessment.structural_errors.append(ValidationDiagnostic(code, json_message, path=path).to_dict())
             click.echo(json.dumps(error_assessment.to_dict(), indent=2))
         else:
-            click.echo(f"Error: {message}", err=True)
+            click.echo(f"Error: {text_message}", err=True)
         # Match the missing/malformed-DIRECTORY exit code (FATAL → 2) so archive
         # and directory inputs return the same code for the equivalent failure.
         # Exit code and the diagnostic's registry severity are separate concerns:
