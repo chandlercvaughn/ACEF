@@ -52,9 +52,7 @@ class TestInspectPrettyMalformedManifest:
         shutil.copytree(_GOLDEN, dst)
         (dst / "acef-manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
         result = CliRunner().invoke(cli, ["inspect", str(dst)])
-        assert result.exception is None, (
-            f"inspect raised {type(result.exception).__name__}: {result.exception}"
-        )
+        assert result.exception is None, f"inspect raised {type(result.exception).__name__}: {result.exception}"
         # inspect is a TOLERANT summary: it must still SUCCEED (exit 0) and render
         # the pretty bundle panel with placeholders — not reject the manifest.
         assert result.exit_code == 0

@@ -67,9 +67,7 @@ class TestStixObjectRefsSchemaUniqueItems:
         import json
         from pathlib import Path
 
-        sch = json.loads(
-            Path("acef-conventions/v1.1/taxonomy_crosswalk.schema.json").read_text(encoding="utf-8")
-        )
+        sch = json.loads(Path("acef-conventions/v1.1/taxonomy_crosswalk.schema.json").read_text(encoding="utf-8"))
         return sch["properties"]["stix"]["properties"]["object_refs"]
 
     def test_schema_itself_valid(self) -> None:
@@ -78,9 +76,7 @@ class TestStixObjectRefsSchemaUniqueItems:
 
         from jsonschema import Draft202012Validator
 
-        sch = json.loads(
-            Path("acef-conventions/v1.1/taxonomy_crosswalk.schema.json").read_text(encoding="utf-8")
-        )
+        sch = json.loads(Path("acef-conventions/v1.1/taxonomy_crosswalk.schema.json").read_text(encoding="utf-8"))
         Draft202012Validator.check_schema(sch)
         assert sch["properties"]["stix"]["properties"]["object_refs"]["uniqueItems"] is True
 
