@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any
 
 from acef.errors import ACEFExportError
 from acef.integrity import (
+    ACEFCanonicalizationError,
     build_merkle_tree,
     canonicalize,
     compute_content_hashes,
@@ -475,6 +476,17 @@ def export_directory(package: Package, output_path: str) -> Path:
 
             sign_bundle(bundle_dir, package.signing_key)
 
+    except ACEFCanonicalizationError as e:
+        # A normalization-on-read filesystem (e.g. HFS+ returning NFD for an
+        # NFC-written name) can make a hash-domain file fail canonicalization at
+        # export; surface a structured ACEFExportError (ACEF-051), never the raw
+        # ValueError-subclass ACEFCanonicalizationError.
+        raise ACEFExportError(
+            f"Bundle is not hash-domain canonicalizable on export (a "
+            f"normalization-on-read filesystem may return a non-NFC name for an "
+            f"NFC-written file; spec §3.1.1): {e}",
+            code="ACEF-051",
+        ) from e
     except OSError as e:
         raise ACEFExportError(f"Failed to export bundle: {e}") from e
 
@@ -698,6 +710,13 @@ def export_archive(package: Package, output_path: str) -> Path:
 
     except ACEFExportError:
         raise
+    except ACEFCanonicalizationError as e:
+        raise ACEFExportError(
+            f"Bundle is not hash-domain canonicalizable on archive export (a "
+            f"normalization-on-read filesystem may return a non-NFC name for an "
+            f"NFC-written file; spec §3.1.1): {e}",
+            code="ACEF-051",
+        ) from e
     except OSError as e:
         raise ACEFExportError(f"Failed to create archive: {e}") from e
 

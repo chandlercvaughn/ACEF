@@ -49,20 +49,37 @@ def chain(prior_bundle_path: str, **kwargs: Any) -> Package:
     import tempfile
     from pathlib import Path
 
-    from acef.integrity import compute_bundle_digest, compute_content_hashes
+    from acef.errors import ACEFFormatError
+    from acef.integrity import (
+        ACEFCanonicalizationError,
+        compute_bundle_digest,
+        compute_content_hashes,
+    )
 
     prior = Path(prior_bundle_path)
-    if prior.suffix == ".gz" or str(prior).endswith(".tar.gz"):
-        loaded = load(prior_bundle_path)
+    # compute_content_hashes hashes an UNTRUSTED prior-bundle directory and
+    # raises ACEFCanonicalizationError (a ValueError, NOT an ACEFError) for a
+    # malformed hash domain (non-NFC/surrogate filename, BOM/non-UTF-8 JSON, a
+    # symlink, an out-of-domain number). The public chain() API must surface a
+    # structured ACEFError (ACEF-051), like loader/integrity_checker do, never a
+    # raw ValueError subclass.
+    try:
+        if prior.suffix == ".gz" or str(prior).endswith(".tar.gz"):
+            loaded = load(prior_bundle_path)
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            tmp_bundle = Path(tmpdir) / "prior.acef"
-            loaded.export(str(tmp_bundle))
-            hashes = compute_content_hashes(tmp_bundle)
-    else:
-        hashes = compute_content_hashes(prior)
+            with tempfile.TemporaryDirectory() as tmpdir:
+                tmp_bundle = Path(tmpdir) / "prior.acef"
+                loaded.export(str(tmp_bundle))
+                hashes = compute_content_hashes(tmp_bundle)
+        else:
+            hashes = compute_content_hashes(prior)
 
-    digest = compute_bundle_digest(hashes)
+        digest = compute_bundle_digest(hashes)
+    except ACEFCanonicalizationError as exc:
+        raise ACEFFormatError(
+            f"Prior bundle at {prior_bundle_path!r} is not hash-domain canonicalizable (spec §3.1.1/§3.1.3): {exc}",
+            code="ACEF-051",
+        ) from exc
     return Package(prior_package_ref=digest, **kwargs)
 
 
