@@ -13,6 +13,7 @@ denied``). The intentional 1 GB / 10 GB size-limit ``ACEFFormatError`` raises
 
 from __future__ import annotations
 
+import errno
 import glob
 import os
 import shutil
@@ -177,18 +178,17 @@ def test_artifact_stat_error_raises_structured(tmp_path: Path, monkeypatch: pyte
 
 
 def test_artifact_read_error_raises_structured(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Platform-independent: a per-file ``read_bytes()`` failure must surface as
-    ACEF-050."""
+    """Platform-independent: a read failure on the opened artifact fd must surface as
+    ACEF-050. (The loader reads via ``os.fdopen(fd).read()`` on an O_NOFOLLOW fd, so
+    inject the failure through ``os.fdopen``.)"""
     dst = _golden_copy(tmp_path)
     (dst / "artifacts" / "x.bin").write_bytes(b"present artifact")
-    real_read = Path.read_bytes
 
-    def fake_read(self: Path) -> bytes:
-        if self.name == "x.bin":
-            raise PermissionError(13, "Permission denied", str(self))
-        return real_read(self)
+    def fake_fdopen(fd, *args, **kwargs):  # type: ignore[no-untyped-def]
+        # Only artifact fds reach here in a directory load; simulate an I/O error.
+        raise OSError(errno.EIO, "simulated I/O error")
 
-    monkeypatch.setattr(Path, "read_bytes", fake_read)
+    monkeypatch.setattr("acef.loader.os.fdopen", fake_fdopen)
     with pytest.raises(ACEFFormatError) as exc:
         acef.load(str(dst))
     assert exc.value.code == "ACEF-050"
@@ -255,6 +255,54 @@ def test_load_rejects_symlinked_artifact_subdir(tmp_path: Path) -> None:
     (external / "f.bin").write_bytes(b"external subtree file")
     dst = _golden_copy(tmp_path)
     (dst / "artifacts" / "sublink").symlink_to(external, target_is_directory=True)
+    with pytest.raises(ACEFFormatError) as exc:
+        acef.load(str(dst))
+    assert exc.value.code == "ACEF-052"
+
+
+@pytest.mark.skipif(not _POSIX, reason="symlink path-escape semantics are POSIX-specific")
+def test_load_rejects_dangling_artifacts_symlink(tmp_path: Path) -> None:
+    """A DANGLING ``artifacts/`` symlink (target missing) must be rejected
+    (ACEF-052), not silently ignored. ``Path.exists()`` FOLLOWS symlinks and returns
+    False for a broken symlink, so the ``is_symlink()`` guard must run BEFORE
+    ``exists()``. RED while the guard sits inside the ``if exists()`` block (the
+    dangling symlink reports exists()==False and is skipped)."""
+    dst = tmp_path / "b"
+    shutil.copytree(_GOLDEN, dst)
+    art = dst / "artifacts"
+    if art.is_symlink():
+        art.unlink()
+    elif art.exists():
+        shutil.rmtree(art)
+    art.symlink_to(tmp_path / "nonexistent_target")
+    with pytest.raises(ACEFFormatError) as exc:
+        acef.load(str(dst))
+    assert exc.value.code == "ACEF-052"
+
+
+@pytest.mark.skipif(not _POSIX, reason="O_NOFOLLOW / symlink-swap race semantics are POSIX-specific")
+def test_load_artifact_symlink_swap_race_rejected(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """TOCTOU: even if the no-follow PROBE is fooled into seeing a regular file
+    (simulating a regular-file -> symlink swap between the lstat probe and the read),
+    the loader must reject the symlink at OPEN time (O_NOFOLLOW) and never read its
+    target. RED while the loader reads via a path that re-follows symlinks
+    (``Path.read_bytes``); GREEN once it opens the fd once with O_NOFOLLOW."""
+    outside = tmp_path / "outside_secret.txt"
+    outside.write_text("EXTERNAL DATA THAT MUST NOT BE READ", encoding="utf-8")
+    dst = _golden_copy(tmp_path)
+    real_reg = dst / "artifacts" / "real.bin"
+    real_reg.write_bytes(b"a genuine regular artifact")
+    leak = dst / "artifacts" / "leak"
+    leak.symlink_to(outside)
+    reg_lstat = real_reg.lstat()  # a genuine regular-file stat_result
+    real_lstat = Path.lstat
+
+    def fake_lstat(self: Path, *args, **kwargs):  # type: ignore[no-untyped-def]
+        if self.name == "leak":
+            return reg_lstat  # pretend the symlink is a regular file (probe fooled)
+        return real_lstat(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "lstat", fake_lstat)
     with pytest.raises(ACEFFormatError) as exc:
         acef.load(str(dst))
     assert exc.value.code == "ACEF-052"

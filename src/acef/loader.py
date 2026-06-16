@@ -6,6 +6,7 @@ Implements security mitigations: path traversal rejection, tar bomb guards.
 
 from __future__ import annotations
 
+import errno
 import gzip
 import json
 import os
@@ -40,6 +41,14 @@ _MAX_SINGLE_FILE_SIZE = 1 * 1024 * 1024 * 1024  # 1 GB
 # Artifact size guards
 _MAX_ARTIFACT_FILE_SIZE = _MAX_SINGLE_FILE_SIZE  # 1 GB per file
 _MAX_TOTAL_ARTIFACT_SIZE = _MAX_EXTRACTED_SIZE  # 10 GB cumulative (m8 Scout R2)
+
+# No-follow / non-blocking open flags for the TOCTOU-safe artifact read. Absent on
+# non-POSIX platforms (Windows), where they degrade to 0 (no-op) and the lstat-based
+# symlink rejection remains the first-line guard. ``O_NOFOLLOW`` makes ``open()``
+# fail with ``ELOOP`` if the final path component is a symlink (closing a regular-file
+# -> symlink swap race); ``O_NONBLOCK`` avoids blocking if it is swapped for a FIFO.
+_O_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
+_O_NONBLOCK = getattr(os, "O_NONBLOCK", 0)
 
 
 def _validate_path(path: str) -> None:
@@ -868,19 +877,24 @@ def _load_directory(bundle_dir: Path) -> Package:
     # Load attachments with size guards (M-SCOUT-5, m8 Scout R2)
     attachments: dict[str, bytes] = {}
     artifacts_dir = bundle_dir / "artifacts"
+    # SECURITY: reject symlinks under artifacts/ WITHOUT following them. A directory
+    # bundle whose ``artifacts/`` (or any entry below it) is a symlink to a path
+    # OUTSIDE the bundle would otherwise read arbitrary local files into
+    # ``Package.attachments`` — a path-escape / data-exposure vector. The archive
+    # (tar) load path (``_validate_tar_safety``) and the integrity hash domain
+    # already forbid symlinks (ACEF-052); the directory load path matches.
+    #
+    # This top-level check MUST run BEFORE ``exists()``: ``Path.exists()`` FOLLOWS
+    # symlinks and returns False for a DANGLING ``artifacts`` symlink, which would
+    # otherwise silently bypass rejection. ``is_symlink()`` uses lstat (no-follow),
+    # so a dangling symlink is still caught.
+    if artifacts_dir.is_symlink():
+        raise ACEFFormatError(
+            f"Bundle 'artifacts' is a symlink, which is not allowed: "
+            f"{artifacts_dir.relative_to(bundle_dir).as_posix()!r}",
+            code="ACEF-052",
+        )
     if artifacts_dir.exists():
-        # SECURITY: reject symlinks under artifacts/ WITHOUT following them. A
-        # directory bundle whose ``artifacts/`` (or any entry below it) is a symlink
-        # to a path OUTSIDE the bundle would otherwise read arbitrary local files
-        # into ``Package.attachments`` — a path-escape / data-exposure vector. The
-        # archive (tar) load path (``_validate_tar_safety``) and the integrity hash
-        # domain already forbid symlinks (ACEF-052); the directory load path matches.
-        if artifacts_dir.is_symlink():
-            raise ACEFFormatError(
-                f"Bundle 'artifacts' is a symlink, which is not allowed: "
-                f"{artifacts_dir.relative_to(bundle_dir).as_posix()!r}",
-                code="ACEF-052",
-            )
         cumulative_artifact_size = 0
 
         # Read every artifact under artifacts/. The public load() must surface a
@@ -914,52 +928,83 @@ def _load_directory(bundle_dir: Path) -> Package:
                     )
             for file_name in file_names:
                 file_path = dir_path_p / file_name
-                # ``lstat()`` does NOT follow symlinks. Do NOT use ``stat()`` /
-                # ``Path.is_file()`` here: ``stat()`` follows symlinks (the
-                # path-escape vector guarded below) and ``Path.is_file()`` SUPPRESSES
+                rel_path = file_path.relative_to(bundle_dir).as_posix()
+                # Pre-filter with ``lstat()`` (NO-follow): reject symlinks (ACEF-052)
+                # and SKIP non-regular special files (FIFO/socket/device) WITHOUT
+                # opening them — opening a device/FIFO can block or have side effects.
+                # Do NOT use ``stat()`` / ``Path.is_file()``: ``stat()`` follows
+                # symlinks (the path-escape vector) and ``Path.is_file()`` SUPPRESSES
                 # OSError on Python >=3.12, silently dropping a present-but-unstattable
-                # artifact. ``lstat()`` lets us reject symlinks (S_ISLNK) BEFORE
-                # following them while still surfacing any other stat failure
-                # (permission denied, vanished mid-load) as structured ACEF-050.
+                # artifact. Any other stat failure (permission denied, vanished
+                # mid-load) -> structured ACEF-050.
                 try:
-                    file_stat = file_path.lstat()
+                    pre_stat = file_path.lstat()
                 except OSError as exc:
                     raise ACEFFormatError(
-                        f"Failed to stat bundle artifact {file_path.relative_to(bundle_dir).as_posix()!r}: {exc}",
+                        f"Failed to stat bundle artifact {rel_path!r}: {exc}",
                         code="ACEF-050",
                     ) from exc
-                if stat.S_ISLNK(file_stat.st_mode):
+                if stat.S_ISLNK(pre_stat.st_mode):
                     raise ACEFFormatError(
-                        f"Bundle artifact is a symlink, which is not allowed: "
-                        f"{file_path.relative_to(bundle_dir).as_posix()!r}",
+                        f"Bundle artifact is a symlink, which is not allowed: {rel_path!r}",
                         code="ACEF-052",
                     )
-                # Skip non-regular entries (FIFO, socket, device), matching the prior
-                # ``is_file()`` filter — only regular files are read into the bundle.
-                if not stat.S_ISREG(file_stat.st_mode):
+                if not stat.S_ISREG(pre_stat.st_mode):
                     continue
-                file_size = file_stat.st_size
-                if file_size > _MAX_ARTIFACT_FILE_SIZE:
-                    raise ACEFFormatError(
-                        f"Artifact file exceeds 1 GB limit: "
-                        f"{file_path.relative_to(bundle_dir).as_posix()} "
-                        f"({file_size} bytes)",
-                        code="ACEF-050",
-                    )
-                cumulative_artifact_size += file_size
-                if cumulative_artifact_size > _MAX_TOTAL_ARTIFACT_SIZE:
-                    raise ACEFFormatError(
-                        f"Cumulative artifact size exceeds 10 GB limit: {cumulative_artifact_size} bytes",
-                        code="ACEF-050",
-                    )
-                rel_path = file_path.relative_to(bundle_dir).as_posix()
+                # Open ONCE with O_NOFOLLOW|O_NONBLOCK to close the TOCTOU window
+                # between the probe above and the read below: a mutable bundle dir
+                # could swap the regular file for a symlink (path-escape), a FIFO
+                # (blocking read), or grow it past the size limit. O_NOFOLLOW makes
+                # open() fail with ELOOP if the leaf was swapped to a symlink ->
+                # ACEF-052; O_NONBLOCK avoids blocking on a ->FIFO swap. The
+                # AUTHORITATIVE type and size come from fstat() on the opened inode,
+                # and the bytes are read from the SAME descriptor — never a re-resolved
+                # path. (On non-POSIX the O_* flags are 0; the lstat reject above and
+                # the fstat S_ISREG check below remain the guards.)
                 try:
-                    attachments[rel_path] = file_path.read_bytes()
+                    fd = os.open(file_path, os.O_RDONLY | _O_NOFOLLOW | _O_NONBLOCK)
                 except OSError as exc:
+                    if exc.errno == errno.ELOOP:
+                        raise ACEFFormatError(
+                            f"Bundle artifact is a symlink, which is not allowed: {rel_path!r}",
+                            code="ACEF-052",
+                        ) from exc
+                    raise ACEFFormatError(
+                        f"Failed to open bundle artifact {rel_path!r}: {exc}",
+                        code="ACEF-050",
+                    ) from exc
+                try:
+                    fd_stat = os.fstat(fd)
+                    if not stat.S_ISREG(fd_stat.st_mode):
+                        # Swapped to a non-regular file between the probe and open.
+                        raise ACEFFormatError(
+                            f"Bundle artifact is not a regular file (changed during load?): {rel_path!r}",
+                            code="ACEF-052",
+                        )
+                    file_size = fd_stat.st_size
+                    if file_size > _MAX_ARTIFACT_FILE_SIZE:
+                        raise ACEFFormatError(
+                            f"Artifact file exceeds 1 GB limit: {rel_path} ({file_size} bytes)",
+                            code="ACEF-050",
+                        )
+                    cumulative_artifact_size += file_size
+                    if cumulative_artifact_size > _MAX_TOTAL_ARTIFACT_SIZE:
+                        raise ACEFFormatError(
+                            f"Cumulative artifact size exceeds 10 GB limit: {cumulative_artifact_size} bytes",
+                            code="ACEF-050",
+                        )
+                    with os.fdopen(fd, "rb", closefd=False) as fh:
+                        attachments[rel_path] = fh.read()
+                except OSError as exc:
+                    # fstat() or read() failure on the opened fd. The size-limit /
+                    # type ACEFFormatError raises above are NOT OSError, so they
+                    # propagate unwrapped through this handler.
                     raise ACEFFormatError(
                         f"Failed to read bundle artifact {rel_path!r}: {exc}",
                         code="ACEF-050",
                     ) from exc
+                finally:
+                    os.close(fd)
 
     # Construct Package via the public classmethod (M-ARCH-1). Thread the
     # open-core v1.1 manifest fields (X5/X6) and any top-level manifest
