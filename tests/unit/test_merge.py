@@ -177,3 +177,39 @@ class TestMergeEntities:
         profiles = result.package.profiles
         profile_ids = [p.profile_id for p in profiles]
         assert profile_ids.count("eu-ai-act") == 1
+
+
+class TestMergeInvalidProducer:
+    """The public ``merge_packages`` API must surface a structured ``ACEFMergeError``
+    — never a raw ``pydantic.ValidationError`` / ``TypeError`` — when the optional
+    ``producer`` argument is malformed (``ProducerInfo`` requires ``name`` + ``version``
+    string fields)."""
+
+    def test_missing_version_raises_structured(self):
+        with pytest.raises(ACEFMergeError) as exc:
+            merge_packages([_make_package(), _make_package()], producer={"name": "X"})
+        assert exc.value.code == "ACEF-060"
+
+    def test_empty_producer_raises_structured(self):
+        with pytest.raises(ACEFMergeError) as exc:
+            merge_packages([_make_package(), _make_package()], producer={})
+        assert exc.value.code == "ACEF-060"
+
+    def test_wrong_type_field_raises_structured(self):
+        with pytest.raises(ACEFMergeError) as exc:
+            merge_packages([_make_package(), _make_package()], producer={"name": 123, "version": "1.0"})
+        assert exc.value.code == "ACEF-060"
+
+    @pytest.mark.parametrize("bad", ["foo", 5, ["a"]])
+    def test_non_mapping_producer_raises_structured(self, bad):
+        with pytest.raises(ACEFMergeError) as exc:
+            merge_packages([_make_package(), _make_package()], producer=bad)
+        assert exc.value.code == "ACEF-060"
+
+    def test_valid_producer_merges(self):
+        result = merge_packages(
+            [_make_package(), _make_package()],
+            producer={"name": "merger-tool", "version": "2.0"},
+        )
+        assert result.package.metadata.producer.name == "merger-tool"
+        assert result.package.metadata.producer.version == "2.0"

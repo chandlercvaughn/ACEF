@@ -10,6 +10,8 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
+from pydantic import ValidationError as PydanticValidationError
+
 from acef.errors import ACEFMergeError, ValidationDiagnostic
 
 # _USTAR_NAME_MAX_BYTES is the exporter's single-source-of-truth USTAR
@@ -542,6 +544,19 @@ def merge_packages(
     if producer is None:
         producer = {"name": "acef-merger", "version": "0.1.0"}
 
+    # Validate the (optional) producer argument up front so the public API surfaces a
+    # structured ACEFMergeError — never a raw pydantic ValidationError (malformed
+    # fields) or TypeError (a non-mapping value). ProducerInfo requires 'name' and
+    # 'version' string fields.
+    try:
+        producer_info = ProducerInfo(**producer)
+    except (PydanticValidationError, TypeError) as exc:
+        raise ACEFMergeError(
+            f"Invalid 'producer' argument to merge_packages (expected a mapping with "
+            f"string 'name' and 'version' fields): {exc}",
+            code="ACEF-060",
+        ) from exc
+
     # Deterministic merged identity (loader-roundtrip-6): derive from inputs
     # unless the caller supplied explicit values. An explicit package_id is
     # validated as a PACKAGE-typed URN and lowercased; an explicit timestamp is
@@ -776,7 +791,7 @@ def merge_packages(
     merged_metadata = PackageMetadata(
         package_id=merged_package_id,
         timestamp=merged_timestamp,
-        producer=ProducerInfo(**producer),
+        producer=producer_info,
     )
 
     # Merge-specific audit trail with a deterministic timestamp — do NOT label a
