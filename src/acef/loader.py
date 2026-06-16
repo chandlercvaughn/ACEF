@@ -868,8 +868,17 @@ def _load_directory(bundle_dir: Path) -> Package:
     artifacts_dir = bundle_dir / "artifacts"
     if artifacts_dir.exists():
         cumulative_artifact_size = 0
-        for file_path in artifacts_dir.rglob("*"):
-            if file_path.is_file():
+        # The rglob traversal, ``is_file()``, ``stat()``, and ``read_bytes()`` over
+        # an UNTRUSTED bundle can each raise ``OSError`` — a permission-denied
+        # (mode 000) artifact, one that vanished mid-load, an unreadable
+        # subdirectory, etc. The public ``load()`` must surface a structured
+        # ``ACEFError``, never a raw ``OSError``. The intentional size-limit
+        # ``ACEFFormatError`` raises below are NOT ``OSError``, so they propagate
+        # unwrapped (and are not re-stamped) through the ``except OSError`` guard.
+        try:
+            for file_path in artifacts_dir.rglob("*"):
+                if not file_path.is_file():
+                    continue
                 file_size = file_path.stat().st_size
                 if file_size > _MAX_ARTIFACT_FILE_SIZE:
                     raise ACEFFormatError(
@@ -886,6 +895,11 @@ def _load_directory(bundle_dir: Path) -> Package:
                     )
                 rel_path = file_path.relative_to(bundle_dir).as_posix()
                 attachments[rel_path] = file_path.read_bytes()
+        except OSError as exc:
+            raise ACEFFormatError(
+                f"Failed to read bundle artifacts under {artifacts_dir.relative_to(bundle_dir).as_posix()!r}: {exc}",
+                code="ACEF-050",
+            ) from exc
 
     # Construct Package via the public classmethod (M-ARCH-1). Thread the
     # open-core v1.1 manifest fields (X5/X6) and any top-level manifest
