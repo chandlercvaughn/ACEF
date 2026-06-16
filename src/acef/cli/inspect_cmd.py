@@ -45,6 +45,7 @@ from acef.render import (
     _crosswalk_edition,
     _incident_payload,
     _ordered_crosswalk_members,
+    _resolve_incident_crosswalk,
     _resolve_incident_field,
     render_incident_evidence_console,
 )
@@ -168,7 +169,11 @@ def _incident_summaries(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if isinstance(harm_class, str) and harm_class:
             summary["harm_class"] = harm_class
 
-        crosswalk = _as_dict(payload.get("taxonomy_crosswalk"))
+        # Record-type aware, like the sibling fields and the console/markdown
+        # renderers: a public incident_card uses its ROOT taxonomy_crosswalk; a
+        # source-backed incident_report surfaces card_source.eu_ai_act_facts as the
+        # eu_ai_act member. NEVER emits the raw card_source / eu_ai_act_facts subtree.
+        crosswalk = _resolve_incident_crosswalk(payload, record_type)
         member_keys = _ordered_crosswalk_members(crosswalk)
         if member_keys:
             members: list[dict[str, Any]] = []

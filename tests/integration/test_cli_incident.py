@@ -249,6 +249,28 @@ class TestInspectJsonNoConfidentialityLeak:
         assert "eu_ai_act_facts" not in summary
         assert "payload" not in summary
 
+    def test_json_source_backed_report_surfaces_eu_ai_act_crosswalk(self, runner: CliRunner, tmp_path: Path) -> None:
+        """The JSON projection MUST be consistent with the console/markdown renderers:
+        a source-backed report's crosswalk comes from card_source.eu_ai_act_facts
+        (surfaced as the eu_ai_act framework), NOT payload.taxonomy_crosswalk (which a
+        source-backed report does not have). RED (pre-fix): the JSON summary read root
+        taxonomy_crosswalk only, so the crosswalk was omitted. The raw facts content
+        (e.g. the trigger codes) MUST NOT leak — only the framework label."""
+        bundle_dir, _ = _build_source_backed_report_bundle(tmp_path)
+
+        result = runner.invoke(cli, ["inspect", str(bundle_dir), "--format", "json"])
+
+        assert result.exit_code == 0, result.output
+        summary = json.loads(result.output)["incident_records"][0]
+        crosswalk = summary.get("taxonomy_crosswalk")
+        assert crosswalk, "source-backed report JSON summary omits the eu_ai_act crosswalk"
+        assert "eu_ai_act" in [m.get("framework") for m in crosswalk]
+        # No-leak: only the framework label is projected; the regulator-only
+        # eu_ai_act_facts content (the §5.7 trigger code) MUST NOT appear.
+        assert "card_source" not in result.output
+        assert "eu_ai_act_facts" not in result.output
+        assert "3.49.a" not in result.output
+
     def test_json_include_private_flag_required_to_see_raw_payload(self, runner: CliRunner, tmp_path: Path) -> None:
         """The raw envelope (with ``card_source``) is only emitted under the
         EXPLICIT ``--include-private`` opt-in; absent the flag it is withheld."""
