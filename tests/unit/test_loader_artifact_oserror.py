@@ -158,17 +158,19 @@ def test_artifact_dir_scan_error_raises_structured(tmp_path: Path, monkeypatch: 
 
 
 def test_artifact_stat_error_raises_structured(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Platform-independent: a per-file ``stat()`` failure must surface as ACEF-050."""
+    """Platform-independent: a per-file ``lstat()`` failure must surface as ACEF-050.
+    (The loader probes with ``lstat`` — no-follow — so symlinks can be rejected
+    before following; this patches ``lstat`` accordingly.)"""
     dst = _golden_copy(tmp_path)
     (dst / "artifacts" / "x.bin").write_bytes(b"present artifact")
-    real_stat = Path.stat
+    real_lstat = Path.lstat
 
-    def fake_stat(self: Path, *args, **kwargs):  # type: ignore[no-untyped-def]
+    def fake_lstat(self: Path, *args, **kwargs):  # type: ignore[no-untyped-def]
         if self.name == "x.bin":
             raise PermissionError(13, "Permission denied", str(self))
-        return real_stat(self, *args, **kwargs)
+        return real_lstat(self, *args, **kwargs)
 
-    monkeypatch.setattr(Path, "stat", fake_stat)
+    monkeypatch.setattr(Path, "lstat", fake_lstat)
     with pytest.raises(ACEFFormatError) as exc:
         acef.load(str(dst))
     assert exc.value.code == "ACEF-050"
@@ -190,3 +192,69 @@ def test_artifact_read_error_raises_structured(tmp_path: Path, monkeypatch: pyte
     with pytest.raises(ACEFFormatError) as exc:
         acef.load(str(dst))
     assert exc.value.code == "ACEF-050"
+
+
+# --- SECURITY: symlinks under artifacts/ are a path-escape / data-exposure vector
+# in a DIRECTORY bundle. The archive (tar) load path and the integrity hash domain
+# already reject symlinks (ACEF-052); the directory load path MUST match. (POSIX-only:
+# symlink creation + the escape scenario are POSIX semantics.)
+
+
+@pytest.mark.skipif(not _POSIX, reason="symlink path-escape semantics are POSIX-specific")
+def test_load_rejects_artifact_symlink_escaping_bundle(tmp_path: Path) -> None:
+    """A directory bundle with artifacts/<name> -> <path OUTSIDE the bundle> must be
+    REJECTED (ACEF-052), NOT have the external file's contents read into
+    Package.attachments. RED on a symlink-following loader (the external secret is
+    captured), GREEN once symlinks are rejected pre-follow."""
+    outside = tmp_path / "outside_secret.txt"
+    outside.write_text("EXTERNAL DATA THAT MUST NOT BE READ", encoding="utf-8")
+    dst = _golden_copy(tmp_path)
+    (dst / "artifacts" / "leak").symlink_to(outside)
+    with pytest.raises(ACEFError) as exc:
+        acef.load(str(dst))
+    assert isinstance(exc.value, ACEFFormatError)
+    assert exc.value.code == "ACEF-052"
+
+
+@pytest.mark.skipif(not _POSIX, reason="symlink path-escape semantics are POSIX-specific")
+def test_load_rejects_artifact_symlink_inside_bundle(tmp_path: Path) -> None:
+    """ANY artifact symlink is rejected — even one resolving inside the bundle —
+    matching the archive path's blanket symlink rejection."""
+    dst = _golden_copy(tmp_path)
+    target = dst / "artifacts" / "real.bin"
+    target.write_bytes(b"real artifact bytes")
+    (dst / "artifacts" / "alias").symlink_to(target)
+    with pytest.raises(ACEFFormatError) as exc:
+        acef.load(str(dst))
+    assert exc.value.code == "ACEF-052"
+
+
+@pytest.mark.skipif(not _POSIX, reason="symlink path-escape semantics are POSIX-specific")
+def test_load_rejects_symlinked_artifacts_dir(tmp_path: Path) -> None:
+    """A symlinked ``artifacts/`` directory itself is rejected (os.walk would
+    otherwise follow the top symlink and read the target dir's files)."""
+    external = tmp_path / "external_dir"
+    external.mkdir()
+    (external / "f.bin").write_bytes(b"external dir file")
+    dst = tmp_path / "b"
+    shutil.copytree(_GOLDEN, dst)
+    art = dst / "artifacts"
+    if art.exists() or art.is_symlink():
+        shutil.rmtree(art)
+    art.symlink_to(external, target_is_directory=True)
+    with pytest.raises(ACEFFormatError) as exc:
+        acef.load(str(dst))
+    assert exc.value.code == "ACEF-052"
+
+
+@pytest.mark.skipif(not _POSIX, reason="symlink path-escape semantics are POSIX-specific")
+def test_load_rejects_symlinked_artifact_subdir(tmp_path: Path) -> None:
+    """A symlinked SUBDIRECTORY under artifacts/ is rejected."""
+    external = tmp_path / "external_sub"
+    external.mkdir()
+    (external / "f.bin").write_bytes(b"external subtree file")
+    dst = _golden_copy(tmp_path)
+    (dst / "artifacts" / "sublink").symlink_to(external, target_is_directory=True)
+    with pytest.raises(ACEFFormatError) as exc:
+        acef.load(str(dst))
+    assert exc.value.code == "ACEF-052"

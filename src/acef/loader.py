@@ -869,6 +869,18 @@ def _load_directory(bundle_dir: Path) -> Package:
     attachments: dict[str, bytes] = {}
     artifacts_dir = bundle_dir / "artifacts"
     if artifacts_dir.exists():
+        # SECURITY: reject symlinks under artifacts/ WITHOUT following them. A
+        # directory bundle whose ``artifacts/`` (or any entry below it) is a symlink
+        # to a path OUTSIDE the bundle would otherwise read arbitrary local files
+        # into ``Package.attachments`` — a path-escape / data-exposure vector. The
+        # archive (tar) load path (``_validate_tar_safety``) and the integrity hash
+        # domain already forbid symlinks (ACEF-052); the directory load path matches.
+        if artifacts_dir.is_symlink():
+            raise ACEFFormatError(
+                f"Bundle 'artifacts' is a symlink, which is not allowed: "
+                f"{artifacts_dir.relative_to(bundle_dir).as_posix()!r}",
+                code="ACEF-052",
+            )
         cumulative_artifact_size = 0
 
         # Read every artifact under artifacts/. The public load() must surface a
@@ -887,26 +899,43 @@ def _load_directory(bundle_dir: Path) -> Package:
                 code="ACEF-050",
             ) from exc
 
-        for dir_path, _subdirs, file_names in os.walk(artifacts_dir, onerror=_on_scan_error):
+        for dir_path, subdirs, file_names in os.walk(artifacts_dir, onerror=_on_scan_error):
             dir_path_p = Path(dir_path)
+            # Reject symlinked subdirectories. os.walk (followlinks=False) does NOT
+            # DESCEND into them, but the symlink itself is a path-escape vector and
+            # must be rejected, not silently ignored.
+            for subdir_name in subdirs:
+                subdir_path = dir_path_p / subdir_name
+                if subdir_path.is_symlink():
+                    raise ACEFFormatError(
+                        f"Bundle artifact directory is a symlink, which is not allowed: "
+                        f"{subdir_path.relative_to(bundle_dir).as_posix()!r}",
+                        code="ACEF-052",
+                    )
             for file_name in file_names:
                 file_path = dir_path_p / file_name
-                # ``stat()`` FIRST (following symlinks), guarded. Do NOT gate on
-                # ``Path.is_file()``: on Python >=3.12 it SUPPRESSES OSError and
-                # returns False, so a present-but-unstattable artifact (e.g. a
-                # symlink to an unreadable target) would be SILENTLY dropped. Any
-                # stat failure here — permission denied, vanished mid-load, an
-                # unresolvable/broken symlink — must surface as structured ACEF-050.
+                # ``lstat()`` does NOT follow symlinks. Do NOT use ``stat()`` /
+                # ``Path.is_file()`` here: ``stat()`` follows symlinks (the
+                # path-escape vector guarded below) and ``Path.is_file()`` SUPPRESSES
+                # OSError on Python >=3.12, silently dropping a present-but-unstattable
+                # artifact. ``lstat()`` lets us reject symlinks (S_ISLNK) BEFORE
+                # following them while still surfacing any other stat failure
+                # (permission denied, vanished mid-load) as structured ACEF-050.
                 try:
-                    file_stat = file_path.stat()
+                    file_stat = file_path.lstat()
                 except OSError as exc:
                     raise ACEFFormatError(
                         f"Failed to stat bundle artifact {file_path.relative_to(bundle_dir).as_posix()!r}: {exc}",
                         code="ACEF-050",
                     ) from exc
-                # Skip non-regular entries (directory symlink, FIFO, socket, device),
-                # matching the prior ``is_file()`` filter — only regular files (and
-                # symlinks resolving to one) are read into the bundle.
+                if stat.S_ISLNK(file_stat.st_mode):
+                    raise ACEFFormatError(
+                        f"Bundle artifact is a symlink, which is not allowed: "
+                        f"{file_path.relative_to(bundle_dir).as_posix()!r}",
+                        code="ACEF-052",
+                    )
+                # Skip non-regular entries (FIFO, socket, device), matching the prior
+                # ``is_file()`` filter — only regular files are read into the bundle.
                 if not stat.S_ISREG(file_stat.st_mode):
                     continue
                 file_size = file_stat.st_size
