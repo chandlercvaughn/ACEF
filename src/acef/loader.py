@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import gzip
 import json
+import os
 import sys
 import tarfile
 import tempfile
@@ -868,18 +869,40 @@ def _load_directory(bundle_dir: Path) -> Package:
     artifacts_dir = bundle_dir / "artifacts"
     if artifacts_dir.exists():
         cumulative_artifact_size = 0
-        # The rglob traversal, ``is_file()``, ``stat()``, and ``read_bytes()`` over
-        # an UNTRUSTED bundle can each raise ``OSError`` — a permission-denied
-        # (mode 000) artifact, one that vanished mid-load, an unreadable
-        # subdirectory, etc. The public ``load()`` must surface a structured
-        # ``ACEFError``, never a raw ``OSError``. The intentional size-limit
-        # ``ACEFFormatError`` raises below are NOT ``OSError``, so they propagate
-        # unwrapped (and are not re-stamped) through the ``except OSError`` guard.
-        try:
-            for file_path in artifacts_dir.rglob("*"):
-                if not file_path.is_file():
-                    continue
-                file_size = file_path.stat().st_size
+
+        # Read every artifact under artifacts/. The public load() must surface a
+        # structured ACEFError, never a raw OSError, AND must never SILENTLY skip a
+        # present-but-unreadable artifact. ``Path.rglob`` is unsafe on BOTH counts:
+        # it suppresses directory-scan OSErrors, so an unreadable SUBDIRECTORY is
+        # silently OMITTED (an incomplete bundle, not a clean failure). Traverse
+        # explicitly with ``os.walk`` + an ``onerror`` callback that raises
+        # ACEF-050 on any scan failure, and guard each file's ``stat()`` /
+        # ``read_bytes()`` the same way. The intentional 1 GB / 10 GB size-limit
+        # ``ACEFFormatError`` raises are NOT ``OSError``, so they propagate
+        # unwrapped (and are not re-stamped) through the per-file guards.
+        def _on_scan_error(exc: OSError) -> None:
+            raise ACEFFormatError(
+                f"Failed to scan bundle artifacts directory: {exc}",
+                code="ACEF-050",
+            ) from exc
+
+        for dir_path, _subdirs, file_names in os.walk(artifacts_dir, onerror=_on_scan_error):
+            dir_path_p = Path(dir_path)
+            for file_name in file_names:
+                file_path = dir_path_p / file_name
+                # ``is_file()`` follows symlinks (matching the prior rglob filter):
+                # a symlink to a regular file is read; a FIFO/socket/broken symlink
+                # is skipped. A bare ``is_file()`` can itself raise OSError, so guard
+                # it too.
+                try:
+                    if not file_path.is_file():
+                        continue
+                    file_size = file_path.stat().st_size
+                except OSError as exc:
+                    raise ACEFFormatError(
+                        f"Failed to stat bundle artifact {file_path.relative_to(bundle_dir).as_posix()!r}: {exc}",
+                        code="ACEF-050",
+                    ) from exc
                 if file_size > _MAX_ARTIFACT_FILE_SIZE:
                     raise ACEFFormatError(
                         f"Artifact file exceeds 1 GB limit: "
@@ -894,12 +917,13 @@ def _load_directory(bundle_dir: Path) -> Package:
                         code="ACEF-050",
                     )
                 rel_path = file_path.relative_to(bundle_dir).as_posix()
-                attachments[rel_path] = file_path.read_bytes()
-        except OSError as exc:
-            raise ACEFFormatError(
-                f"Failed to read bundle artifacts under {artifacts_dir.relative_to(bundle_dir).as_posix()!r}: {exc}",
-                code="ACEF-050",
-            ) from exc
+                try:
+                    attachments[rel_path] = file_path.read_bytes()
+                except OSError as exc:
+                    raise ACEFFormatError(
+                        f"Failed to read bundle artifact {rel_path!r}: {exc}",
+                        code="ACEF-050",
+                    ) from exc
 
     # Construct Package via the public classmethod (M-ARCH-1). Thread the
     # open-core v1.1 manifest fields (X5/X6) and any top-level manifest
