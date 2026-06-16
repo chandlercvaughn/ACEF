@@ -380,6 +380,78 @@ class TestSourceBackedIncidentReportResolution:
         assert "AIIC-STRAY-2099-ZZZZZZZZZZZZZZZZZZZZZZZZZZ" not in md
         assert _CRITICAL_VECTOR in md
 
+    # --- taxonomy_crosswalk must ALSO be record-type-aware (the one field the prior
+    # F-M9-RENDER fix left reading payload root only, lines 391/454). ---
+
+    _CARD_SOURCE_CROSSWALK = {
+        "eu_ai_act": {"edition": "reg-2024-1689", "serious_incident_triggers": ["3.49.a"]},
+        "nist_ai_600_1": {"edition": "2024-07-final", "categories": ["Information Security"]},
+    }
+
+    def test_incident_report_crosswalk_resolves_from_card_source_markdown(self) -> None:
+        """RED (pre-fix): the crosswalk was read from ``payload.taxonomy_crosswalk``
+        (root) only, so a source-backed incident_report carrying it under
+        ``card_source`` rendered NO crosswalk at all."""
+        rec = {
+            "record_type": "incident_report",
+            "payload": {
+                "card_source": {
+                    "public_incident_id": _PUBLIC_ID,
+                    "taxonomy_crosswalk": dict(self._CARD_SOURCE_CROSSWALK),
+                },
+            },
+        }
+        # Precondition: crosswalk is ONLY under card_source.
+        assert "taxonomy_crosswalk" not in rec["payload"]
+        md = render_incident_evidence_markdown([rec])
+        assert "Taxonomy Crosswalk" in md
+        assert "eu_ai_act" in md
+        assert "nist_ai_600_1" in md
+        assert "reg-2024-1689" in md
+
+    def test_incident_report_crosswalk_resolves_from_card_source_console(self) -> None:
+        rec = {
+            "record_type": "incident_report",
+            "payload": {
+                "card_source": {
+                    "public_incident_id": _PUBLIC_ID,
+                    "taxonomy_crosswalk": dict(self._CARD_SOURCE_CROSSWALK),
+                },
+            },
+        }
+        out = render_incident_evidence_console([rec])
+        assert "Crosswalk" in out
+        assert "eu_ai_act" in out
+        assert "nist_ai_600_1" in out
+
+    def test_incident_report_stray_root_crosswalk_does_not_mask_card_source(self) -> None:
+        """For an incident_report, card_source crosswalk WINS; a stray ROOT crosswalk
+        must NOT mask it (record-type-aware resolution)."""
+        rec = {
+            "record_type": "incident_report",
+            "payload": {
+                "taxonomy_crosswalk": {"eu_ai_act": {"edition": "STRAY-ROOT-EDITION"}},
+                "card_source": {
+                    "public_incident_id": _PUBLIC_ID,
+                    "taxonomy_crosswalk": {"nist_ai_600_1": {"edition": "2024-07-final"}},
+                },
+            },
+        }
+        md = render_incident_evidence_markdown([rec])
+        assert "nist_ai_600_1" in md
+        assert "2024-07-final" in md
+        assert "STRAY-ROOT-EDITION" not in md
+
+    def test_public_incident_card_crosswalk_root_first_no_regression(self) -> None:
+        """A PUBLIC incident_card keeps its root crosswalk root-first; a stray
+        card_source crosswalk does NOT win (no regression)."""
+        rec = _incident_card_record()
+        rec["payload"]["card_source"] = {"taxonomy_crosswalk": {"eu_ai_act": {"edition": "STRAY-CS-EDITION"}}}
+        md = render_incident_evidence_markdown([rec])
+        # The public card's ROOT crosswalk wins.
+        assert "reg-2024-1689" in md
+        assert "STRAY-CS-EDITION" not in md
+
 
 class TestMarkdownEvidenceTruncationAudit:
     """Part-A audit regression: Markdown evidence-ref list must not silently drop.

@@ -387,8 +387,10 @@ def render_incident_evidence_markdown(records: list[dict[str, Any]]) -> str:
             block.append("- **Harm Core:**")
             block.extend(_render_harm_core_markdown(harm_core))
 
-        # taxonomy_crosswalk.
-        crosswalk = _as_dict(payload.get("taxonomy_crosswalk"))
+        # taxonomy_crosswalk — record-type aware, like the sibling fields above: a
+        # source-backed incident_report carries it under card_source, a public
+        # incident_card at the root.
+        crosswalk = _as_dict(_resolve_incident_field(payload, record_type, "taxonomy_crosswalk"))
         member_keys = _ordered_crosswalk_members(crosswalk)
         if member_keys:
             block.append("- **Taxonomy Crosswalk:**")
@@ -451,7 +453,9 @@ def render_incident_evidence_console(records: list[dict[str, Any]]) -> str:
         if isinstance(harm_class, str) and harm_class:
             block.append(f"  Harm class: {harm_class}")
 
-        crosswalk = _as_dict(payload.get("taxonomy_crosswalk"))
+        # taxonomy_crosswalk — record-type aware (card_source for a source-backed
+        # report, root for a public card), matching the markdown twin.
+        crosswalk = _as_dict(_resolve_incident_field(payload, record_type, "taxonomy_crosswalk"))
         member_keys = _ordered_crosswalk_members(crosswalk)
         if member_keys:
             block.append(f"  Crosswalk: {', '.join(member_keys)}")
