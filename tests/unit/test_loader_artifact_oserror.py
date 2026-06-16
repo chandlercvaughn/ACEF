@@ -380,3 +380,56 @@ def test_load_artifact_growth_after_stat_rejected(tmp_path: Path, monkeypatch: p
     with pytest.raises(ACEFFormatError) as exc:
         acef.load(str(dst))
     assert exc.value.code == "ACEF-050"
+
+
+@pytest.mark.skipif(not _FD_WALK_SUPPORTED, reason="targets the POSIX fd-anchored artifact reader")
+def test_artifact_fstat_error_raises_structured(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """An ``fstat()`` failure on the opened artifact fd must surface as ACEF-050 — not
+    leak a raw OSError. (The fstat call is guarded separately from the bounded read.)"""
+    payload = b"present artifact"
+    dst = _golden_copy(tmp_path)
+    (dst / "artifacts" / "x.bin").write_bytes(payload)
+    real_fstat = os.fstat
+
+    def fake_fstat(fd):  # type: ignore[no-untyped-def]
+        st = real_fstat(fd)
+        if stat.S_ISREG(st.st_mode) and st.st_size == len(payload):
+            raise OSError(errno.EIO, "simulated fstat failure")
+        return st
+
+    monkeypatch.setattr("acef.loader.os.fstat", fake_fstat)
+    with pytest.raises(ACEFFormatError) as exc:
+        acef.load(str(dst))
+    assert exc.value.code == "ACEF-050"
+
+
+# --- Fail-closed when fd-relative no-follow traversal is unavailable (no dir_fd). ---
+
+
+def test_fail_closed_without_fd_support_with_artifacts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """On a platform without fd-relative (dir_fd) traversal the TOCTOU/path-escape
+    guarantees cannot be provided, so loading a bundle that HAS artifacts must FAIL
+    CLOSED (ACEF-050) rather than read them insecurely."""
+    dst = _golden_copy(tmp_path)
+    (dst / "artifacts" / "x.bin").write_bytes(b"present artifact")
+    monkeypatch.setattr("acef.loader._FD_WALK_SUPPORTED", False)
+    with pytest.raises(ACEFFormatError) as exc:
+        acef.load(str(dst))
+    assert exc.value.code == "ACEF-050"
+
+
+def test_empty_artifacts_loads_without_fd_support(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """An EMPTY ``artifacts/`` directory has nothing to read insecurely, so it must
+    still load cleanly even without fd-relative traversal (no false fail-closed)."""
+    dst = tmp_path / "b"
+    shutil.copytree(_GOLDEN, dst)
+    art = dst / "artifacts"
+    if art.is_symlink() or art.exists():
+        if art.is_dir() and not art.is_symlink():
+            shutil.rmtree(art)
+        else:
+            art.unlink()
+    art.mkdir()
+    monkeypatch.setattr("acef.loader._FD_WALK_SUPPORTED", False)
+    pkg = acef.load(str(dst))
+    assert not any(k.startswith("artifacts/") for k in pkg.attachments)

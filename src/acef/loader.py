@@ -491,14 +491,13 @@ def _read_fd_bounded(fd: int, budget: int, rel_path: str) -> bytes:
     return b"".join(chunks)
 
 
-def _read_artifact_file_fd(parent_fd: int | None, name: str, rel_path: str, cumulative: int) -> bytes:
-    """Open one regular artifact file no-follow (relative to ``parent_fd`` when given),
-    verify it is still a regular file via ``fstat`` on the OPENED inode, and read it
-    with the bounded reader. ``parent_fd`` is ``None`` only for the top ``artifacts/``
-    open in the non-fd-walk fallback (an absolute path)."""
-    flags = os.O_RDONLY | _O_NOFOLLOW | _O_NONBLOCK
+def _read_artifact_file_fd(parent_fd: int, name: str, rel_path: str, cumulative: int) -> bytes:
+    """Open one regular artifact file no-follow RELATIVE to ``parent_fd`` (a trusted
+    opened directory descriptor), verify it is still a regular file via ``fstat`` on
+    the OPENED inode, and read it with the bounded reader. Every OSError on the fd
+    (open / fstat / read) is surfaced as a structured ACEFError, never raw."""
     try:
-        fd = os.open(name, flags) if parent_fd is None else os.open(name, flags, dir_fd=parent_fd)
+        fd = os.open(name, os.O_RDONLY | _O_NOFOLLOW | _O_NONBLOCK, dir_fd=parent_fd)
     except OSError as exc:
         if exc.errno == errno.ELOOP:
             raise ACEFFormatError(
@@ -510,7 +509,13 @@ def _read_artifact_file_fd(parent_fd: int | None, name: str, rel_path: str, cumu
             code="ACEF-050",
         ) from exc
     try:
-        fd_stat = os.fstat(fd)
+        try:
+            fd_stat = os.fstat(fd)
+        except OSError as exc:
+            raise ACEFFormatError(
+                f"Failed to stat opened bundle artifact {rel_path!r}: {exc}",
+                code="ACEF-050",
+            ) from exc
         if not stat.S_ISREG(fd_stat.st_mode):
             # Swapped to a non-regular file between the probe and the open.
             raise ACEFFormatError(
@@ -608,67 +613,41 @@ def _read_artifacts_dir_fd(
         attachments[child_rel] = data
 
 
-def _read_artifacts_walk(artifacts_dir: Path, bundle_dir: Path, attachments: dict[str, bytes]) -> None:
-    """Fallback artifact reader for platforms without ``dir_fd`` support. Uses
-    ``os.walk`` (no symlink descent) with a per-component ``lstat`` symlink reject and
-    the leaf O_NOFOLLOW + bounded read. Without ``dir_fd`` it cannot fully defeat an
-    ancestor-symlink swap, but symlinks present at scan time are still rejected and
-    reads remain bounded."""
-    cumulative = 0
-
-    def _on_scan_error(exc: OSError) -> None:
-        raise ACEFFormatError(
-            f"Failed to scan bundle artifacts directory: {exc}",
-            code="ACEF-050",
-        ) from exc
-
-    for dir_path, subdirs, file_names in os.walk(artifacts_dir, onerror=_on_scan_error):
-        dir_path_p = Path(dir_path)
-        for subdir_name in subdirs:
-            if (dir_path_p / subdir_name).is_symlink():
-                raise ACEFFormatError(
-                    f"Bundle artifact directory is a symlink, which is not allowed: "
-                    f"{(dir_path_p / subdir_name).relative_to(bundle_dir).as_posix()!r}",
-                    code="ACEF-052",
-                )
-        for file_name in file_names:
-            file_path = dir_path_p / file_name
-            rel_path = file_path.relative_to(bundle_dir).as_posix()
-            try:
-                pre_stat = file_path.lstat()
-            except OSError as exc:
-                raise ACEFFormatError(
-                    f"Failed to stat bundle artifact {rel_path!r}: {exc}",
-                    code="ACEF-050",
-                ) from exc
-            if stat.S_ISLNK(pre_stat.st_mode):
-                raise ACEFFormatError(
-                    f"Bundle artifact is a symlink, which is not allowed: {rel_path!r}",
-                    code="ACEF-052",
-                )
-            if not stat.S_ISREG(pre_stat.st_mode):
-                continue
-            data = _read_artifact_file_fd(None, str(file_path), rel_path, cumulative)
-            cumulative += len(data)
-            attachments[rel_path] = data
-
-
 def _read_bundle_artifacts(artifacts_dir: Path, bundle_dir: Path) -> dict[str, bytes]:
     """Read every regular file under ``artifacts/`` into an attachments dict.
 
     SECURITY: a directory bundle is UNTRUSTED and may be mutable. This reader (1)
     rejects symlinks at every path component WITHOUT following them — the archive
     (tar) load path and the integrity hash domain already forbid symlinks (ACEF-052);
-    (2) anchors traversal to trusted directory fds on POSIX so an ancestor-directory
-    symlink swap cannot escape the bundle; (3) reads each file from a single
-    O_NOFOLLOW descriptor with a BOUNDED chunked read so a file growing mid-load
-    cannot bypass the size limits; and (4) surfaces every failure as a structured
-    ACEFError (never a raw OSError) and never silently skips a present-but-unreadable
-    artifact.
+    (2) anchors traversal to trusted directory fds so an ancestor-directory symlink
+    swap cannot escape the bundle; (3) reads each file from a single O_NOFOLLOW
+    descriptor with a BOUNDED chunked read so a file growing mid-load cannot bypass the
+    size limits; and (4) surfaces every failure as a structured ACEFError (never a raw
+    OSError) and never silently skips a present-but-unreadable artifact.
+
+    The TOCTOU guarantees (2)/(3) require fd-relative (``dir_fd``) no-follow traversal.
+    Every platform this project targets (Linux, macOS) provides it. On a platform that
+    does NOT, we cannot read UNTRUSTED bundle artifacts without risking a symlink
+    path-escape, so we FAIL CLOSED rather than load them insecurely — an empty
+    ``artifacts/`` is still fine (nothing to read).
     """
     attachments: dict[str, bytes] = {}
     if not _FD_WALK_SUPPORTED:
-        _read_artifacts_walk(artifacts_dir, bundle_dir, attachments)
+        try:
+            with os.scandir(artifacts_dir) as it:
+                has_entries = any(True for _ in it)
+        except OSError as exc:
+            raise ACEFFormatError(
+                f"Failed to scan bundle artifacts directory: {exc}",
+                code="ACEF-050",
+            ) from exc
+        if has_entries:
+            raise ACEFFormatError(
+                "Secure artifact loading requires fd-relative no-follow directory "
+                "traversal, which is unavailable on this platform; refusing to load "
+                "bundle artifacts to avoid a symlink path-escape.",
+                code="ACEF-050",
+            )
         return attachments
     # POSIX fd-anchored path. Open artifacts/ itself no-follow; a symlinked or
     # non-directory artifacts/ is rejected here (ELOOP / ENOTDIR -> ACEF-052).
