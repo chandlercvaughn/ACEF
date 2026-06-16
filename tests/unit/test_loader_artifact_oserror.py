@@ -17,12 +17,14 @@ import errno
 import glob
 import os
 import shutil
+import stat
 from pathlib import Path
 
 import pytest
 
 import acef
 from acef.errors import ACEFError, ACEFFormatError
+from acef.loader import _FD_WALK_SUPPORTED, _MAX_ARTIFACT_DIR_DEPTH
 
 _GOLDEN = next(p for p in sorted(glob.glob("tests/conformance/golden-bundles/*")) if Path(p).is_dir())
 
@@ -140,55 +142,55 @@ def test_isfile_suppression_does_not_silently_skip(tmp_path: Path, monkeypatch: 
     assert pkg.attachments.get("artifacts/x.bin") == b"present artifact"
 
 
+@pytest.mark.skipif(not _FD_WALK_SUPPORTED, reason="targets the POSIX fd-anchored artifact reader")
 def test_artifact_dir_scan_error_raises_structured(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Platform-independent: a directory-scan ``OSError`` delivered through
-    ``os.walk``'s ``onerror`` callback must surface as structured ACEF-050."""
+    """A directory-scan ``OSError`` must surface as structured ACEF-050. The
+    fd-anchored reader scans with ``os.listdir(dir_fd)``; inject the failure there."""
     dst = _golden_copy(tmp_path)
-    real_walk = os.walk
+    (dst / "artifacts" / "x.bin").write_bytes(b"present artifact")
+    real_listdir = os.listdir
 
-    def fake_walk(top, *args, **kwargs):  # type: ignore[no-untyped-def]
-        onerror = kwargs.get("onerror")
-        if onerror is not None and Path(top).name == "artifacts":
-            onerror(PermissionError(13, "Permission denied", str(top)))
-        return real_walk(top, *args, **kwargs)
+    def fake_listdir(path, *args, **kwargs):  # type: ignore[no-untyped-def]
+        if isinstance(path, int):  # an fd -> the artifact scan
+            raise PermissionError(errno.EACCES, "Permission denied")
+        return real_listdir(path, *args, **kwargs)
 
-    monkeypatch.setattr("acef.loader.os.walk", fake_walk)
+    monkeypatch.setattr("acef.loader.os.listdir", fake_listdir)
     with pytest.raises(ACEFFormatError) as exc:
         acef.load(str(dst))
     assert exc.value.code == "ACEF-050"
 
 
+@pytest.mark.skipif(not _FD_WALK_SUPPORTED, reason="targets the POSIX fd-anchored artifact reader")
 def test_artifact_stat_error_raises_structured(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Platform-independent: a per-file ``lstat()`` failure must surface as ACEF-050.
-    (The loader probes with ``lstat`` — no-follow — so symlinks can be rejected
-    before following; this patches ``lstat`` accordingly.)"""
+    """A per-entry ``lstat()`` failure must surface as ACEF-050. The fd-anchored
+    reader probes with ``os.lstat(name, dir_fd=...)``; inject the failure there."""
     dst = _golden_copy(tmp_path)
     (dst / "artifacts" / "x.bin").write_bytes(b"present artifact")
-    real_lstat = Path.lstat
+    real_lstat = os.lstat
 
-    def fake_lstat(self: Path, *args, **kwargs):  # type: ignore[no-untyped-def]
-        if self.name == "x.bin":
-            raise PermissionError(13, "Permission denied", str(self))
-        return real_lstat(self, *args, **kwargs)
+    def fake_lstat(path, *args, **kwargs):  # type: ignore[no-untyped-def]
+        if path == "x.bin":
+            raise PermissionError(errno.EACCES, "Permission denied")
+        return real_lstat(path, *args, **kwargs)
 
-    monkeypatch.setattr(Path, "lstat", fake_lstat)
+    monkeypatch.setattr("acef.loader.os.lstat", fake_lstat)
     with pytest.raises(ACEFFormatError) as exc:
         acef.load(str(dst))
     assert exc.value.code == "ACEF-050"
 
 
+@pytest.mark.skipif(not _FD_WALK_SUPPORTED, reason="targets the POSIX fd-anchored artifact reader")
 def test_artifact_read_error_raises_structured(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Platform-independent: a read failure on the opened artifact fd must surface as
-    ACEF-050. (The loader reads via ``os.fdopen(fd).read()`` on an O_NOFOLLOW fd, so
-    inject the failure through ``os.fdopen``.)"""
+    """A read failure on the opened artifact fd must surface as ACEF-050. The
+    bounded reader uses ``os.read(fd, n)``; inject the failure there."""
     dst = _golden_copy(tmp_path)
     (dst / "artifacts" / "x.bin").write_bytes(b"present artifact")
 
-    def fake_fdopen(fd, *args, **kwargs):  # type: ignore[no-untyped-def]
-        # Only artifact fds reach here in a directory load; simulate an I/O error.
+    def fake_read(fd, n):  # type: ignore[no-untyped-def]
         raise OSError(errno.EIO, "simulated I/O error")
 
-    monkeypatch.setattr("acef.loader.os.fdopen", fake_fdopen)
+    monkeypatch.setattr("acef.loader.os.read", fake_read)
     with pytest.raises(ACEFFormatError) as exc:
         acef.load(str(dst))
     assert exc.value.code == "ACEF-050"
@@ -294,15 +296,87 @@ def test_load_artifact_symlink_swap_race_rejected(tmp_path: Path, monkeypatch: p
     real_reg.write_bytes(b"a genuine regular artifact")
     leak = dst / "artifacts" / "leak"
     leak.symlink_to(outside)
-    reg_lstat = real_reg.lstat()  # a genuine regular-file stat_result
-    real_lstat = Path.lstat
+    reg_lstat = os.lstat(str(real_reg))  # a genuine regular-file stat_result
+    real_oslstat = os.lstat
 
-    def fake_lstat(self: Path, *args, **kwargs):  # type: ignore[no-untyped-def]
-        if self.name == "leak":
+    def fake_lstat(path, *args, **kwargs):  # type: ignore[no-untyped-def]
+        if path == "leak":
             return reg_lstat  # pretend the symlink is a regular file (probe fooled)
-        return real_lstat(self, *args, **kwargs)
+        return real_oslstat(path, *args, **kwargs)
 
-    monkeypatch.setattr(Path, "lstat", fake_lstat)
+    monkeypatch.setattr("acef.loader.os.lstat", fake_lstat)
+    with pytest.raises(ACEFFormatError) as exc:
+        acef.load(str(dst))
+    # Rejected at OPEN time by O_NOFOLLOW (ELOOP), not the fooled lstat probe.
+    assert exc.value.code == "ACEF-052"
+
+
+@pytest.mark.skipif(not _FD_WALK_SUPPORTED, reason="targets the POSIX fd-anchored artifact reader")
+def test_load_subdir_symlink_swap_race_rejected(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """ANCESTOR anchoring: even if the probe is fooled into seeing a symlinked
+    SUBDIRECTORY as a real directory (simulating an ancestor-dir -> symlink swap), the
+    fd-anchored reader opens the subdir with O_DIRECTORY|O_NOFOLLOW relative to its
+    parent fd, so the swap is rejected (ELOOP -> ACEF-052) and the traversal cannot
+    escape the bundle. This is the guarantee O_NOFOLLOW-on-the-leaf alone cannot
+    give."""
+    external = tmp_path / "external_dir"
+    external.mkdir()
+    (external / "f.bin").write_bytes(b"external dir file")
+    dst = _golden_copy(tmp_path)
+    (dst / "artifacts" / "sublink").symlink_to(external, target_is_directory=True)
+    real_dir_stat = os.lstat(str(dst / "artifacts"))  # a genuine directory stat_result
+    real_oslstat = os.lstat
+
+    def fake_lstat(path, *args, **kwargs):  # type: ignore[no-untyped-def]
+        if path == "sublink":
+            return real_dir_stat  # pretend the dir-symlink is a real directory
+        return real_oslstat(path, *args, **kwargs)
+
+    monkeypatch.setattr("acef.loader.os.lstat", fake_lstat)
     with pytest.raises(ACEFFormatError) as exc:
         acef.load(str(dst))
     assert exc.value.code == "ACEF-052"
+
+
+@pytest.mark.skipif(not _FD_WALK_SUPPORTED, reason="targets the POSIX fd-anchored artifact reader")
+def test_load_rejects_excessive_artifact_nesting(tmp_path: Path) -> None:
+    """Defense-in-depth: artifact subdirectory nesting beyond the bound is rejected
+    (ACEF-050) — the fd-anchored reader recurses, and an unbounded depth would
+    exhaust the stack."""
+    dst = _golden_copy(tmp_path)
+    deep = dst / "artifacts"
+    for _ in range(_MAX_ARTIFACT_DIR_DEPTH + 2):
+        deep = deep / "d"
+    deep.mkdir(parents=True)
+    (deep / "leaf.bin").write_bytes(b"too deep")
+    with pytest.raises(ACEFFormatError) as exc:
+        acef.load(str(dst))
+    assert exc.value.code == "ACEF-050"
+
+
+def test_load_artifact_growth_after_stat_rejected(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Finding D (post-stat growth): the per-file size limit is enforced on the
+    ACTUAL bytes read, not a pre-read fstat() that a mutable file can outrun. Simulate
+    a file that fstat() reports as within-limit but is actually larger: the BOUNDED
+    read must reject it (ACEF-050) rather than store the over-budget bytes."""
+
+    class _FakeStat:
+        # A within-limit regular-file stat that lies about size.
+        st_mode = stat.S_IFREG | 0o644
+        st_size = 8
+
+    dst = _golden_copy(tmp_path)
+    (dst / "artifacts" / "x.bin").write_bytes(b"x" * 4096)  # real file is far larger
+    monkeypatch.setattr("acef.loader._MAX_ARTIFACT_FILE_SIZE", 8)
+    real_fstat = os.fstat
+
+    def fake_fstat(fd):  # type: ignore[no-untyped-def]
+        st = real_fstat(fd)
+        if stat.S_ISREG(st.st_mode) and st.st_size == 4096:
+            return _FakeStat()  # report the artifact as 8 bytes (passes the early check)
+        return st
+
+    monkeypatch.setattr("acef.loader.os.fstat", fake_fstat)
+    with pytest.raises(ACEFFormatError) as exc:
+        acef.load(str(dst))
+    assert exc.value.code == "ACEF-050"
