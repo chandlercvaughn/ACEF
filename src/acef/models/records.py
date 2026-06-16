@@ -9,40 +9,11 @@ from typing import Any, Literal, TypeVar
 
 from pydantic import Field, StrictInt, ValidationError, model_validator
 
-from acef.models.base import ACEFBaseModel
+from acef.models.base import ACEFBaseModel, _reject_present_null
 from acef.models.enums import Confidentiality, LifecyclePhase, ObligationRole, TrustLevel
 from acef.models.urns import URNType, generate_urn
 
 _T = TypeVar("_T")
-
-
-def _reject_present_null(values: Any, fields: tuple[str, ...]) -> Any:
-    """Reject a PRESENT explicit ``null`` on a NON-nullable schema property.
-
-    The frozen ``record-envelope.schema.json`` types the listed properties as
-    ``integer`` / ``string`` (NOT ``["integer","null"]`` / ``["string","null"]``),
-    so an explicit ``null`` VALUE on a property that IS present is a type
-    violation — distinct from the property being ABSENT (which the model defaults
-    cleanly). Pydantic's ``X | None = None`` typing (needed to express OPTIONAL /
-    absent) ALSO silently accepts a present explicit ``null``, collapsing that
-    distinction; this ``mode="before"`` validator restores it by raising
-    ``ValueError`` (which Pydantic wraps as ``ValidationError`` — re-raised by the
-    loader's ``_nested`` wrapper as the structured ``ACEFFormatError(ACEF-050)``)
-    when a listed key is present in the RAW input with a ``None`` value. A missing
-    key is untouched, so absent → default is preserved.
-
-    Only operates on a raw ``dict`` input (the wire shape); non-dict inputs are
-    passed through unchanged for Pydantic's normal handling.
-    """
-    if isinstance(values, dict):
-        present_null = [f for f in fields if f in values and values[f] is None]
-        if present_null:
-            raise ValueError(
-                f"property {present_null!r} is present but null; the frozen schema "
-                f"types these properties as non-nullable (integer/string), so an "
-                f"explicit null is a type violation (omit the key instead)"
-            )
-    return values
 
 
 class EntityRefs(ACEFBaseModel):

@@ -88,7 +88,7 @@ class TestDoctorFalsyNonObjectMetadataPrecision:
     def test_present_non_object_metadata_reports_acef_002(self, tmp_path: Path, meta: str) -> None:
         """Any PRESENT non-object metadata value — including explicit ``null`` —
         is a present-but-invalid value, reported as ACEF-002 (not 'Missing')."""
-        bundle = _bundle(tmp_path, ('{"metadata": %s, "subjects": []}' % meta).encode())
+        bundle = _bundle(tmp_path, f'{{"metadata": {meta}, "subjects": []}}'.encode())
         result = CliRunner().invoke(cli, ["doctor", str(bundle)])
         assert result.exception is None or isinstance(result.exception, SystemExit)
         assert "metadata is not a JSON object" in result.output
