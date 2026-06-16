@@ -20,7 +20,12 @@ class ProducerInfo(ACEFBaseModel):
 class RetentionPolicy(ACEFBaseModel):
     """Package-level retention requirements."""
 
-    min_retention_days: int = Field(ge=0)
+    # OPTIONAL to match the FROZEN v1 manifest schema, whose retention_policy
+    # object declares NO `required` array (min_retention_days is a schema-optional
+    # property). A required model field made load() over-reject a schema-valid
+    # manifest carrying retention_policy without min_retention_days — a
+    # load/validate divergence. Mirrors the record-level RecordRetention model.
+    min_retention_days: int | None = Field(default=None, ge=0)
     personal_data_interplay: str | None = None
 
 
