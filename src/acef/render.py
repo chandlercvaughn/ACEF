@@ -300,6 +300,27 @@ def _resolve_incident_field(payload: dict[str, Any], record_type: str, field: st
     return card_source.get(field)
 
 
+def _resolve_incident_crosswalk(payload: dict[str, Any], record_type: str) -> dict[str, Any]:
+    """The taxonomy-crosswalk VIEW for an incident record, RECORD-TYPE aware.
+
+    A PUBLIC ``incident_card`` carries the full ``taxonomy_crosswalk`` at the payload
+    ROOT (each framework member with its edition). A SOURCE-BACKED ``incident_report``
+    has NO ``taxonomy_crosswalk`` — the v1.1 ``card_source`` schema is CLOSED
+    (``additionalProperties: false``) and does not define that field; the
+    regulator-filing EU AI Act crosswalk evidence is ``card_source.eu_ai_act_facts``
+    (§5.7). Surface that as the ``eu_ai_act`` crosswalk member so a source-backed report
+    still renders crosswalk evidence (it previously rendered none). A legacy
+    public-shaped ``incident_report`` (root ``taxonomy_crosswalk``, no
+    ``card_source.eu_ai_act_facts``) falls back to the root crosswalk.
+    """
+    if record_type == "incident_report":
+        facts = _as_dict(_as_dict(payload.get("card_source")).get("eu_ai_act_facts"))
+        if facts:
+            return {"eu_ai_act": facts}
+        return _as_dict(payload.get("taxonomy_crosswalk"))
+    return _as_dict(payload.get("taxonomy_crosswalk"))
+
+
 def _crosswalk_edition(member: dict[str, Any]) -> str | None:
     """Return a member's version-pin (``edition`` or, for mit_domain, the
     ``taxonomy_version`` label), or None when absent (§5.5)."""
@@ -387,10 +408,10 @@ def render_incident_evidence_markdown(records: list[dict[str, Any]]) -> str:
             block.append("- **Harm Core:**")
             block.extend(_render_harm_core_markdown(harm_core))
 
-        # taxonomy_crosswalk — record-type aware, like the sibling fields above: a
-        # source-backed incident_report carries it under card_source, a public
-        # incident_card at the root.
-        crosswalk = _as_dict(_resolve_incident_field(payload, record_type, "taxonomy_crosswalk"))
+        # taxonomy_crosswalk — record-type aware: a public incident_card carries the
+        # full crosswalk at the root; a source-backed incident_report has none, so its
+        # card_source.eu_ai_act_facts is surfaced as the eu_ai_act member (§5.7).
+        crosswalk = _resolve_incident_crosswalk(payload, record_type)
         member_keys = _ordered_crosswalk_members(crosswalk)
         if member_keys:
             block.append("- **Taxonomy Crosswalk:**")
@@ -453,9 +474,9 @@ def render_incident_evidence_console(records: list[dict[str, Any]]) -> str:
         if isinstance(harm_class, str) and harm_class:
             block.append(f"  Harm class: {harm_class}")
 
-        # taxonomy_crosswalk — record-type aware (card_source for a source-backed
-        # report, root for a public card), matching the markdown twin.
-        crosswalk = _as_dict(_resolve_incident_field(payload, record_type, "taxonomy_crosswalk"))
+        # taxonomy_crosswalk — record-type aware (eu_ai_act_facts for a source-backed
+        # report, root crosswalk for a public card), matching the markdown twin.
+        crosswalk = _resolve_incident_crosswalk(payload, record_type)
         member_keys = _ordered_crosswalk_members(crosswalk)
         if member_keys:
             block.append(f"  Crosswalk: {', '.join(member_keys)}")

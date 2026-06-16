@@ -380,77 +380,75 @@ class TestSourceBackedIncidentReportResolution:
         assert "AIIC-STRAY-2099-ZZZZZZZZZZZZZZZZZZZZZZZZZZ" not in md
         assert _CRITICAL_VECTOR in md
 
-    # --- taxonomy_crosswalk must ALSO be record-type-aware (the one field the prior
-    # F-M9-RENDER fix left reading payload root only, lines 391/454). ---
+    # --- taxonomy_crosswalk must ALSO be record-type-aware. A source-backed
+    # incident_report has NO taxonomy_crosswalk (the v1.1 card_source schema is CLOSED
+    # and does not define it); its EU AI Act crosswalk evidence is
+    # card_source.eu_ai_act_facts (§5.7), which the renderer surfaces as the eu_ai_act
+    # member. Pre-fix the renderer read payload.taxonomy_crosswalk (root) ONLY, so a
+    # real source-backed report rendered NO crosswalk evidence. ---
 
-    _CARD_SOURCE_CROSSWALK = {
-        "eu_ai_act": {"edition": "reg-2024-1689", "serious_incident_triggers": ["3.49.a"]},
-        "nist_ai_600_1": {"edition": "2024-07-final", "categories": ["Information Security"]},
-    }
-
-    def test_incident_report_crosswalk_resolves_from_card_source_markdown(self) -> None:
-        """RED (pre-fix): the crosswalk was read from ``payload.taxonomy_crosswalk``
-        (root) only, so a source-backed incident_report carrying it under
-        ``card_source`` rendered NO crosswalk at all."""
-        rec = {
-            "record_type": "incident_report",
-            "payload": {
-                "card_source": {
-                    "public_incident_id": _PUBLIC_ID,
-                    "taxonomy_crosswalk": dict(self._CARD_SOURCE_CROSSWALK),
-                },
-            },
-        }
-        # Precondition: crosswalk is ONLY under card_source.
+    def test_real_report_incident_crosswalk_from_eu_ai_act_facts_markdown(self) -> None:
+        """The REAL builder (Package.report_incident) emits the EU AI Act crosswalk
+        evidence under card_source.eu_ai_act_facts and NO root taxonomy_crosswalk; the
+        renderer must surface it as the eu_ai_act crosswalk member."""
+        rec = self._real_report_incident_record()
+        # Precondition: real source-backed shape — eu_ai_act_facts under card_source,
+        # NO taxonomy_crosswalk anywhere.
         assert "taxonomy_crosswalk" not in rec["payload"]
+        assert "taxonomy_crosswalk" not in rec["payload"]["card_source"]
+        assert rec["payload"]["card_source"]["eu_ai_act_facts"]
         md = render_incident_evidence_markdown([rec])
         assert "Taxonomy Crosswalk" in md
         assert "eu_ai_act" in md
-        assert "nist_ai_600_1" in md
-        assert "reg-2024-1689" in md
 
-    def test_incident_report_crosswalk_resolves_from_card_source_console(self) -> None:
-        rec = {
-            "record_type": "incident_report",
-            "payload": {
-                "card_source": {
-                    "public_incident_id": _PUBLIC_ID,
-                    "taxonomy_crosswalk": dict(self._CARD_SOURCE_CROSSWALK),
-                },
-            },
-        }
+    def test_real_report_incident_crosswalk_from_eu_ai_act_facts_console(self) -> None:
+        rec = self._real_report_incident_record()
         out = render_incident_evidence_console([rec])
         assert "Crosswalk" in out
         assert "eu_ai_act" in out
-        assert "nist_ai_600_1" in out
 
-    def test_incident_report_stray_root_crosswalk_does_not_mask_card_source(self) -> None:
-        """For an incident_report, card_source crosswalk WINS; a stray ROOT crosswalk
-        must NOT mask it (record-type-aware resolution)."""
+    def test_incident_report_stray_root_crosswalk_not_used_when_facts_present(self) -> None:
+        """For a source-backed incident_report (card_source.eu_ai_act_facts present), the
+        crosswalk view is the eu_ai_act facts; a stray ROOT taxonomy_crosswalk member is
+        NOT rendered."""
         rec = {
             "record_type": "incident_report",
             "payload": {
-                "taxonomy_crosswalk": {"eu_ai_act": {"edition": "STRAY-ROOT-EDITION"}},
+                "taxonomy_crosswalk": {"nist_ai_600_1": {"edition": "STRAY-ROOT-EDITION"}},
                 "card_source": {
                     "public_incident_id": _PUBLIC_ID,
-                    "taxonomy_crosswalk": {"nist_ai_600_1": {"edition": "2024-07-final"}},
+                    "eu_ai_act_facts": {"serious_incident_triggers": ["3.49.a"], "death_involved": True},
                 },
+            },
+        }
+        md = render_incident_evidence_markdown([rec])
+        assert "eu_ai_act" in md  # from card_source.eu_ai_act_facts
+        assert "nist_ai_600_1" not in md
+        assert "STRAY-ROOT-EDITION" not in md
+
+    def test_legacy_public_shaped_incident_report_falls_back_to_root_crosswalk(self) -> None:
+        """A legacy public-shaped incident_report (root taxonomy_crosswalk, no
+        card_source.eu_ai_act_facts) falls back to the root crosswalk."""
+        rec = {
+            "record_type": "incident_report",
+            "payload": {
+                "public_incident_id": _PUBLIC_ID,
+                "taxonomy_crosswalk": {"nist_ai_600_1": {"edition": "2024-07-final"}},
             },
         }
         md = render_incident_evidence_markdown([rec])
         assert "nist_ai_600_1" in md
         assert "2024-07-final" in md
-        assert "STRAY-ROOT-EDITION" not in md
 
-    def test_public_incident_card_crosswalk_root_first_no_regression(self) -> None:
-        """A PUBLIC incident_card keeps its root crosswalk root-first; a stray
-        card_source crosswalk does NOT win (no regression)."""
+    def test_public_incident_card_crosswalk_root_renders_no_regression(self) -> None:
+        """A PUBLIC incident_card renders its full ROOT taxonomy_crosswalk (each member
+        with its edition) — unchanged."""
         rec = _incident_card_record()
-        rec["payload"]["card_source"] = {"taxonomy_crosswalk": {"eu_ai_act": {"edition": "STRAY-CS-EDITION"}}}
         md = render_incident_evidence_markdown([rec])
-        # The public card's ROOT crosswalk wins.
+        assert "eu_ai_act" in md
+        assert "nist_ai_600_1" in md
         assert "reg-2024-1689" in md
-        assert "STRAY-CS-EDITION" not in md
+        assert "2024-07-final" in md
 
 
 class TestMarkdownEvidenceTruncationAudit:
