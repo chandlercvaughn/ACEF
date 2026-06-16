@@ -9,6 +9,7 @@ from __future__ import annotations
 import gzip
 import json
 import os
+import stat
 import sys
 import tarfile
 import tempfile
@@ -890,19 +891,25 @@ def _load_directory(bundle_dir: Path) -> Package:
             dir_path_p = Path(dir_path)
             for file_name in file_names:
                 file_path = dir_path_p / file_name
-                # ``is_file()`` follows symlinks (matching the prior rglob filter):
-                # a symlink to a regular file is read; a FIFO/socket/broken symlink
-                # is skipped. A bare ``is_file()`` can itself raise OSError, so guard
-                # it too.
+                # ``stat()`` FIRST (following symlinks), guarded. Do NOT gate on
+                # ``Path.is_file()``: on Python >=3.12 it SUPPRESSES OSError and
+                # returns False, so a present-but-unstattable artifact (e.g. a
+                # symlink to an unreadable target) would be SILENTLY dropped. Any
+                # stat failure here — permission denied, vanished mid-load, an
+                # unresolvable/broken symlink — must surface as structured ACEF-050.
                 try:
-                    if not file_path.is_file():
-                        continue
-                    file_size = file_path.stat().st_size
+                    file_stat = file_path.stat()
                 except OSError as exc:
                     raise ACEFFormatError(
                         f"Failed to stat bundle artifact {file_path.relative_to(bundle_dir).as_posix()!r}: {exc}",
                         code="ACEF-050",
                     ) from exc
+                # Skip non-regular entries (directory symlink, FIFO, socket, device),
+                # matching the prior ``is_file()`` filter — only regular files (and
+                # symlinks resolving to one) are read into the bundle.
+                if not stat.S_ISREG(file_stat.st_mode):
+                    continue
+                file_size = file_stat.st_size
                 if file_size > _MAX_ARTIFACT_FILE_SIZE:
                     raise ACEFFormatError(
                         f"Artifact file exceeds 1 GB limit: "
