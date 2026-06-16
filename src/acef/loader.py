@@ -60,13 +60,26 @@ _READ_CHUNK = 1024 * 1024
 # stack). 64 levels is far beyond any real evidence bundle.
 _MAX_ARTIFACT_DIR_DEPTH = 64
 
-# Whether the platform supports fd-relative (``dir_fd``) directory traversal. On POSIX
-# this lets us anchor every path component to a trusted opened directory descriptor,
-# defeating an ANCESTOR-directory symlink swap (O_NOFOLLOW alone only guards the leaf).
-# On platforms without it (Windows), fall back to an ``os.walk`` reader.
-_FD_WALK_SUPPORTED = (
-    {os.open, os.lstat}.issubset(os.supports_dir_fd) and os.listdir in os.supports_fd and os.stat in os.supports_fd
-)
+
+def _fd_walk_supported() -> bool:
+    """Whether the secure fd-anchored artifact reader can run on this platform.
+
+    It requires BOTH (a) fd-relative (``dir_fd``) traversal — to anchor every path
+    component to a trusted opened directory descriptor, defeating an ANCESTOR-directory
+    symlink swap — AND (b) a real ``O_NOFOLLOW``: without no-follow opens, a file or
+    directory symlink swapped in AFTER the ``lstat`` probe would still be followed,
+    reopening the path-escape the whole reader exists to prevent. When either is
+    unavailable, ``_read_bundle_artifacts`` FAILS CLOSED rather than read insecurely.
+    """
+    return bool(
+        getattr(os, "O_NOFOLLOW", 0)
+        and {os.open, os.lstat}.issubset(os.supports_dir_fd)
+        and os.listdir in os.supports_fd
+        and os.stat in os.supports_fd
+    )
+
+
+_FD_WALK_SUPPORTED = _fd_walk_supported()
 
 
 def _validate_path(path: str) -> None:

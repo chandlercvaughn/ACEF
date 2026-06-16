@@ -24,7 +24,7 @@ import pytest
 
 import acef
 from acef.errors import ACEFError, ACEFFormatError
-from acef.loader import _FD_WALK_SUPPORTED, _MAX_ARTIFACT_DIR_DEPTH
+from acef.loader import _FD_WALK_SUPPORTED, _MAX_ARTIFACT_DIR_DEPTH, _fd_walk_supported
 
 _GOLDEN = next(p for p in sorted(glob.glob("tests/conformance/golden-bundles/*")) if Path(p).is_dir())
 
@@ -433,3 +433,16 @@ def test_empty_artifacts_loads_without_fd_support(tmp_path: Path, monkeypatch: p
     monkeypatch.setattr("acef.loader._FD_WALK_SUPPORTED", False)
     pkg = acef.load(str(dst))
     assert not any(k.startswith("artifacts/") for k in pkg.attachments)
+
+
+@pytest.mark.skipif(not _FD_WALK_SUPPORTED, reason="needs a platform where the secure reader is otherwise available")
+def test_fd_walk_support_requires_o_nofollow(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The secure fd-anchored reader requires a REAL ``O_NOFOLLOW``: without no-follow
+    opens, a symlink swapped in after the ``lstat`` probe would still be followed
+    (path-escape). The support gate must therefore be False when ``O_NOFOLLOW`` is
+    unavailable, so the loader fails closed rather than reading insecurely."""
+    # Sanity: available on this platform when O_NOFOLLOW is present.
+    assert _fd_walk_supported() is True
+    # Absent / no-op O_NOFOLLOW -> gate must be False even though dir_fd is supported.
+    monkeypatch.setattr("acef.loader.os.O_NOFOLLOW", 0)
+    assert _fd_walk_supported() is False
