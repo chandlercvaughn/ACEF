@@ -52,6 +52,18 @@ def record_cmd(
             except FileNotFoundError as exc:
                 click.echo(f"Error: Payload file not found: {payload_path}", err=True)
                 raise SystemExit(1) from exc
+            except UnicodeDecodeError as exc:
+                # A non-UTF-8 payload file is a FORMAT violation (spec §3.1.1
+                # requires UTF-8 throughout). UnicodeDecodeError is a ValueError
+                # subclass — NOT an OSError, and NOT a json.JSONDecodeError — so
+                # without this handler it escaped both the inner OSError catch and
+                # the outer JSONDecodeError catch as a raw traceback. Stamp it
+                # ACEF-050, consistent with the invalid-JSON payload path below.
+                click.echo(
+                    f"Error: Payload file {payload_path} is not valid UTF-8 [ACEF-050]: {exc}",
+                    err=True,
+                )
+                raise SystemExit(1) from exc
             except OSError as exc:
                 click.echo(f"Error: Cannot read payload file {payload_path}: {exc}", err=True)
                 raise SystemExit(1) from exc

@@ -96,3 +96,34 @@ class TestRecordBadArgsCleanError:
         # A bad --role is NOT an unknown-record_type error: it must not be
         # mislabeled with ACEF-003.
         assert "ACEF-003" not in result.output
+
+    def test_non_utf8_payload_file_clean_error(self, tmp_path: Path) -> None:
+        # ``--payload @file`` opens with encoding="utf-8"; a non-UTF-8 file raises
+        # UnicodeDecodeError, which is a ValueError subclass — NOT an OSError and
+        # NOT a json.JSONDecodeError — so without a dedicated handler it escaped
+        # the inner FileNotFoundError/OSError and the outer JSONDecodeError catches
+        # as a raw traceback. It must surface a clean structured CLI error.
+        pf = tmp_path / "payload.json"
+        pf.write_bytes(b'{"k": "\x80\x81"}')  # 0x80 is an invalid UTF-8 start byte
+        result = CliRunner().invoke(
+            cli,
+            ["record", str(self._bundle(tmp_path)), "--type", "event_log", "--payload", f"@{pf}"],
+        )
+        assert _clean(result)
+        assert result.exit_code != 0
+        assert "Error" in result.output
+        assert "UTF-8" in result.output
+        # A non-UTF-8 payload file is a FORMAT violation, consistent with the
+        # invalid-JSON payload path which also stamps ACEF-050.
+        assert "ACEF-050" in result.output
+
+    def test_valid_payload_file_succeeds(self, tmp_path: Path) -> None:
+        # Happy-path guard: a well-formed UTF-8 ``@file`` payload still works.
+        pf = tmp_path / "payload.json"
+        pf.write_text('{"k": "v"}', encoding="utf-8")
+        result = CliRunner().invoke(
+            cli,
+            ["record", str(self._bundle(tmp_path)), "--type", "event_log", "--payload", f"@{pf}"],
+        )
+        assert result.exception is None or isinstance(result.exception, SystemExit)
+        assert result.exit_code == 0
