@@ -53,12 +53,20 @@ class TestMergeBasic:
         assert len(result.package.records) == 1
 
     def test_merge_creates_audit_trail(self):
+        import re
+
         pkg1 = _make_package(subject_name="A")
         pkg2 = _make_package(subject_name="B")
         result = merge_packages([pkg1, pkg2])
         manifest = result.package.build_manifest()
         merge_events = [e for e in manifest.audit_trail if "Merged" in e.description]
         assert len(merge_events) >= 1
+        # The merge audit entry MUST carry a schema-valid actor_ref (roborev on
+        # 3753e54): an empty actor_ref FATAL-fails ACEF-002 on merged output.
+        actor_urn = re.compile(r"^urn:acef:act:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+        assert all(actor_urn.match(e.actor_ref) for e in manifest.audit_trail), (
+            f"every merge audit entry needs a valid actor_ref; got {[e.actor_ref for e in manifest.audit_trail]!r}"
+        )
 
 
 class TestDuplicateSubjects:

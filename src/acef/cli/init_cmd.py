@@ -69,13 +69,17 @@ def init_cmd(
 
     pkg = Package(producer={"name": producer_name, "version": producer_version})
 
-    if subject_name:
-        pkg.add_subject(
-            subject_type=subject_type,
-            name=subject_name,
-            risk_classification=risk_classification,
-            modalities=list(modalities),
-        )
+    # The frozen manifest schema requires subjects[] minItems:1, so a VALID bundle
+    # always has >=1 subject. `acef init` is documented as producing a minimal VALID
+    # bundle, so it always scaffolds a subject — using --subject-name when given, else a
+    # clearly-placeholder default the user renames (a bare `init <path>` previously
+    # emitted zero subjects -> schema-invalid).
+    pkg.add_subject(
+        subject_type=subject_type,
+        name=subject_name or "Initial Subject (rename me)",
+        risk_classification=risk_classification,
+        modalities=list(modalities),
+    )
 
     try:
         pkg.export(path)

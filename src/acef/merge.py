@@ -32,6 +32,7 @@ from acef.package import (
     _INCIDENT_RECORD_TYPES,
     _V1_1_INCIDENT_RELATIONSHIP_EDGES,
     Package,
+    _producer_actor_urn,
     _v1_1_only_incident_report_fields,
 )
 from acef.schemas.registry import parse_core_version_minor
@@ -800,6 +801,10 @@ def merge_packages(
         AuditTrailEntry(
             event_type=AuditEventType.UPDATED,
             timestamp=merged_timestamp,
+            # Schema-required actor_ref (urn:acef:act:<uuid>): the merge actor is the
+            # merged producer, derived deterministically (same as the SDK CREATED entry)
+            # so merged output is schema-valid and byte-stable.
+            actor_ref=_producer_actor_urn(producer_info),
             description=f"Merged from {len(packages)} packages",
         ),
     ]

@@ -85,12 +85,15 @@ def doctor_cmd(path: str) -> None:
         return  # Exit 0 (clean)
 
     for severity, category, message in issues:
+        # ``\[`` escapes the literal opening bracket so the category renders verbatim —
+        # an unescaped ``[{category}]`` is parsed by rich as a (usually unknown) style
+        # tag and swallowed, which previously hid the category label entirely.
         if severity == "error":
-            console.print(f"  [red][{category}][/red] {message}")
+            console.print(f"  [red]\\[{category}][/red] {message}")
         elif severity == "warning":
-            console.print(f"  [yellow][{category}][/yellow] {message}")
+            console.print(f"  [yellow]\\[{category}][/yellow] {message}")
         else:
-            console.print(f"  [dim][{category}][/dim] {message}")
+            console.print(f"  [dim]\\[{category}][/dim] {message}")
 
     errors = sum(1 for s, _, _ in issues if s == "error")
     warnings = sum(1 for s, _, _ in issues if s == "warning")
@@ -307,8 +310,9 @@ def _check_records(bundle_path: Path, issues: list[tuple[str, str, str]]) -> Non
 
 # Integrity codes are reported by _check_integrity; the schema/reference phase below
 # surfaces everything ELSE from the canonical validator so doctor agrees with `validate`
-# without double-listing integrity diagnostics.
-_INTEGRITY_CODES = frozenset({"ACEF-010", "ACEF-011", "ACEF-012", "ACEF-013", "ACEF-014"})
+# without double-listing integrity diagnostics. ACEF-051 (hash-domain canonicalization)
+# is emitted by the integrity phase too, so it is excluded here (roborev Low).
+_INTEGRITY_CODES = frozenset({"ACEF-010", "ACEF-011", "ACEF-012", "ACEF-013", "ACEF-014", "ACEF-051"})
 
 
 def _check_schema_and_references(bundle_path: Path, issues: list[tuple[str, str, str]]) -> None:
@@ -318,10 +322,17 @@ def _check_schema_and_references(bundle_path: Path, issues: list[tuple[str, str,
     bundle (missing required field, dangling subject_ref, ...) "healthy" + exit 0 while
     ``validate`` rejected it FATAL. This delegates to ``validate_bundle`` and surfaces its
     SCHEMA (ACEF-002/004) + REFERENCE (ACEF-020/...) + other structural diagnostics —
-    everything EXCEPT the integrity codes ``_check_integrity`` already reports — so
-    doctor's verdict matches ``validate``. A malformed bundle the validator cannot parse
-    is already surfaced by the structure/manifest phases above, so any exception here
-    degrades to a skip rather than crashing doctor.
+    everything EXCEPT the integrity codes ``_check_integrity`` already reports.
+
+    Exit-code agreement with ``validate`` (roborev Medium): ``acef validate`` fails
+    (non-zero) only on a FATAL structural error or a NOT_SATISFIED provision — a NON-fatal
+    structural diagnostic (e.g. a non-fatal ACEF-020 reference error) is ADVISORY there and
+    exits 0. doctor mirrors that: only FATAL diagnostics flip the exit (mapped to the
+    failing "error" bucket); non-fatal diagnostics are reported as advisory warnings.
+    Each diagnostic is filed under its OWN serialized ``category`` (roborev Low) so an
+    ACEF-020 reference finding is not mislabeled "[schema]". A malformed bundle the
+    validator cannot parse is already surfaced by the structure/manifest phases above, so
+    any exception here degrades to a skip rather than crashing doctor.
     """
     console.print("\nChecking schema + references...")
     from acef.validation.engine import validate_bundle
@@ -338,10 +349,14 @@ def _check_schema_and_references(bundle_path: Path, issues: list[tuple[str, str,
         if code in _INTEGRITY_CODES:
             continue
         severity = str(err.get("severity", "error"))
-        bucket = "error" if severity in ("fatal", "error") else ("warning" if severity == "warning" else "info")
+        category = str(err.get("category") or "schema")
         path = err.get("path")
         loc = f" ({path})" if path else ""
-        issues.append((bucket, "schema", f"{code}: {err.get('message', '')}{loc}"))
+        message = f"{code}: {err.get('message', '')}{loc}"
+        # FATAL -> failing "error" bucket (matches `validate` exit 2); any non-fatal
+        # diagnostic is advisory (matches `validate` exit 0) -> "warning"/"info" bucket.
+        bucket = "error" if severity == "fatal" else ("info" if severity == "info" else "warning")
+        issues.append((bucket, category, message))
         surfaced += 1
     if surfaced == 0:
         console.print("  [green]Schema + references valid[/green]")

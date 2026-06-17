@@ -92,3 +92,17 @@ def test_acef_init_emits_a_validating_bundle(tmp_path: Path) -> None:
     assert validate.exit_code == 0, (
         f"acef init output must validate clean; got exit {validate.exit_code}\n{validate.output}"
     )
+
+
+def test_bare_acef_init_emits_a_validating_bundle(tmp_path: Path) -> None:
+    """Even WITHOUT --subject-name, ``acef init`` must emit a VALID bundle: the schema
+    requires subjects[] minItems:1, so a no-subject scaffold is schema-invalid. init now
+    always scaffolds a (renameable) default subject (roborev on 3753e54)."""
+    runner = CliRunner()
+    out = str(tmp_path / "bare-init.acef")
+    init = runner.invoke(cli, ["init", out])
+    assert init.exit_code == 0, init.output
+    validate = runner.invoke(cli, ["validate", out])
+    assert validate.exit_code == 0, (
+        f"bare `acef init` output must validate clean; got exit {validate.exit_code}\n{validate.output}"
+    )

@@ -40,6 +40,47 @@ def test_doctor_fails_on_schema_invalid_bundle_like_validate(tmp_path: Path) -> 
     assert "ACEF-002" in doctor.output, "doctor must surface the schema violation"
 
 
+def test_doctor_agrees_with_validate_on_a_nonfatal_reference_diagnostic(tmp_path: Path) -> None:
+    """roborev on 7c29922: ``validate`` fails only on FATAL structural errors (or a
+    NOT_SATISFIED provision); a NON-fatal diagnostic (e.g. a dangling subject_ref ->
+    non-fatal ACEF-020) is advisory and exits 0. doctor must AGREE — it must not exit
+    non-zero on a non-fatal diagnostic — and must file it under its real category
+    ('reference'), not mislabel it '[schema]'."""
+    pkg = Package(producer={"name": "acef-sdk", "version": "0.1.0"})
+    pkg.add_subject(
+        "ai_system",
+        name="S",
+        version="1.0.0",
+        provider="P",
+        risk_classification="high-risk",
+        modalities=["text"],
+        lifecycle_phase="deployment",
+    )
+    pkg.record(
+        "risk_register",
+        payload={
+            "risk_id": "R1",
+            "description": "x",
+            "category": "safety",
+            "likelihood": "possible",
+            "severity": "major",
+        },
+        obligation_role="provider",
+        entity_refs={"subject_refs": ["urn:acef:sub:00000000-0000-0000-0000-000000000999"]},  # dangling
+    )
+    bundle = str(tmp_path / "dangling.acef")
+    pkg.export(bundle)
+    runner = CliRunner()
+    validate = runner.invoke(cli, ["validate", bundle])
+    doctor = runner.invoke(cli, ["doctor", bundle])
+    assert validate.exit_code == doctor.exit_code == 0, (
+        f"doctor must agree with validate on a non-fatal diagnostic; "
+        f"validate={validate.exit_code} doctor={doctor.exit_code}"
+    )
+    assert "ACEF-020" in doctor.output
+    assert "[reference]" in doctor.output, "ACEF-020 must be filed under its real 'reference' category"
+
+
 def test_doctor_passes_a_clean_bundle(tmp_path: Path) -> None:
     """A fully-valid bundle still passes doctor (exit 0)."""
     pkg = Package(producer={"name": "acef-sdk", "version": "0.1.0"})

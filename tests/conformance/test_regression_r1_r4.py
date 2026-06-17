@@ -241,14 +241,12 @@ def test_val_regression_004_acef_verify_cli(bundle_name: str) -> None:
 
     This assertion subsumes VAL-CLI-001 (same harness, same bundles).
 
-    Implemented by F-M1-CLI-COMPAT: the ``acef verify`` subcommand calls
-    the existing validator pipeline but classifies a narrow, well-known
-    baseline diagnostic (empty ``audit_trail[N]/actor_ref`` triggering
-    ACEF-002 under the FROZEN v1 manifest schema) as non-fatal for CI.
-    Every other ACEF-002 (and every other diagnostic) continues to fail.
-
-    See ``src/acef/cli/verify_cmd.py:_BASELINE_DIAGNOSTICS`` for the exact
-    downgrade rule.
+    The goldens verify clean because they are GENUINELY schema-valid: F1
+    regenerated them with a deterministic, schema-valid ``audit_trail[0].actor_ref``
+    (previously empty, which had to be downgraded as a baseline diagnostic). The
+    ``_BASELINE_DIAGNOSTICS`` downgrade table is now empty — a FRESH invalid
+    actor_ref correctly fails verify (see
+    ``test_invalid_audit_actor_ref_is_no_longer_a_verify_baseline``).
     """
     bundle_dir = GOLDEN_BUNDLES_DIR / bundle_name
     assert bundle_dir.exists()
@@ -260,4 +258,17 @@ def test_val_regression_004_acef_verify_cli(bundle_name: str) -> None:
         f"[{bundle_name}] `{' '.join(argv)}` exited {result.returncode}\n"
         f"--- stdout ---\n{result.stdout[-2000:]}\n"
         f"--- stderr ---\n{result.stderr[-2000:]}"
+    )
+
+
+def test_invalid_audit_actor_ref_is_no_longer_a_verify_baseline() -> None:
+    """roborev on 3753e54: an empty/invalid ``audit_trail[N]/actor_ref`` ACEF-002 was
+    DOWNGRADED to a non-fatal 'baseline' by verify, so a FRESH invalid bundle slipped
+    through CI. The SDK now emits a valid actor_ref (F1), so the downgrade is obsolete
+    and removed: the diagnostic must NOT be treated as a baseline anymore."""
+    from acef.cli.verify_cmd import _BASELINE_DIAGNOSTICS, _is_baseline
+
+    assert _BASELINE_DIAGNOSTICS == (), "the baseline downgrade table must be empty"
+    assert not _is_baseline({"code": "ACEF-002", "path": "/audit_trail/0/actor_ref"}), (
+        "an invalid audit-trail actor_ref must FAIL verify, not be downgraded"
     )

@@ -15,21 +15,16 @@ on the existing test corpus.
 
 Baseline diagnostic downgrade
 -----------------------------
-ACEF v0.4 tightened ``acef-conventions/v1/manifest.schema.json``
-post-creation of the v0.3-era frozen golden bundles. Six of those bundles
-declare ``audit_trail[0].actor_ref = ""`` against a schema that now
-requires the URN pattern.
-
-Both the schema and the golden bundles are FROZEN (VAL-SCHEMA-010,
-VAL-REGRESSION-001). The bundles' content cannot be edited, and the schema
-cannot be relaxed retroactively. ``verify`` therefore classifies this
-specific (code, path-shape) pair as a *baseline diagnostic*: still reported
-to stderr for transparency, but does not flip the exit code. Fresh schema
-violations (any other code, or any other JSON path) continue to fail.
-
-The baseline set is intentionally narrow: ``ACEF-002`` at
-``/audit_trail/<int>/actor_ref``. No other code and no other path is
-downgraded.
+``verify`` supports an RFC-gated table of *baseline diagnostics* — specific
+``(code, path-shape)`` pairs still reported to stderr but tolerated by the exit
+code, for genuinely-frozen legacy bytes that a tightened schema retroactively
+flags. The table is currently EMPTY: the sole historical entry (``ACEF-002`` at
+``/audit_trail/<int>/actor_ref``) existed only because the v0.3-era goldens
+carried ``audit_trail[0].actor_ref = ""``; F1 regenerated those goldens with a
+schema-valid deterministic producer actor_ref, so the SDK no longer emits that
+diagnostic and the downgrade is obsolete. Removing it means a FRESH bundle with
+an invalid audit-trail actor_ref correctly FAILS verification (it no longer
+slips through CI). Any future baseline entry requires a spec-author RFC.
 """
 
 from __future__ import annotations
@@ -55,12 +50,9 @@ from acef.validation.engine import validate_bundle
 #
 # Extending this table requires a spec-author RFC. Adding entries silently is
 # a regression of the verify contract.
-_BASELINE_DIAGNOSTICS: tuple[tuple[str, re.Pattern[str]], ...] = (
-    (
-        "ACEF-002",
-        re.compile(r"^/audit_trail/\d+/actor_ref$"),
-    ),
-)
+# Currently EMPTY: the SDK emits schema-valid bundles (F1), so no diagnostic needs
+# downgrading. A FRESH invalid audit-trail actor_ref now correctly fails verify.
+_BASELINE_DIAGNOSTICS: tuple[tuple[str, re.Pattern[str]], ...] = ()
 
 
 def _is_baseline(diag: dict[str, Any]) -> bool:
