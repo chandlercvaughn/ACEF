@@ -1511,7 +1511,11 @@ def check_publishability(
         # --- *_commitment FORMAT (both modes) ---
         commitments = {k: v for k, v in card_payload.items() if isinstance(k, str) and k.endswith("_commitment")}
         for key, value in commitments.items():
-            if not (isinstance(value, str) and re.match(r"^sha256:[0-9a-f]{64}$", value)):
+            # End with an ABSOLUTE end-of-string assertion, NOT ``$``: ``$`` matches
+            # BEFORE a trailing ``\n``, so ``sha256:<64hex>\n`` would pass this card-only
+            # FORMAT check (the ONLY commitment guard in card-only mode) and corrupt the
+            # value's canonical/hash bytes (§5.11). Mirrors ``_SEV_VECTOR_PATTERN``.
+            if not (isinstance(value, str) and re.match(r"^sha256:[0-9a-f]{64}(?![\s\S])", value)):
                 diags.append(
                     ValidationDiagnostic(
                         "ACEF-086",
@@ -1740,8 +1744,11 @@ def _record_confidentiality_of(rec: dict[str, Any]) -> str:
 # has additionalProperties:true and does NOT define these two properties, so a
 # malformed dedupe value on an incident_report payload is NOT caught at the schema
 # phase — the rule enforces the shape for BOTH record types.
-_DEDUPE_KEY_SHAPE = re.compile(r"^sha256:[0-9a-f]{64}$")
-_DEDUPE_HMAC_SHAPE = re.compile(r"^hmac-sha256:[0-9a-f]{64}$")
+# End with an ABSOLUTE end-of-string assertion ``(?![\s\S])`` rather than ``$``: ``$``
+# matches BEFORE a trailing ``\n``, so ``sha256:<64hex>\n`` would pass the §5.5 dedupe-key
+# SHAPE check and corrupt the key's canonical bytes. Mirrors ``_SEV_VECTOR_PATTERN``.
+_DEDUPE_KEY_SHAPE = re.compile(r"^sha256:[0-9a-f]{64}(?![\s\S])")
+_DEDUPE_HMAC_SHAPE = re.compile(r"^hmac-sha256:[0-9a-f]{64}(?![\s\S])")
 
 
 def check_dedupe_key_confidentiality(records: list[dict[str, Any]]) -> list[ValidationDiagnostic]:

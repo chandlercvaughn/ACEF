@@ -663,6 +663,17 @@ class TestACEF086PublishabilityGate:
         diags = ir.check_publishability([card], source_backed=False)
         assert "ACEF-086" not in _codes(diags)
 
+    def test_card_only_commitment_trailing_newline_fails_086(self) -> None:
+        # The card-only `*_commitment` FORMAT check is the ONLY commitment guard in
+        # card-only mode and anchored with `$`, so a sha256:<64hex>\n value was accepted.
+        # The end anchor must reject the trailing newline (§5.11 commitment FORMAT).
+        card = _published_card({"description_commitment": "sha256:" + "a" * 64 + "\n"})
+        assert "ACEF-086" in _codes(ir.check_publishability([card], source_backed=False))
+
+    def test_card_only_commitment_well_formed_passes(self) -> None:
+        card = _published_card({"description_commitment": "sha256:" + "a" * 64})
+        assert "ACEF-086" not in _codes(ir.check_publishability([card], source_backed=False))
+
     def test_unlinked_commitment_raises_086(self) -> None:
         # A *_commitment key whose disposition is NOT hash-committed in the source
         # publishability_map is an orphan -> ACEF-086 (source-backed only).
@@ -2329,6 +2340,19 @@ class TestDedupeKeyShapeValidation:
 
     def test_non_string_dedupe_key_fails_086(self) -> None:
         card = _dedupe_card(confidentiality="public", payload_extra={"incident_dedupe_key": 12345})
+        assert "ACEF-086" in _codes(ir.check_dedupe_key_confidentiality([card]))
+
+    def test_trailing_newline_dedupe_key_fails_086(self) -> None:
+        # The shape regex anchored with `$`, which matches BEFORE a trailing \n, so a
+        # sha256:<64hex>\n value was accepted — corrupting the key's canonical bytes
+        # (§5.5). The end anchor must reject ANY trailing character.
+        card = _dedupe_card(confidentiality="public", payload_extra={"incident_dedupe_key": _GOOD_DEDUPE_KEY + "\n"})
+        assert "ACEF-086" in _codes(ir.check_dedupe_key_confidentiality([card]))
+
+    def test_trailing_newline_dedupe_hmac_fails_086(self) -> None:
+        card = _dedupe_card(
+            confidentiality="public", payload_extra={"incident_dedupe_key_hmac": _GOOD_DEDUPE_HMAC + "\n"}
+        )
         assert "ACEF-086" in _codes(ir.check_dedupe_key_confidentiality([card]))
 
 

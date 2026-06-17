@@ -114,13 +114,13 @@
     },
     "incident_dedupe_key": {
       "type": "string",
-      "pattern": "^sha256:[0-9a-f]{64}$",
-      "description": "Cross-DB dedupe spine (§5.5). Emitted ONLY on public records; omit on non-public."
+      "pattern": "^sha256:[0-9a-f]{64}(?![\\s\\S])",
+      "description": "Cross-DB dedupe spine (§5.5). Emitted ONLY on public records; omit on non-public. End-anchored with (?![\\s\\S]) (not $) so a trailing newline is rejected — $ matches before a final \\n and would admit a hash-corrupting sha256:<64hex>\\n."
     },
     "incident_dedupe_key_hmac": {
       "type": "string",
-      "pattern": "^hmac-sha256:[0-9a-f]{64}$",
-      "description": "Keyed variant for redacted-subject dedupe; pepper held by the §5.3 resolver."
+      "pattern": "^hmac-sha256:[0-9a-f]{64}(?![\\s\\S])",
+      "description": "Keyed variant for redacted-subject dedupe; pepper held by the §5.3 resolver. End-anchored with (?![\\s\\S]) (not $) so a trailing newline is rejected."
     },
     "severity_vector": {
       "$ref": "severity_vector.schema.json",
@@ -249,8 +249,8 @@
   "patternProperties": {
     "^[a-z0-9_]+_commitment$": {
       "type": "string",
-      "pattern": "^sha256:[0-9a-f]{64}$",
-      "description": "Hash-committed projection of a non-public source field (§5.11), e.g. description_commitment, harm_distribution_basis_commitment. Value MUST equal 'sha256:' + hex(SHA-256(JCS(source_value))) at the source path whose §5.11 disposition is hash-committed (commitment-linkage; orphan/mismatch raises ACEF-086)."
+      "pattern": "^sha256:[0-9a-f]{64}(?![\\s\\S])",
+      "description": "Hash-committed projection of a non-public source field (§5.11), e.g. description_commitment, harm_distribution_basis_commitment. Value MUST equal 'sha256:' + hex(SHA-256(JCS(source_value))) at the source path whose §5.11 disposition is hash-committed (commitment-linkage; orphan/mismatch raises ACEF-086). End-anchored with (?![\\s\\S]) (not $) so a trailing newline is rejected — $ matches before a final \\n and would admit a hash-corrupting sha256:<64hex>\\n."
     },
     "^x-[a-z0-9-]+(/[a-z0-9-]+)*$": {
       "type": "object",

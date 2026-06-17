@@ -537,12 +537,12 @@ The public `incident_card` record. Closed (`additionalProperties: false`); unkno
       "type": "string", "enum": ["autonomous", "human_on_the_loop", "human_in_the_loop"]
     },
     "incident_dedupe_key": {
-      "type": "string", "pattern": "^sha256:[0-9a-f]{64}$",
-      "description": "Cross-DB dedupe spine (§5.5). Emitted ONLY on public records; omit on non-public."
+      "type": "string", "pattern": "^sha256:[0-9a-f]{64}(?![\\s\\S])",
+      "description": "Cross-DB dedupe spine (§5.5). Emitted ONLY on public records; omit on non-public. End-anchored (?![\\s\\S]) (not $) so a trailing newline is rejected."
     },
     "incident_dedupe_key_hmac": {
-      "type": "string", "pattern": "^hmac-sha256:[0-9a-f]{64}$",
-      "description": "Keyed variant for redacted-subject dedupe; pepper held by the §5.3 resolver."
+      "type": "string", "pattern": "^hmac-sha256:[0-9a-f]{64}(?![\\s\\S])",
+      "description": "Keyed variant for redacted-subject dedupe; pepper held by the §5.3 resolver. End-anchored (?![\\s\\S]) (not $) so a trailing newline is rejected."
     },
     "severity_vector": { "$ref": "severity_vector.schema.json", "description": "Recomputable vector (§5.4): the strict ACEF-SEV:1.0 Group-I grammar (companion referenced, not inlined — the weak `^ACEF-SEV:1.0/` prefix would accept unbandable/garbage vectors the companion rejects). The coarse `severity` enum MUST equal band(severity_vector)." },
     "sector_of_deployment": {
@@ -583,8 +583,8 @@ The public `incident_card` record. Closed (`additionalProperties: false`); unkno
   "patternProperties": {
     "^[a-z0-9_]+_commitment$": {
       "type": "string",
-      "pattern": "^sha256:[0-9a-f]{64}$",
-      "description": "Hash-committed projection of a non-public source field (§5.11), e.g. description_commitment, harm_distribution_basis_commitment."
+      "pattern": "^sha256:[0-9a-f]{64}(?![\\s\\S])",
+      "description": "Hash-committed projection of a non-public source field (§5.11), e.g. description_commitment, harm_distribution_basis_commitment. End-anchored (?![\\s\\S]) (not $) so a trailing newline is rejected."
     }
   },
   "additionalProperties": false

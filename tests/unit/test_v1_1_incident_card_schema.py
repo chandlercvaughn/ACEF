@@ -347,6 +347,23 @@ def test_incident_card_rejects_eu_trigger_code_as_harm_class(
             "missing required public_incident_id rejected",
             id="missing-public-incident-id",
         ),
+        # Trailing-newline format bypass: the patterns anchored with `$` matched BEFORE
+        # a final \n, admitting a hash-corrupting value. The (?![\s\S]) end anchor rejects it.
+        pytest.param(
+            lambda c: c.__setitem__("incident_dedupe_key", "sha256:" + "a" * 64 + "\n"),
+            "trailing-newline incident_dedupe_key rejected",
+            id="dedupe-key-trailing-newline",
+        ),
+        pytest.param(
+            lambda c: c.__setitem__("incident_dedupe_key_hmac", "hmac-sha256:" + "b" * 64 + "\n"),
+            "trailing-newline incident_dedupe_key_hmac rejected",
+            id="dedupe-hmac-trailing-newline",
+        ),
+        pytest.param(
+            lambda c: c.__setitem__("description_commitment", "sha256:" + "a" * 64 + "\n"),
+            "trailing-newline *_commitment rejected",
+            id="commitment-trailing-newline",
+        ),
     ],
 )
 def test_incident_card_rejects(
