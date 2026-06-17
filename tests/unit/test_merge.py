@@ -68,6 +68,41 @@ class TestKeepLatestSubjectIntegrity:
         reverse = {s.id for s in merge_packages([pkg_b, pkg_a], conflict_strategy="keep_latest").package.subjects}
         assert forward == reverse, f"equal-timestamp tie-break is input-order-dependent: fwd={forward} rev={reverse}"
 
+    def test_keep_latest_remaps_subject_refs_in_entities_and_relationships(self) -> None:
+        # F8 follow-up (roborev on eafa3a2): the dropped->winner subject remap must also
+        # cover NON-record subject references — components[].subject_refs,
+        # datasets[].subject_refs, and relationship source_ref/target_ref (an endpoint may
+        # be a subject URN) — or keep_latest still emits a dangling reference to the dropped
+        # subject in the merged entity graph.
+        pkg_a = Package(producer={"name": "tool", "version": "1.0"})
+        sub_a = pkg_a.add_subject("ai_system", name="Shared System")
+        comp = pkg_a.add_component("Comp", "model", subject_refs=[sub_a.id])
+        pkg_a.add_dataset("DS", subject_refs=[sub_a.id])
+        pkg_a.add_relationship(sub_a.id, comp.id, "deploys")
+        pkg_a.metadata.timestamp = "2026-01-01T00:00:00Z"
+
+        pkg_b = Package(producer={"name": "tool", "version": "1.0"})
+        sub_b = pkg_b.add_subject("ai_system", name="Shared System")  # newer -> wins
+        pkg_b.metadata.timestamp = "2026-06-01T00:00:00Z"
+
+        result = merge_packages([pkg_a, pkg_b], conflict_strategy="keep_latest")
+        kept = {s.id for s in result.package.subjects}
+        assert kept == {sub_b.id}
+        ents = result.package.entities
+        for c in ents.components:
+            assert sub_a.id not in c.subject_refs, f"dangling component subject_ref: {c.subject_refs}"
+            assert all(ref in kept for ref in c.subject_refs)
+        for d in ents.datasets:
+            assert sub_a.id not in d.subject_refs, f"dangling dataset subject_ref: {d.subject_refs}"
+        for rel in ents.relationships:
+            assert rel.source_ref != sub_a.id and rel.target_ref != sub_a.id, (
+                f"dangling relationship endpoint to dropped subject: {rel.source_ref} -> {rel.target_ref}"
+            )
+        # the subject endpoint (was sub_a) is repointed to the winner sub_b
+        assert any(rel.source_ref == sub_b.id for rel in ents.relationships), (
+            [r.source_ref for r in ents.relationships]
+        )
+
 
 class TestMergeBasic:
     """Test basic merge operations."""

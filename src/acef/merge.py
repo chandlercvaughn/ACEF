@@ -21,7 +21,7 @@ from acef.errors import ACEFMergeError, ValidationDiagnostic
 # satisfy. (export.py does not import merge.py, so this is cycle-free.)
 from acef.export import _USTAR_NAME_MAX_BYTES
 from acef.integrity import sha256_hex
-from acef.models.entities import EntitiesBlock
+from acef.models.entities import EntitiesBlock, Relationship
 from acef.models.enums import AuditEventType
 from acef.models.manifest import AuditTrailEntry, ProfileEntry
 from acef.models.metadata import PackageMetadata, ProducerInfo, Versioning
@@ -427,6 +427,40 @@ def _rewrite_record_subject_refs(record: RecordEnvelope, remap: dict[str, str]) 
     rewritten = record.model_copy(deep=True)
     rewritten.entity_refs.subject_refs = new_refs
     return rewritten
+
+
+def _remap_entities_subject_refs(entities: EntitiesBlock, remap: dict[str, str]) -> None:
+    """Rewrite every subject URN reference in the merged ENTITY GRAPH through the
+    keep_latest dropped->winner remap (F8 follow-up, roborev on eafa3a2).
+
+    Records are not the only subject referrers: ``components[].subject_refs``,
+    ``datasets[].subject_refs``, and a relationship ``source_ref``/``target_ref`` (an
+    endpoint may itself be a subject URN) can all point at a subject dropped by conflict
+    resolution. Non-subject refs are unaffected — they are absent from the subject-only
+    remap, so :func:`_resolve_subject_remap` returns them unchanged. Mutates ``entities``
+    in place. Relationships are re-deduplicated after rewrite (two edges differing ONLY by a
+    dropped-vs-winner endpoint collapse to one), order-preserving by first occurrence —
+    matching the in-loop dedup key ``(source_ref, target_ref, relationship_type)``.
+    """
+    if not remap:
+        return
+    for comp in entities.components:
+        comp.subject_refs = [_resolve_subject_remap(remap, ref) for ref in comp.subject_refs]
+    for dataset in entities.datasets:
+        dataset.subject_refs = [_resolve_subject_remap(remap, ref) for ref in dataset.subject_refs]
+    deduped: list[Relationship] = []
+    seen: set[tuple[str, str, str]] = set()
+    for rel in entities.relationships:
+        rel.source_ref = _resolve_subject_remap(remap, rel.source_ref)
+        rel.target_ref = _resolve_subject_remap(remap, rel.target_ref)
+        rt = rel.relationship_type
+        rel_type = rt.value if hasattr(rt, "value") else str(rt)
+        rel_key = (rel.source_ref, rel.target_ref, rel_type)
+        if rel_key in seen:
+            continue
+        seen.add(rel_key)
+        deduped.append(rel)
+    entities.relationships = deduped
 
 
 def _normalize_explicit_package_id(package_id: str) -> str:
@@ -898,6 +932,12 @@ def merge_packages(
         )
         for owner_pkg_index, record in merged_records
     ]
+
+    # Rewrite NON-record subject references (component/dataset subject_refs + relationship
+    # endpoints) through the same dropped->winner remap so keep_latest leaves NO dangling
+    # subject reference anywhere in the merged graph (F8 follow-up). Done before the
+    # core-version derivation below, which reads the final relationship set.
+    _remap_entities_subject_refs(merged_entities, subject_id_remap)
 
     # Derive the merged core_version from the inputs + resolved content (roborev
     # HIGH on a32e21b7): the HIGHEST input core_version, floored to 1.1.0 whenever
