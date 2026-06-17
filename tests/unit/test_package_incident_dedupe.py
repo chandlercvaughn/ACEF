@@ -39,7 +39,7 @@ import pytest
 
 from acef.integrity import canonicalize
 from acef.models.enums import Confidentiality
-from acef.package import Package, compute_incident_dedupe_key_hmac
+from acef.package import Package, compute_incident_dedupe_key, compute_incident_dedupe_key_hmac
 from acef.redaction import RedactionPolicy
 
 _DEDUPE_KEY_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -88,7 +88,7 @@ def _expected_dedupe_key(
     preimage = {
         "value_chain_role": value_chain_role,
         "subject_identity": _expected_subject_identity(provider, name, version),
-        "harm_class": harm_class,
+        "harm_class": unicodedata.normalize("NFC", harm_class),  # §5.5/Q6: NFC-normalized harm input
         "occurrence_date_utc": occurrence_date_utc,
     }
     digest = hashlib.sha256(canonicalize(preimage)).hexdigest()
@@ -108,7 +108,7 @@ def _expected_dedupe_hmac(
     preimage = {
         "value_chain_role": value_chain_role,
         "subject_identity": _expected_subject_identity(provider, name, version),
-        "harm_class": harm_class,
+        "harm_class": unicodedata.normalize("NFC", harm_class),  # §5.5/Q6: NFC-normalized harm input
         "occurrence_date_utc": occurrence_date_utc,
     }
     mac = hmac.new(pepper, canonicalize(preimage), hashlib.sha256).hexdigest()
@@ -771,3 +771,38 @@ class TestComputeIncidentDedupeKeyHmacDirectPepperGate:
             occurrence_date="2026-07-15T00:00:00Z",
         )
         assert out is None
+
+
+class TestDedupeKeyHarmClassNFC:
+    """§5.5 / Appendix E Q6: the canonical harm input (``harm_class``) is NFC-normalized
+    before hashing, exactly like ``subject_identity`` — so two spellings that differ only
+    by Unicode normalization derive the SAME key. (The shipped harm_class enum is closed +
+    pure-ASCII, where NFC is a no-op, so this is byte-neutral on conformant input and
+    robust if the vocabulary ever gains a non-ASCII code.)"""
+
+    _NFC = unicodedata.normalize("NFC", "café_harm")  # é precomposed (U+00E9)
+    _NFD = unicodedata.normalize("NFD", "café_harm")  # e + combining acute (U+0065 U+0301)
+
+    def test_distinct_normalization_forms(self) -> None:
+        assert self._NFC != self._NFD
+
+    def test_key_nfc_normalizes_harm_class(self) -> None:
+        common = dict(
+            value_chain_role="foundation_model",
+            subject_identity=("OpenAI", "GPT-X", "4.0"),
+            occurrence_date="2026-08-01T00:00:00Z",
+        )
+        assert compute_incident_dedupe_key(harm_class=self._NFC, **common) == compute_incident_dedupe_key(
+            harm_class=self._NFD, **common
+        )
+
+    def test_hmac_nfc_normalizes_harm_class(self) -> None:
+        common = dict(
+            pepper=b"k" * 32,
+            value_chain_role="foundation_model",
+            subject_identity=("OpenAI", "GPT-X", "4.0"),
+            occurrence_date="2026-08-01T00:00:00Z",
+        )
+        assert compute_incident_dedupe_key_hmac(harm_class=self._NFC, **common) == compute_incident_dedupe_key_hmac(
+            harm_class=self._NFD, **common
+        )

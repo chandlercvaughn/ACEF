@@ -187,11 +187,20 @@ def _incident_dedupe_preimage(
     harm_class: str,
     occurrence_date_utc: str,
 ) -> dict[str, str]:
-    """The 4-key §5.5 dedupe preimage OBJECT (the JCS input)."""
+    """The 4-key §5.5 dedupe preimage OBJECT (the JCS input).
+
+    ``harm_class`` is NFC-normalized here (§5.5 / Appendix E Q6: the canonical harm input
+    is the harm_core.harm_class code, NFC-normalized) — mirroring the NFC normalization
+    ``subject_identity`` already received in :func:`_normalize_subject_identity` — so two
+    spellings differing only by Unicode normalization derive a byte-identical key. The
+    shipped harm_class enum is closed + pure-ASCII (NFC is a no-op on every valid value),
+    so this is byte-neutral on conformant input and robust if the vocabulary ever gains a
+    non-ASCII code.
+    """
     return {
         "value_chain_role": value_chain_role,
         "subject_identity": subject_identity,
-        "harm_class": harm_class,
+        "harm_class": unicodedata.normalize("NFC", harm_class),
         "occurrence_date_utc": occurrence_date_utc,
     }
 
