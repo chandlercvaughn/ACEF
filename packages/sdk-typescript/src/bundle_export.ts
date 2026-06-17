@@ -474,7 +474,11 @@ function strictRfc3339ToEpochSeconds(ts: string): number | null {
     // For a NEGATIVE base with a positive fractional part the instant is closer to zero, so
     // the truncated second is base+1 (e.g. -1s + 0.999s = -0.001s -> 0); otherwise the
     // fractional is discarded. m[7] is the captured ".ddd…" (or undefined).
-    const hasPositiveFraction = m[7] !== undefined && /[1-9]/.test(m[7]);
+    // Python's datetime carries only MICROSECOND precision, so it truncates fractional
+    // digits beyond the first six before computing .timestamp(); a sub-microsecond-only
+    // fractional (e.g. ".0000001") therefore counts as ZERO. Mirror that by inspecting only
+    // the first 6 fractional digits (m[7] = ".ddd…"; slice(1, 7) drops the dot, takes 6).
+    const hasPositiveFraction = m[7] !== undefined && /[1-9]/.test(m[7].slice(1, 7));
     if (hasPositiveFraction && baseSeconds < 0) return baseSeconds + 1;
     return baseSeconds;
 }

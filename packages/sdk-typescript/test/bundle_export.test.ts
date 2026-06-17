@@ -183,6 +183,11 @@ test("F6: deriveMtime mirrors the Python strict RFC3339 checker (accept/reject +
     // pre-epoch + positive fractional: Python int() truncates toward zero (-1s + 0.999s -> 0).
     assert.equal(mtimeOf("1969-12-31T23:59:59.999Z"), 0);
     assert.equal(mtimeOf("1969-12-31T23:59:59.0001Z"), 0);
+    // Python carries only MICROSECOND precision: a sub-microsecond-only fractional counts
+    // as zero, so a negative base second stays negative.
+    assert.equal(mtimeOf("1969-12-31T23:59:59.000001Z"), 0); // 1 microsecond -> positive
+    assert.equal(mtimeOf("1969-12-31T23:59:59.0000001Z"), -1); // sub-microsecond -> zero
+    assert.equal(mtimeOf("1969-12-31T23:59:59.0000009Z"), -1); // sub-microsecond -> zero
     // REJECTED — every input the Python checker rejects must throw ACEF-002, never emit an
     // archive with a divergent mtime.
     for (const bad of [
