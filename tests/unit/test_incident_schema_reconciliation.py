@@ -261,6 +261,28 @@ def test_appendix_b_card_source_required_equals_shipped_schema() -> None:
     )
 
 
+def test_appendix_b_card_source_severity_vector_refs_strict_companion() -> None:
+    """Appendix B reconciliation (RED→GREEN): the PRIVATE card_source overlay excerpt's
+    ``severity_vector`` MUST ``$ref`` the strict companion (like the shipped
+    ``incident_report.card_source.schema.json``), not inline the weak ``^ACEF-SEV:1.0/``
+    prefix that accepts unbandable/garbage SOURCE vectors the shipped schema rejects.
+    Pre-fix the card_source excerpt inlines the weak pattern and this FAILS."""
+    cs = _appendix_b_card_source_excerpt()["properties"]["card_source"]["properties"]["severity_vector"]
+    assert cs.get("$ref") == "severity_vector.schema.json", (
+        "RED defect: Appendix B card_source.severity_vector inlines a weak '^ACEF-SEV:1.0/' "
+        "prefix instead of $ref-ing severity_vector.schema.json"
+    )
+    assert "pattern" not in cs
+
+
+def test_appendix_b_card_source_severity_vector_matches_shipped() -> None:
+    """The Appendix B card_source ``severity_vector`` ``$ref`` MUST EQUAL the shipped
+    ``incident_report.card_source.schema.json`` property."""
+    excerpt = _appendix_b_card_source_excerpt()["properties"]["card_source"]["properties"]["severity_vector"]
+    shipped = _load(_CARD_SOURCE_PATH)["properties"]["severity_vector"]
+    assert excerpt.get("$ref") == shipped.get("$ref") == "severity_vector.schema.json"
+
+
 # ---------------------------------------------------------------------------
 # VAL-FIX-INCSCHEMA-002 reconciliation — Appendix B incident_card excerpt
 # harm_distribution_basis uniqueItems matches the shipped schema

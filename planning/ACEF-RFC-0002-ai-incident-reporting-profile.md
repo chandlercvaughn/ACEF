@@ -610,7 +610,7 @@ The private projection-source overlay on `incident_report` (also v1.1, gated on 
         "id_state": { "type": "string", "enum": ["RESERVED", "PUBLISHED", "REJECTED"] },
         "disputed": { "type": "boolean", "description": "Overlay on PUBLISHED (§5.3); a card may be PUBLISHED and disputed simultaneously." },
         "coordinated_disclosure": { "$ref": "coordinated_disclosure.schema.json" },
-        "severity_vector": { "type": "string", "pattern": "^ACEF-SEV:1\\.0/" },
+        "severity_vector": { "$ref": "severity_vector.schema.json" },
         "harm_core": { "$ref": "incident_card.schema.json#/properties/harm_core" },
         "eu_ai_act_facts": {
           "type": "object", "additionalProperties": false,
