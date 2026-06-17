@@ -77,7 +77,9 @@ class RedactionPolicy(ACEFBaseModel):
     @field_validator("version")
     @classmethod
     def _validate_semver(cls, v: str) -> str:
-        if not isinstance(v, str) or not _SEMVER_PATTERN.match(v):
+        # ``fullmatch`` (NOT ``match``): ``$``-anchored ``.match`` accepts ``"1.0.0\n"``
+        # (``$`` before a final newline); the whole-string check rejects a trailing newline.
+        if not isinstance(v, str) or not _SEMVER_PATTERN.fullmatch(v):
             raise ValueError(
                 f"RedactionPolicy.version must be semver-shaped (MAJOR.MINOR.PATCH[-pre|+build]); got {v!r}."
             )

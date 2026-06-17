@@ -89,12 +89,17 @@ class TestCommitmentFieldNameValidation:
             "root.cause",  # dot
             "",  # empty
             "rootCause_commitment",  # already-suffixed (double-suffix trap)
+            "description\n",  # trailing-newline bypass: $ matched before \n (roborev ae5f0e2)
+            "root_cause\n",  # trailing newline after an otherwise-grammar-valid name
         ],
     )
     def test_non_grammar_commitment_field_name_raises_valueerror(self, bad_field: str) -> None:
-        """A commitment field name outside ``^[a-z0-9_]+$`` is rejected at the call
-        site with a clear ValueError naming the offending key + the grammar, instead
-        of producing an opaque ACEF-004 at export/validation."""
+        """A commitment field name outside ``^[a-z0-9_]+(?![\\s\\S])`` is rejected at the
+        call site with a clear ValueError naming the offending key + the grammar, instead
+        of producing an opaque ACEF-004 at export/validation. A trailing newline is
+        rejected: the preflight uses ``fullmatch`` so ``"description\\n"`` cannot emit a
+        schema-invalid ``"description\\n_commitment"`` key (the ``$``-before-``\\n``
+        bypass)."""
         pkg = _pkg_with_policy()
         with pytest.raises(ValueError) as exc:
             pkg.incident_card(

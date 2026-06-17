@@ -159,7 +159,12 @@ DEFAULT_FRESHNESS = timedelta(hours=24)
 # assigner = 2–8 uppercase alphanumerics, year = 4 digits, suffix >=26 Crockford-base32.
 import re as _re  # noqa: E402  (kept local to this grammar concern)
 
-_PUBLIC_INCIDENT_ID_PATTERN = _re.compile(r"^AIIC-([A-Z0-9]{2,8})-([0-9]{4})-[0-9A-HJKMNP-TV-Z]{26,}$")
+# End-anchored with ``(?![\s\S])`` (NOT ``$``): ``$`` matches BEFORE a final ``\n``, so an
+# otherwise-valid ``AIIC-…<suffix>\n`` would parse and ``verify_domain_control`` would
+# proceed to attribution (returning VERIFIED/REJECT) instead of treating the malformed id
+# as UNVERIFIED. Mirrors the schema + offline ``incident_rules._PUBLIC_INCIDENT_ID_PATTERN``
+# absolute end anchor so the online verifier rejects the same newline-corrupted ids.
+_PUBLIC_INCIDENT_ID_PATTERN = _re.compile(r"^AIIC-([A-Z0-9]{2,8})-([0-9]{4})-[0-9A-HJKMNP-TV-Z]{26,}(?![\s\S])")
 
 
 class DomainControlLookupError(Exception):
@@ -463,11 +468,15 @@ def _is_allowed_well_known_host(host: str) -> bool:
     if "." not in host:
         return False  # a bare single label (no dot) is not a registrable domain
     labels = host.split(".")
-    if not all(_LDH_LABEL.match(label) for label in labels):
+    # ``fullmatch`` (NOT ``match``): a ``$``-anchored ``.match`` accepts a label with a
+    # trailing ``\n`` (``$`` matches before a final newline), so a newline-bearing host
+    # would slip the LDH/TLD registrable-host guard. ``fullmatch`` requires the WHOLE
+    # label to match, rejecting any trailing newline / control character.
+    if not all(_LDH_LABEL.fullmatch(label) for label in labels):
         return False  # an empty label, an over-long label, or a non-LDH char → deny
     # (3) The TLD (final label) MUST be alphabetic or a punycode A-label. A numeric / hex
     # final label (0x1, 123, 1) is not a valid TLD → every IP textual form is rejected.
-    if not _VALID_TLD.match(labels[-1]):
+    if not _VALID_TLD.fullmatch(labels[-1]):
         return False
     return True
 

@@ -106,7 +106,10 @@ def _commitment_shape_problems(payload: dict[str, Any]) -> list[tuple[str, str]]
         )
 
     payload_hash = payload.get("redacted_payload_hash")
-    if not isinstance(payload_hash, str) or not _SHA256_BARE_HEX_RE.match(payload_hash):
+    # ``fullmatch`` (NOT ``match``): ``$``-anchored ``.match`` accepts a 64-hex digest with
+    # a trailing ``\n`` (``$`` before a final newline), admitting a newline-corrupted
+    # commitment hash; the whole-string check rejects any trailing character.
+    if not isinstance(payload_hash, str) or not _SHA256_BARE_HEX_RE.fullmatch(payload_hash):
         problems.append(
             (
                 "redacted_payload_hash must be 64 lowercase hex characters "

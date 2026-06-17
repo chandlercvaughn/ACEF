@@ -609,7 +609,7 @@ def validate_namespaces(namespaces: object, *, strict_keys: bool = True) -> dict
         )
     validated: dict[str, dict[str, Any]] = {}
     for key, value in namespaces.items():
-        if strict_keys and (not isinstance(key, str) or not _NAMESPACE_KEY_PATTERN.match(key)):
+        if strict_keys and (not isinstance(key, str) or not _NAMESPACE_KEY_PATTERN.fullmatch(key)):
             raise ACEFSchemaError(
                 f"Invalid namespace key {key!r}: top-level namespace keys MUST "
                 "be x-vendor-prefixed, matching the manifest schema pattern "
@@ -680,7 +680,10 @@ if TYPE_CHECKING:  # pragma: no cover — type-only import to avoid a runtime co
 #   assigner = 2-8 uppercase alphanumerics; year = 4 digits;
 #   suffix    = >=26 Crockford-base32 chars `[0-9A-HJKMNP-TV-Z]` (>=128 bits).
 _ASSIGNER_LABEL_PATTERN = re.compile(r"^[A-Z0-9]{2,8}$")
-_PUBLIC_INCIDENT_ID_PATTERN = re.compile(r"^AIIC-([A-Z0-9]{2,8})-([0-9]{4})-[0-9A-HJKMNP-TV-Z]{26,}$")
+# End-anchored with ``(?![\s\S])`` (NOT ``$``) so a trailing ``\n`` is rejected, mirroring
+# the schema + offline/online ``_PUBLIC_INCIDENT_ID_PATTERN``s ($ matches before a final
+# newline and would admit a cross-reference-breaking ``AIIC-...\n``).
+_PUBLIC_INCIDENT_ID_PATTERN = re.compile(r"^AIIC-([A-Z0-9]{2,8})-([0-9]{4})-[0-9A-HJKMNP-TV-Z]{26,}(?![\s\S])")
 
 # RFC-0002 §5.11 whole-value hash commitments. The incident_card schema admits
 # commitment keys ONLY under the pattern ``^[a-z0-9_]+_commitment$`` with
@@ -995,7 +998,10 @@ def _registrable_label_from_domain(domain: str) -> str:
         registrable_label = labels[0]
         registrable_domain = labels[0]
     label = registrable_label.upper()
-    if not _ASSIGNER_LABEL_PATTERN.match(label):
+    # ``fullmatch`` (NOT ``match``): ``$``-anchored ``.match`` accepts ``"OPENAI\n"`` (``$``
+    # before a final newline), which would mint a newline-corrupted ``AIIC-...`` id; the
+    # whole-string check rejects any trailing newline / control character.
+    if not _ASSIGNER_LABEL_PATTERN.fullmatch(label):
         raise ValueError(
             f"mint_incident_id: cannot derive an assigner LABEL from domain {domain!r} — the "
             f"registrable label {registrable_label!r} -> {label!r} does not satisfy the §5.3 "
@@ -3397,15 +3403,21 @@ class Package:
         # would silently change WHICH field the commitment binds.
         if commitments:
             for field_name, value in commitments.items():
-                if not isinstance(field_name, str) or not _COMMITMENT_FIELD_NAME_PATTERN.match(field_name):
+                # ``fullmatch`` (NOT ``match``): a ``$``-anchored ``.match`` accepts
+                # ``"description\n"`` (``$`` before a final newline), which would emit a
+                # schema-invalid ``"description\n_commitment"`` key and DEFEAT this
+                # fail-fast-at-the-call-site guard. The whole-string check rejects any
+                # trailing newline / control character.
+                if not isinstance(field_name, str) or not _COMMITMENT_FIELD_NAME_PATTERN.fullmatch(field_name):
                     raise ValueError(
                         f"incident_card: commitment field name {field_name!r} is invalid — a "
-                        "commitment field name must match the grammar '[a-z0-9_]+' (lowercase "
-                        "letters, digits, and underscores only) so the emitted "
+                        "commitment field name must match the grammar '^[a-z0-9_]+(?![\\s\\S])' "
+                        "(lowercase letters, digits, and underscores only, with no trailing "
+                        "newline) so the emitted "
                         f"'{field_name}_commitment' key satisfies the incident_card schema's "
-                        "'^[a-z0-9_]+_commitment$' pattern. Rename the field (e.g. 'rootCause' "
-                        "-> 'root_cause'); the name is the committed identity and is never "
-                        "normalized for you."
+                        "'^[a-z0-9_]+_commitment(?![\\s\\S])' pattern. Rename the field (e.g. "
+                        "'rootCause' -> 'root_cause'); the name is the committed identity and is "
+                        "never normalized for you."
                     )
                 payload[f"{field_name}_commitment"] = "sha256:" + sha256_hex(canonicalize(value))
 

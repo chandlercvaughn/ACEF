@@ -1864,8 +1864,13 @@ _REC_URN_SHAPE = re.compile(r"^urn:acef:rec:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-
 
 
 def _is_record_urn(ref: str) -> bool:
-    """True iff ``ref`` is a well-formed record URN (``urn:acef:rec:<uuid>``)."""
-    return bool(_REC_URN_SHAPE.match(ref))
+    """True iff ``ref`` is a well-formed record URN (``urn:acef:rec:<uuid>``).
+
+    ``fullmatch`` (NOT ``match``): a ``$``-anchored ``.match`` accepts ``urn:...<uuid>\\n``
+    (``$`` matches before a final newline); the whole-string check rejects a §5.8 edge
+    endpoint carrying a trailing newline.
+    """
+    return bool(_REC_URN_SHAPE.fullmatch(ref))
 
 
 def _report_public_incident_id_of(payload: dict[str, Any]) -> str | None:
