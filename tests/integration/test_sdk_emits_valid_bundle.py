@@ -126,3 +126,44 @@ def test_bare_acef_init_subject_name_is_not_a_placeholder(tmp_path: Path) -> Non
     assert "rename me" not in lowered and "placeholder" not in lowered, (
         f"bare init must not stamp placeholder compliance data; got {name!r}"
     )
+
+
+def test_init_default_subject_name_is_derived_lexically_not_via_symlink_resolution(tmp_path: Path) -> None:
+    """roborev on 6f60f8e: deriving the default subject name via ``target.resolve()`` FOLLOWS
+    symlinks — it derives the subject from the symlink TARGET's basename, not the
+    user-supplied bundle path. The derivation must be purely LEXICAL: ``init <link.acef>``
+    where ``link.acef`` -> ``real-target/`` must name the subject from ``link.acef``
+    (-> 'user-named'), NOT from the target dir ('real-target')."""
+    target_dir = tmp_path / "real-target"
+    target_dir.mkdir()
+    link = tmp_path / "user-named.acef"
+    link.symlink_to(target_dir, target_is_directory=True)
+
+    runner = CliRunner()
+    result = runner.invoke(cli, ["init", str(link)])
+    assert result.exit_code == 0, result.output
+    manifest = json.loads((link / "acef-manifest.json").read_text(encoding="utf-8"))
+    name = manifest["subjects"][0]["name"]
+    assert name == "user-named", f"subject must derive from the user-supplied path, got {name!r}"
+    assert name != "real-target", "must NOT derive the subject from the symlink target basename"
+
+
+def test_init_does_not_crash_on_a_symlink_loop_path(tmp_path: Path) -> None:
+    """roborev on 6f60f8e: ``Path.resolve()`` can raise ``RuntimeError`` on a symlink loop
+    (platform/CPython-version dependent), so deriving the subject name via
+    ``target.resolve()`` risked an UNCAUGHT traceback before the command's normal
+    write-error path. The lexical (``os.path.abspath``) derivation never traverses symlinks,
+    so a loop path degrades gracefully (a handled non-zero exit via the write-error path),
+    never an uncaught RuntimeError. Cross-version DEFENSIVE guard — on the CI interpreter
+    (CPython 3.14) ``resolve()`` happens not to raise here, so this is a forward-regression
+    guard, not the RED-first discriminator (that is the symlink-target test above)."""
+    a = tmp_path / "a.acef"
+    b = tmp_path / "b"
+    a.symlink_to(b)
+    b.symlink_to(a)  # loop: a -> b -> a
+
+    runner = CliRunner()
+    result = runner.invoke(cli, ["init", str(a)])
+    assert not isinstance(result.exception, RuntimeError), (
+        f"acef init must not crash with an uncaught RuntimeError on a symlink loop; got {result.exception!r}"
+    )

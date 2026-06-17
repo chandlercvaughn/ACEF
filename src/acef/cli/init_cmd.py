@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import click
@@ -79,7 +80,14 @@ def init_cmd(
     # on 6700802). Deriving from the bundle directory name (sans the `.acef` convention
     # suffix) yields a concrete, user-chosen identifier; only a nameless target (filesystem
     # root) falls back to a stable generic.
-    derived_name = target.resolve().name
+    #
+    # Derive the basename LEXICALLY via os.path.abspath, NOT Path.resolve() (roborev on
+    # 6f60f8e): resolve() follows symlinks — it raises RuntimeError on a symlink loop
+    # (an uncaught crash before the write-error path below) and would name the subject from
+    # a symlink TARGET's basename rather than the user-supplied path. abspath only
+    # normalizes against the CWD without traversing symlinks, so the loop never raises and
+    # the name comes from the path the user actually typed.
+    derived_name = os.path.basename(os.path.abspath(target))
     if derived_name.endswith(".acef"):
         derived_name = derived_name[: -len(".acef")]
     default_subject_name = derived_name or "acef-subject"
