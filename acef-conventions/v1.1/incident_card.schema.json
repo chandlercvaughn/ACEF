@@ -12,8 +12,8 @@
   "properties": {
     "public_incident_id": {
       "type": "string",
-      "pattern": "^AIIC-[A-Z0-9]{2,8}-[0-9]{4}-[0-9A-HJKMNP-TV-Z]{26,}$",
-      "description": "Assigner-scoped, non-enumerable, self-asserted federated handle of the form AIIC-{assigner}-{year}-{suffix}: assigner is 2-8 uppercase alphanumerics, year is 4 digits, and the suffix is >=26 Crockford-base32 chars [0-9A-HJKMNP-TV-Z] (>=128 bits of entropy). Lifecycle state (supersedes/merged_from/split_into) is held out-of-band in the §5.3 id-state document. The handle is self-asserted, NOT a forgery-resistant credential: offline-deterministic validation checks pattern + JWS self-consistency only and never attributes the id to the assigner domain. Carries id_grade (§5.3)."
+      "pattern": "^AIIC-[A-Z0-9]{2,8}-[0-9]{4}-[0-9A-HJKMNP-TV-Z]{26,}(?![\\s\\S])",
+      "description": "Assigner-scoped, non-enumerable, self-asserted federated handle of the form AIIC-{assigner}-{year}-{suffix}: assigner is 2-8 uppercase alphanumerics, year is 4 digits, and the suffix is >=26 Crockford-base32 chars [0-9A-HJKMNP-TV-Z] (>=128 bits of entropy). End-anchored with (?![\\s\\S]) (not $) so a trailing newline is rejected — $ matches before a final \\n and would admit a cross-reference-breaking AIIC-...\\n. Lifecycle state (supersedes/merged_from/split_into) is held out-of-band in the §5.3 id-state document. The handle is self-asserted, NOT a forgery-resistant credential: offline-deterministic validation checks pattern + JWS self-consistency only and never attributes the id to the assigner domain. Carries id_grade (§5.3)."
     },
     "id_grade": {
       "type": "string",
@@ -247,7 +247,7 @@
     }
   },
   "patternProperties": {
-    "^[a-z0-9_]+_commitment$": {
+    "^[a-z0-9_]+_commitment(?![\\s\\S])": {
       "type": "string",
       "pattern": "^sha256:[0-9a-f]{64}(?![\\s\\S])",
       "description": "Hash-committed projection of a non-public source field (§5.11), e.g. description_commitment, harm_distribution_basis_commitment. Value MUST equal 'sha256:' + hex(SHA-256(JCS(source_value))) at the source path whose §5.11 disposition is hash-committed (commitment-linkage; orphan/mismatch raises ACEF-086). End-anchored with (?![\\s\\S]) (not $) so a trailing newline is rejected — $ matches before a final \\n and would admit a hash-corrupting sha256:<64hex>\\n."

@@ -370,6 +370,25 @@ def test_incident_card_rejects_eu_trigger_code_as_harm_class(
             "trailing-newline *_commitment rejected",
             id="commitment-trailing-newline",
         ),
+        # Trailing-newline *_commitment KEY bypass (roborev Medium on e1ec70e): the
+        # patternProperties key `^[a-z0-9_]+_commitment$` matched `description_commitment\n`
+        # (the `$` matches before a final \n), so additionalProperties:false ACCEPTED the
+        # malformed key while check_publishability ignores it (key.endswith('_commitment')
+        # is False) — a hash-committed projection that slips the §5.11 commitment-linkage
+        # gate. The (?![\s\S]) key anchor rejects the newline-bearing key.
+        pytest.param(
+            lambda c: c.__setitem__("description_commitment\n", "sha256:" + "a" * 64),
+            "trailing-newline *_commitment KEY rejected by additionalProperties",
+            id="commitment-key-trailing-newline",
+        ),
+        # Trailing-newline public_incident_id bypass: the id pattern `^AIIC-…$` matched
+        # `AIIC-…\n` (the same $-before-\n weakness), admitting a newline-corrupted,
+        # cross-reference-breaking id. The (?![\s\S]) end anchor rejects it.
+        pytest.param(
+            lambda c: c.__setitem__("public_incident_id", f"AIIC-OPENAI-2026-{_VALID_SUFFIX}\n"),
+            "trailing-newline public_incident_id rejected",
+            id="public-incident-id-trailing-newline",
+        ),
     ],
 )
 def test_incident_card_rejects(

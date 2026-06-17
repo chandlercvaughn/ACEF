@@ -68,7 +68,13 @@ _DEATH_CLOCK_DAYS = 10
 _SHORT_CLOCK_DAYS = 2  # 3.49.b (critical-infrastructure) OR widespread
 _GENERAL_CLOCK_DAYS = 15
 
-_PUBLIC_INCIDENT_ID_PATTERN = re.compile(r"^AIIC-([A-Z0-9]{2,8})-([0-9]{4})-[0-9A-HJKMNP-TV-Z]{26,}$")
+# End-anchored with ``(?![\s\S])`` (NOT ``$``): ``$`` matches BEFORE a single trailing
+# ``\n``, so an otherwise-valid ``AIIC-…<suffix>\n`` id would MATCH and silently pass the
+# offline ACEF-083 id-trust gate, admitting a newline-corrupted, cross-reference-breaking
+# id (the same trailing-newline bypass class hardened on the dedupe/severity/commitment
+# patterns). The absolute end assertion rejects ANY trailing character and mirrors the
+# ``incident_card.schema.json`` / ``incident_report.card_source.schema.json`` id patterns.
+_PUBLIC_INCIDENT_ID_PATTERN = re.compile(r"^AIIC-([A-Z0-9]{2,8})-([0-9]{4})-[0-9A-HJKMNP-TV-Z]{26,}(?![\s\S])")
 
 # §5.4 — the mandatory Group-I prefix the band() projection keys on. The full
 # wire grammar lives in severity_vector.schema.json; band() needs only the
@@ -1772,9 +1778,12 @@ def check_dedupe_key_confidentiality(records: list[dict[str, Any]]) -> list[Vali
     non-public record MAY carry it.
 
     **Shape (both fields, both record types).** A PRESENT ``incident_dedupe_key``
-    MUST match ``^sha256:[0-9a-f]{64}$`` and a PRESENT ``incident_dedupe_key_hmac``
-    MUST match ``^hmac-sha256:[0-9a-f]{64}$`` (mirrored from
-    incident_card.schema.json). The ``incident_report`` schema's
+    MUST match ``^sha256:[0-9a-f]{64}(?![\\s\\S])`` and a PRESENT
+    ``incident_dedupe_key_hmac`` MUST match ``^hmac-sha256:[0-9a-f]{64}(?![\\s\\S])``
+    (mirrored from incident_card.schema.json). The absolute end assertion
+    ``(?![\\s\\S])`` (not ``$``) rejects a trailing newline, which ``$`` would admit
+    before a final newline — a hash-corrupting ``sha256:<64hex>`` plus a newline. The
+    ``incident_report`` schema's
     ``additionalProperties:true`` does not constrain these properties, so a
     malformed value on a report would otherwise pass unchecked; the rule enforces
     the shape for either record type (malformed -> ACEF-086).

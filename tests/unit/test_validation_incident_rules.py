@@ -1701,6 +1701,24 @@ class TestACEF083Offline:
         d083 = next(d for d in diags if d.code == "ACEF-083")
         assert "offline-deterministic" in d083.message
 
+    def test_trailing_newline_id_raises_083(self) -> None:
+        # Trailing-newline id-trust bypass (Finding-2 class): _PUBLIC_INCIDENT_ID_PATTERN
+        # was `$`-anchored, and `$` matches BEFORE a final \n — so an otherwise-valid id
+        # with a trailing newline (`AIIC-…<suffix>\n`) matched and SILENTLY PASSED the
+        # offline ACEF-083 id-trust gate, admitting a newline-corrupted, cross-reference-
+        # breaking id. The (?![\s\S]) absolute end anchor rejects ANY trailing character.
+        card = {
+            "record_id": "r",
+            "record_type": "incident_card",
+            "payload": {
+                "public_incident_id": f"{_VALID_ID}\n",
+                "id_grade": "self-asserted",
+                "harm_core": dict(_VALID_HARM_CORE),
+            },
+        }
+        diags = ir.check_public_incident_id_offline([card], manifest={})
+        assert "ACEF-083" in _codes(diags), "a trailing-newline public_incident_id must fail offline id-trust"
+
     def test_assigner_absent_from_bundled_snapshot_raises_083(self) -> None:
         # When a snapshot IS bundled, local membership is checked.
         card = {
