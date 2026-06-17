@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 
 from acef.cli.main import cli
@@ -97,3 +98,30 @@ def test_doctor_passes_a_clean_bundle(tmp_path: Path) -> None:
     pkg.export(out)
     result = CliRunner().invoke(cli, ["doctor", out])
     assert result.exit_code == 0, result.output
+
+
+def test_doctor_files_integrity_phase_diagnostic_under_its_real_category(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """roborev on 6700802: ACEF-051 (hash-domain canonicalization) is emitted by the
+    INTEGRITY phase (so it is excluded from the schema/reference dedup set), but
+    ``_check_integrity`` hardcoded the category as ``"integrity"`` — yet ACEF-051 is
+    registered ``format`` (not ``integrity``). Each integrity-phase diagnostic must be
+    filed under its OWN serialized category, so ACEF-051 surfaces as ``[format]`` not a
+    mislabeled ``[integrity]``. The common integrity codes (ACEF-010..014, genuinely
+    ``integrity``) are unaffected."""
+    from acef.cli import doctor_cmd
+    from acef.errors import ValidationDiagnostic
+
+    # ACEF-051's category auto-resolves to ErrorCategory.FORMAT in ValidationDiagnostic.
+    monkeypatch.setattr(
+        "acef.validation.integrity_checker.check_integrity",
+        lambda _bundle: [ValidationDiagnostic("ACEF-051", "non-NFC attachment path", path="/records/x.jsonl")],
+    )
+    issues: list[tuple[str, str, str]] = []
+    doctor_cmd._check_integrity(tmp_path, issues)
+
+    assert issues, "the synthetic ACEF-051 integrity diagnostic must be surfaced"
+    _severity, category, message = issues[0]
+    assert category == "format", f"ACEF-051 must be filed under its real category 'format', got {category!r}"
+    assert "ACEF-051" in message

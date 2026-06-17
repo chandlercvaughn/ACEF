@@ -72,11 +72,20 @@ def init_cmd(
     # The frozen manifest schema requires subjects[] minItems:1, so a VALID bundle
     # always has >=1 subject. `acef init` is documented as producing a minimal VALID
     # bundle, so it always scaffolds a subject — using --subject-name when given, else a
-    # clearly-placeholder default the user renames (a bare `init <path>` previously
-    # emitted zero subjects -> schema-invalid).
+    # default DERIVED from the target path (a bare `init <path>` previously emitted zero
+    # subjects -> schema-invalid). The default must NOT be literal placeholder text:
+    # stamping "Initial Subject (rename me)" as real subject metadata let a scaffold carry
+    # explicit placeholder compliance data through `acef validate` (exit 0) and CI (roborev
+    # on 6700802). Deriving from the bundle directory name (sans the `.acef` convention
+    # suffix) yields a concrete, user-chosen identifier; only a nameless target (filesystem
+    # root) falls back to a stable generic.
+    derived_name = target.resolve().name
+    if derived_name.endswith(".acef"):
+        derived_name = derived_name[: -len(".acef")]
+    default_subject_name = derived_name or "acef-subject"
     pkg.add_subject(
         subject_type=subject_type,
-        name=subject_name or "Initial Subject (rename me)",
+        name=subject_name or default_subject_name,
         risk_classification=risk_classification,
         modalities=list(modalities),
     )

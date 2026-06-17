@@ -272,7 +272,12 @@ def _check_integrity(bundle_path: Path, issues: list[tuple[str, str, str]]) -> N
     for diag in diagnostics:
         bucket = _SEVERITY_TO_BUCKET.get(diag.severity, "error")
         location = f" ({diag.path})" if diag.path else ""
-        issues.append((bucket, "integrity", f"{diag.code}: {diag.message}{location}"))
+        # File each diagnostic under its OWN registered category, not a hardcoded
+        # "integrity" (roborev on 6700802). The integrity phase emits genuinely-integrity
+        # codes (ACEF-010..014) AND ACEF-051 (hash-domain canonicalization), which is
+        # registered "format"; hardcoding "integrity" mislabeled it. ValidationDiagnostic
+        # resolves .category from the error registry, so [format] now renders correctly.
+        issues.append((bucket, diag.category.value, f"{diag.code}: {diag.message}{location}"))
 
 
 def _check_records(bundle_path: Path, issues: list[tuple[str, str, str]]) -> None:

@@ -106,3 +106,23 @@ def test_bare_acef_init_emits_a_validating_bundle(tmp_path: Path) -> None:
     assert validate.exit_code == 0, (
         f"bare `acef init` output must validate clean; got exit {validate.exit_code}\n{validate.output}"
     )
+
+
+def test_bare_acef_init_subject_name_is_not_a_placeholder(tmp_path: Path) -> None:
+    """roborev on 6700802: a bare ``acef init`` previously stamped the literal placeholder
+    'Initial Subject (rename me)' as real subject metadata, so a scaffold carrying explicit
+    placeholder compliance data could pass ``acef validate`` (exit 0) and be accepted by CI.
+    The default subject name is now DERIVED from the target path (the ``.acef`` bundle stem),
+    so no 'rename me'/'placeholder' text is ever written as compliance data while bare init
+    still emits a schema-valid bundle (subjects[] minItems:1)."""
+    runner = CliRunner()
+    out = str(tmp_path / "acme-incident.acef")
+    init = runner.invoke(cli, ["init", out])
+    assert init.exit_code == 0, init.output
+    manifest = json.loads((Path(out) / "acef-manifest.json").read_text(encoding="utf-8"))
+    name = manifest["subjects"][0]["name"]
+    assert name == "acme-incident", f"default subject name must derive from the path, got {name!r}"
+    lowered = name.lower()
+    assert "rename me" not in lowered and "placeholder" not in lowered, (
+        f"bare init must not stamp placeholder compliance data; got {name!r}"
+    )
