@@ -347,6 +347,12 @@ def test_incident_card_rejects_eu_trigger_code_as_harm_class(
             "missing required public_incident_id rejected",
             id="missing-public-incident-id",
         ),
+        pytest.param(
+            lambda c: c.pop("id_grade"),
+            "missing required id_grade rejected (§5.3 line 140: a card carrying a "
+            "public_incident_id but omitting id_grade MUST be rejected; the grade is not defaultable)",
+            id="missing-id_grade",
+        ),
         # Trailing-newline format bypass: the patterns anchored with `$` matched BEFORE
         # a final \n, admitting a hash-corrupting value. The (?![\s\S]) end anchor rejects it.
         pytest.param(
