@@ -2682,11 +2682,16 @@ class Package:
         if existing is None:
             self.add_profile(_ART73_PROFILE_ID, provisions=canonical)
             return
-        if not set(canonical) <= set(existing.applicable_provisions):
-            repaired = [p for p in existing.applicable_provisions if p != "art-73"]
-            for provision_id in canonical:
-                if provision_id not in repaired:
-                    repaired.append(provision_id)
+        # Compute the desired list unconditionally: drop the non-matching legacy "art-73"
+        # placeholder WHENEVER present (even if both canonical ids are already there —
+        # roborev on dbfd0f8), ensure both canonical ids are present, and preserve any
+        # other caller-declared ids in place. Assign only if it actually changed (no
+        # needless mutation / order churn when already correct).
+        repaired = [p for p in existing.applicable_provisions if p != "art-73"]
+        for provision_id in canonical:
+            if provision_id not in repaired:
+                repaired.append(provision_id)
+        if repaired != existing.applicable_provisions:
             existing.applicable_provisions = repaired
 
     @staticmethod

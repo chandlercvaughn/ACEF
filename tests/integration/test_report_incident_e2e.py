@@ -258,6 +258,30 @@ class TestReportIncidentEndToEnd:
             f"a repaired stale profile must evaluate both Art.73 provisions; got {sorted(evaluated)}"
         )
 
+    def test_art73_repair_drops_placeholder_even_when_canonical_present(self, tmp_path: Path) -> None:
+        """roborev on dbfd0f8: the repair must drop the legacy ``art-73`` placeholder even
+        when BOTH canonical provisions are ALREADY present — the prior guard only fired when
+        a canonical id was MISSING, so ``["article-3-49","article-73","art-73"]`` exported
+        the stale non-matching id verbatim."""
+        _, key = _write_ec_key(tmp_path)
+        pkg = _new_pkg()
+        pkg.add_profile("eu-ai-act-art73-2026", provisions=["article-3-49", "article-73", "art-73"])
+        pkg.add_subject("ai_system", name="Sys", risk_classification="high-risk", modalities=["text"])
+        minted = mint_incident_id("openai.com", key, year=2026)
+        pkg.report_incident(
+            public_incident_id=minted.public_incident_id,
+            harm_core=dict(_HARM_CORE),
+            incident_type="operational_failure",
+            description="report on a package whose Art.73 profile has both real ids plus the stale placeholder",
+            awareness_date="2026-08-01T00:00:00Z",
+            eu_ai_act_facts={"serious_incident_triggers": ["3.49.a"], "widespread": False, "death_involved": True},
+        )
+        prof = next(p for p in pkg.profiles if p.profile_id == "eu-ai-act-art73-2026")
+        assert "art-73" not in prof.applicable_provisions, (
+            f"stale placeholder must be dropped even when canonical ids are present; got {prof.applicable_provisions}"
+        )
+        assert {"article-3-49", "article-73"} <= set(prof.applicable_provisions), prof.applicable_provisions
+
     def test_public_card_with_special_category_basis_validates_clean(self, tmp_path: Path) -> None:
         # A public card projecting a special-category field MUST carry a satisfying
         # declared_publication_basis (§5.11) — the builder threads it through and the
