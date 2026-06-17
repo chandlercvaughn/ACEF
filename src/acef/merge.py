@@ -380,6 +380,55 @@ def _timestamp_is_newer_or_equal(new_ts: str, old_ts: str) -> bool:
         )
 
 
+def _keep_latest_subject_replaces(new_ts: str, old_ts: str, new_id: str, old_id: str) -> bool:
+    """Deterministic ``keep_latest`` decision for a same-named subject conflict (F8).
+
+    Replace the incumbent iff the new package is STRICTLY newer, OR — on a timestamp TIE —
+    the new ``subject_id`` sorts lexicographically BEFORE the incumbent's. The tie-break is
+    input-order-INDEPENDENT: the bare ``new_dt >= old_dt`` favored whichever package happened
+    to be processed LATER, so ``merge([A, B])`` and ``merge([B, A])`` kept different subjects
+    on equal timestamps, contradicting the module's byte-identical-determinism guarantee.
+    """
+    new_newer_or_eq = _timestamp_is_newer_or_equal(new_ts, old_ts)
+    old_newer_or_eq = _timestamp_is_newer_or_equal(old_ts, new_ts)
+    if new_newer_or_eq and not old_newer_or_eq:
+        return True  # new strictly newer
+    if old_newer_or_eq and not new_newer_or_eq:
+        return False  # old strictly newer
+    return new_id < old_id  # timestamp tie -> stable, order-independent tie-break
+
+
+def _resolve_subject_remap(remap: dict[str, str], subject_id: str) -> str:
+    """Follow a dropped->winner subject_id ``remap`` transitively to the FINAL winner (F8).
+
+    ``keep_latest`` can drop A for B and later B for C, so a record's ref to A must resolve
+    A->B->C. The chain is acyclic (a dropped subject_id never re-wins), so following it
+    terminates; the ``visited`` guard is a defensive backstop against a malformed cycle.
+    """
+    visited: set[str] = set()
+    while subject_id in remap and subject_id not in visited:
+        visited.add(subject_id)
+        subject_id = remap[subject_id]
+    return subject_id
+
+
+def _rewrite_record_subject_refs(record: RecordEnvelope, remap: dict[str, str]) -> RecordEnvelope:
+    """Rewrite a record's ``entity_refs.subject_refs`` through a dropped->winner remap (F8).
+
+    Mirrors :func:`_rewrite_record_attachment_refs`: a record that referenced a subject
+    DROPPED by ``keep_latest`` is repointed to the surviving subject, so the merged bundle
+    carries no dangling subject_ref. Returns the same record object when nothing changed.
+    """
+    if not remap or record.entity_refs is None or not record.entity_refs.subject_refs:
+        return record
+    new_refs = [_resolve_subject_remap(remap, ref) for ref in record.entity_refs.subject_refs]
+    if new_refs == record.entity_refs.subject_refs:
+        return record
+    rewritten = record.model_copy(deep=True)
+    rewritten.entity_refs.subject_refs = new_refs
+    return rewritten
+
+
 def _normalize_explicit_package_id(package_id: str) -> str:
     """Validate + canonicalize a caller-supplied merged ``package_id``.
 
@@ -604,6 +653,11 @@ def merge_packages(
     # still ends up pointing at the relocated bytes (roborev HIGH).
     relocations: dict[int, dict[str, str]] = {}
 
+    # keep_latest can drop a same-named subject in favor of a newer one; records that
+    # referenced the DROPPED subject_id are remapped through this dropped->winner map so the
+    # merged bundle has no dangling subject_ref (F8). Resolved transitively at record assembly.
+    subject_id_remap: dict[str, str] = {}
+
     # Track what we've seen for conflict detection
     seen_subjects: dict[str, tuple[str, Any]] = {}  # name+type -> (pkg_id, subject)
     seen_entities: dict[str, str] = {}  # entity_id -> pkg_id
@@ -628,11 +682,16 @@ def merge_packages(
                 if conflict_strategy == "fail":
                     raise ACEFMergeError(f"Conflict: duplicate subject {key!r}", code="ACEF-060")
                 elif conflict_strategy == "keep_latest":
-                    old_pkg_id = seen_subjects[key][0]
+                    old_pkg_id, old_subject = seen_subjects[key]
                     old_pkg_ts = pkg_timestamps.get(old_pkg_id, "")
                     new_pkg_ts = pkg.metadata.timestamp
-                    if _timestamp_is_newer_or_equal(new_pkg_ts, old_pkg_ts):
-                        # New package is same age or newer — replace
+                    if _keep_latest_subject_replaces(
+                        new_pkg_ts, old_pkg_ts, subject.subject_id, old_subject.subject_id
+                    ):
+                        # NEW subject wins — drop OLD. Records that referenced the dropped
+                        # OLD subject_id remap to the surviving NEW one (no dangling ref, F8).
+                        if old_subject.subject_id != subject.subject_id:
+                            subject_id_remap[old_subject.subject_id] = subject.subject_id
                         merged_subjects = [
                             s
                             for s in merged_subjects
@@ -640,7 +699,11 @@ def merge_packages(
                         ]
                         seen_subjects[key] = (pkg_id, subject)
                         merged_subjects.append(subject.model_copy(deep=True))
-                    # else: old is newer, keep it (already in merged_subjects)
+                    else:
+                        # OLD subject wins — drop NEW. Records that referenced the dropped
+                        # NEW subject_id remap to the surviving OLD one (no dangling ref, F8).
+                        if old_subject.subject_id != subject.subject_id:
+                            subject_id_remap[subject.subject_id] = old_subject.subject_id
                 elif conflict_strategy == "keep_all":
                     merged_subjects.append(subject.model_copy(deep=True))
             else:
@@ -824,8 +887,15 @@ def merge_packages(
     # owning package INDEX so duplicate package_ids never cross-rewrite one
     # package's records to another package's relocated bytes (roborev MEDIUM).
     # Records from packages with no relocations pass through unchanged.
+    # Also rewrite subject_refs through the keep_latest dropped->winner remap (F8) so no
+    # record points at a subject that conflict resolution removed. Composed with the
+    # attachment-ref rewrite; both pass records from packages with nothing to remap through
+    # unchanged (no needless copy).
     resolved_records = [
-        _rewrite_record_attachment_refs(record, relocations.get(owner_pkg_index, {}))
+        _rewrite_record_subject_refs(
+            _rewrite_record_attachment_refs(record, relocations.get(owner_pkg_index, {})),
+            subject_id_remap,
+        )
         for owner_pkg_index, record in merged_records
     ]
 

@@ -28,6 +28,47 @@ def _make_package(
     return pkg
 
 
+class TestKeepLatestSubjectIntegrity:
+    """F8 (audit high): ``keep_latest`` subject conflict resolution.
+
+    Two defects: (1) dropping a same-named subject left records that referenced the
+    DROPPED subject_id dangling (no remap to the winner); (2) the equal-timestamp tie-break
+    used ``>=`` which favors whichever package was processed LATER, making the kept subject
+    input-order-dependent and contradicting the module's byte-identical-determinism claim.
+    """
+
+    def _pkg(self, subject_name: str, timestamp: str, payload: dict) -> tuple[Package, str]:
+        pkg = Package(producer={"name": "tool", "version": "1.0"})
+        sub = pkg.add_subject("ai_system", name=subject_name)
+        pkg.record("risk_register", payload=payload, entity_refs={"subject_refs": [sub.id]})
+        pkg.metadata.timestamp = timestamp
+        return pkg, sub.id
+
+    def test_keep_latest_remaps_dangling_subject_refs(self) -> None:
+        # pkg_b is strictly NEWER -> its subject wins; pkg_a's subject is dropped. The
+        # surviving record from pkg_a that referenced subject_a MUST be remapped to the
+        # winner subject_b — never left dangling.
+        pkg_a, id_a = self._pkg("Shared System", "2026-01-01T00:00:00Z", {"a": 1})
+        pkg_b, id_b = self._pkg("Shared System", "2026-06-01T00:00:00Z", {"b": 2})
+        assert id_a != id_b
+        result = merge_packages([pkg_a, pkg_b], conflict_strategy="keep_latest")
+        kept = {s.id for s in result.package.subjects}
+        assert kept == {id_b}, kept
+        all_refs = [ref for r in result.package.records for ref in r.entity_refs.subject_refs]
+        assert id_a not in all_refs, f"record left a dangling ref to the dropped subject {id_a}: {all_refs}"
+        assert all(ref in kept for ref in all_refs), f"every subject_ref must resolve to a kept subject: {all_refs}"
+
+    def test_keep_latest_equal_timestamp_tiebreak_is_order_independent(self) -> None:
+        ts = "2026-03-15T00:00:00Z"
+        pkg_a, _id_a = self._pkg("Shared System", ts, {"a": 1})
+        pkg_b, _id_b = self._pkg("Shared System", ts, {"b": 2})
+        # merge_packages deep-copies inputs (does not mutate them), so the SAME pkg objects
+        # can be merged in both orders — the only variable is input order.
+        forward = {s.id for s in merge_packages([pkg_a, pkg_b], conflict_strategy="keep_latest").package.subjects}
+        reverse = {s.id for s in merge_packages([pkg_b, pkg_a], conflict_strategy="keep_latest").package.subjects}
+        assert forward == reverse, f"equal-timestamp tie-break is input-order-dependent: fwd={forward} rev={reverse}"
+
+
 class TestMergeBasic:
     """Test basic merge operations."""
 
