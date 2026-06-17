@@ -1321,35 +1321,42 @@ def _resolve_json_pointer(doc: dict[str, Any], pointer: str) -> tuple[bool, Any]
 # §5.11 source-to-card projection (disposition-honored check, ACEF-086)
 # ---------------------------------------------------------------------------
 
-# FROZEN, INSTALL-SAFE set of ``incident_card`` ROOT fields that are PROJECTED from
-# the source ``incident_report`` (RFC-0002 §5.11). This module lives under
-# ``src/acef`` and is ALWAYS packaged, so the disposition-honored ACEF-086 check
-# below resolves every projection edge with NO disk read — fail-CLOSED even in a
-# pip-installed deployment where ``acef-conventions/v1.1/`` is absent.
+# FROZEN, INSTALL-SAFE projectable-field sets for the disposition-honored ACEF-086
+# check (RFC-0002 §5.11). This module lives under ``src/acef`` and is ALWAYS packaged,
+# so the check resolves every projection edge with NO disk read — fail-CLOSED even in
+# a pip-installed deployment where ``acef-conventions/v1.1/`` is absent.
 #
-# A publishability_map source JSON Pointer PROJECTS to a card-root field ``<X>``
-# iff the pointer is exactly ``/<X>`` (report payload root) or ``/card_source/<X>``
-# (the overlay) AND ``<X>`` is one of these projectable card-root fields. A
-# deeper-nested pointer (``/impact_assessment/notes``,
-# ``/card_source/coordinated_disclosure/foo``) names a SUB-field, not a card-root
-# field, and projects to nothing — see :func:`_pointer_to_card_root_field`.
+# A publishability_map source JSON Pointer PROJECTS to a card-root field ``<X>`` only
+# from that field's ONE authoritative origin (see :func:`_pointer_to_card_root_field`):
 #
-# This is the FULL set of card-root EVIDENCE fields — every ``incident_card`` named
-# root property EXCEPT the three CARD-AUTHORED / COMPUTED meta fields that are NOT
-# projected from a disposed source field: ``declared_publication_basis`` (the
-# basis justification, authored on the card; a published special-category card MUST
-# carry it, so flagging it would be a false positive), and the two §5.5 dedupe keys
-# ``incident_dedupe_key`` / ``incident_dedupe_key_hmac`` (computed on the card).
-# Covering the FULL set (not just the card_source∩incident_card overlap) closes the
+# - a CARD_SOURCE-OWNED field (``<X>`` in ``_CARD_SOURCE_PROJECTED_FIELDS``, i.e. an
+#   ``incident_card`` root property that is ALSO an ``incident_report.card_source``
+#   property) projects ONLY from ``/card_source/<X>``; its stray report-root mirror
+#   ``/<X>`` is IGNORED (no false positive), because the card's public value comes from
+#   card_source, not the report root.
+# - a REPORT-ROOT EVIDENCE field (``<X>`` in ``_REPORT_ROOT_PROJECTED_FIELDS``) projects
+#   ONLY from the report payload root ``/<X>``.
+#
+# A deeper-nested pointer (``/impact_assessment/notes``,
+# ``/card_source/coordinated_disclosure/foo``) names a SUB-field and projects to nothing.
+#
+# The two sets together are the FULL set of card-root EVIDENCE fields — every
+# ``incident_card`` named root property EXCEPT the three CARD-AUTHORED / COMPUTED meta
+# fields that are NOT projected from a disposed source field (``_CARD_AUTHORED_FIELDS``:
+# ``declared_publication_basis`` — a published special-category card MUST carry it, so
+# flagging it would be a false positive — and the two §5.5 dedupe keys
+# ``incident_dedupe_key`` / ``incident_dedupe_key_hmac``, computed on the card).
+# Covering both origins (not just the card_source∩incident_card overlap) closes the
 # audit gap where a card-root-but-not-card_source field — ``harm_distribution_basis``
 # (GDPR Art.9), ``transferability``, ``sector_of_deployment``, ``autonomy_level``,
-# ``value_chain_role``, ``taxonomy_crosswalk`` — disposed ``regulator-only``/
-# ``omitted`` yet PUBLISHED on the card was silently accepted (the basis-gate at
-# §5.11 line 333 is a SEPARATE additional check, not a substitute).
+# ``value_chain_role``, ``taxonomy_crosswalk`` — disposed ``regulator-only``/``omitted``
+# yet PUBLISHED on the card was silently accepted (the basis-gate at §5.11 line 333 is a
+# SEPARATE additional check, not a substitute).
 #
-# DRIFT GUARD: ``tests/unit/test_validation_incident_rules.py`` re-derives this set
-# from the v1.1 ``incident_card`` schema in a checkout and asserts equality, so any
-# additive card-root field change is caught in CI while runtime NEVER reads schema.
+# DRIFT GUARD: ``tests/unit/test_validation_incident_rules.py`` re-derives BOTH sets
+# from the v1.1 ``incident_card`` + ``card_source`` schemas in a checkout and asserts
+# equality, so any additive card-root field change is caught in CI while runtime NEVER
+# reads schema.
 _CARD_AUTHORED_FIELDS: frozenset[str] = frozenset(
     {"declared_publication_basis", "incident_dedupe_key", "incident_dedupe_key_hmac"}
 )
@@ -1557,13 +1564,15 @@ def check_publishability(
         # false-positive. ``card_payload`` here is the incident_card's payload.
         #
         # SCOPE — EXPLICIT source-to-card projection via :func:`_pointer_to_card_root_field`
-        # (full pointer, never a leaf token). A pointer projects to a card-root field iff
-        # it is ``/<X>`` or ``/card_source/<X>`` for ``<X>`` in the FULL projectable
-        # card-root EVIDENCE set ``_INCIDENT_CARD_ROOT_FIELDS`` — covering NOT just the
-        # card_source∩incident_card overlap but also card-root-but-not-card_source fields
-        # (harm_distribution_basis, transferability, sector_of_deployment, autonomy_level,
-        # value_chain_role, taxonomy_crosswalk). A deeper-nested or non-card-root pointer
-        # projects to nothing and is IGNORED — no leaf-name inference, no false-positive.
+        # (full pointer, never a leaf token), resolving each field from its ONE
+        # authoritative origin: a card_source-OWNED field (``_CARD_SOURCE_PROJECTED_FIELDS``)
+        # ONLY from ``/card_source/<X>``, a report-root EVIDENCE field
+        # (``_REPORT_ROOT_PROJECTED_FIELDS``) ONLY from ``/<X>``. Together these cover NOT
+        # just the card_source∩incident_card overlap but also card-root-but-not-card_source
+        # fields (harm_distribution_basis, transferability, sector_of_deployment,
+        # autonomy_level, value_chain_role, taxonomy_crosswalk). A deeper-nested or
+        # wrong-origin pointer projects to nothing and is IGNORED — no leaf-name inference,
+        # no false-positive on a stray report-root mirror of a card_source-owned field.
         # Iterate in canonical sorted order so diagnostics are order-independent.
         if rtype == "incident_card":
             for pointer, disposition in sorted(pub_map.items(), key=lambda kv: str(kv[0])):
