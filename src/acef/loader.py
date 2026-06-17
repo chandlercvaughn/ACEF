@@ -400,9 +400,21 @@ def _parse_jsonl(path: Path) -> list[dict[str, Any]]:
             records.
     """
     records: list[dict[str, Any]] = []
-    with open(path, encoding="utf-8") as f:
-        for line_num, line in enumerate(f, 1):
-            line = line.strip()
+    # Read in BINARY and decode each line explicitly (F9). Text-mode iteration decodes
+    # LAZILY, so non-UTF-8 record bytes raised a RAW UnicodeDecodeError DURING the `for`
+    # iteration — outside the json try below — leaking out of the public load() API. A
+    # line-feed (0x0A) is never part of a multi-byte UTF-8 sequence, so splitting on it
+    # before decoding never severs a character. A decode failure now maps to the structured
+    # ACEF-050 (matching this module's manifest read + the validation engine), with the line no.
+    with open(path, "rb") as f:
+        for line_num, raw_line in enumerate(f, 1):
+            try:
+                line = raw_line.decode("utf-8").strip()
+            except UnicodeDecodeError as e:
+                raise ACEFFormatError(
+                    f"Record file {path}:{line_num} is not valid UTF-8: {e}",
+                    code="ACEF-050",
+                ) from e
             if not line:
                 continue
             try:
