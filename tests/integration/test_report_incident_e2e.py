@@ -158,6 +158,71 @@ class TestReportIncidentEndToEnd:
         errors = _error_diags(assessment)
         assert errors == [], f"unexpected ERROR/FATAL diagnostics: {errors}"
 
+    def test_art73_profile_produces_a_real_satisfied_rollup_not_an_empty_one(self, tmp_path: Path) -> None:
+        """Task #35: the SDK declared the eu-ai-act-art73-2026 profile with the placeholder
+        ``provisions=["art-73"]`` — an id that matches NEITHER real provision (article-3-49,
+        article-73), so the generic engine evaluated ZERO provisions and an Art.73 filing
+        produced an EMPTY provision_summary (dead config + dead template rules). The profile
+        must bind its REAL provisions so both roll up — and to SATISFIED (the binding
+        shortest-clock / dual-source enforcement is the delegated ACEF-084; the generic
+        article-73 ``notification_timeline`` rule is advisory because it is a POST-FILING
+        record the builder cannot populate without fabricating a date). Covers BOTH the
+        confidential REPORT-ONLY path and the public CARD-ONLY path, evaluated past the
+        2026-08-02 effective date so the provisions are in force."""
+        from acef.models.enums import ProvisionOutcome
+
+        instant = "2026-09-01T00:00:00Z"
+        art73_ids = {"article-3-49", "article-73"}
+
+        # --- confidential REPORT-ONLY ---
+        key_path, key = _write_ec_key(tmp_path)
+        report_pkg = _new_pkg()
+        minted_r = mint_incident_id("openai.com", key, year=2026)
+        report_pkg.add_subject("ai_system", name="Sys", risk_classification="high-risk", modalities=["text"])
+        report_pkg.report_incident(
+            public_incident_id=minted_r.public_incident_id,
+            harm_core=dict(_HARM_CORE),
+            incident_type="operational_failure",
+            description="Confidential Art.73 serious-incident report.",
+            awareness_date="2026-08-01T00:00:00Z",
+            eu_ai_act_facts={"serious_incident_triggers": ["3.49.a"], "widespread": False, "death_involved": True},
+        )
+        report_dir = tmp_path / "report-only.acef"
+        report_pkg.export(str(report_dir))
+        ra = validate_bundle(report_dir, profiles=["eu-ai-act-art73-2026"], evaluation_instant=instant)
+        r_outcomes = {ps.provision_id: ps.provision_outcome for ps in ra.provision_summary}
+        assert art73_ids <= set(r_outcomes), (
+            f"report-only: both Art.73 provisions must be EVALUATED (not an empty rollup); got {sorted(r_outcomes)}"
+        )
+        # Binding obligations met (no fail-severity rule trips; ACEF-084 clean) -> NOT
+        # NOT_SATISFIED and NOT SKIPPED (effective at this instant). PARTIALLY_SATISFIED is
+        # the honest outcome: two advisory warnings legitimately trip on the confidential
+        # pre-filing path (no optional public incident_card; no post-filing notification_timeline).
+        _ok = {ProvisionOutcome.SATISFIED, ProvisionOutcome.PARTIALLY_SATISFIED}
+        assert r_outcomes["article-73"] in _ok, r_outcomes["article-73"]
+        assert r_outcomes["article-3-49"] in _ok, r_outcomes["article-3-49"]
+
+        # --- public CARD-ONLY ---
+        card_pkg = _new_pkg()
+        minted_c = mint_incident_id("openai.com", key, year=2026)
+        card_pkg.add_subject("ai_system", name="Sys", risk_classification="high-risk", modalities=["text"])
+        card_pkg.incident_card(
+            public_incident_id=minted_c.public_incident_id,
+            harm_core=dict(_HARM_CORE),
+            severity_vector="ACEF-SEV:1.0/HT:P/HG:H/RV:A/SC:U/BR:I",
+            awareness_date="2026-08-01T00:00:00Z",
+            eu_ai_act_facts={"serious_incident_triggers": ["3.49.a"], "widespread": False, "death_involved": False},
+        )
+        card_dir = tmp_path / "card-only.acef"
+        card_pkg.export(str(card_dir))
+        ca = validate_bundle(card_dir, profiles=["eu-ai-act-art73-2026"], evaluation_instant=instant)
+        c_outcomes = {ps.provision_id: ps.provision_outcome for ps in ca.provision_summary}
+        assert art73_ids <= set(c_outcomes), (
+            f"card-only: both Art.73 provisions must be EVALUATED (not an empty rollup); got {sorted(c_outcomes)}"
+        )
+        assert c_outcomes["article-73"] in _ok, c_outcomes["article-73"]
+        assert c_outcomes["article-3-49"] in _ok, c_outcomes["article-3-49"]
+
     def test_public_card_with_special_category_basis_validates_clean(self, tmp_path: Path) -> None:
         # A public card projecting a special-category field MUST carry a satisfying
         # declared_publication_basis (§5.11) — the builder threads it through and the

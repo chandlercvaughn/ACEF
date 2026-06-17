@@ -381,10 +381,13 @@ class TestRetainedRuleEvaluation:
     """
 
     def _failed_fail_rule_ids(self, template: Template, records: list[RecordEnvelope]) -> list[str]:
+        return self._failed_rule_ids(template, records, "fail")
+
+    def _failed_rule_ids(self, template: Template, records: list[RecordEnvelope], severity: str) -> list[str]:
         failed: list[str] = []
         for prov in template.provisions:
             for rule in prov.evaluation:
-                if rule.severity != "fail":
+                if rule.severity != severity:
                     continue
                 op = OPERATOR_REGISTRY[rule.rule]
                 passed, _ = op(rule.params, records)
@@ -392,9 +395,14 @@ class TestRetainedRuleEvaluation:
                     failed.append(rule.rule_id)
         return failed
 
-    def test_incident_report_without_notification_timeline_fails(self, template: Template) -> None:
-        # The retained per-record conditional: an incident_report MUST carry
-        # notification_timeline[]. A report missing it MUST fail a fail-severity rule.
+    def test_incident_report_without_notification_timeline_is_advisory_not_fail(self, template: Template) -> None:
+        # Task #35: notification_timeline[] is a POST-FILING record (the
+        # awareness->report->authority-notification chain) an exporter cannot populate
+        # without fabricating a notification_date, so its presence check is ADVISORY
+        # (warning), NOT fail-blocking — the BINDING Art.73 obligation is the delegated
+        # ACEF-084 shortest-clock/dual-source check. A report missing notification_timeline
+        # therefore trips NO fail-severity rule (it MUST NOT block the confidential §5.7
+        # path), but DOES still trip the notification_timeline WARNING.
         report = _make_record(
             "incident_report",
             {
@@ -404,7 +412,12 @@ class TestRetainedRuleEvaluation:
                 "card_source": {"public_incident_id": _VALID_AIIC_ID, "id_grade": "self-asserted"},
             },
         )
-        assert self._failed_fail_rule_ids(template, [report]) != []
+        assert self._failed_fail_rule_ids(template, [report]) == [], (
+            "a missing notification_timeline must NOT trip a fail-severity rule (it is advisory)"
+        )
+        assert "art73-notification-timeline-present" in self._failed_rule_ids(template, [report], "warning"), (
+            "a missing notification_timeline must still trip the advisory WARNING rule"
+        )
 
     def test_confidential_report_with_notification_timeline_passes_retained_rules(self, template: Template) -> None:
         # A complete confidential report (with notification_timeline) satisfies the

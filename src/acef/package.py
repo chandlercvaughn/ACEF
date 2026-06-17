@@ -2654,9 +2654,23 @@ class Package:
             self._versioning.core_version = "1.1.0"
 
     def _declare_art73_profile(self) -> None:
-        """Declare the eu-ai-act-art73-2026 profile once (idempotent)."""
+        """Declare the eu-ai-act-art73-2026 profile once (idempotent).
+
+        ``applicable_provisions`` MUST name the template's REAL provision ids —
+        ``article-3-49`` (the serious-incident definition/triggers) and ``article-73``
+        (the reporting obligation). The earlier placeholder ``["art-73"]`` matched
+        NEITHER (the engine selects by exact provision_id or ``<id>.``/``<id>-`` prefix),
+        so the generic engine evaluated ZERO provisions and an Art.73 filing produced an
+        EMPTY provision rollup while the template's authored rules sat dead. Binding the
+        real ids makes both provisions roll up (to SATISFIED — their fail-blocking
+        enforcement is the delegated ACEF-084 shortest-clock/dual-source check; the
+        generic rules are definitional/advisory). The profile_id alone (independent of
+        these provisions) is what threads the delegated ACEF-08x checks via
+        ``run_incident_rules``'s manifest+requested union, so that enforcement is
+        unaffected.
+        """
         if not any(p.profile_id == _ART73_PROFILE_ID for p in self._profiles):
-            self.add_profile(_ART73_PROFILE_ID, provisions=["art-73"])
+            self.add_profile(_ART73_PROFILE_ID, provisions=["article-3-49", "article-73"])
 
     @staticmethod
     def _sorted_canonical(seq: Iterable[Any], *, numeric: bool = False) -> list[Any]:
