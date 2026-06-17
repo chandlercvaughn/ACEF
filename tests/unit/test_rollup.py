@@ -137,35 +137,37 @@ class TestProvisionRollup:
         summary = compute_provision_outcome("prov-1", "test-profile", results, [])
         assert summary.provision_outcome == ProvisionOutcome.NOT_SATISFIED
 
-    def test_info_failed_not_satisfied(self):
-        """Step 6 is LITERAL: an info-severity rule with outcome=FAILED means NOT
-        all rules passed, so the provision MUST NOT roll up to SATISFIED.
+    def test_info_failed_does_not_block_satisfied(self):
+        """F7: a FAILED info-severity rule must NOT demote a provision to NOT_ASSESSED.
 
-        Spec §3.7 step 6: "If ALL rules have outcome: passed -> satisfied". An
-        info-failed rule fails NEITHER step 1 (fail-severity) NOR step 5
-        (warning-severity), so under the old impl none of steps 1-5 matched and
-        step 6 fired SATISFIED even though one rule had outcome=FAILED. That
-        deviates from the literal MUST (assessment-rollup-1). The spec defines no
-        info-driven precedence slot, so the residual info-failed mix falls
-        through to the documented fallback NOT_ASSESSED (step 7's outcome), NOT
-        SATISFIED.
+        info severity is INFORMATIONAL (spec §3.5 line 1167; the taxonomy defines info as
+        "informational observations"), so an info rule is non-gating. The spec's
+        provision-outcome PRECEDENCE LIST (§3.7 / conformance checklist line 1704:
+        "not-satisfied > error > skipped > gap-acknowledged > partially-satisfied >
+        satisfied") shows NOT_ASSESSED is reserved for step 2 (error) and step 7 (no rules)
+        ONLY — it is NOT a valid outcome for a provision whose rules were evaluated with no
+        error. The earlier literal reading of step 6 (assessment-rollup-1) mis-resolved this
+        gap by falling info-failed through to NOT_ASSESSED, which falsely reports a
+        FULLY-ASSESSED provision as un-assessable. With all fail- and warning-severity rules
+        PASSED, the provision is SATISFIED; the info failure is recorded per-rule but does
+        not gate the rollup.
         """
         results = [
             _rule_result(RuleOutcome.PASSED, RuleSeverity.FAIL, rule_id="r1"),
             _rule_result(RuleOutcome.FAILED, RuleSeverity.INFO, rule_id="r2"),
         ]
         summary = compute_provision_outcome("prov-1", "test-profile", results, [])
-        assert summary.provision_outcome == ProvisionOutcome.NOT_ASSESSED
+        assert summary.provision_outcome == ProvisionOutcome.SATISFIED
         # The info-failed rule is neither a fail nor a warning tally.
         assert summary.fail_count == 0
         assert summary.warning_count == 0
 
-    def test_info_failed_mixed_with_passed_and_skipped_not_satisfied(self):
-        """A passed + skipped + info-failed mix is still NOT SATISFIED.
+    def test_info_failed_mixed_with_passed_and_skipped_is_satisfied(self):
+        """A passed + skipped + info-failed mix is SATISFIED (F7).
 
-        Skipped rules are not-applicable, but a FAILED info rule means not every
-        evaluated rule passed, so SATISFIED is wrong. Falls through to the
-        documented NOT_ASSESSED fallback.
+        Skipped rules are not-applicable; the only "failed" rule is an info (non-gating)
+        rule. All fail/warning requirements passed, so the provision is SATISFIED — not the
+        spec-disallowed NOT_ASSESSED.
         """
         results = [
             _rule_result(RuleOutcome.PASSED, RuleSeverity.FAIL, rule_id="r1"),
@@ -173,7 +175,7 @@ class TestProvisionRollup:
             _rule_result(RuleOutcome.FAILED, RuleSeverity.INFO, rule_id="r3"),
         ]
         summary = compute_provision_outcome("prov-1", "test-profile", results, [])
-        assert summary.provision_outcome == ProvisionOutcome.NOT_ASSESSED
+        assert summary.provision_outcome == ProvisionOutcome.SATISFIED
 
     def test_info_passed_still_satisfied(self):
         """An info rule that PASSED does not block SATISFIED — only a FAILED info
