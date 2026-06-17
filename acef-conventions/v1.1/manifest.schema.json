@@ -92,9 +92,9 @@
     },
     "namespaces": {
       "type": "object",
-      "description": "X6: Vendor-extension namespace container per spec §6.4. Each top-level key MUST be x-vendor-prefixed (matching pattern '^x-[a-z0-9-]+/?$'). Values are arbitrary objects whose contents are owned by the namespace registrant. Registered namespaces (e.g., 'x-freddy/voice-rubric-emission') may be subject to validator lint hooks via the namespace_lints.py registry; unregistered namespaces are permitted but receive no lint coverage (graceful degradation).",
+      "description": "X6: Vendor-extension namespace container per spec §6.4. Each top-level key MUST be x-vendor-prefixed (matching pattern '^x-[a-z0-9-]+/?(?![\\s\\S])', end-anchored with (?![\\s\\S]) not $ so a trailing newline is rejected — $ matches before a final \\n and would admit an 'x-vendor\\n' key past additionalProperties: false). Values are arbitrary objects whose contents are owned by the namespace registrant. Registered namespaces (e.g., 'x-freddy/voice-rubric-emission') may be subject to validator lint hooks via the namespace_lints.py registry; unregistered namespaces are permitted but receive no lint coverage (graceful degradation).",
       "patternProperties": {
-        "^x-[a-z0-9-]+/?$": {
+        "^x-[a-z0-9-]+/?(?![\\s\\S])": {
           "type": "object",
           "additionalProperties": true
         }

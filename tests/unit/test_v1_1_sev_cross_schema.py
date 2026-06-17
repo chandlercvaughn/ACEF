@@ -501,7 +501,7 @@ def test_taxonomy_crosswalk_is_closed_with_x_namespace(
     slash-qualified ``x-*`` namespace (VAL-CROSS-001)."""
     assert taxonomy_crosswalk_schema["additionalProperties"] is False
     assert set(taxonomy_crosswalk_schema["properties"].keys()) == set(_CROSSWALK_MEMBERS)
-    assert "^x-[a-z0-9-]+(/[a-z0-9-]+)*$" in taxonomy_crosswalk_schema["patternProperties"]
+    assert "^x-[a-z0-9-]+(/[a-z0-9-]+)*(?![\\s\\S])" in taxonomy_crosswalk_schema["patternProperties"]
 
 
 def test_taxonomy_crosswalk_members_are_closed_and_edition_pinned(

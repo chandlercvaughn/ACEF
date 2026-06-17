@@ -844,7 +844,11 @@ def _normalize_stix_object_refs(object_refs: list[str] | None) -> list[str] | No
     if not object_refs:
         return None
     for ref in object_refs:
-        if not isinstance(ref, str) or not _STIX_OBJECT_REF_PATTERN.match(ref):
+        # ``fullmatch`` (NOT ``match``): a ``$``-anchored ``.match`` accepts a STIX id with
+        # a trailing ``\n`` (``$`` before a final newline), which the mirrored
+        # taxonomy_crosswalk.schema.json STIX pattern (now ``(?![\s\S])``-anchored) rejects;
+        # the whole-string check keeps the builder and the closed schema in lockstep.
+        if not isinstance(ref, str) or not _STIX_OBJECT_REF_PATTERN.fullmatch(ref):
             raise ValueError(
                 f"STIX object_ref {ref!r} is not a valid STIX 2.1 id of the form "
                 "'<type>--<uuidv4>' (lowercase SDO/SRO type token + RFC-4122 v4 UUID); "

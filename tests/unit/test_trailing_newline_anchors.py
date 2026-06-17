@@ -12,6 +12,9 @@ malformed value is accepted) and passes after.
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 from cryptography.hazmat.primitives.asymmetric import ec
 
@@ -21,11 +24,11 @@ from acef.domain_control import (
     challenge_token_for,
     verify_domain_control,
 )
-from acef.package import mint_incident_id, validate_namespaces
+from acef.package import _normalize_stix_object_refs, mint_incident_id, validate_namespaces
 from acef.redaction import RedactionPolicy
 from acef.signing import _derive_jwk
 from acef.validation.incident_rules import _is_record_urn
-from acef.validation.schema_validator import _commitment_shape_problems
+from acef.validation.schema_validator import _commitment_shape_problems, validate_manifest_schema
 
 _VALID_SUFFIX = "0123456789ABCDEFGHJKMNPQRS"  # 26 Crockford-base32 chars (>=128 bits)
 _VALID_ID = f"AIIC-OPENAI-2026-{_VALID_SUFFIX}"
@@ -115,3 +118,42 @@ def test_verify_domain_control_trailing_newline_id_is_unverified() -> None:
     assert result.verdict is DomainControlVerdict.UNVERIFIED, (
         f"a trailing-newline public_incident_id must be UNVERIFIED, got {result.verdict}"
     )
+
+
+_VALID_STIX_REF = "malware--00000000-0000-4000-8000-000000000000"
+
+
+def test_stix_object_ref_rejects_trailing_newline() -> None:
+    """The §5.8 STIX object_refs builder must reject a STIX id with a trailing newline
+    rather than emit it into the closed taxonomy_crosswalk (``_STIX_OBJECT_REF_PATTERN``
+    was ``$``-anchored + ``.match``; the mirrored schema pattern is now (?![\\s\\S])-anchored)."""
+    assert _normalize_stix_object_refs([_VALID_STIX_REF]) == [_VALID_STIX_REF]  # clean
+    with pytest.raises(ValueError):
+        _normalize_stix_object_refs([f"{_VALID_STIX_REF}\n"])
+
+
+def _valid_v1_1_manifest() -> dict[str, object]:
+    """A real, manifest-schema-valid v1.1 manifest loaded from a committed incident
+    conformance vector (so the baseline is valid by construction, not hand-stamped)."""
+    repo_root = Path(__file__).resolve().parents[2]
+    manifest_path = (
+        repo_root / "test-vectors/incident/offline-deterministic/pass/pass-hash-committed-card.acef/acef-manifest.json"
+    )
+    return json.loads(manifest_path.read_text(encoding="utf-8"))  # type: ignore[no-any-return]
+
+
+def test_manifest_schema_rejects_trailing_newline_namespace_key() -> None:
+    """The v1.1 manifest SCHEMA (not just the validate_namespaces helper) must reject an
+    X6 ``namespaces`` key with a trailing newline. The patternProperties key
+    ``^x-[a-z0-9-]+/?$`` was ``$``-anchored, so JSON-Schema's search semantics matched
+    ``"x-vendor\\n"`` before the final newline and ``additionalProperties: false``
+    accepted it; the (?![\\s\\S]) anchor rejects it through validate_manifest_schema()."""
+    clean = _valid_v1_1_manifest()
+    clean["namespaces"] = {"x-vendor": {"k": "v"}}
+    assert validate_manifest_schema(clean, "v1.1") == [], (
+        "a clean x-vendor namespace key must validate (sanity baseline)"
+    )
+    malformed = _valid_v1_1_manifest()
+    malformed["namespaces"] = {"x-vendor\n": {"k": "v"}}
+    diagnostics = validate_manifest_schema(malformed, "v1.1")
+    assert diagnostics, "a trailing-newline namespaces key must be rejected by the manifest schema"

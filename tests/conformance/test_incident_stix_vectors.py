@@ -38,9 +38,10 @@ _STIX_DIR = _REPO_ROOT / "test-vectors" / "incident-stix"
 _VECTORS_MANIFEST = _STIX_DIR / "vectors.json"
 
 # The STIX 2.1 id grammar mirrored from
-# acef-conventions/v1.1/taxonomy_crosswalk.schema.json (stix.object_refs items.pattern).
+# acef-conventions/v1.1/taxonomy_crosswalk.schema.json (stix.object_refs items.pattern),
+# including the absolute end anchor (?![\s\S]) (not $) that rejects a trailing newline.
 _STIX_ID_PATTERN = re.compile(
-    r"^[a-z][a-z0-9-]{2,249}--[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    r"^[a-z][a-z0-9-]{2,249}--[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}(?![\s\S])"
 )
 
 # The pre-existing, feature-unrelated SDK quirk (empty audit_trail actor_ref) that

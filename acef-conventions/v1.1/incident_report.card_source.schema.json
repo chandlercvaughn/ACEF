@@ -94,7 +94,7 @@
       "type": "object",
       "description": "Per-field §5.11 disposition map governing how each incident_report source field is projected onto the public incident_card. KEYS are RFC 6901 JSON Pointers into the source incident_report (e.g. /root_cause_analysis), NOT free strings: the root pointer \"\" is forbidden, and each key MUST be a syntactically valid JSON Pointer with ~0/~1 escaping and MUST resolve to exactly one source value (resolution checked only in source-backed validation, §5.11). VALUES are the closed disposition set: public (copied verbatim), regulator-only (stays private/not projected), hash-committed (the card carries a <field>_commitment SHA-256 value), anonymized (an irreversibly anonymized derivative under a declared anonymization_method), or omitted (never a card field).",
       "propertyNames": {
-        "pattern": "^(/([^/~]|~0|~1)*)+$"
+        "pattern": "^(/([^/~]|~0|~1)*)+(?![\\s\\S])"
       },
       "additionalProperties": {
         "type": "string",
@@ -109,7 +109,7 @@
     }
   },
   "patternProperties": {
-    "^x-[a-z0-9-]+(/[a-z0-9-]+)*$": {
+    "^x-[a-z0-9-]+(/[a-z0-9-]+)*(?![\\s\\S])": {
       "type": "object",
       "description": "X6 vendor-extension namespace (§5.5 / Appendix E Q15). Accepts both the bare `x-<vendor>` form and the slash-qualified namespace form `x-<vendor>/<segment>(/<segment>)*` documented in the repo (e.g. x-freddy and x-freddy/voice-rubric-emission, as cited in v1.1/manifest.schema.json:95 and present in tests/conformance/golden-bundles/). Segments are lowercase [a-z0-9-]; uppercase keys, non-`x-` keys, and a bare trailing slash (x-freddy/) are rejected. Any matching `x-*` key is accepted, safely-ignorable, preserved on round-trip, and MUST NOT affect conformance. Non-`x-` unknown keys remain rejected by additionalProperties: false."
     }

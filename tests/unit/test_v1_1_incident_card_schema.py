@@ -389,6 +389,15 @@ def test_incident_card_rejects_eu_trigger_code_as_harm_class(
             "trailing-newline public_incident_id rejected",
             id="public-incident-id-trailing-newline",
         ),
+        # Trailing-newline x-* namespace KEY bypass: the patternProperties key
+        # `^x-[a-z0-9-]+(/[a-z0-9-]+)*$` matched `"x-vendor\n"` (the $-before-\n weakness),
+        # so additionalProperties:false accepted a newline-corrupted vendor namespace key.
+        # The (?![\s\S]) key anchor rejects it.
+        pytest.param(
+            lambda c: c.__setitem__("x-vendor\n", {}),
+            "trailing-newline x-* namespace KEY rejected by additionalProperties",
+            id="x-namespace-key-trailing-newline",
+        ),
     ],
 )
 def test_incident_card_rejects(

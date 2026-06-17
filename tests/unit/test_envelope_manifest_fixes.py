@@ -257,7 +257,7 @@ class TestBuilderAuthorsV11ManifestFields:
     def test_add_namespace_emits_in_manifest(self) -> None:
         """A builder-authored Package can declare namespaces (X6).
 
-        The key matches the frozen v1.1 schema pattern ``^x-[a-z0-9-]+/?$`` so
+        The key matches the v1.1 schema pattern ``^x-[a-z0-9-]+/?(?![\\s\\S])`` so
         the authored manifest is schema-valid (a key with a segment after the
         slash, e.g. 'x-vendor/extension', is rejected by additionalProperties).
         """

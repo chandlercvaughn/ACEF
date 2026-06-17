@@ -252,7 +252,7 @@
       "pattern": "^sha256:[0-9a-f]{64}(?![\\s\\S])",
       "description": "Hash-committed projection of a non-public source field (§5.11), e.g. description_commitment, harm_distribution_basis_commitment. Value MUST equal 'sha256:' + hex(SHA-256(JCS(source_value))) at the source path whose §5.11 disposition is hash-committed (commitment-linkage; orphan/mismatch raises ACEF-086). End-anchored with (?![\\s\\S]) (not $) so a trailing newline is rejected — $ matches before a final \\n and would admit a hash-corrupting sha256:<64hex>\\n."
     },
-    "^x-[a-z0-9-]+(/[a-z0-9-]+)*$": {
+    "^x-[a-z0-9-]+(/[a-z0-9-]+)*(?![\\s\\S])": {
       "type": "object",
       "description": "X6 vendor-extension namespace (§5.5 / Appendix E Q15). Accepts both the bare `x-<vendor>` form and the slash-qualified namespace form `x-<vendor>/<segment>(/<segment>)*` documented in the repo (e.g. x-freddy and x-freddy/voice-rubric-emission, as cited in v1.1/manifest.schema.json:95 and present in tests/conformance/golden-bundles/). Segments are lowercase [a-z0-9-]; uppercase keys, non-`x-` keys, and a bare trailing slash (x-freddy/) are rejected. Any matching `x-*` key is accepted, safely-ignorable, preserved on round-trip, and MUST NOT affect conformance. Non-`x-`, non-`_commitment` unknown top-level keys remain rejected by additionalProperties: false."
     }
