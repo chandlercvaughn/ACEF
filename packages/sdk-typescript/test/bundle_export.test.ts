@@ -161,6 +161,20 @@ test("buildVirtualBundle emits the full export_directory file set", () => {
     assert.equal(vb.mtime, 1777593600);
 });
 
+test("F6: buildVirtualBundle rejects a non-RFC3339 metadata.timestamp (Python/TS parity)", () => {
+    if (!existsSync(VERIFIED_DELIVERY)) return;
+    const loaded = loadBundle(VERIFIED_DELIVERY);
+    const meta = loaded.manifestRaw["metadata"] as Record<string, unknown>;
+    // Basic-form (non-RFC3339) — the Python exporter now rejects it (ACEF-002); the TS
+    // exporter MUST reject identically, never emit an archive with a divergent mtime.
+    meta["timestamp"] = "20240115T103000Z";
+    assert.throws(() => buildVirtualBundle(loaded), /ACEF-002/);
+    // A strict RFC 3339 timestamp still exports cleanly (no over-rejection).
+    meta["timestamp"] = "2024-01-15T10:30:00Z";
+    const vb = buildVirtualBundle(loaded);
+    assert.equal(vb.mtime, Math.floor(Date.parse("2024-01-15T10:30:00+00:00") / 1000));
+});
+
 test("each JSONL file ends with a single trailing newline", () => {
     if (!existsSync(VERIFIED_DELIVERY)) return;
     const loaded = loadBundle(VERIFIED_DELIVERY);

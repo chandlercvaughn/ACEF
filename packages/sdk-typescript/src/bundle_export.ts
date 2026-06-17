@@ -422,15 +422,39 @@ export function rebuildManifestForExport(manifestRaw: Obj, records: RawRecord[])
     return out;
 }
 
+/**
+ * Strict RFC 3339 date-time, mirroring the Python exporter's _STRICT_FORMAT_CHECKER
+ * (jsonschema "date-time"): YYYY-MM-DDTHH:MM:SS, optional fractional seconds, and a
+ * Z/z or ±HH:MM zone. Date.parse is far more lenient (it accepts basic-form and other
+ * non-RFC3339 inputs), so it cannot be the gate.
+ */
+const RFC3339_DATETIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?([Zz]|[+-]\d{2}:\d{2})$/;
+
 /** Derive the deterministic mtime from manifest metadata.timestamp. */
 function deriveMtime(manifestRaw: Obj): number {
     const metadata = asObj(manifestRaw["metadata"]);
     const ts = metadata["timestamp"];
-    if (typeof ts !== "string" || ts.length === 0) return 0;
-    // Python: int(datetime.fromisoformat(ts.replace("Z","+00:00")).timestamp())
-    const normalized = ts.replace("Z", "+00:00");
+    // F6 cross-SDK parity: derive the deterministic tar member mtime ONLY from a strict
+    // RFC 3339 date-time, exactly as the Python exporter (src/acef/export.py) now does.
+    // The previous `return 0` fallbacks for missing/non-string/Date.parse-rejected
+    // timestamps meant a non-RFC3339 value (e.g. basic-form "20240115T103000Z") that
+    // Python REJECTS would still emit an archive here with a divergent mtime — breaking
+    // byte-identical cross-language export. Fail closed with the same ACEF-002.
+    if (typeof ts !== "string" || !RFC3339_DATETIME.test(ts)) {
+        throw new Error(
+            `[ACEF-002] metadata.timestamp ${JSON.stringify(ts)} is not a strict RFC 3339 date-time, so a ` +
+                `deterministic, cross-language tar member mtime cannot be derived from it. Re-export with an ` +
+                `RFC 3339 metadata.timestamp (YYYY-MM-DDTHH:MM:SSZ).`,
+        );
+    }
+    const normalized = ts.replace(/[Zz]$/, "+00:00");
     const ms = Date.parse(normalized);
-    if (Number.isNaN(ms)) return 0;
+    if (Number.isNaN(ms)) {
+        throw new Error(
+            `[ACEF-002] metadata.timestamp ${JSON.stringify(ts)} passed RFC 3339 validation but could not be ` +
+                `parsed into a UTC instant for the deterministic tar mtime.`,
+        );
+    }
     return Math.floor(ms / 1000);
 }
 

@@ -240,3 +240,11 @@ def test_archive_export_rejects_non_rfc3339_timestamp(tmp_path: Path) -> None:
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
     load(str(bundle_dir)).export(str(tmp_path / "ok.acef.tar.gz"))
     assert (tmp_path / "ok.acef.tar.gz").exists()
+
+    # A LOWERCASE-'z' zone is VALID RFC 3339 (the strict checker normalizes case before
+    # validating), so it must EXPORT cleanly — not surface a raw ValueError from
+    # datetime.fromisoformat, which only accepts an uppercase 'Z' (roborev MEDIUM on c3251d8).
+    manifest["metadata"]["timestamp"] = "2024-01-15T10:30:00z"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    load(str(bundle_dir)).export(str(tmp_path / "lower-z.acef.tar.gz"))
+    assert (tmp_path / "lower-z.acef.tar.gz").exists()

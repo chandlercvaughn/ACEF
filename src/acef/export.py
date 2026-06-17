@@ -570,7 +570,20 @@ def export_archive(package: Package, output_path: str) -> Path:
                     "(YYYY-MM-DDTHH:MM:SSZ).",
                     code="ACEF-002",
                 )
-            mtime = int(datetime.fromisoformat(timestamp_str.replace("Z", "+00:00")).timestamp())
+            # The strict checker NORMALIZES case before RFC 3339 validation, so a valid
+            # lowercase-'z' zone passes it, but ``datetime.fromisoformat`` only accepts an
+            # uppercase 'Z' (and only on 3.11+). Normalize BOTH zone cases, and wrap the
+            # parse so ANY residual checker/parser disagreement surfaces as the structured
+            # ACEF-002 rather than a raw ValueError (roborev on c3251d8).
+            iso = timestamp_str.replace("Z", "+00:00").replace("z", "+00:00")
+            try:
+                mtime = int(datetime.fromisoformat(iso).timestamp())
+            except ValueError as exc:
+                raise ACEFExportError(
+                    f"metadata.timestamp {timestamp_str!r} passed RFC 3339 format validation but could "
+                    f"not be parsed into a UTC instant for the deterministic tar mtime: {exc}",
+                    code="ACEF-002",
+                ) from exc
 
             # Collect all files in lexicographic order using forward slashes
             # (per spec: all paths MUST use forward slashes)
