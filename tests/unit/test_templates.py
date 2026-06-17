@@ -700,3 +700,15 @@ class TestGpaiIncidentProvisionCitation:
         for sub in subs:
             ref = sub.get("normative_text_ref", "")
             assert "Safety 3" not in ref and "Safety Commitment 3" not in ref
+
+    def test_incident_messages_have_no_stale_two_vs_fifteen_phrasing(self) -> None:
+        # Measure 9.3 has FOUR bands (2/5/10/15 days); no message may keep the stale
+        # binary "2-day vs 15-day" phrasing.
+        prov = self._incident_provision()
+        texts = [e.get("message", "") for e in prov.get("evaluation", [])]
+        texts.append(prov.get("description", ""))
+        texts.extend(sub.get("description", "") for sub in prov.get("sub_provisions", []))
+        assert not any("2-day vs 15-day" in t for t in texts)
+        # The severity rule message references Measure 9.3 / the four-band timeline.
+        sev_msg = next(e["message"] for e in prov["evaluation"] if e["rule_id"] == "gpai-s3-incident-severity")
+        assert "9.3" in sev_msg or "2/5/10/15" in sev_msg
