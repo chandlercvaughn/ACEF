@@ -319,6 +319,37 @@ def test_appendix_b_harm_distribution_basis_matches_shipped_schema() -> None:
         )
 
 
+def test_appendix_b_severity_vector_refs_strict_companion() -> None:
+    """Appendix B reconciliation (RED→GREEN).
+
+    The shipped ``incident_card.schema.json`` delegates ``severity_vector`` to
+    ``{"$ref": "severity_vector.schema.json"}`` (the strict ACEF-SEV:1.0 Group-I
+    grammar). The Appendix B normative excerpt documented it as a WEAK inline prefix
+    ``{"type":"string","pattern":"^ACEF-SEV:1\\.0/"}`` that ACCEPTS an HG-less /
+    garbage-after-prefix vector the shipped schema REJECTS — so an RFC-derived
+    implementation and a shipped-schema implementation disagree on validity. The
+    excerpt MUST ``$ref`` the companion (like its harm_class / taxonomy_crosswalk /
+    coordinated_disclosure siblings). Pre-fix the excerpt inlines the weak pattern and
+    this FAILS.
+    """
+    sv = _appendix_b_incident_card_excerpt()["properties"]["severity_vector"]
+    assert sv.get("$ref") == "severity_vector.schema.json", (
+        "RED defect: Appendix B incident_card.severity_vector inlines a weak '^ACEF-SEV:1.0/' "
+        "prefix pattern instead of $ref-ing the strict severity_vector.schema.json companion"
+    )
+    assert "pattern" not in sv, "the weak inline prefix pattern must be removed in favour of the $ref"
+
+
+def test_appendix_b_severity_vector_matches_shipped_schema() -> None:
+    """The Appendix B ``severity_vector`` ``$ref`` MUST EQUAL the shipped
+    ``incident_card.schema.json`` property so an implementation built from the
+    normative text and one built from the shipped schema agree on the ACEF-SEV:1.0
+    grammar."""
+    excerpt = _appendix_b_incident_card_excerpt()["properties"]["severity_vector"]
+    shipped = _load(_INCIDENT_CARD_PATH)["properties"]["severity_vector"]
+    assert excerpt.get("$ref") == shipped.get("$ref") == "severity_vector.schema.json"
+
+
 # ---------------------------------------------------------------------------
 # VAL-FIX-INCSCHEMA-001 reconciliation — Appendix B nested card_source
 # eu_ai_act_facts.serious_incident_triggers matches the shipped schema
