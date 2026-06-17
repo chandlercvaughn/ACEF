@@ -7,6 +7,7 @@ from pathlib import Path
 
 import click
 
+from acef.errors import ACEFError
 from acef.package import Package
 
 
@@ -100,7 +101,12 @@ def init_cmd(
 
     try:
         pkg.export(path)
-    except OSError as exc:
+    except (OSError, ACEFError) as exc:
+        # Package.export() wraps filesystem OSErrors from the directory writer as a
+        # structured ACEFExportError (ACEF-050/052), which is an ACEFError, NOT an
+        # OSError — so catching OSError alone let a write failure (e.g. exporting into a
+        # symlink-loop path) surface as an uncaught traceback (roborev on 855ffc9). Catch
+        # both so every write/path failure degrades through this single error path.
         click.echo(f"Error: Cannot write bundle to {path}: {exc}", err=True)
         raise SystemExit(1) from exc
 

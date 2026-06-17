@@ -12,9 +12,11 @@ validator rejects — disqualifying for a reference implementation.
 from __future__ import annotations
 
 import json
+import os
 import re
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 
 from acef.cli.main import cli
@@ -22,6 +24,11 @@ from acef.package import Package
 from acef.validation.engine import validate_bundle
 
 _ACTOR_URN = re.compile(r"^urn:acef:act:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+
+# symlink creation + symlink-traversal semantics are POSIX-specific; on Windows /
+# unprivileged environments Path.symlink_to() fails before the CLI behavior under test
+# is exercised (mirrors tests/unit/test_loader_artifact_oserror.py).
+_POSIX = os.name == "posix"
 
 
 def _structural_errors(bundle_dir: Path) -> list[tuple[str | None, str | None]]:
@@ -128,6 +135,7 @@ def test_bare_acef_init_subject_name_is_not_a_placeholder(tmp_path: Path) -> Non
     )
 
 
+@pytest.mark.skipif(not _POSIX, reason="symlink creation/traversal semantics are POSIX-specific")
 def test_init_default_subject_name_is_derived_lexically_not_via_symlink_resolution(tmp_path: Path) -> None:
     """roborev on 6f60f8e: deriving the default subject name via ``target.resolve()`` FOLLOWS
     symlinks — it derives the subject from the symlink TARGET's basename, not the
@@ -148,15 +156,16 @@ def test_init_default_subject_name_is_derived_lexically_not_via_symlink_resoluti
     assert name != "real-target", "must NOT derive the subject from the symlink target basename"
 
 
-def test_init_does_not_crash_on_a_symlink_loop_path(tmp_path: Path) -> None:
-    """roborev on 6f60f8e: ``Path.resolve()`` can raise ``RuntimeError`` on a symlink loop
-    (platform/CPython-version dependent), so deriving the subject name via
-    ``target.resolve()`` risked an UNCAUGHT traceback before the command's normal
-    write-error path. The lexical (``os.path.abspath``) derivation never traverses symlinks,
-    so a loop path degrades gracefully (a handled non-zero exit via the write-error path),
-    never an uncaught RuntimeError. Cross-version DEFENSIVE guard — on the CI interpreter
-    (CPython 3.14) ``resolve()`` happens not to raise here, so this is a forward-regression
-    guard, not the RED-first discriminator (that is the symlink-target test above)."""
+@pytest.mark.skipif(not _POSIX, reason="symlink creation/traversal semantics are POSIX-specific")
+def test_init_degrades_cleanly_on_a_symlink_loop_path(tmp_path: Path) -> None:
+    """roborev on 855ffc9: ``acef init`` over a symlink-loop path must degrade through its
+    documented write-error path (a clean non-zero exit + an error message), NOT crash with
+    an uncaught exception. Two failure modes are covered: the old ``target.resolve()`` could
+    raise ``RuntimeError`` on the loop (subject-name derivation), and ``Package.export()``
+    wraps the filesystem ``OSError`` from writing into the loop as ``ACEFExportError`` —
+    which ``init_cmd`` only caught as ``OSError`` before, so it surfaced UNCAUGHT. The
+    derivation is now lexical (no resolve) and the export is wrapped in
+    ``except (OSError, ACEFError)``, so neither leaks."""
     a = tmp_path / "a.acef"
     b = tmp_path / "b"
     a.symlink_to(b)
@@ -164,6 +173,10 @@ def test_init_does_not_crash_on_a_symlink_loop_path(tmp_path: Path) -> None:
 
     runner = CliRunner()
     result = runner.invoke(cli, ["init", str(a)])
-    assert not isinstance(result.exception, RuntimeError), (
-        f"acef init must not crash with an uncaught RuntimeError on a symlink loop; got {result.exception!r}"
+    # No UNCAUGHT exception: a clean SystemExit (or success) only — never a bare
+    # RuntimeError/ACEFExportError leaking to the terminal as a traceback.
+    assert result.exception is None or isinstance(result.exception, SystemExit), (
+        f"acef init must not crash with an uncaught exception on a symlink loop; got {result.exception!r}"
     )
+    assert result.exit_code != 0, "a symlink-loop write must fail with a clean non-zero exit"
+    assert "Cannot write bundle" in result.output, f"missing the write-error message: {result.output!r}"
