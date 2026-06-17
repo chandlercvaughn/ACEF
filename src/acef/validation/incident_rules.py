@@ -1353,17 +1353,29 @@ def _resolve_json_pointer(doc: dict[str, Any], pointer: str) -> tuple[bool, Any]
 _CARD_AUTHORED_FIELDS: frozenset[str] = frozenset(
     {"declared_publication_basis", "incident_dedupe_key", "incident_dedupe_key_hmac"}
 )
-_INCIDENT_CARD_ROOT_FIELDS: frozenset[str] = frozenset(
+# A card-root field's AUTHORITATIVE source-backed projection origin depends on whether
+# the field is owned by the card_source overlay or lives at the report payload root.
+# Splitting the two prevents a false positive (roborev): a card_source-OWNED field
+# (public_incident_id, harm_core, ...) carries its public projection from
+# /card_source/<X>, so a stray /<X> mirror at the REPORT ROOT is NOT the projection
+# source and a disposition on it must not fire ACEF-086 against the card_source-derived
+# card field.
+#
+# CARD_SOURCE-OWNED: an ``incident_card`` root property that is ALSO an
+# ``incident_report.card_source`` property — projects ONLY from ``/card_source/<X>``.
+_CARD_SOURCE_PROJECTED_FIELDS: frozenset[str] = frozenset(
+    {"coordinated_disclosure", "harm_core", "id_grade", "public_incident_id", "severity_vector"}
+)
+# REPORT-ROOT: an ``incident_card`` root EVIDENCE property that is NOT a card_source
+# property (and not a card-authored/computed meta field) — projects ONLY from the
+# report payload root ``/<X>``. Includes the original ``severity`` plus the audit-gap
+# fields (harm_distribution_basis, transferability, sector_of_deployment, ...).
+_REPORT_ROOT_PROJECTED_FIELDS: frozenset[str] = frozenset(
     {
         "autonomy_level",
-        "coordinated_disclosure",
-        "harm_core",
         "harm_distribution_basis",
-        "id_grade",
-        "public_incident_id",
         "sector_of_deployment",
         "severity",
-        "severity_vector",
         "taxonomy_crosswalk",
         "transferability",
         "value_chain_role",
@@ -1375,18 +1387,20 @@ def _pointer_to_card_root_field(pointer: str) -> str | None:
     """The ``incident_card`` ROOT field a publishability_map JSON-Pointer projects to
     (§5.11), or ``None``.
 
-    The public card is a PROJECTION of the source ``incident_report``: a card-root
-    field ``<X>`` is sourced from the report root ``/<X>`` or the card_source overlay
-    ``/card_source/<X>``. Resolution is on the FULL pointer (NEVER a leaf token), so
-    two distinct source fields sharing a leaf name (``/a/notes``, ``/b/notes``) never
-    collide. A deeper-nested pointer names a SUB-field and projects to nothing.
+    The public card is a PROJECTION of the source ``incident_report``. The
+    AUTHORITATIVE projection origin is field-specific: a card_source-OWNED field projects
+    ONLY from ``/card_source/<X>`` (so its stray report-root mirror ``/<X>`` is ignored —
+    no false positive), while a report-root EVIDENCE field projects ONLY from ``/<X>``.
+    Resolution is on the FULL pointer (NEVER a leaf token), so two distinct source fields
+    sharing a leaf name (``/a/notes``, ``/b/notes``) never collide; a deeper-nested
+    pointer names a SUB-field and projects to nothing.
     """
     if not isinstance(pointer, str) or not pointer.startswith("/"):
         return None
     segments = [seg.replace("~1", "/").replace("~0", "~") for seg in pointer[1:].split("/")]
-    if len(segments) == 1 and segments[0] in _INCIDENT_CARD_ROOT_FIELDS:
+    if len(segments) == 1 and segments[0] in _REPORT_ROOT_PROJECTED_FIELDS:
         return segments[0]
-    if len(segments) == 2 and segments[0] == "card_source" and segments[1] in _INCIDENT_CARD_ROOT_FIELDS:
+    if len(segments) == 2 and segments[0] == "card_source" and segments[1] in _CARD_SOURCE_PROJECTED_FIELDS:
         return segments[1]
     return None
 

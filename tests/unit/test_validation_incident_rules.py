@@ -908,6 +908,45 @@ class TestACEF086PublishabilityGate:
         diags = ir.check_publishability([card, report], source_backed=True)
         assert "ACEF-086" not in _codes(diags)
 
+    # --- H3 follow-up (roborev): a card_source-OWNED field projects ONLY from
+    #     /card_source/<X>, never the report-ROOT mirror /<X>, so a disposed root mirror
+    #     must not false-positive against the card_source-derived public projection. ----
+
+    def test_card_source_owned_root_mirror_does_not_false_positive(self) -> None:
+        # public_incident_id is card_source-owned; a stray /public_incident_id at the
+        # REPORT ROOT disposed regulator-only must NOT fire the disposition-honored
+        # ACEF-086 when the card carries its normal card_source-derived value (the root
+        # mirror is not the projection source for card_source-owned fields).
+        report = self._published_report(
+            {"publishability_map": {"/public_incident_id": "regulator-only"}},
+            {"public_incident_id": _VALID_ID},  # stray root mirror that resolves
+        )
+        card = _published_card({})  # _published_card carries public_incident_id (from card_source)
+        diags = ir.check_publishability([card, report], source_backed=True)
+        assert not any("public_incident_id" in d.message and "not honored" in d.message.lower() for d in diags)
+
+    def test_card_source_owned_harm_core_root_mirror_does_not_false_positive(self) -> None:
+        report = self._published_report(
+            {"publishability_map": {"/harm_core": "regulator-only"}},
+            {"harm_core": dict(_VALID_HARM_CORE)},  # stray root mirror
+        )
+        card = _published_card({})  # _published_card carries harm_core (from card_source)
+        diags = ir.check_publishability([card, report], source_backed=True)
+        assert not any("harm_core" in d.message and "not honored" in d.message.lower() for d in diags)
+
+    def test_card_source_owned_field_via_card_source_pointer_still_fires(self) -> None:
+        # No regression: the AUTHORITATIVE /card_source/<field> disposition still fires.
+        report = self._published_report(
+            {
+                "publishability_map": {"/card_source/severity_vector": "regulator-only"},
+                "severity_vector": "ACEF-SEV:1.0/HT:P/HG:H/RV:A/SC:U/BR:I",
+            },
+            {},
+        )
+        card = _published_card({"severity_vector": "ACEF-SEV:1.0/HT:P/HG:H/RV:A/SC:U/BR:I"})
+        diags = ir.check_publishability([card, report], source_backed=True)
+        assert any("severity_vector" in d.message and "not honored" in d.message.lower() for d in diags)
+
     # --- INCVAL-003: source-backed disposition-honored check -------------
 
     def _report_with_severity_disposition(self, disposition: str) -> dict[str, Any]:
@@ -2486,47 +2525,53 @@ class TestCheckIncidentEdges:
 # ---------------------------------------------------------------------------
 
 
-def _derive_card_root_fields_from_schema() -> frozenset[str] | None:
-    """Derive the projectable §5.11 card-root EVIDENCE field set from the on-disk
-    ``incident_card`` schema: its named root properties MINUS the card-authored /
-    computed meta fields (``declared_publication_basis`` + the two §5.5 dedupe keys).
-    Returns ``None`` when the schema dir is ABSENT (installed-only CI)."""
+def _derive_card_root_fields_from_schema() -> tuple[frozenset[str], frozenset[str]] | None:
+    """Derive the two projectable §5.11 sets from the on-disk v1.1 schemas:
+    ``(card_source_projected, report_root_projected)``. A card-root EVIDENCE field
+    (named ``incident_card`` root property MINUS card-authored meta) projects from
+    ``/card_source/<X>`` iff it is ALSO a card_source property, else from the report
+    root ``/<X>``. Returns ``None`` when the schema dir is ABSENT (installed-only CI)."""
     here = Path(__file__).resolve()
     for ancestor in here.parents:
         c = ancestor / "acef-conventions" / "v1.1" / "incident_card.schema.json"
-        if c.is_file():
-            card_schema = json.loads(c.read_text(encoding="utf-8"))
-            named = {k for k in (card_schema.get("properties") or {}) if isinstance(k, str)}
-            return frozenset(named - ir._CARD_AUTHORED_FIELDS)
+        s = ancestor / "acef-conventions" / "v1.1" / "incident_report.card_source.schema.json"
+        if c.is_file() and s.is_file():
+            card_named = {k for k in (json.loads(c.read_text(encoding="utf-8")).get("properties") or {})}
+            cs_named = {k for k in (json.loads(s.read_text(encoding="utf-8")).get("properties") or {})}
+            evidence = card_named - ir._CARD_AUTHORED_FIELDS
+            card_source_projected = frozenset(evidence & cs_named)
+            report_root_projected = frozenset(evidence - cs_named)
+            return card_source_projected, report_root_projected
     return None
 
 
 class TestProjectionMapInstallSafety:
-    """The frozen-constant card-root projection set is install-safe and fail-closed."""
+    """The frozen-constant card-root projection sets are install-safe and fail-closed."""
 
     def test_runtime_projection_source_is_frozen_constant_not_disk_read(self) -> None:
-        # The runtime disposition-honored check MUST source its projection set from
-        # the frozen module constant, never from a disk read.
-        assert isinstance(ir._INCIDENT_CARD_ROOT_FIELDS, frozenset)
-        assert ir._INCIDENT_CARD_ROOT_FIELDS  # non-empty
-        # The exact frozen projectable card-root EVIDENCE set (full named incident_card
-        # root properties minus the card-authored/computed meta fields).
-        assert ir._INCIDENT_CARD_ROOT_FIELDS == frozenset(
+        # The runtime disposition-honored check MUST source its projection sets from
+        # frozen module constants, never from a disk read.
+        assert isinstance(ir._CARD_SOURCE_PROJECTED_FIELDS, frozenset)
+        assert isinstance(ir._REPORT_ROOT_PROJECTED_FIELDS, frozenset)
+        # card_source-OWNED fields project ONLY from /card_source/<X>.
+        assert ir._CARD_SOURCE_PROJECTED_FIELDS == frozenset(
+            {"coordinated_disclosure", "harm_core", "id_grade", "public_incident_id", "severity_vector"}
+        )
+        # report-root EVIDENCE fields project ONLY from /<X> (the original /severity plus
+        # the audit-gap fields).
+        assert ir._REPORT_ROOT_PROJECTED_FIELDS == frozenset(
             {
                 "autonomy_level",
-                "coordinated_disclosure",
-                "harm_core",
                 "harm_distribution_basis",
-                "id_grade",
-                "public_incident_id",
                 "sector_of_deployment",
                 "severity",
-                "severity_vector",
                 "taxonomy_crosswalk",
                 "transferability",
                 "value_chain_role",
             }
         )
+        # The two sets are disjoint (a field projects from exactly one origin).
+        assert ir._CARD_SOURCE_PROJECTED_FIELDS.isdisjoint(ir._REPORT_ROOT_PROJECTED_FIELDS)
 
     def test_pointer_to_card_root_field_full_pointer_no_leaf_collapse(self) -> None:
         # Projection resolves on the FULL pointer (report root /<X> or overlay
@@ -2590,12 +2635,17 @@ class TestProjectionMapInstallSafety:
         derived = _derive_card_root_fields_from_schema()
         if derived is None:
             pytest.skip(
-                "v1.1 schema dir absent (installed-only layout); the frozen "
-                "_INCIDENT_CARD_ROOT_FIELDS constant is authoritative — the schema "
-                "cross-check is a checkout-only drift guard"
+                "v1.1 schema dir absent (installed-only layout); the frozen projection "
+                "constants are authoritative — the schema cross-check is a checkout-only "
+                "drift guard"
             )
-        assert derived == ir._INCIDENT_CARD_ROOT_FIELDS, (
-            "v1.1 incident_card schema drifted from the frozen _INCIDENT_CARD_ROOT_FIELDS "
-            "constant; update the constant (and _CARD_AUTHORED_FIELDS if a new card-authored "
-            "meta field was added) to mirror the new schema set"
+        derived_card_source, derived_report_root = derived
+        assert (derived_card_source, derived_report_root) == (
+            ir._CARD_SOURCE_PROJECTED_FIELDS,
+            ir._REPORT_ROOT_PROJECTED_FIELDS,
+        ), (
+            "v1.1 incident_card / card_source schemas drifted from the frozen "
+            "_CARD_SOURCE_PROJECTED_FIELDS / _REPORT_ROOT_PROJECTED_FIELDS constants; update "
+            "the constants (and _CARD_AUTHORED_FIELDS if a new card-authored meta field was "
+            "added) to mirror the new schema sets"
         )
