@@ -570,11 +570,27 @@ def export_archive(package: Package, output_path: str) -> Path:
                     "(YYYY-MM-DDTHH:MM:SSZ).",
                     code="ACEF-002",
                 )
-            # The strict checker NORMALIZES case before RFC 3339 validation, so a valid
-            # lowercase-'z' zone passes it, but ``datetime.fromisoformat`` only accepts an
-            # uppercase 'Z' (and only on 3.11+). Normalize BOTH zone cases, and wrap the
-            # parse so ANY residual checker/parser disagreement surfaces as the structured
-            # ACEF-002 rather than a raw ValueError (roborev on c3251d8).
+            # Require WHOLE-SECOND RFC 3339 (no fractional seconds) for the mtime source
+            # (roborev on 796ceb4). A POSIX tar member mtime is integer seconds, so a
+            # fractional component cannot be represented in it; worse, reproducing Python's
+            # float ``datetime.timestamp()`` truncation BYTE-IDENTICALLY in the TypeScript
+            # SDK is not possible at all magnitudes (Python uses arbitrary-precision integer
+            # intermediates; JS doubles lose sub-ULP precision for far-pre-epoch instants).
+            # Both SDKs therefore reject a fractional metadata.timestamp so the accepted set
+            # — and the derived mtime — is identical. A "." can only appear as the fractional
+            # separator in a checker-valid date-time (date uses "-", zone uses "+"/"-"/"Z").
+            if "." in timestamp_str:
+                raise ACEFExportError(
+                    f"metadata.timestamp {timestamp_str!r} carries fractional seconds; the deterministic "
+                    "tar member mtime is whole-second and fractional precision cannot be reproduced "
+                    "byte-identically across the Python and TypeScript SDKs. Use a whole-second RFC 3339 "
+                    "metadata.timestamp (YYYY-MM-DDTHH:MM:SSZ).",
+                    code="ACEF-002",
+                )
+            # Whole-second RFC 3339 -> an EXACT integer epoch in both languages. The strict
+            # checker normalizes case, so normalize both zone cases for fromisoformat, and
+            # wrap the parse so any residual checker/parser disagreement surfaces as the
+            # structured ACEF-002 rather than a raw ValueError (roborev on c3251d8).
             iso = timestamp_str.replace("Z", "+00:00").replace("z", "+00:00")
             try:
                 mtime = int(datetime.fromisoformat(iso).timestamp())

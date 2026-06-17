@@ -169,27 +169,20 @@ test("F6: deriveMtime mirrors the Python strict RFC3339 checker (accept/reject +
         meta["timestamp"] = ts;
         return buildVirtualBundle(loaded).mtime;
     };
-    // ACCEPTED — exact epoch-second parity with the Python exporter (values computed from
-    // int(datetime.fromisoformat(...).timestamp())).
+    // ACCEPTED (WHOLE-SECOND only) — exact epoch-second parity with the Python exporter.
+    // A whole-second epoch is an exact integer in both languages (no float-truncation parity
+    // to reconcile), incl. far pre-epoch / min-year.
     assert.equal(mtimeOf("2024-01-15T10:30:00Z"), 1705314600);
     assert.equal(mtimeOf("2024-01-15t10:30:00Z"), 1705314600); // lowercase t (RFC 3339 §5.6)
     assert.equal(mtimeOf("2024-01-15T10:30:00z"), 1705314600); // lowercase z
     assert.equal(mtimeOf("2024-01-15T10:30:00+02:00"), 1705307400);
     assert.equal(mtimeOf("2024-01-15T10:30:00-05:30"), 1705334400);
     assert.equal(mtimeOf("2024-02-29T00:00:00Z"), 1709164800); // valid leap day
-    assert.equal(mtimeOf("2024-01-15T10:30:00.999Z"), 1705314600); // fractional truncated
     assert.equal(mtimeOf("0001-01-01T00:00:00Z"), -62135596800); // min year, far pre-epoch
-    assert.equal(mtimeOf("1969-12-31T23:59:59Z"), -1); // pre-epoch, no fraction
-    // pre-epoch + positive fractional: Python int() truncates toward zero (-1s + 0.999s -> 0).
-    assert.equal(mtimeOf("1969-12-31T23:59:59.999Z"), 0);
-    assert.equal(mtimeOf("1969-12-31T23:59:59.0001Z"), 0);
-    // Python carries only MICROSECOND precision: a sub-microsecond-only fractional counts
-    // as zero, so a negative base second stays negative.
-    assert.equal(mtimeOf("1969-12-31T23:59:59.000001Z"), 0); // 1 microsecond -> positive
-    assert.equal(mtimeOf("1969-12-31T23:59:59.0000001Z"), -1); // sub-microsecond -> zero
-    assert.equal(mtimeOf("1969-12-31T23:59:59.0000009Z"), -1); // sub-microsecond -> zero
-    // REJECTED — every input the Python checker rejects must throw ACEF-002, never emit an
-    // archive with a divergent mtime.
+    assert.equal(mtimeOf("1969-12-31T23:59:59Z"), -1); // pre-epoch
+    // REJECTED — every input the Python exporter rejects must throw ACEF-002, never emit an
+    // archive with a divergent mtime. FRACTIONAL seconds are rejected by BOTH SDKs (the
+    // mtime is whole-second; cross-language float-truncation parity is not guaranteed).
     for (const bad of [
         "20240115T103000Z", // basic form
         "0000-01-01T00:00:00Z", // year 0000 (Python datetime MINYEAR is 1)
@@ -198,6 +191,9 @@ test("F6: deriveMtime mirrors the Python strict RFC3339 checker (accept/reject +
         "2024-01-15T10:30:60Z", // leap second :60
         "2024-01-15T24:00:00Z", // hour 24
         "2024-01-15T10:30:00+25:00", // out-of-range offset
+        "2024-01-15T10:30:00.999Z", // fractional seconds (whole-second only)
+        "2024-01-15T10:30:00.000001Z", // microsecond fractional
+        "1969-12-31T23:59:59.999Z", // pre-epoch fractional
         "not-a-date",
         "",
     ]) {

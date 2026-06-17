@@ -423,25 +423,29 @@ export function rebuildManifestForExport(manifestRaw: Obj, records: RawRecord[])
 }
 
 /**
- * Strict RFC 3339 date-time shape — case-insensitive ``T``/``Z`` separators (RFC 3339
- * §5.6), optional fractional seconds, and a ``Z``/``z`` or ``±HH:MM`` zone. A regex alone
- * is NOT sufficient (it cannot reject impossible CALENDAR dates like ``2023-02-29``), so
- * :func:`strictRfc3339ToEpochSeconds` does range + calendar validation after the match.
+ * Strict WHOLE-SECOND RFC 3339 date-time shape — case-insensitive ``T``/``Z`` separators
+ * (RFC 3339 §5.6) and a ``Z``/``z`` or ``±HH:MM`` zone. FRACTIONAL seconds are intentionally
+ * NOT permitted (no ``(\.\d+)?`` group): the tar member mtime is whole-second, and Python's
+ * float ``datetime.timestamp()`` truncation cannot be reproduced byte-identically here at
+ * all magnitudes, so BOTH SDKs reject a fractional timestamp (see the Python exporter). A
+ * regex alone is not sufficient (it cannot reject impossible CALENDAR dates like
+ * ``2023-02-29``), so :func:`strictRfc3339ToEpochSeconds` does range + calendar validation.
  */
-const RFC3339_DATETIME = /^(\d{4})-(\d{2})-(\d{2})[Tt](\d{2}):(\d{2}):(\d{2})(\.\d+)?(?:[Zz]|([+-])(\d{2}):(\d{2}))$/;
+const RFC3339_DATETIME = /^(\d{4})-(\d{2})-(\d{2})[Tt](\d{2}):(\d{2}):(\d{2})(?:[Zz]|([+-])(\d{2}):(\d{2}))$/;
 
 function isLeapYear(year: number): boolean {
     return (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
 }
 
 /**
- * Validate a STRICT RFC 3339 date-time and return its epoch seconds, or ``null`` if it is
- * not valid. Mirrors the Python exporter's ``_STRICT_FORMAT_CHECKER`` (jsonschema
- * "date-time") EXACTLY on every edge the determinism contract cares about: case-insensitive
- * ``T``/``Z``; month 1-12; valid calendar day incl. leap years (``2023-02-29`` rejected,
- * ``2024-02-29`` accepted); hour 0-23, minute 0-59, second 0-59 (a ``:60`` leap second is
- * REJECTED, matching Python); offset hour 0-23, minute 0-59. ``Date.parse`` cannot be the
- * gate — it is lenient (basic-form) AND it NORMALIZES impossible dates instead of rejecting.
+ * Validate a strict WHOLE-SECOND RFC 3339 date-time and return its epoch seconds, or
+ * ``null`` if it is not valid. Mirrors the Python exporter EXACTLY on every accepted/rejected
+ * edge: case-insensitive ``T``/``Z``; month 1-12; valid calendar day incl. leap years
+ * (``2023-02-29`` rejected, ``2024-02-29`` accepted); hour 0-23, minute 0-59, second 0-59
+ * (``:60`` leap second rejected); offset hour 0-23, minute 0-59; year >= 1; FRACTIONAL
+ * seconds rejected. A whole-second epoch is an exact integer in both languages (no float
+ * truncation parity to worry about). ``Date.parse`` cannot be the gate — it is lenient and
+ * NORMALIZES impossible dates instead of rejecting.
  */
 function strictRfc3339ToEpochSeconds(ts: string): number | null {
     const m = RFC3339_DATETIME.exec(ts);
@@ -458,29 +462,18 @@ function strictRfc3339ToEpochSeconds(ts: string): number | null {
     const daysInMonth = [31, isLeapYear(year) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1]!;
     if (day < 1 || day > daysInMonth) return null;
     let offsetMinutes = 0;
-    if (m[8] !== undefined) {
-        // m[8] = sign, m[9] = offset hours, m[10] = offset minutes (Z/z -> all undefined).
-        const offHour = Number(m[9]);
-        const offMin = Number(m[10]);
+    if (m[7] !== undefined) {
+        // m[7] = sign, m[8] = offset hours, m[9] = offset minutes (Z/z -> all undefined).
+        const offHour = Number(m[8]);
+        const offMin = Number(m[9]);
         if (offHour > 23 || offMin > 59) return null;
-        offsetMinutes = (m[8] === "-" ? -1 : 1) * (offHour * 60 + offMin);
+        offsetMinutes = (m[7] === "-" ? -1 : 1) * (offHour * 60 + offMin);
     }
     const utc = new Date(Date.UTC(year, month - 1, day, hour, minute, second));
     if (year < 100) utc.setUTCFullYear(year); // undo Date.UTC's 0-99 -> 1900-1999 remap
-    // Integer-second epoch with the zone offset applied (offsets are whole minutes, so no
-    // fractional is introduced here).
-    const baseSeconds = Math.floor(utc.getTime() / 1000) - offsetMinutes * 60;
-    // Python keeps fractional seconds and truncates the WHOLE instant toward zero via int().
-    // For a NEGATIVE base with a positive fractional part the instant is closer to zero, so
-    // the truncated second is base+1 (e.g. -1s + 0.999s = -0.001s -> 0); otherwise the
-    // fractional is discarded. m[7] is the captured ".ddd…" (or undefined).
-    // Python's datetime carries only MICROSECOND precision, so it truncates fractional
-    // digits beyond the first six before computing .timestamp(); a sub-microsecond-only
-    // fractional (e.g. ".0000001") therefore counts as ZERO. Mirror that by inspecting only
-    // the first 6 fractional digits (m[7] = ".ddd…"; slice(1, 7) drops the dot, takes 6).
-    const hasPositiveFraction = m[7] !== undefined && /[1-9]/.test(m[7].slice(1, 7));
-    if (hasPositiveFraction && baseSeconds < 0) return baseSeconds + 1;
-    return baseSeconds;
+    // Whole-second epoch with the zone offset applied (offsets are whole minutes). Exact
+    // integer in both languages — no fractional truncation to reconcile.
+    return Math.floor(utc.getTime() / 1000) - offsetMinutes * 60;
 }
 
 /** Derive the deterministic mtime from manifest metadata.timestamp. */

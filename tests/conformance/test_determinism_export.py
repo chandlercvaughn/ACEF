@@ -248,3 +248,15 @@ def test_archive_export_rejects_non_rfc3339_timestamp(tmp_path: Path) -> None:
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
     load(str(bundle_dir)).export(str(tmp_path / "lower-z.acef.tar.gz"))
     assert (tmp_path / "lower-z.acef.tar.gz").exists()
+
+    # FRACTIONAL seconds are rejected (roborev on 796ceb4): the tar member mtime is
+    # whole-second and Python's float datetime.timestamp() truncation cannot be reproduced
+    # byte-identically in the TS SDK at all magnitudes, so BOTH SDKs reject a fractional
+    # metadata.timestamp -> identical accepted set + identical mtime.
+    manifest["metadata"]["timestamp"] = "2024-01-15T10:30:00.999Z"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    reloaded_fractional = load(str(bundle_dir))
+    with pytest.raises(ACEFExportError) as frac_exc:
+        reloaded_fractional.export(str(tmp_path / "fractional.acef.tar.gz"))
+    assert frac_exc.value.code == "ACEF-002"
+    assert "fractional" in str(frac_exc.value).lower()
