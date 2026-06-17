@@ -625,19 +625,19 @@ def test_namespace_lint_does_not_alter_conformance_outcomes(tmp_path: Path) -> N
     #     diagnostic (ACEF-020/021/050/080/…) on BOTH runs would slip through,
     #     and the bare-code delta check could not tell a spurious shared code
     #     from the tolerated baseline. Pinning the EXACT (code, path) set
-    #     proves the clean bundle carries precisely ONE exporter-intrinsic
-    #     structural diagnostic and nothing else, so any new spurious
-    #     structural error fails this test. roborev cross-record-authority Low.
+    #     proves the clean bundle carries NO spurious structural diagnostic, so
+    #     any new structural error fails this test. roborev cross-record-authority Low.
     #
-    #     The single tolerated baseline entry is the exporter's
-    #     package-creation audit-trail entry, whose absent actor_ref serializes
-    #     to an empty string and fails the actor-URN pattern → exactly one
-    #     ACEF-002 at ``/audit_trail/0/actor_ref``. This is exporter-intrinsic
-    #     (identical across both runs) and is NOT the x-freddy lint.
-    exporter_intrinsic_baseline = [("ACEF-002", "/audit_trail/0/actor_ref")]
+    #     The baseline is now EMPTY: the package-creation audit-trail entry carries
+    #     a schema-valid, deterministic producer actor_ref (urn:acef:act:<uuid5>),
+    #     so the exporter no longer emits the formerly-intrinsic ACEF-002 at
+    #     ``/audit_trail/0/actor_ref`` (F1 — the SDK's headline flow now validates
+    #     clean). A fully schema-clean fixture must validate with zero structural
+    #     errors on the no-freddy run.
+    exporter_intrinsic_baseline: list[tuple[str, str | None]] = []
     assert _code_paths(no_freddy.structural_errors) == exporter_intrinsic_baseline, (
-        "clean fixture structural baseline must be EXACTLY the one exporter-intrinsic "
-        f"ACEF-002 at /audit_trail/0/actor_ref — got {no_freddy.structural_errors!r}"
+        "clean fixture must validate with NO structural errors — "
+        f"got {no_freddy.structural_errors!r}"
     )
     # The ONLY structural delta WITH the x-freddy record is the single ACEF-077
     # namespace lint (which carries no path). Assert exact (code, path) set

@@ -20,6 +20,14 @@ from acef.package import Package
     default="minimal-risk",
     type=click.Choice(["high-risk", "gpai", "gpai-systemic", "limited-risk", "minimal-risk"]),
 )
+@click.option(
+    "--modality",
+    "modalities",
+    multiple=True,
+    default=("text",),
+    type=click.Choice(["text", "image", "audio", "video", "multimodal"]),
+    help="Subject input/output modality (repeatable). A subject MUST declare >=1; defaults to text.",
+)
 @click.option("--force", is_flag=True, default=False, help="Overwrite a non-empty existing directory at PATH")
 def init_cmd(
     path: str,
@@ -28,6 +36,7 @@ def init_cmd(
     subject_name: str | None,
     subject_type: str,
     risk_classification: str,
+    modalities: tuple[str, ...],
     force: bool,
 ) -> None:
     """Initialize a new ACEF Evidence Bundle at PATH.
@@ -65,6 +74,7 @@ def init_cmd(
             subject_type=subject_type,
             name=subject_name,
             risk_classification=risk_classification,
+            modalities=list(modalities),
         )
 
     try:

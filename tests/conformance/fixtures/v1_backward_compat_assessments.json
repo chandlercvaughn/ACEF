@@ -3,7 +3,7 @@
     "provision_summary": [
       {
         "evidence_refs": [
-          "urn:acef:rec:855460ea-7b53-4ce2-981c-875d3dbfa210"
+          "urn:acef:rec:bd650bbd-d3e8-4fb9-b741-efc4b26e1725"
         ],
         "fail_count": 0,
         "outcome": "satisfied",
@@ -11,14 +11,14 @@
         "provision_id": "cac-explicit-label",
         "skipped_count": 0,
         "subject_scope": [
-          "urn:acef:sub:88525167-c0ff-4df6-b4c4-27a93a6c396e"
+          "urn:acef:sub:bf06e980-8674-432a-b78c-afd102593b97"
         ],
         "warning_count": 0
       },
       {
         "evidence_refs": [
-          "urn:acef:rec:4617b4e9-e5db-4b40-8f02-005b713e2542",
-          "urn:acef:rec:c51f3889-f83a-4af9-92fc-da71e3cb6b42"
+          "urn:acef:rec:3e60933e-618f-4fd8-a5f1-e73f1a6b1b27",
+          "urn:acef:rec:f1ec2064-ba92-4f89-9c5c-e76caf7ee379"
         ],
         "fail_count": 0,
         "outcome": "satisfied",
@@ -26,17 +26,17 @@
         "provision_id": "cac-implicit-metadata",
         "skipped_count": 0,
         "subject_scope": [
-          "urn:acef:sub:88525167-c0ff-4df6-b4c4-27a93a6c396e"
+          "urn:acef:sub:bf06e980-8674-432a-b78c-afd102593b97"
         ],
         "warning_count": 0
       },
       {
         "evidence_refs": [
-          "urn:acef:rec:27fb43de-f7a7-4677-9bb3-6fa411c376e7",
-          "urn:acef:rec:60f768e6-53c8-4613-816f-3083fc40c8db",
-          "urn:acef:rec:855460ea-7b53-4ce2-981c-875d3dbfa210",
-          "urn:acef:rec:4617b4e9-e5db-4b40-8f02-005b713e2542",
-          "urn:acef:rec:c51f3889-f83a-4af9-92fc-da71e3cb6b42"
+          "urn:acef:rec:586a1cdc-5f9e-4d2a-9c7c-50bc680ee34a",
+          "urn:acef:rec:f1b3c929-f718-4526-b6d2-9b974a2e4f89",
+          "urn:acef:rec:bd650bbd-d3e8-4fb9-b741-efc4b26e1725",
+          "urn:acef:rec:3e60933e-618f-4fd8-a5f1-e73f1a6b1b27",
+          "urn:acef:rec:f1ec2064-ba92-4f89-9c5c-e76caf7ee379"
         ],
         "fail_count": 0,
         "outcome": "satisfied",
@@ -44,14 +44,14 @@
         "provision_id": "cac-log-retention",
         "skipped_count": 0,
         "subject_scope": [
-          "urn:acef:sub:88525167-c0ff-4df6-b4c4-27a93a6c396e"
+          "urn:acef:sub:bf06e980-8674-432a-b78c-afd102593b97"
         ],
         "warning_count": 0
       },
       {
         "evidence_refs": [
-          "urn:acef:rec:4617b4e9-e5db-4b40-8f02-005b713e2542",
-          "urn:acef:rec:c51f3889-f83a-4af9-92fc-da71e3cb6b42"
+          "urn:acef:rec:3e60933e-618f-4fd8-a5f1-e73f1a6b1b27",
+          "urn:acef:rec:f1ec2064-ba92-4f89-9c5c-e76caf7ee379"
         ],
         "fail_count": 0,
         "outcome": "satisfied",
@@ -59,7 +59,7 @@
         "provision_id": "cac-watermark",
         "skipped_count": 0,
         "subject_scope": [
-          "urn:acef:sub:88525167-c0ff-4df6-b4c4-27a93a6c396e"
+          "urn:acef:sub:bf06e980-8674-432a-b78c-afd102593b97"
         ],
         "warning_count": 0
       }
@@ -67,7 +67,7 @@
     "results": [
       {
         "evidence_refs": [
-          "urn:acef:rec:855460ea-7b53-4ce2-981c-875d3dbfa210"
+          "urn:acef:rec:bd650bbd-d3e8-4fb9-b741-efc4b26e1725"
         ],
         "message": null,
         "outcome": "passed",
@@ -76,12 +76,12 @@
         "rule_id": "cac-explicit-disclosure-exists",
         "severity": "fail",
         "subject_scope": [
-          "urn:acef:sub:88525167-c0ff-4df6-b4c4-27a93a6c396e"
+          "urn:acef:sub:bf06e980-8674-432a-b78c-afd102593b97"
         ]
       },
       {
         "evidence_refs": [
-          "urn:acef:rec:855460ea-7b53-4ce2-981c-875d3dbfa210"
+          "urn:acef:rec:bd650bbd-d3e8-4fb9-b741-efc4b26e1725"
         ],
         "message": null,
         "outcome": "passed",
@@ -90,12 +90,12 @@
         "rule_id": "cac-explicit-label-type",
         "severity": "warning",
         "subject_scope": [
-          "urn:acef:sub:88525167-c0ff-4df6-b4c4-27a93a6c396e"
+          "urn:acef:sub:bf06e980-8674-432a-b78c-afd102593b97"
         ]
       },
       {
         "evidence_refs": [
-          "urn:acef:rec:855460ea-7b53-4ce2-981c-875d3dbfa210"
+          "urn:acef:rec:bd650bbd-d3e8-4fb9-b741-efc4b26e1725"
         ],
         "message": null,
         "outcome": "passed",
@@ -104,12 +104,12 @@
         "rule_id": "cac-explicit-locale",
         "severity": "warning",
         "subject_scope": [
-          "urn:acef:sub:88525167-c0ff-4df6-b4c4-27a93a6c396e"
+          "urn:acef:sub:bf06e980-8674-432a-b78c-afd102593b97"
         ]
       },
       {
         "evidence_refs": [
-          "urn:acef:rec:855460ea-7b53-4ce2-981c-875d3dbfa210"
+          "urn:acef:rec:bd650bbd-d3e8-4fb9-b741-efc4b26e1725"
         ],
         "message": null,
         "outcome": "passed",
@@ -118,13 +118,13 @@
         "rule_id": "cac-explicit-presentation",
         "severity": "fail",
         "subject_scope": [
-          "urn:acef:sub:88525167-c0ff-4df6-b4c4-27a93a6c396e"
+          "urn:acef:sub:bf06e980-8674-432a-b78c-afd102593b97"
         ]
       },
       {
         "evidence_refs": [
-          "urn:acef:rec:4617b4e9-e5db-4b40-8f02-005b713e2542",
-          "urn:acef:rec:c51f3889-f83a-4af9-92fc-da71e3cb6b42"
+          "urn:acef:rec:3e60933e-618f-4fd8-a5f1-e73f1a6b1b27",
+          "urn:acef:rec:f1ec2064-ba92-4f89-9c5c-e76caf7ee379"
         ],
         "message": null,
         "outcome": "passed",
@@ -133,13 +133,13 @@
         "rule_id": "cac-implicit-jurisdiction",
         "severity": "fail",
         "subject_scope": [
-          "urn:acef:sub:88525167-c0ff-4df6-b4c4-27a93a6c396e"
+          "urn:acef:sub:bf06e980-8674-432a-b78c-afd102593b97"
         ]
       },
       {
         "evidence_refs": [
-          "urn:acef:rec:4617b4e9-e5db-4b40-8f02-005b713e2542",
-          "urn:acef:rec:c51f3889-f83a-4af9-92fc-da71e3cb6b42"
+          "urn:acef:rec:3e60933e-618f-4fd8-a5f1-e73f1a6b1b27",
+          "urn:acef:rec:f1ec2064-ba92-4f89-9c5c-e76caf7ee379"
         ],
         "message": null,
         "outcome": "passed",
@@ -148,13 +148,13 @@
         "rule_id": "cac-implicit-marking-exists",
         "severity": "fail",
         "subject_scope": [
-          "urn:acef:sub:88525167-c0ff-4df6-b4c4-27a93a6c396e"
+          "urn:acef:sub:bf06e980-8674-432a-b78c-afd102593b97"
         ]
       },
       {
         "evidence_refs": [
-          "urn:acef:rec:4617b4e9-e5db-4b40-8f02-005b713e2542",
-          "urn:acef:rec:c51f3889-f83a-4af9-92fc-da71e3cb6b42"
+          "urn:acef:rec:3e60933e-618f-4fd8-a5f1-e73f1a6b1b27",
+          "urn:acef:rec:f1ec2064-ba92-4f89-9c5c-e76caf7ee379"
         ],
         "message": null,
         "outcome": "passed",
@@ -163,13 +163,13 @@
         "rule_id": "cac-implicit-marking-scheme-id",
         "severity": "fail",
         "subject_scope": [
-          "urn:acef:sub:88525167-c0ff-4df6-b4c4-27a93a6c396e"
+          "urn:acef:sub:bf06e980-8674-432a-b78c-afd102593b97"
         ]
       },
       {
         "evidence_refs": [
-          "urn:acef:rec:4617b4e9-e5db-4b40-8f02-005b713e2542",
-          "urn:acef:rec:c51f3889-f83a-4af9-92fc-da71e3cb6b42"
+          "urn:acef:rec:3e60933e-618f-4fd8-a5f1-e73f1a6b1b27",
+          "urn:acef:rec:f1ec2064-ba92-4f89-9c5c-e76caf7ee379"
         ],
         "message": null,
         "outcome": "passed",
@@ -178,13 +178,13 @@
         "rule_id": "cac-implicit-metadata-container",
         "severity": "warning",
         "subject_scope": [
-          "urn:acef:sub:88525167-c0ff-4df6-b4c4-27a93a6c396e"
+          "urn:acef:sub:bf06e980-8674-432a-b78c-afd102593b97"
         ]
       },
       {
         "evidence_refs": [
-          "urn:acef:rec:4617b4e9-e5db-4b40-8f02-005b713e2542",
-          "urn:acef:rec:c51f3889-f83a-4af9-92fc-da71e3cb6b42"
+          "urn:acef:rec:3e60933e-618f-4fd8-a5f1-e73f1a6b1b27",
+          "urn:acef:rec:f1ec2064-ba92-4f89-9c5c-e76caf7ee379"
         ],
         "message": null,
         "outcome": "passed",
@@ -193,13 +193,13 @@
         "rule_id": "cac-implicit-modality",
         "severity": "warning",
         "subject_scope": [
-          "urn:acef:sub:88525167-c0ff-4df6-b4c4-27a93a6c396e"
+          "urn:acef:sub:bf06e980-8674-432a-b78c-afd102593b97"
         ]
       },
       {
         "evidence_refs": [
-          "urn:acef:rec:27fb43de-f7a7-4677-9bb3-6fa411c376e7",
-          "urn:acef:rec:60f768e6-53c8-4613-816f-3083fc40c8db"
+          "urn:acef:rec:586a1cdc-5f9e-4d2a-9c7c-50bc680ee34a",
+          "urn:acef:rec:f1b3c929-f718-4526-b6d2-9b974a2e4f89"
         ],
         "message": null,
         "outcome": "passed",
@@ -208,13 +208,13 @@
         "rule_id": "cac-event-log-exists",
         "severity": "fail",
         "subject_scope": [
-          "urn:acef:sub:88525167-c0ff-4df6-b4c4-27a93a6c396e"
+          "urn:acef:sub:bf06e980-8674-432a-b78c-afd102593b97"
         ]
       },
       {
         "evidence_refs": [
-          "urn:acef:rec:27fb43de-f7a7-4677-9bb3-6fa411c376e7",
-          "urn:acef:rec:60f768e6-53c8-4613-816f-3083fc40c8db"
+          "urn:acef:rec:586a1cdc-5f9e-4d2a-9c7c-50bc680ee34a",
+          "urn:acef:rec:f1b3c929-f718-4526-b6d2-9b974a2e4f89"
         ],
         "message": null,
         "outcome": "passed",
@@ -223,13 +223,13 @@
         "rule_id": "cac-log-correlation-id",
         "severity": "warning",
         "subject_scope": [
-          "urn:acef:sub:88525167-c0ff-4df6-b4c4-27a93a6c396e"
+          "urn:acef:sub:bf06e980-8674-432a-b78c-afd102593b97"
         ]
       },
       {
         "evidence_refs": [
-          "urn:acef:rec:27fb43de-f7a7-4677-9bb3-6fa411c376e7",
-          "urn:acef:rec:60f768e6-53c8-4613-816f-3083fc40c8db"
+          "urn:acef:rec:586a1cdc-5f9e-4d2a-9c7c-50bc680ee34a",
+          "urn:acef:rec:f1b3c929-f718-4526-b6d2-9b974a2e4f89"
         ],
         "message": null,
         "outcome": "passed",
@@ -238,16 +238,16 @@
         "rule_id": "cac-log-event-type",
         "severity": "fail",
         "subject_scope": [
-          "urn:acef:sub:88525167-c0ff-4df6-b4c4-27a93a6c396e"
+          "urn:acef:sub:bf06e980-8674-432a-b78c-afd102593b97"
         ]
       },
       {
         "evidence_refs": [
-          "urn:acef:rec:855460ea-7b53-4ce2-981c-875d3dbfa210",
-          "urn:acef:rec:27fb43de-f7a7-4677-9bb3-6fa411c376e7",
-          "urn:acef:rec:60f768e6-53c8-4613-816f-3083fc40c8db",
-          "urn:acef:rec:4617b4e9-e5db-4b40-8f02-005b713e2542",
-          "urn:acef:rec:c51f3889-f83a-4af9-92fc-da71e3cb6b42"
+          "urn:acef:rec:bd650bbd-d3e8-4fb9-b741-efc4b26e1725",
+          "urn:acef:rec:586a1cdc-5f9e-4d2a-9c7c-50bc680ee34a",
+          "urn:acef:rec:f1b3c929-f718-4526-b6d2-9b974a2e4f89",
+          "urn:acef:rec:3e60933e-618f-4fd8-a5f1-e73f1a6b1b27",
+          "urn:acef:rec:f1ec2064-ba92-4f89-9c5c-e76caf7ee379"
         ],
         "message": null,
         "outcome": "passed",
@@ -256,12 +256,12 @@
         "rule_id": "cac-log-freshness",
         "severity": "fail",
         "subject_scope": [
-          "urn:acef:sub:88525167-c0ff-4df6-b4c4-27a93a6c396e"
+          "urn:acef:sub:bf06e980-8674-432a-b78c-afd102593b97"
         ]
       },
       {
         "evidence_refs": [
-          "urn:acef:rec:60f768e6-53c8-4613-816f-3083fc40c8db"
+          "urn:acef:rec:f1b3c929-f718-4526-b6d2-9b974a2e4f89"
         ],
         "message": null,
         "outcome": "passed",
@@ -270,13 +270,13 @@
         "rule_id": "cac-log-label-exception",
         "severity": "info",
         "subject_scope": [
-          "urn:acef:sub:88525167-c0ff-4df6-b4c4-27a93a6c396e"
+          "urn:acef:sub:bf06e980-8674-432a-b78c-afd102593b97"
         ]
       },
       {
         "evidence_refs": [
-          "urn:acef:rec:4617b4e9-e5db-4b40-8f02-005b713e2542",
-          "urn:acef:rec:c51f3889-f83a-4af9-92fc-da71e3cb6b42"
+          "urn:acef:rec:3e60933e-618f-4fd8-a5f1-e73f1a6b1b27",
+          "urn:acef:rec:f1ec2064-ba92-4f89-9c5c-e76caf7ee379"
         ],
         "message": null,
         "outcome": "passed",
@@ -285,13 +285,13 @@
         "rule_id": "cac-watermark-applied",
         "severity": "warning",
         "subject_scope": [
-          "urn:acef:sub:88525167-c0ff-4df6-b4c4-27a93a6c396e"
+          "urn:acef:sub:bf06e980-8674-432a-b78c-afd102593b97"
         ]
       },
       {
         "evidence_refs": [
-          "urn:acef:rec:4617b4e9-e5db-4b40-8f02-005b713e2542",
-          "urn:acef:rec:c51f3889-f83a-4af9-92fc-da71e3cb6b42"
+          "urn:acef:rec:3e60933e-618f-4fd8-a5f1-e73f1a6b1b27",
+          "urn:acef:rec:f1ec2064-ba92-4f89-9c5c-e76caf7ee379"
         ],
         "message": null,
         "outcome": "passed",
@@ -300,13 +300,13 @@
         "rule_id": "cac-watermark-family",
         "severity": "info",
         "subject_scope": [
-          "urn:acef:sub:88525167-c0ff-4df6-b4c4-27a93a6c396e"
+          "urn:acef:sub:bf06e980-8674-432a-b78c-afd102593b97"
         ]
       },
       {
         "evidence_refs": [
-          "urn:acef:rec:4617b4e9-e5db-4b40-8f02-005b713e2542",
-          "urn:acef:rec:c51f3889-f83a-4af9-92fc-da71e3cb6b42"
+          "urn:acef:rec:3e60933e-618f-4fd8-a5f1-e73f1a6b1b27",
+          "urn:acef:rec:f1ec2064-ba92-4f89-9c5c-e76caf7ee379"
         ],
         "message": null,
         "outcome": "passed",
@@ -315,522 +315,469 @@
         "rule_id": "cac-watermark-verification",
         "severity": "info",
         "subject_scope": [
-          "urn:acef:sub:88525167-c0ff-4df6-b4c4-27a93a6c396e"
+          "urn:acef:sub:bf06e980-8674-432a-b78c-afd102593b97"
         ]
       }
     ],
-    "structural_diagnostics": [
-      {
-        "category": "schema",
-        "code": "ACEF-002",
-        "message": "Manifest schema violation: '' does not match '^urn:acef:act:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'",
-        "path": "/audit_trail/0/actor_ref",
-        "severity": "fatal"
-      }
-    ]
+    "structural_diagnostics": []
   },
   "eu-high-risk-core": {
     "provision_summary": [
       {
-        "evidence_refs": [
-          "urn:acef:rec:804e6e6a-5080-49ef-b109-1d717dd95698",
-          "urn:acef:rec:9a4939af-6f51-47dc-b720-991cb3fcfef4"
-        ],
+        "evidence_refs": [],
         "fail_count": 0,
-        "outcome": "satisfied",
+        "outcome": "skipped",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-10",
-        "skipped_count": 0,
+        "skipped_count": 4,
         "subject_scope": [
-          "urn:acef:sub:c3a13a9c-ada1-4ef6-bca0-377f65afbd18"
+          "urn:acef:sub:c348092c-4025-4af0-b15d-9a483c364c95"
         ],
         "warning_count": 0
       },
       {
-        "evidence_refs": [
-          "urn:acef:rec:3d621167-8506-4a28-98bc-054969747b2b"
-        ],
+        "evidence_refs": [],
         "fail_count": 0,
-        "outcome": "satisfied",
+        "outcome": "skipped",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-11",
-        "skipped_count": 0,
+        "skipped_count": 2,
         "subject_scope": [
-          "urn:acef:sub:c3a13a9c-ada1-4ef6-bca0-377f65afbd18"
+          "urn:acef:sub:c348092c-4025-4af0-b15d-9a483c364c95"
         ],
         "warning_count": 0
       },
       {
-        "evidence_refs": [
-          "urn:acef:rec:52e798dd-5b7f-4cbf-a319-3ec7cde997e0",
-          "urn:acef:rec:86bee24a-6eef-4089-9c8c-c8e5258f7835"
-        ],
+        "evidence_refs": [],
         "fail_count": 0,
-        "outcome": "satisfied",
+        "outcome": "skipped",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-12",
-        "skipped_count": 0,
+        "skipped_count": 5,
         "subject_scope": [
-          "urn:acef:sub:c3a13a9c-ada1-4ef6-bca0-377f65afbd18"
+          "urn:acef:sub:c348092c-4025-4af0-b15d-9a483c364c95"
         ],
         "warning_count": 0
       },
       {
-        "evidence_refs": [
-          "urn:acef:rec:f1962d08-6353-4ed8-ab6b-b3463ce4a551"
-        ],
+        "evidence_refs": [],
         "fail_count": 0,
-        "outcome": "satisfied",
+        "outcome": "skipped",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-13",
-        "skipped_count": 0,
+        "skipped_count": 2,
         "subject_scope": [
-          "urn:acef:sub:c3a13a9c-ada1-4ef6-bca0-377f65afbd18"
+          "urn:acef:sub:c348092c-4025-4af0-b15d-9a483c364c95"
         ],
         "warning_count": 0
       },
       {
-        "evidence_refs": [
-          "urn:acef:rec:df927ca2-fd06-4dfe-82c6-2e421d8e5106"
-        ],
+        "evidence_refs": [],
         "fail_count": 0,
-        "outcome": "satisfied",
+        "outcome": "skipped",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-14",
-        "skipped_count": 0,
+        "skipped_count": 2,
         "subject_scope": [
-          "urn:acef:sub:c3a13a9c-ada1-4ef6-bca0-377f65afbd18"
+          "urn:acef:sub:c348092c-4025-4af0-b15d-9a483c364c95"
         ],
         "warning_count": 0
       },
       {
-        "evidence_refs": [
-          "urn:acef:rec:3d621167-8506-4a28-98bc-054969747b2b"
-        ],
+        "evidence_refs": [],
         "fail_count": 0,
-        "outcome": "satisfied",
+        "outcome": "skipped",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-15",
-        "skipped_count": 0,
+        "skipped_count": 2,
         "subject_scope": [
-          "urn:acef:sub:c3a13a9c-ada1-4ef6-bca0-377f65afbd18"
+          "urn:acef:sub:c348092c-4025-4af0-b15d-9a483c364c95"
         ],
         "warning_count": 0
       },
       {
-        "evidence_refs": [
-          "urn:acef:rec:a204affe-7d86-4dde-93ce-df2ff059dd04"
-        ],
+        "evidence_refs": [],
         "fail_count": 0,
-        "outcome": "satisfied",
+        "outcome": "skipped",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-17",
-        "skipped_count": 0,
+        "skipped_count": 2,
         "subject_scope": [
-          "urn:acef:sub:c3a13a9c-ada1-4ef6-bca0-377f65afbd18"
+          "urn:acef:sub:c348092c-4025-4af0-b15d-9a483c364c95"
         ],
         "warning_count": 0
       },
       {
-        "evidence_refs": [
-          "urn:acef:rec:8935c655-5956-4564-9f2b-796b8d25904e",
-          "urn:acef:rec:b6a206bd-5823-431b-a797-6990c6317aab",
-          "urn:acef:rec:962db5e0-fc2f-4cfc-8e9a-981836a25ae9",
-          "urn:acef:rec:804e6e6a-5080-49ef-b109-1d717dd95698",
-          "urn:acef:rec:9a4939af-6f51-47dc-b720-991cb3fcfef4",
-          "urn:acef:rec:3d621167-8506-4a28-98bc-054969747b2b",
-          "urn:acef:rec:52e798dd-5b7f-4cbf-a319-3ec7cde997e0",
-          "urn:acef:rec:86bee24a-6eef-4089-9c8c-c8e5258f7835",
-          "urn:acef:rec:a204affe-7d86-4dde-93ce-df2ff059dd04",
-          "urn:acef:rec:df927ca2-fd06-4dfe-82c6-2e421d8e5106",
-          "urn:acef:rec:f1962d08-6353-4ed8-ab6b-b3463ce4a551"
-        ],
+        "evidence_refs": [],
         "fail_count": 0,
-        "outcome": "satisfied",
+        "outcome": "skipped",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-9",
-        "skipped_count": 0,
+        "skipped_count": 6,
         "subject_scope": [
-          "urn:acef:sub:c3a13a9c-ada1-4ef6-bca0-377f65afbd18"
+          "urn:acef:sub:c348092c-4025-4af0-b15d-9a483c364c95"
         ],
         "warning_count": 0
       }
     ],
     "results": [
       {
-        "evidence_refs": [
-          "urn:acef:rec:804e6e6a-5080-49ef-b109-1d717dd95698"
-        ],
-        "message": null,
-        "outcome": "passed",
+        "evidence_refs": [],
+        "message": "Provision not yet effective (effective_date=2026-08-02, evaluation_instant=2026-03-15T12:00:00Z)",
+        "outcome": "skipped",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-10",
         "rule_id": "art10-data-provenance",
         "severity": "fail",
         "subject_scope": [
-          "urn:acef:sub:c3a13a9c-ada1-4ef6-bca0-377f65afbd18"
+          "urn:acef:sub:c348092c-4025-4af0-b15d-9a483c364c95"
         ]
       },
       {
-        "evidence_refs": [
-          "urn:acef:rec:9a4939af-6f51-47dc-b720-991cb3fcfef4"
-        ],
-        "message": null,
-        "outcome": "passed",
+        "evidence_refs": [],
+        "message": "Provision not yet effective (effective_date=2026-08-02, evaluation_instant=2026-03-15T12:00:00Z)",
+        "outcome": "skipped",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-10",
         "rule_id": "art10-dataset-card",
         "severity": "fail",
         "subject_scope": [
-          "urn:acef:sub:c3a13a9c-ada1-4ef6-bca0-377f65afbd18"
+          "urn:acef:sub:c348092c-4025-4af0-b15d-9a483c364c95"
         ]
       },
       {
-        "evidence_refs": [
-          "urn:acef:rec:9a4939af-6f51-47dc-b720-991cb3fcfef4"
-        ],
-        "message": null,
-        "outcome": "passed",
+        "evidence_refs": [],
+        "message": "Provision not yet effective (effective_date=2026-08-02, evaluation_instant=2026-03-15T12:00:00Z)",
+        "outcome": "skipped",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-10",
         "rule_id": "art10-dataset-entity-linked",
         "severity": "fail",
         "subject_scope": [
-          "urn:acef:sub:c3a13a9c-ada1-4ef6-bca0-377f65afbd18"
+          "urn:acef:sub:c348092c-4025-4af0-b15d-9a483c364c95"
         ]
       },
       {
-        "evidence_refs": [
-          "urn:acef:rec:804e6e6a-5080-49ef-b109-1d717dd95698"
-        ],
-        "message": null,
-        "outcome": "passed",
+        "evidence_refs": [],
+        "message": "Provision not yet effective (effective_date=2026-08-02, evaluation_instant=2026-03-15T12:00:00Z)",
+        "outcome": "skipped",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-10",
         "rule_id": "art10-provenance-source",
         "severity": "fail",
         "subject_scope": [
-          "urn:acef:sub:c3a13a9c-ada1-4ef6-bca0-377f65afbd18"
+          "urn:acef:sub:c348092c-4025-4af0-b15d-9a483c364c95"
         ]
       },
       {
-        "evidence_refs": [
-          "urn:acef:rec:3d621167-8506-4a28-98bc-054969747b2b"
-        ],
-        "message": null,
-        "outcome": "passed",
+        "evidence_refs": [],
+        "message": "Provision not yet effective (effective_date=2026-08-02, evaluation_instant=2026-03-15T12:00:00Z)",
+        "outcome": "skipped",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-11",
         "rule_id": "art11-evaluation-report",
         "severity": "fail",
         "subject_scope": [
-          "urn:acef:sub:c3a13a9c-ada1-4ef6-bca0-377f65afbd18"
+          "urn:acef:sub:c348092c-4025-4af0-b15d-9a483c364c95"
         ]
       },
       {
-        "evidence_refs": [
-          "urn:acef:rec:3d621167-8506-4a28-98bc-054969747b2b"
-        ],
-        "message": null,
-        "outcome": "passed",
+        "evidence_refs": [],
+        "message": "Provision not yet effective (effective_date=2026-08-02, evaluation_instant=2026-03-15T12:00:00Z)",
+        "outcome": "skipped",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-11",
         "rule_id": "art11-report-methodology",
         "severity": "warning",
         "subject_scope": [
-          "urn:acef:sub:c3a13a9c-ada1-4ef6-bca0-377f65afbd18"
+          "urn:acef:sub:c348092c-4025-4af0-b15d-9a483c364c95"
         ]
       },
       {
-        "evidence_refs": [
-          "urn:acef:rec:52e798dd-5b7f-4cbf-a319-3ec7cde997e0",
-          "urn:acef:rec:86bee24a-6eef-4089-9c8c-c8e5258f7835"
-        ],
-        "message": null,
-        "outcome": "passed",
+        "evidence_refs": [],
+        "message": "Provision not yet effective (effective_date=2026-08-02, evaluation_instant=2026-03-15T12:00:00Z)",
+        "outcome": "skipped",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-12",
         "rule_id": "art12-correlation-id-present",
         "severity": "fail",
         "subject_scope": [
-          "urn:acef:sub:c3a13a9c-ada1-4ef6-bca0-377f65afbd18"
+          "urn:acef:sub:c348092c-4025-4af0-b15d-9a483c364c95"
         ]
       },
       {
-        "evidence_refs": [
-          "urn:acef:rec:52e798dd-5b7f-4cbf-a319-3ec7cde997e0",
-          "urn:acef:rec:86bee24a-6eef-4089-9c8c-c8e5258f7835"
-        ],
-        "message": null,
-        "outcome": "passed",
+        "evidence_refs": [],
+        "message": "Provision not yet effective (effective_date=2026-08-02, evaluation_instant=2026-03-15T12:00:00Z)",
+        "outcome": "skipped",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-12",
         "rule_id": "art12-entity-linked",
         "severity": "warning",
         "subject_scope": [
-          "urn:acef:sub:c3a13a9c-ada1-4ef6-bca0-377f65afbd18"
+          "urn:acef:sub:c348092c-4025-4af0-b15d-9a483c364c95"
         ]
       },
       {
-        "evidence_refs": [
-          "urn:acef:rec:52e798dd-5b7f-4cbf-a319-3ec7cde997e0",
-          "urn:acef:rec:86bee24a-6eef-4089-9c8c-c8e5258f7835"
-        ],
-        "message": null,
-        "outcome": "passed",
+        "evidence_refs": [],
+        "message": "Provision not yet effective (effective_date=2026-08-02, evaluation_instant=2026-03-15T12:00:00Z)",
+        "outcome": "skipped",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-12",
         "rule_id": "art12-event-log",
         "severity": "fail",
         "subject_scope": [
-          "urn:acef:sub:c3a13a9c-ada1-4ef6-bca0-377f65afbd18"
+          "urn:acef:sub:c348092c-4025-4af0-b15d-9a483c364c95"
         ]
       },
       {
-        "evidence_refs": [
-          "urn:acef:rec:52e798dd-5b7f-4cbf-a319-3ec7cde997e0",
-          "urn:acef:rec:86bee24a-6eef-4089-9c8c-c8e5258f7835"
-        ],
-        "message": null,
-        "outcome": "passed",
+        "evidence_refs": [],
+        "message": "Provision not yet effective (effective_date=2026-08-02, evaluation_instant=2026-03-15T12:00:00Z)",
+        "outcome": "skipped",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-12",
         "rule_id": "art12-event-type-present",
         "severity": "fail",
         "subject_scope": [
-          "urn:acef:sub:c3a13a9c-ada1-4ef6-bca0-377f65afbd18"
+          "urn:acef:sub:c348092c-4025-4af0-b15d-9a483c364c95"
         ]
       },
       {
-        "evidence_refs": [
-          "urn:acef:rec:52e798dd-5b7f-4cbf-a319-3ec7cde997e0"
-        ],
-        "message": null,
-        "outcome": "passed",
+        "evidence_refs": [],
+        "message": "Provision not yet effective (effective_date=2026-08-02, evaluation_instant=2026-03-15T12:00:00Z)",
+        "outcome": "skipped",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-12",
         "rule_id": "art12-logging-spec",
         "severity": "warning",
         "subject_scope": [
-          "urn:acef:sub:c3a13a9c-ada1-4ef6-bca0-377f65afbd18"
+          "urn:acef:sub:c348092c-4025-4af0-b15d-9a483c364c95"
         ]
       },
       {
-        "evidence_refs": [
-          "urn:acef:rec:f1962d08-6353-4ed8-ab6b-b3463ce4a551"
-        ],
-        "message": null,
-        "outcome": "passed",
+        "evidence_refs": [],
+        "message": "Provision not yet effective (effective_date=2026-08-02, evaluation_instant=2026-03-15T12:00:00Z)",
+        "outcome": "skipped",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-13",
         "rule_id": "art13-subject-linked",
         "severity": "warning",
         "subject_scope": [
-          "urn:acef:sub:c3a13a9c-ada1-4ef6-bca0-377f65afbd18"
+          "urn:acef:sub:c348092c-4025-4af0-b15d-9a483c364c95"
         ]
       },
       {
-        "evidence_refs": [
-          "urn:acef:rec:f1962d08-6353-4ed8-ab6b-b3463ce4a551"
-        ],
-        "message": null,
-        "outcome": "passed",
+        "evidence_refs": [],
+        "message": "Provision not yet effective (effective_date=2026-08-02, evaluation_instant=2026-03-15T12:00:00Z)",
+        "outcome": "skipped",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-13",
         "rule_id": "art13-transparency-disclosure",
         "severity": "fail",
         "subject_scope": [
-          "urn:acef:sub:c3a13a9c-ada1-4ef6-bca0-377f65afbd18"
+          "urn:acef:sub:c348092c-4025-4af0-b15d-9a483c364c95"
         ]
       },
       {
-        "evidence_refs": [
-          "urn:acef:rec:df927ca2-fd06-4dfe-82c6-2e421d8e5106"
-        ],
-        "message": null,
-        "outcome": "passed",
+        "evidence_refs": [],
+        "message": "Provision not yet effective (effective_date=2026-08-02, evaluation_instant=2026-03-15T12:00:00Z)",
+        "outcome": "skipped",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-14",
         "rule_id": "art14-human-oversight",
         "severity": "fail",
         "subject_scope": [
-          "urn:acef:sub:c3a13a9c-ada1-4ef6-bca0-377f65afbd18"
+          "urn:acef:sub:c348092c-4025-4af0-b15d-9a483c364c95"
         ]
       },
       {
-        "evidence_refs": [
-          "urn:acef:rec:df927ca2-fd06-4dfe-82c6-2e421d8e5106"
-        ],
-        "message": null,
-        "outcome": "passed",
+        "evidence_refs": [],
+        "message": "Provision not yet effective (effective_date=2026-08-02, evaluation_instant=2026-03-15T12:00:00Z)",
+        "outcome": "skipped",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-14",
         "rule_id": "art14-oversight-entity-linked",
         "severity": "warning",
         "subject_scope": [
-          "urn:acef:sub:c3a13a9c-ada1-4ef6-bca0-377f65afbd18"
+          "urn:acef:sub:c348092c-4025-4af0-b15d-9a483c364c95"
         ]
       },
       {
-        "evidence_refs": [
-          "urn:acef:rec:3d621167-8506-4a28-98bc-054969747b2b"
-        ],
-        "message": null,
-        "outcome": "passed",
+        "evidence_refs": [],
+        "message": "Provision not yet effective (effective_date=2026-08-02, evaluation_instant=2026-03-15T12:00:00Z)",
+        "outcome": "skipped",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-15",
         "rule_id": "art15-accuracy-metrics",
         "severity": "warning",
         "subject_scope": [
-          "urn:acef:sub:c3a13a9c-ada1-4ef6-bca0-377f65afbd18"
+          "urn:acef:sub:c348092c-4025-4af0-b15d-9a483c364c95"
         ]
       },
       {
-        "evidence_refs": [
-          "urn:acef:rec:3d621167-8506-4a28-98bc-054969747b2b"
-        ],
-        "message": null,
-        "outcome": "passed",
+        "evidence_refs": [],
+        "message": "Provision not yet effective (effective_date=2026-08-02, evaluation_instant=2026-03-15T12:00:00Z)",
+        "outcome": "skipped",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-15",
         "rule_id": "art15-evaluation-report",
         "severity": "fail",
         "subject_scope": [
-          "urn:acef:sub:c3a13a9c-ada1-4ef6-bca0-377f65afbd18"
+          "urn:acef:sub:c348092c-4025-4af0-b15d-9a483c364c95"
         ]
       },
       {
-        "evidence_refs": [
-          "urn:acef:rec:a204affe-7d86-4dde-93ce-df2ff059dd04"
-        ],
-        "message": null,
-        "outcome": "passed",
+        "evidence_refs": [],
+        "message": "Provision not yet effective (effective_date=2026-08-02, evaluation_instant=2026-03-15T12:00:00Z)",
+        "outcome": "skipped",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-17",
         "rule_id": "art17-governance-policy",
         "severity": "fail",
         "subject_scope": [
-          "urn:acef:sub:c3a13a9c-ada1-4ef6-bca0-377f65afbd18"
+          "urn:acef:sub:c348092c-4025-4af0-b15d-9a483c364c95"
         ]
       },
       {
-        "evidence_refs": [
-          "urn:acef:rec:a204affe-7d86-4dde-93ce-df2ff059dd04"
-        ],
-        "message": null,
-        "outcome": "passed",
+        "evidence_refs": [],
+        "message": "Provision not yet effective (effective_date=2026-08-02, evaluation_instant=2026-03-15T12:00:00Z)",
+        "outcome": "skipped",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-17",
         "rule_id": "art17-qms-attachment",
         "severity": "warning",
         "subject_scope": [
-          "urn:acef:sub:c3a13a9c-ada1-4ef6-bca0-377f65afbd18"
+          "urn:acef:sub:c348092c-4025-4af0-b15d-9a483c364c95"
         ]
       },
       {
-        "evidence_refs": [
-          "urn:acef:rec:8935c655-5956-4564-9f2b-796b8d25904e",
-          "urn:acef:rec:b6a206bd-5823-431b-a797-6990c6317aab"
-        ],
-        "message": null,
-        "outcome": "passed",
+        "evidence_refs": [],
+        "message": "Provision not yet effective (effective_date=2026-08-02, evaluation_instant=2026-03-15T12:00:00Z)",
+        "outcome": "skipped",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-9",
         "rule_id": "art9-entity-linked",
         "severity": "fail",
         "subject_scope": [
-          "urn:acef:sub:c3a13a9c-ada1-4ef6-bca0-377f65afbd18"
+          "urn:acef:sub:c348092c-4025-4af0-b15d-9a483c364c95"
         ]
       },
       {
-        "evidence_refs": [
-          "urn:acef:rec:804e6e6a-5080-49ef-b109-1d717dd95698",
-          "urn:acef:rec:9a4939af-6f51-47dc-b720-991cb3fcfef4",
-          "urn:acef:rec:3d621167-8506-4a28-98bc-054969747b2b",
-          "urn:acef:rec:52e798dd-5b7f-4cbf-a319-3ec7cde997e0",
-          "urn:acef:rec:86bee24a-6eef-4089-9c8c-c8e5258f7835",
-          "urn:acef:rec:a204affe-7d86-4dde-93ce-df2ff059dd04",
-          "urn:acef:rec:df927ca2-fd06-4dfe-82c6-2e421d8e5106",
-          "urn:acef:rec:8935c655-5956-4564-9f2b-796b8d25904e",
-          "urn:acef:rec:b6a206bd-5823-431b-a797-6990c6317aab",
-          "urn:acef:rec:962db5e0-fc2f-4cfc-8e9a-981836a25ae9",
-          "urn:acef:rec:f1962d08-6353-4ed8-ab6b-b3463ce4a551"
-        ],
-        "message": null,
-        "outcome": "passed",
+        "evidence_refs": [],
+        "message": "Provision not yet effective (effective_date=2026-08-02, evaluation_instant=2026-03-15T12:00:00Z)",
+        "outcome": "skipped",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-9",
         "rule_id": "art9-freshness",
         "severity": "warning",
         "subject_scope": [
-          "urn:acef:sub:c3a13a9c-ada1-4ef6-bca0-377f65afbd18"
+          "urn:acef:sub:c348092c-4025-4af0-b15d-9a483c364c95"
         ]
       },
       {
-        "evidence_refs": [
-          "urn:acef:rec:b6a206bd-5823-431b-a797-6990c6317aab"
-        ],
-        "message": null,
-        "outcome": "passed",
+        "evidence_refs": [],
+        "message": "Provision not yet effective (effective_date=2026-08-02, evaluation_instant=2026-03-15T12:00:00Z)",
+        "outcome": "skipped",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-9",
         "rule_id": "art9-management-review",
         "severity": "fail",
         "subject_scope": [
-          "urn:acef:sub:c3a13a9c-ada1-4ef6-bca0-377f65afbd18"
+          "urn:acef:sub:c348092c-4025-4af0-b15d-9a483c364c95"
         ]
       },
       {
-        "evidence_refs": [
-          "urn:acef:rec:b6a206bd-5823-431b-a797-6990c6317aab"
-        ],
-        "message": null,
-        "outcome": "passed",
+        "evidence_refs": [],
+        "message": "Provision not yet effective (effective_date=2026-08-02, evaluation_instant=2026-03-15T12:00:00Z)",
+        "outcome": "skipped",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-9",
         "rule_id": "art9-post-market-monitoring",
         "severity": "warning",
         "subject_scope": [
-          "urn:acef:sub:c3a13a9c-ada1-4ef6-bca0-377f65afbd18"
+          "urn:acef:sub:c348092c-4025-4af0-b15d-9a483c364c95"
         ]
       },
       {
-        "evidence_refs": [
-          "urn:acef:rec:8935c655-5956-4564-9f2b-796b8d25904e",
-          "urn:acef:rec:b6a206bd-5823-431b-a797-6990c6317aab"
-        ],
-        "message": null,
-        "outcome": "passed",
+        "evidence_refs": [],
+        "message": "Provision not yet effective (effective_date=2026-08-02, evaluation_instant=2026-03-15T12:00:00Z)",
+        "outcome": "skipped",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-9",
         "rule_id": "art9-risk-register",
         "severity": "fail",
         "subject_scope": [
-          "urn:acef:sub:c3a13a9c-ada1-4ef6-bca0-377f65afbd18"
+          "urn:acef:sub:c348092c-4025-4af0-b15d-9a483c364c95"
         ]
       },
       {
-        "evidence_refs": [
-          "urn:acef:rec:962db5e0-fc2f-4cfc-8e9a-981836a25ae9"
-        ],
-        "message": null,
-        "outcome": "passed",
+        "evidence_refs": [],
+        "message": "Provision not yet effective (effective_date=2026-08-02, evaluation_instant=2026-03-15T12:00:00Z)",
+        "outcome": "skipped",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-9",
         "rule_id": "art9-risk-treatment",
         "severity": "fail",
         "subject_scope": [
-          "urn:acef:sub:c3a13a9c-ada1-4ef6-bca0-377f65afbd18"
+          "urn:acef:sub:c348092c-4025-4af0-b15d-9a483c364c95"
         ]
       }
     ],
     "structural_diagnostics": [
       {
-        "category": "schema",
-        "code": "ACEF-002",
-        "message": "Manifest schema violation: '' does not match '^urn:acef:act:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'",
-        "path": "/audit_trail/0/actor_ref",
-        "severity": "fatal"
+        "category": "profile",
+        "code": "ACEF-032",
+        "message": "Provision article-10 not yet effective (effective: 2026-08-02, evaluation: 2026-03-15T12:00:00Z)",
+        "path": "",
+        "severity": "info"
+      },
+      {
+        "category": "profile",
+        "code": "ACEF-032",
+        "message": "Provision article-11 not yet effective (effective: 2026-08-02, evaluation: 2026-03-15T12:00:00Z)",
+        "path": "",
+        "severity": "info"
+      },
+      {
+        "category": "profile",
+        "code": "ACEF-032",
+        "message": "Provision article-12 not yet effective (effective: 2026-08-02, evaluation: 2026-03-15T12:00:00Z)",
+        "path": "",
+        "severity": "info"
+      },
+      {
+        "category": "profile",
+        "code": "ACEF-032",
+        "message": "Provision article-13 not yet effective (effective: 2026-08-02, evaluation: 2026-03-15T12:00:00Z)",
+        "path": "",
+        "severity": "info"
+      },
+      {
+        "category": "profile",
+        "code": "ACEF-032",
+        "message": "Provision article-14 not yet effective (effective: 2026-08-02, evaluation: 2026-03-15T12:00:00Z)",
+        "path": "",
+        "severity": "info"
+      },
+      {
+        "category": "profile",
+        "code": "ACEF-032",
+        "message": "Provision article-15 not yet effective (effective: 2026-08-02, evaluation: 2026-03-15T12:00:00Z)",
+        "path": "",
+        "severity": "info"
+      },
+      {
+        "category": "profile",
+        "code": "ACEF-032",
+        "message": "Provision article-17 not yet effective (effective: 2026-08-02, evaluation: 2026-03-15T12:00:00Z)",
+        "path": "",
+        "severity": "info"
+      },
+      {
+        "category": "profile",
+        "code": "ACEF-032",
+        "message": "Provision article-9 not yet effective (effective: 2026-08-02, evaluation: 2026-03-15T12:00:00Z)",
+        "path": "",
+        "severity": "info"
       }
     ]
   },
@@ -838,9 +785,9 @@
     "provision_summary": [
       {
         "evidence_refs": [
-          "urn:acef:rec:17cd1346-09a2-4f55-bcf5-08fb1b6f38a9",
-          "urn:acef:rec:d5d8c1bf-f24f-4357-a082-a7409033343b",
-          "urn:acef:rec:244c326e-7d12-4e05-8369-7ad05a2fa9d5"
+          "urn:acef:rec:9cbbd7e5-ec6f-46c6-8904-e7d7e12e93b5",
+          "urn:acef:rec:17a7bfa6-04bd-404a-a8a5-32640befb2ad",
+          "urn:acef:rec:e461e9ca-2e40-4336-ba12-e35f4e2a4d2d"
         ],
         "fail_count": 0,
         "outcome": "satisfied",
@@ -848,7 +795,7 @@
         "provision_id": "article-53",
         "skipped_count": 0,
         "subject_scope": [
-          "urn:acef:sub:25417616-c36a-4d69-8e72-29c79df668ea"
+          "urn:acef:sub:34a93a0d-4053-4c78-832e-c5adac90b030"
         ],
         "warning_count": 0
       }
@@ -856,7 +803,7 @@
     "results": [
       {
         "evidence_refs": [
-          "urn:acef:rec:244c326e-7d12-4e05-8369-7ad05a2fa9d5"
+          "urn:acef:rec:e461e9ca-2e40-4336-ba12-e35f4e2a4d2d"
         ],
         "message": null,
         "outcome": "passed",
@@ -865,12 +812,12 @@
         "rule_id": "art53-annex-xi-doc",
         "severity": "warning",
         "subject_scope": [
-          "urn:acef:sub:25417616-c36a-4d69-8e72-29c79df668ea"
+          "urn:acef:sub:34a93a0d-4053-4c78-832e-c5adac90b030"
         ]
       },
       {
         "evidence_refs": [
-          "urn:acef:rec:d5d8c1bf-f24f-4357-a082-a7409033343b"
+          "urn:acef:rec:17a7bfa6-04bd-404a-a8a5-32640befb2ad"
         ],
         "message": null,
         "outcome": "passed",
@@ -879,12 +826,12 @@
         "rule_id": "art53-copyright",
         "severity": "fail",
         "subject_scope": [
-          "urn:acef:sub:25417616-c36a-4d69-8e72-29c79df668ea"
+          "urn:acef:sub:34a93a0d-4053-4c78-832e-c5adac90b030"
         ]
       },
       {
         "evidence_refs": [
-          "urn:acef:rec:17cd1346-09a2-4f55-bcf5-08fb1b6f38a9"
+          "urn:acef:rec:9cbbd7e5-ec6f-46c6-8904-e7d7e12e93b5"
         ],
         "message": null,
         "outcome": "passed",
@@ -893,12 +840,12 @@
         "rule_id": "art53-data-provenance",
         "severity": "fail",
         "subject_scope": [
-          "urn:acef:sub:25417616-c36a-4d69-8e72-29c79df668ea"
+          "urn:acef:sub:34a93a0d-4053-4c78-832e-c5adac90b030"
         ]
       },
       {
         "evidence_refs": [
-          "urn:acef:rec:17cd1346-09a2-4f55-bcf5-08fb1b6f38a9"
+          "urn:acef:rec:9cbbd7e5-ec6f-46c6-8904-e7d7e12e93b5"
         ],
         "message": null,
         "outcome": "passed",
@@ -907,69 +854,54 @@
         "rule_id": "art53-provenance-source-type",
         "severity": "fail",
         "subject_scope": [
-          "urn:acef:sub:25417616-c36a-4d69-8e72-29c79df668ea"
+          "urn:acef:sub:34a93a0d-4053-4c78-832e-c5adac90b030"
         ]
       }
     ],
-    "structural_diagnostics": [
-      {
-        "category": "schema",
-        "code": "ACEF-002",
-        "message": "Manifest schema violation: '' does not match '^urn:acef:act:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'",
-        "path": "/audit_trail/0/actor_ref",
-        "severity": "fatal"
-      }
-    ]
+    "structural_diagnostics": []
   },
   "multi-subject-composed": {
     "provision_summary": [
       {
-        "evidence_refs": [
-          "urn:acef:rec:a805c374-9c3f-4389-8da4-05dadb98a94a",
-          "urn:acef:rec:e97ee37a-c44d-4818-b718-e825dd3e7a14"
-        ],
+        "evidence_refs": [],
         "fail_count": 0,
-        "outcome": "satisfied",
+        "outcome": "skipped",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-10",
-        "skipped_count": 0,
+        "skipped_count": 4,
         "subject_scope": [
-          "urn:acef:sub:b4bf5f13-c1bf-4acc-b5de-93a025ae3a57"
+          "urn:acef:sub:7c4d7da9-7a5f-446c-9ee0-f25453c504af"
         ],
         "warning_count": 0
       },
       {
-        "evidence_refs": [
-          "urn:acef:rec:83248bdb-7d49-49a3-9e57-215414ec2299"
-        ],
+        "evidence_refs": [],
         "fail_count": 0,
-        "outcome": "satisfied",
+        "outcome": "skipped",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-11",
-        "skipped_count": 0,
+        "skipped_count": 2,
         "subject_scope": [
-          "urn:acef:sub:b4bf5f13-c1bf-4acc-b5de-93a025ae3a57"
+          "urn:acef:sub:7c4d7da9-7a5f-446c-9ee0-f25453c504af"
         ],
         "warning_count": 0
       },
       {
-        "evidence_refs": [
-          "urn:acef:rec:bc3421bb-06a4-4b88-b72c-ab3c66394dc1"
-        ],
+        "evidence_refs": [],
         "fail_count": 0,
-        "outcome": "satisfied",
+        "outcome": "skipped",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-13",
-        "skipped_count": 0,
+        "skipped_count": 2,
         "subject_scope": [
-          "urn:acef:sub:b4bf5f13-c1bf-4acc-b5de-93a025ae3a57"
+          "urn:acef:sub:7c4d7da9-7a5f-446c-9ee0-f25453c504af"
         ],
         "warning_count": 0
       },
       {
         "evidence_refs": [
-          "urn:acef:rec:a805c374-9c3f-4389-8da4-05dadb98a94a",
-          "urn:acef:rec:4f89d40e-ab0c-4455-b60d-49eb45a4450e"
+          "urn:acef:rec:feced0fc-dc86-4831-bfb9-8f2f01a62cc8",
+          "urn:acef:rec:0ede5956-4c07-43a7-93ea-f2d1e458982b"
         ],
         "fail_count": 0,
         "outcome": "partially-satisfied",
@@ -977,33 +909,25 @@
         "provision_id": "article-53",
         "skipped_count": 0,
         "subject_scope": [
-          "urn:acef:sub:89ff8b73-8cb4-45d0-a569-140e07cfafd0"
+          "urn:acef:sub:2153c4b4-e012-45ef-a13d-a5cc61d0e649"
         ],
         "warning_count": 1
       },
       {
-        "evidence_refs": [
-          "urn:acef:rec:2d0ff685-040d-41fe-b784-85cacb2ba251",
-          "urn:acef:rec:39baee65-2172-4947-ac40-708a3c7ac4ff",
-          "urn:acef:rec:a805c374-9c3f-4389-8da4-05dadb98a94a",
-          "urn:acef:rec:e97ee37a-c44d-4818-b718-e825dd3e7a14",
-          "urn:acef:rec:83248bdb-7d49-49a3-9e57-215414ec2299",
-          "urn:acef:rec:47e5102d-0595-41cc-b9d2-d48a51838c46",
-          "urn:acef:rec:bc3421bb-06a4-4b88-b72c-ab3c66394dc1"
-        ],
+        "evidence_refs": [],
         "fail_count": 0,
-        "outcome": "satisfied",
+        "outcome": "skipped",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-9",
-        "skipped_count": 0,
+        "skipped_count": 6,
         "subject_scope": [
-          "urn:acef:sub:b4bf5f13-c1bf-4acc-b5de-93a025ae3a57"
+          "urn:acef:sub:7c4d7da9-7a5f-446c-9ee0-f25453c504af"
         ],
         "warning_count": 0
       },
       {
         "evidence_refs": [
-          "urn:acef:rec:47e5102d-0595-41cc-b9d2-d48a51838c46"
+          "urn:acef:rec:da423cb6-c50c-4551-b8ed-46fcfc748069"
         ],
         "fail_count": 0,
         "outcome": "partially-satisfied",
@@ -1011,13 +935,13 @@
         "provision_id": "govern-1",
         "skipped_count": 0,
         "subject_scope": [
-          "urn:acef:sub:89ff8b73-8cb4-45d0-a569-140e07cfafd0"
+          "urn:acef:sub:2153c4b4-e012-45ef-a13d-a5cc61d0e649"
         ],
         "warning_count": 1
       },
       {
         "evidence_refs": [
-          "urn:acef:rec:47e5102d-0595-41cc-b9d2-d48a51838c46"
+          "urn:acef:rec:da423cb6-c50c-4551-b8ed-46fcfc748069"
         ],
         "fail_count": 0,
         "outcome": "partially-satisfied",
@@ -1025,13 +949,13 @@
         "provision_id": "govern-1",
         "skipped_count": 0,
         "subject_scope": [
-          "urn:acef:sub:b4bf5f13-c1bf-4acc-b5de-93a025ae3a57"
+          "urn:acef:sub:7c4d7da9-7a5f-446c-9ee0-f25453c504af"
         ],
         "warning_count": 1
       },
       {
         "evidence_refs": [
-          "urn:acef:rec:2d0ff685-040d-41fe-b784-85cacb2ba251"
+          "urn:acef:rec:a0cbbd91-0056-48b3-b7d3-eaf61a0854e4"
         ],
         "fail_count": 0,
         "outcome": "partially-satisfied",
@@ -1039,13 +963,13 @@
         "provision_id": "map-1",
         "skipped_count": 0,
         "subject_scope": [
-          "urn:acef:sub:89ff8b73-8cb4-45d0-a569-140e07cfafd0"
+          "urn:acef:sub:2153c4b4-e012-45ef-a13d-a5cc61d0e649"
         ],
         "warning_count": 1
       },
       {
         "evidence_refs": [
-          "urn:acef:rec:2d0ff685-040d-41fe-b784-85cacb2ba251"
+          "urn:acef:rec:a0cbbd91-0056-48b3-b7d3-eaf61a0854e4"
         ],
         "fail_count": 0,
         "outcome": "partially-satisfied",
@@ -1053,13 +977,13 @@
         "provision_id": "map-1",
         "skipped_count": 0,
         "subject_scope": [
-          "urn:acef:sub:b4bf5f13-c1bf-4acc-b5de-93a025ae3a57"
+          "urn:acef:sub:7c4d7da9-7a5f-446c-9ee0-f25453c504af"
         ],
         "warning_count": 1
       },
       {
         "evidence_refs": [
-          "urn:acef:rec:83248bdb-7d49-49a3-9e57-215414ec2299"
+          "urn:acef:rec:cd0a1689-dd70-4cfa-85d6-6712044ebc77"
         ],
         "fail_count": 0,
         "outcome": "satisfied",
@@ -1067,13 +991,13 @@
         "provision_id": "measure-1",
         "skipped_count": 0,
         "subject_scope": [
-          "urn:acef:sub:89ff8b73-8cb4-45d0-a569-140e07cfafd0"
+          "urn:acef:sub:2153c4b4-e012-45ef-a13d-a5cc61d0e649"
         ],
         "warning_count": 0
       },
       {
         "evidence_refs": [
-          "urn:acef:rec:83248bdb-7d49-49a3-9e57-215414ec2299"
+          "urn:acef:rec:cd0a1689-dd70-4cfa-85d6-6712044ebc77"
         ],
         "fail_count": 0,
         "outcome": "satisfied",
@@ -1081,122 +1005,106 @@
         "provision_id": "measure-1",
         "skipped_count": 0,
         "subject_scope": [
-          "urn:acef:sub:b4bf5f13-c1bf-4acc-b5de-93a025ae3a57"
+          "urn:acef:sub:7c4d7da9-7a5f-446c-9ee0-f25453c504af"
         ],
         "warning_count": 0
       }
     ],
     "results": [
       {
-        "evidence_refs": [
-          "urn:acef:rec:a805c374-9c3f-4389-8da4-05dadb98a94a"
-        ],
-        "message": null,
-        "outcome": "passed",
+        "evidence_refs": [],
+        "message": "Provision not yet effective (effective_date=2026-08-02, evaluation_instant=2026-03-15T12:00:00Z)",
+        "outcome": "skipped",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-10",
         "rule_id": "art10-data-provenance",
         "severity": "fail",
         "subject_scope": [
-          "urn:acef:sub:b4bf5f13-c1bf-4acc-b5de-93a025ae3a57"
+          "urn:acef:sub:7c4d7da9-7a5f-446c-9ee0-f25453c504af"
         ]
       },
       {
-        "evidence_refs": [
-          "urn:acef:rec:e97ee37a-c44d-4818-b718-e825dd3e7a14"
-        ],
-        "message": null,
-        "outcome": "passed",
+        "evidence_refs": [],
+        "message": "Provision not yet effective (effective_date=2026-08-02, evaluation_instant=2026-03-15T12:00:00Z)",
+        "outcome": "skipped",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-10",
         "rule_id": "art10-dataset-card",
         "severity": "fail",
         "subject_scope": [
-          "urn:acef:sub:b4bf5f13-c1bf-4acc-b5de-93a025ae3a57"
+          "urn:acef:sub:7c4d7da9-7a5f-446c-9ee0-f25453c504af"
         ]
       },
       {
-        "evidence_refs": [
-          "urn:acef:rec:e97ee37a-c44d-4818-b718-e825dd3e7a14"
-        ],
-        "message": null,
-        "outcome": "passed",
+        "evidence_refs": [],
+        "message": "Provision not yet effective (effective_date=2026-08-02, evaluation_instant=2026-03-15T12:00:00Z)",
+        "outcome": "skipped",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-10",
         "rule_id": "art10-dataset-entity-linked",
         "severity": "fail",
         "subject_scope": [
-          "urn:acef:sub:b4bf5f13-c1bf-4acc-b5de-93a025ae3a57"
+          "urn:acef:sub:7c4d7da9-7a5f-446c-9ee0-f25453c504af"
         ]
       },
       {
-        "evidence_refs": [
-          "urn:acef:rec:a805c374-9c3f-4389-8da4-05dadb98a94a"
-        ],
-        "message": null,
-        "outcome": "passed",
+        "evidence_refs": [],
+        "message": "Provision not yet effective (effective_date=2026-08-02, evaluation_instant=2026-03-15T12:00:00Z)",
+        "outcome": "skipped",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-10",
         "rule_id": "art10-provenance-source",
         "severity": "fail",
         "subject_scope": [
-          "urn:acef:sub:b4bf5f13-c1bf-4acc-b5de-93a025ae3a57"
+          "urn:acef:sub:7c4d7da9-7a5f-446c-9ee0-f25453c504af"
         ]
       },
       {
-        "evidence_refs": [
-          "urn:acef:rec:83248bdb-7d49-49a3-9e57-215414ec2299"
-        ],
-        "message": null,
-        "outcome": "passed",
+        "evidence_refs": [],
+        "message": "Provision not yet effective (effective_date=2026-08-02, evaluation_instant=2026-03-15T12:00:00Z)",
+        "outcome": "skipped",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-11",
         "rule_id": "art11-evaluation-report",
         "severity": "fail",
         "subject_scope": [
-          "urn:acef:sub:b4bf5f13-c1bf-4acc-b5de-93a025ae3a57"
+          "urn:acef:sub:7c4d7da9-7a5f-446c-9ee0-f25453c504af"
         ]
       },
       {
-        "evidence_refs": [
-          "urn:acef:rec:83248bdb-7d49-49a3-9e57-215414ec2299"
-        ],
-        "message": null,
-        "outcome": "passed",
+        "evidence_refs": [],
+        "message": "Provision not yet effective (effective_date=2026-08-02, evaluation_instant=2026-03-15T12:00:00Z)",
+        "outcome": "skipped",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-11",
         "rule_id": "art11-report-methodology",
         "severity": "warning",
         "subject_scope": [
-          "urn:acef:sub:b4bf5f13-c1bf-4acc-b5de-93a025ae3a57"
+          "urn:acef:sub:7c4d7da9-7a5f-446c-9ee0-f25453c504af"
         ]
       },
       {
-        "evidence_refs": [
-          "urn:acef:rec:bc3421bb-06a4-4b88-b72c-ab3c66394dc1"
-        ],
-        "message": null,
-        "outcome": "passed",
+        "evidence_refs": [],
+        "message": "Provision not yet effective (effective_date=2026-08-02, evaluation_instant=2026-03-15T12:00:00Z)",
+        "outcome": "skipped",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-13",
         "rule_id": "art13-subject-linked",
         "severity": "warning",
         "subject_scope": [
-          "urn:acef:sub:b4bf5f13-c1bf-4acc-b5de-93a025ae3a57"
+          "urn:acef:sub:7c4d7da9-7a5f-446c-9ee0-f25453c504af"
         ]
       },
       {
-        "evidence_refs": [
-          "urn:acef:rec:bc3421bb-06a4-4b88-b72c-ab3c66394dc1"
-        ],
-        "message": null,
-        "outcome": "passed",
+        "evidence_refs": [],
+        "message": "Provision not yet effective (effective_date=2026-08-02, evaluation_instant=2026-03-15T12:00:00Z)",
+        "outcome": "skipped",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-13",
         "rule_id": "art13-transparency-disclosure",
         "severity": "fail",
         "subject_scope": [
-          "urn:acef:sub:b4bf5f13-c1bf-4acc-b5de-93a025ae3a57"
+          "urn:acef:sub:7c4d7da9-7a5f-446c-9ee0-f25453c504af"
         ]
       },
       {
@@ -1208,12 +1116,12 @@
         "rule_id": "art53-annex-xi-doc",
         "severity": "warning",
         "subject_scope": [
-          "urn:acef:sub:89ff8b73-8cb4-45d0-a569-140e07cfafd0"
+          "urn:acef:sub:2153c4b4-e012-45ef-a13d-a5cc61d0e649"
         ]
       },
       {
         "evidence_refs": [
-          "urn:acef:rec:4f89d40e-ab0c-4455-b60d-49eb45a4450e"
+          "urn:acef:rec:0ede5956-4c07-43a7-93ea-f2d1e458982b"
         ],
         "message": null,
         "outcome": "passed",
@@ -1222,12 +1130,12 @@
         "rule_id": "art53-copyright",
         "severity": "fail",
         "subject_scope": [
-          "urn:acef:sub:89ff8b73-8cb4-45d0-a569-140e07cfafd0"
+          "urn:acef:sub:2153c4b4-e012-45ef-a13d-a5cc61d0e649"
         ]
       },
       {
         "evidence_refs": [
-          "urn:acef:rec:a805c374-9c3f-4389-8da4-05dadb98a94a"
+          "urn:acef:rec:feced0fc-dc86-4831-bfb9-8f2f01a62cc8"
         ],
         "message": null,
         "outcome": "passed",
@@ -1236,12 +1144,12 @@
         "rule_id": "art53-data-provenance",
         "severity": "fail",
         "subject_scope": [
-          "urn:acef:sub:89ff8b73-8cb4-45d0-a569-140e07cfafd0"
+          "urn:acef:sub:2153c4b4-e012-45ef-a13d-a5cc61d0e649"
         ]
       },
       {
         "evidence_refs": [
-          "urn:acef:rec:a805c374-9c3f-4389-8da4-05dadb98a94a"
+          "urn:acef:rec:feced0fc-dc86-4831-bfb9-8f2f01a62cc8"
         ],
         "message": null,
         "outcome": "passed",
@@ -1250,102 +1158,84 @@
         "rule_id": "art53-provenance-source-type",
         "severity": "fail",
         "subject_scope": [
-          "urn:acef:sub:89ff8b73-8cb4-45d0-a569-140e07cfafd0"
+          "urn:acef:sub:2153c4b4-e012-45ef-a13d-a5cc61d0e649"
         ]
       },
       {
-        "evidence_refs": [
-          "urn:acef:rec:2d0ff685-040d-41fe-b784-85cacb2ba251"
-        ],
-        "message": null,
-        "outcome": "passed",
+        "evidence_refs": [],
+        "message": "Provision not yet effective (effective_date=2026-08-02, evaluation_instant=2026-03-15T12:00:00Z)",
+        "outcome": "skipped",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-9",
         "rule_id": "art9-entity-linked",
         "severity": "fail",
         "subject_scope": [
-          "urn:acef:sub:b4bf5f13-c1bf-4acc-b5de-93a025ae3a57"
+          "urn:acef:sub:7c4d7da9-7a5f-446c-9ee0-f25453c504af"
         ]
       },
       {
-        "evidence_refs": [
-          "urn:acef:rec:a805c374-9c3f-4389-8da4-05dadb98a94a",
-          "urn:acef:rec:e97ee37a-c44d-4818-b718-e825dd3e7a14",
-          "urn:acef:rec:83248bdb-7d49-49a3-9e57-215414ec2299",
-          "urn:acef:rec:47e5102d-0595-41cc-b9d2-d48a51838c46",
-          "urn:acef:rec:2d0ff685-040d-41fe-b784-85cacb2ba251",
-          "urn:acef:rec:39baee65-2172-4947-ac40-708a3c7ac4ff",
-          "urn:acef:rec:bc3421bb-06a4-4b88-b72c-ab3c66394dc1"
-        ],
-        "message": null,
-        "outcome": "passed",
+        "evidence_refs": [],
+        "message": "Provision not yet effective (effective_date=2026-08-02, evaluation_instant=2026-03-15T12:00:00Z)",
+        "outcome": "skipped",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-9",
         "rule_id": "art9-freshness",
         "severity": "warning",
         "subject_scope": [
-          "urn:acef:sub:b4bf5f13-c1bf-4acc-b5de-93a025ae3a57"
+          "urn:acef:sub:7c4d7da9-7a5f-446c-9ee0-f25453c504af"
         ]
       },
       {
-        "evidence_refs": [
-          "urn:acef:rec:2d0ff685-040d-41fe-b784-85cacb2ba251"
-        ],
-        "message": null,
-        "outcome": "passed",
+        "evidence_refs": [],
+        "message": "Provision not yet effective (effective_date=2026-08-02, evaluation_instant=2026-03-15T12:00:00Z)",
+        "outcome": "skipped",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-9",
         "rule_id": "art9-management-review",
         "severity": "fail",
         "subject_scope": [
-          "urn:acef:sub:b4bf5f13-c1bf-4acc-b5de-93a025ae3a57"
+          "urn:acef:sub:7c4d7da9-7a5f-446c-9ee0-f25453c504af"
         ]
       },
       {
-        "evidence_refs": [
-          "urn:acef:rec:2d0ff685-040d-41fe-b784-85cacb2ba251"
-        ],
-        "message": null,
-        "outcome": "passed",
+        "evidence_refs": [],
+        "message": "Provision not yet effective (effective_date=2026-08-02, evaluation_instant=2026-03-15T12:00:00Z)",
+        "outcome": "skipped",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-9",
         "rule_id": "art9-post-market-monitoring",
         "severity": "warning",
         "subject_scope": [
-          "urn:acef:sub:b4bf5f13-c1bf-4acc-b5de-93a025ae3a57"
+          "urn:acef:sub:7c4d7da9-7a5f-446c-9ee0-f25453c504af"
         ]
       },
       {
-        "evidence_refs": [
-          "urn:acef:rec:2d0ff685-040d-41fe-b784-85cacb2ba251"
-        ],
-        "message": null,
-        "outcome": "passed",
+        "evidence_refs": [],
+        "message": "Provision not yet effective (effective_date=2026-08-02, evaluation_instant=2026-03-15T12:00:00Z)",
+        "outcome": "skipped",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-9",
         "rule_id": "art9-risk-register",
         "severity": "fail",
         "subject_scope": [
-          "urn:acef:sub:b4bf5f13-c1bf-4acc-b5de-93a025ae3a57"
+          "urn:acef:sub:7c4d7da9-7a5f-446c-9ee0-f25453c504af"
         ]
       },
       {
-        "evidence_refs": [
-          "urn:acef:rec:39baee65-2172-4947-ac40-708a3c7ac4ff"
-        ],
-        "message": null,
-        "outcome": "passed",
+        "evidence_refs": [],
+        "message": "Provision not yet effective (effective_date=2026-08-02, evaluation_instant=2026-03-15T12:00:00Z)",
+        "outcome": "skipped",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-9",
         "rule_id": "art9-risk-treatment",
         "severity": "fail",
         "subject_scope": [
-          "urn:acef:sub:b4bf5f13-c1bf-4acc-b5de-93a025ae3a57"
+          "urn:acef:sub:7c4d7da9-7a5f-446c-9ee0-f25453c504af"
         ]
       },
       {
         "evidence_refs": [
-          "urn:acef:rec:47e5102d-0595-41cc-b9d2-d48a51838c46"
+          "urn:acef:rec:da423cb6-c50c-4551-b8ed-46fcfc748069"
         ],
         "message": null,
         "outcome": "passed",
@@ -1354,12 +1244,12 @@
         "rule_id": "govern1-governance-policy",
         "severity": "fail",
         "subject_scope": [
-          "urn:acef:sub:89ff8b73-8cb4-45d0-a569-140e07cfafd0"
+          "urn:acef:sub:2153c4b4-e012-45ef-a13d-a5cc61d0e649"
         ]
       },
       {
         "evidence_refs": [
-          "urn:acef:rec:47e5102d-0595-41cc-b9d2-d48a51838c46"
+          "urn:acef:rec:da423cb6-c50c-4551-b8ed-46fcfc748069"
         ],
         "message": null,
         "outcome": "passed",
@@ -1368,7 +1258,7 @@
         "rule_id": "govern1-governance-policy",
         "severity": "fail",
         "subject_scope": [
-          "urn:acef:sub:b4bf5f13-c1bf-4acc-b5de-93a025ae3a57"
+          "urn:acef:sub:7c4d7da9-7a5f-446c-9ee0-f25453c504af"
         ]
       },
       {
@@ -1380,7 +1270,7 @@
         "rule_id": "govern1-policy-attachment",
         "severity": "warning",
         "subject_scope": [
-          "urn:acef:sub:89ff8b73-8cb4-45d0-a569-140e07cfafd0"
+          "urn:acef:sub:2153c4b4-e012-45ef-a13d-a5cc61d0e649"
         ]
       },
       {
@@ -1392,12 +1282,12 @@
         "rule_id": "govern1-policy-attachment",
         "severity": "warning",
         "subject_scope": [
-          "urn:acef:sub:b4bf5f13-c1bf-4acc-b5de-93a025ae3a57"
+          "urn:acef:sub:7c4d7da9-7a5f-446c-9ee0-f25453c504af"
         ]
       },
       {
         "evidence_refs": [
-          "urn:acef:rec:47e5102d-0595-41cc-b9d2-d48a51838c46"
+          "urn:acef:rec:da423cb6-c50c-4551-b8ed-46fcfc748069"
         ],
         "message": null,
         "outcome": "passed",
@@ -1406,12 +1296,12 @@
         "rule_id": "govern1-policy-entity-linked",
         "severity": "warning",
         "subject_scope": [
-          "urn:acef:sub:89ff8b73-8cb4-45d0-a569-140e07cfafd0"
+          "urn:acef:sub:2153c4b4-e012-45ef-a13d-a5cc61d0e649"
         ]
       },
       {
         "evidence_refs": [
-          "urn:acef:rec:47e5102d-0595-41cc-b9d2-d48a51838c46"
+          "urn:acef:rec:da423cb6-c50c-4551-b8ed-46fcfc748069"
         ],
         "message": null,
         "outcome": "passed",
@@ -1420,7 +1310,7 @@
         "rule_id": "govern1-policy-entity-linked",
         "severity": "warning",
         "subject_scope": [
-          "urn:acef:sub:b4bf5f13-c1bf-4acc-b5de-93a025ae3a57"
+          "urn:acef:sub:7c4d7da9-7a5f-446c-9ee0-f25453c504af"
         ]
       },
       {
@@ -1432,7 +1322,7 @@
         "rule_id": "map1-risk-category",
         "severity": "warning",
         "subject_scope": [
-          "urn:acef:sub:89ff8b73-8cb4-45d0-a569-140e07cfafd0"
+          "urn:acef:sub:2153c4b4-e012-45ef-a13d-a5cc61d0e649"
         ]
       },
       {
@@ -1444,12 +1334,12 @@
         "rule_id": "map1-risk-category",
         "severity": "warning",
         "subject_scope": [
-          "urn:acef:sub:b4bf5f13-c1bf-4acc-b5de-93a025ae3a57"
+          "urn:acef:sub:7c4d7da9-7a5f-446c-9ee0-f25453c504af"
         ]
       },
       {
         "evidence_refs": [
-          "urn:acef:rec:2d0ff685-040d-41fe-b784-85cacb2ba251"
+          "urn:acef:rec:a0cbbd91-0056-48b3-b7d3-eaf61a0854e4"
         ],
         "message": null,
         "outcome": "passed",
@@ -1458,12 +1348,12 @@
         "rule_id": "map1-risk-entity-linked",
         "severity": "warning",
         "subject_scope": [
-          "urn:acef:sub:89ff8b73-8cb4-45d0-a569-140e07cfafd0"
+          "urn:acef:sub:2153c4b4-e012-45ef-a13d-a5cc61d0e649"
         ]
       },
       {
         "evidence_refs": [
-          "urn:acef:rec:2d0ff685-040d-41fe-b784-85cacb2ba251"
+          "urn:acef:rec:a0cbbd91-0056-48b3-b7d3-eaf61a0854e4"
         ],
         "message": null,
         "outcome": "passed",
@@ -1472,12 +1362,12 @@
         "rule_id": "map1-risk-entity-linked",
         "severity": "warning",
         "subject_scope": [
-          "urn:acef:sub:b4bf5f13-c1bf-4acc-b5de-93a025ae3a57"
+          "urn:acef:sub:7c4d7da9-7a5f-446c-9ee0-f25453c504af"
         ]
       },
       {
         "evidence_refs": [
-          "urn:acef:rec:2d0ff685-040d-41fe-b784-85cacb2ba251"
+          "urn:acef:rec:a0cbbd91-0056-48b3-b7d3-eaf61a0854e4"
         ],
         "message": null,
         "outcome": "passed",
@@ -1486,12 +1376,12 @@
         "rule_id": "map1-risk-register",
         "severity": "fail",
         "subject_scope": [
-          "urn:acef:sub:89ff8b73-8cb4-45d0-a569-140e07cfafd0"
+          "urn:acef:sub:2153c4b4-e012-45ef-a13d-a5cc61d0e649"
         ]
       },
       {
         "evidence_refs": [
-          "urn:acef:rec:2d0ff685-040d-41fe-b784-85cacb2ba251"
+          "urn:acef:rec:a0cbbd91-0056-48b3-b7d3-eaf61a0854e4"
         ],
         "message": null,
         "outcome": "passed",
@@ -1500,12 +1390,12 @@
         "rule_id": "map1-risk-register",
         "severity": "fail",
         "subject_scope": [
-          "urn:acef:sub:b4bf5f13-c1bf-4acc-b5de-93a025ae3a57"
+          "urn:acef:sub:7c4d7da9-7a5f-446c-9ee0-f25453c504af"
         ]
       },
       {
         "evidence_refs": [
-          "urn:acef:rec:83248bdb-7d49-49a3-9e57-215414ec2299"
+          "urn:acef:rec:cd0a1689-dd70-4cfa-85d6-6712044ebc77"
         ],
         "message": null,
         "outcome": "passed",
@@ -1514,12 +1404,12 @@
         "rule_id": "measure1-evaluation-report",
         "severity": "fail",
         "subject_scope": [
-          "urn:acef:sub:89ff8b73-8cb4-45d0-a569-140e07cfafd0"
+          "urn:acef:sub:2153c4b4-e012-45ef-a13d-a5cc61d0e649"
         ]
       },
       {
         "evidence_refs": [
-          "urn:acef:rec:83248bdb-7d49-49a3-9e57-215414ec2299"
+          "urn:acef:rec:cd0a1689-dd70-4cfa-85d6-6712044ebc77"
         ],
         "message": null,
         "outcome": "passed",
@@ -1528,12 +1418,12 @@
         "rule_id": "measure1-evaluation-report",
         "severity": "fail",
         "subject_scope": [
-          "urn:acef:sub:b4bf5f13-c1bf-4acc-b5de-93a025ae3a57"
+          "urn:acef:sub:7c4d7da9-7a5f-446c-9ee0-f25453c504af"
         ]
       },
       {
         "evidence_refs": [
-          "urn:acef:rec:83248bdb-7d49-49a3-9e57-215414ec2299"
+          "urn:acef:rec:cd0a1689-dd70-4cfa-85d6-6712044ebc77"
         ],
         "message": null,
         "outcome": "passed",
@@ -1542,12 +1432,12 @@
         "rule_id": "measure1-methodology-present",
         "severity": "warning",
         "subject_scope": [
-          "urn:acef:sub:89ff8b73-8cb4-45d0-a569-140e07cfafd0"
+          "urn:acef:sub:2153c4b4-e012-45ef-a13d-a5cc61d0e649"
         ]
       },
       {
         "evidence_refs": [
-          "urn:acef:rec:83248bdb-7d49-49a3-9e57-215414ec2299"
+          "urn:acef:rec:cd0a1689-dd70-4cfa-85d6-6712044ebc77"
         ],
         "message": null,
         "outcome": "passed",
@@ -1556,12 +1446,12 @@
         "rule_id": "measure1-methodology-present",
         "severity": "warning",
         "subject_scope": [
-          "urn:acef:sub:b4bf5f13-c1bf-4acc-b5de-93a025ae3a57"
+          "urn:acef:sub:7c4d7da9-7a5f-446c-9ee0-f25453c504af"
         ]
       },
       {
         "evidence_refs": [
-          "urn:acef:rec:83248bdb-7d49-49a3-9e57-215414ec2299"
+          "urn:acef:rec:cd0a1689-dd70-4cfa-85d6-6712044ebc77"
         ],
         "message": null,
         "outcome": "passed",
@@ -1570,12 +1460,12 @@
         "rule_id": "measure1-metrics-present",
         "severity": "warning",
         "subject_scope": [
-          "urn:acef:sub:89ff8b73-8cb4-45d0-a569-140e07cfafd0"
+          "urn:acef:sub:2153c4b4-e012-45ef-a13d-a5cc61d0e649"
         ]
       },
       {
         "evidence_refs": [
-          "urn:acef:rec:83248bdb-7d49-49a3-9e57-215414ec2299"
+          "urn:acef:rec:cd0a1689-dd70-4cfa-85d6-6712044ebc77"
         ],
         "message": null,
         "outcome": "passed",
@@ -1584,107 +1474,113 @@
         "rule_id": "measure1-metrics-present",
         "severity": "warning",
         "subject_scope": [
-          "urn:acef:sub:b4bf5f13-c1bf-4acc-b5de-93a025ae3a57"
+          "urn:acef:sub:7c4d7da9-7a5f-446c-9ee0-f25453c504af"
         ]
       }
     ],
     "structural_diagnostics": [
       {
-        "category": "schema",
-        "code": "ACEF-002",
-        "message": "Manifest schema violation: '' does not match '^urn:acef:act:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'",
-        "path": "/audit_trail/0/actor_ref",
-        "severity": "fatal"
+        "category": "profile",
+        "code": "ACEF-032",
+        "message": "Provision article-10 not yet effective (effective: 2026-08-02, evaluation: 2026-03-15T12:00:00Z)",
+        "path": "",
+        "severity": "info"
+      },
+      {
+        "category": "profile",
+        "code": "ACEF-032",
+        "message": "Provision article-11 not yet effective (effective: 2026-08-02, evaluation: 2026-03-15T12:00:00Z)",
+        "path": "",
+        "severity": "info"
+      },
+      {
+        "category": "profile",
+        "code": "ACEF-032",
+        "message": "Provision article-13 not yet effective (effective: 2026-08-02, evaluation: 2026-03-15T12:00:00Z)",
+        "path": "",
+        "severity": "info"
+      },
+      {
+        "category": "profile",
+        "code": "ACEF-032",
+        "message": "Provision article-9 not yet effective (effective: 2026-08-02, evaluation: 2026-03-15T12:00:00Z)",
+        "path": "",
+        "severity": "info"
       }
     ]
   },
   "synthetic-content-marking": {
     "provision_summary": [
       {
-        "evidence_refs": [
-          "urn:acef:rec:a77c6741-755b-4390-b37c-3e7000f9f377",
-          "urn:acef:rec:d02b86ed-ab44-41fb-b46e-87120fb0ca1f"
-        ],
+        "evidence_refs": [],
         "fail_count": 0,
-        "outcome": "satisfied",
+        "outcome": "skipped",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-50.2",
-        "skipped_count": 0,
+        "skipped_count": 4,
         "subject_scope": [
-          "urn:acef:sub:b51b04f1-066e-480f-9a76-dd6805d8e980"
+          "urn:acef:sub:246763ee-a955-4a49-8e77-64056e4202c0"
         ],
         "warning_count": 0
       }
     ],
     "results": [
       {
-        "evidence_refs": [
-          "urn:acef:rec:a77c6741-755b-4390-b37c-3e7000f9f377",
-          "urn:acef:rec:d02b86ed-ab44-41fb-b46e-87120fb0ca1f"
-        ],
-        "message": null,
-        "outcome": "passed",
+        "evidence_refs": [],
+        "message": "Provision not yet effective (effective_date=2026-08-02, evaluation_instant=2026-03-15T12:00:00Z)",
+        "outcome": "skipped",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-50.2",
         "rule_id": "art50-marking-exists",
         "severity": "fail",
         "subject_scope": [
-          "urn:acef:sub:b51b04f1-066e-480f-9a76-dd6805d8e980"
+          "urn:acef:sub:246763ee-a955-4a49-8e77-64056e4202c0"
         ]
       },
       {
-        "evidence_refs": [
-          "urn:acef:rec:a77c6741-755b-4390-b37c-3e7000f9f377",
-          "urn:acef:rec:d02b86ed-ab44-41fb-b46e-87120fb0ca1f"
-        ],
-        "message": null,
-        "outcome": "passed",
+        "evidence_refs": [],
+        "message": "Provision not yet effective (effective_date=2026-08-02, evaluation_instant=2026-03-15T12:00:00Z)",
+        "outcome": "skipped",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-50.2",
         "rule_id": "art50-marking-scheme-id",
         "severity": "fail",
         "subject_scope": [
-          "urn:acef:sub:b51b04f1-066e-480f-9a76-dd6805d8e980"
+          "urn:acef:sub:246763ee-a955-4a49-8e77-64056e4202c0"
         ]
       },
       {
-        "evidence_refs": [
-          "urn:acef:rec:a77c6741-755b-4390-b37c-3e7000f9f377",
-          "urn:acef:rec:d02b86ed-ab44-41fb-b46e-87120fb0ca1f"
-        ],
-        "message": null,
-        "outcome": "passed",
+        "evidence_refs": [],
+        "message": "Provision not yet effective (effective_date=2026-08-02, evaluation_instant=2026-03-15T12:00:00Z)",
+        "outcome": "skipped",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-50.2",
         "rule_id": "art50-marking-technique",
         "severity": "warning",
         "subject_scope": [
-          "urn:acef:sub:b51b04f1-066e-480f-9a76-dd6805d8e980"
+          "urn:acef:sub:246763ee-a955-4a49-8e77-64056e4202c0"
         ]
       },
       {
-        "evidence_refs": [
-          "urn:acef:rec:a77c6741-755b-4390-b37c-3e7000f9f377",
-          "urn:acef:rec:d02b86ed-ab44-41fb-b46e-87120fb0ca1f"
-        ],
-        "message": null,
-        "outcome": "passed",
+        "evidence_refs": [],
+        "message": "Provision not yet effective (effective_date=2026-08-02, evaluation_instant=2026-03-15T12:00:00Z)",
+        "outcome": "skipped",
         "profile_id": "eu-ai-act-2024",
         "provision_id": "article-50.2",
         "rule_id": "art50-modality",
         "severity": "fail",
         "subject_scope": [
-          "urn:acef:sub:b51b04f1-066e-480f-9a76-dd6805d8e980"
+          "urn:acef:sub:246763ee-a955-4a49-8e77-64056e4202c0"
         ]
       }
     ],
     "structural_diagnostics": [
       {
-        "category": "schema",
-        "code": "ACEF-002",
-        "message": "Manifest schema violation: '' does not match '^urn:acef:act:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'",
-        "path": "/audit_trail/0/actor_ref",
-        "severity": "fatal"
+        "category": "profile",
+        "code": "ACEF-032",
+        "message": "Provision article-50.2 not yet effective (effective: 2026-08-02, evaluation: 2026-03-15T12:00:00Z)",
+        "path": "",
+        "severity": "info"
       }
     ]
   },
@@ -1692,8 +1588,8 @@
     "provision_summary": [
       {
         "evidence_refs": [
-          "urn:acef:rec:a7a8bbe7-9954-4685-9068-6106a4b885fd",
-          "urn:acef:rec:f8d7f96c-5358-4acd-af6a-a1754ae7bdc0"
+          "urn:acef:rec:9a80699b-668d-406a-8867-2447394622b6",
+          "urn:acef:rec:e300abd8-279b-49b2-b660-aeb0f7d6f687"
         ],
         "fail_count": 0,
         "outcome": "satisfied",
@@ -1701,13 +1597,13 @@
         "provision_id": "govern-1",
         "skipped_count": 0,
         "subject_scope": [
-          "urn:acef:sub:ce4c5016-6bdf-47d2-bb83-a20229686fb4"
+          "urn:acef:sub:1ff22ed2-7b96-458b-a843-95c7532f523b"
         ],
         "warning_count": 0
       },
       {
         "evidence_refs": [
-          "urn:acef:rec:61e77222-cd1b-49a7-9798-ee56980d5efa"
+          "urn:acef:rec:735b2511-7131-4e04-a1bb-66df5ed88246"
         ],
         "fail_count": 0,
         "outcome": "satisfied",
@@ -1715,13 +1611,13 @@
         "provision_id": "manage-1",
         "skipped_count": 0,
         "subject_scope": [
-          "urn:acef:sub:ce4c5016-6bdf-47d2-bb83-a20229686fb4"
+          "urn:acef:sub:1ff22ed2-7b96-458b-a843-95c7532f523b"
         ],
         "warning_count": 0
       },
       {
         "evidence_refs": [
-          "urn:acef:rec:41d17d4c-3f0c-4324-a9a1-003fbd477a0d"
+          "urn:acef:rec:9131819f-d883-4f7a-a9d6-9dc75ce0ff6d"
         ],
         "fail_count": 0,
         "outcome": "satisfied",
@@ -1729,13 +1625,13 @@
         "provision_id": "map-1",
         "skipped_count": 0,
         "subject_scope": [
-          "urn:acef:sub:ce4c5016-6bdf-47d2-bb83-a20229686fb4"
+          "urn:acef:sub:1ff22ed2-7b96-458b-a843-95c7532f523b"
         ],
         "warning_count": 0
       },
       {
         "evidence_refs": [
-          "urn:acef:rec:54b99c94-b53e-420c-8361-689132621755"
+          "urn:acef:rec:6b10c3a7-f4a8-4d1d-892e-15e9feb373ea"
         ],
         "fail_count": 0,
         "outcome": "satisfied",
@@ -1743,7 +1639,7 @@
         "provision_id": "measure-1",
         "skipped_count": 0,
         "subject_scope": [
-          "urn:acef:sub:ce4c5016-6bdf-47d2-bb83-a20229686fb4"
+          "urn:acef:sub:1ff22ed2-7b96-458b-a843-95c7532f523b"
         ],
         "warning_count": 0
       }
@@ -1751,8 +1647,8 @@
     "results": [
       {
         "evidence_refs": [
-          "urn:acef:rec:a7a8bbe7-9954-4685-9068-6106a4b885fd",
-          "urn:acef:rec:f8d7f96c-5358-4acd-af6a-a1754ae7bdc0"
+          "urn:acef:rec:9a80699b-668d-406a-8867-2447394622b6",
+          "urn:acef:rec:e300abd8-279b-49b2-b660-aeb0f7d6f687"
         ],
         "message": null,
         "outcome": "passed",
@@ -1761,12 +1657,12 @@
         "rule_id": "govern1-governance-policy",
         "severity": "fail",
         "subject_scope": [
-          "urn:acef:sub:ce4c5016-6bdf-47d2-bb83-a20229686fb4"
+          "urn:acef:sub:1ff22ed2-7b96-458b-a843-95c7532f523b"
         ]
       },
       {
         "evidence_refs": [
-          "urn:acef:rec:f8d7f96c-5358-4acd-af6a-a1754ae7bdc0"
+          "urn:acef:rec:9a80699b-668d-406a-8867-2447394622b6"
         ],
         "message": null,
         "outcome": "passed",
@@ -1775,13 +1671,13 @@
         "rule_id": "govern1-policy-attachment",
         "severity": "warning",
         "subject_scope": [
-          "urn:acef:sub:ce4c5016-6bdf-47d2-bb83-a20229686fb4"
+          "urn:acef:sub:1ff22ed2-7b96-458b-a843-95c7532f523b"
         ]
       },
       {
         "evidence_refs": [
-          "urn:acef:rec:a7a8bbe7-9954-4685-9068-6106a4b885fd",
-          "urn:acef:rec:f8d7f96c-5358-4acd-af6a-a1754ae7bdc0"
+          "urn:acef:rec:9a80699b-668d-406a-8867-2447394622b6",
+          "urn:acef:rec:e300abd8-279b-49b2-b660-aeb0f7d6f687"
         ],
         "message": null,
         "outcome": "passed",
@@ -1790,12 +1686,12 @@
         "rule_id": "govern1-policy-entity-linked",
         "severity": "warning",
         "subject_scope": [
-          "urn:acef:sub:ce4c5016-6bdf-47d2-bb83-a20229686fb4"
+          "urn:acef:sub:1ff22ed2-7b96-458b-a843-95c7532f523b"
         ]
       },
       {
         "evidence_refs": [
-          "urn:acef:rec:61e77222-cd1b-49a7-9798-ee56980d5efa"
+          "urn:acef:rec:735b2511-7131-4e04-a1bb-66df5ed88246"
         ],
         "message": null,
         "outcome": "passed",
@@ -1804,12 +1700,12 @@
         "rule_id": "manage1-risk-treatment",
         "severity": "fail",
         "subject_scope": [
-          "urn:acef:sub:ce4c5016-6bdf-47d2-bb83-a20229686fb4"
+          "urn:acef:sub:1ff22ed2-7b96-458b-a843-95c7532f523b"
         ]
       },
       {
         "evidence_refs": [
-          "urn:acef:rec:61e77222-cd1b-49a7-9798-ee56980d5efa"
+          "urn:acef:rec:735b2511-7131-4e04-a1bb-66df5ed88246"
         ],
         "message": null,
         "outcome": "passed",
@@ -1818,12 +1714,12 @@
         "rule_id": "manage1-treatment-entity-linked",
         "severity": "warning",
         "subject_scope": [
-          "urn:acef:sub:ce4c5016-6bdf-47d2-bb83-a20229686fb4"
+          "urn:acef:sub:1ff22ed2-7b96-458b-a843-95c7532f523b"
         ]
       },
       {
         "evidence_refs": [
-          "urn:acef:rec:61e77222-cd1b-49a7-9798-ee56980d5efa"
+          "urn:acef:rec:735b2511-7131-4e04-a1bb-66df5ed88246"
         ],
         "message": null,
         "outcome": "passed",
@@ -1832,12 +1728,12 @@
         "rule_id": "manage1-treatment-type",
         "severity": "warning",
         "subject_scope": [
-          "urn:acef:sub:ce4c5016-6bdf-47d2-bb83-a20229686fb4"
+          "urn:acef:sub:1ff22ed2-7b96-458b-a843-95c7532f523b"
         ]
       },
       {
         "evidence_refs": [
-          "urn:acef:rec:41d17d4c-3f0c-4324-a9a1-003fbd477a0d"
+          "urn:acef:rec:9131819f-d883-4f7a-a9d6-9dc75ce0ff6d"
         ],
         "message": null,
         "outcome": "passed",
@@ -1846,12 +1742,12 @@
         "rule_id": "map1-risk-category",
         "severity": "warning",
         "subject_scope": [
-          "urn:acef:sub:ce4c5016-6bdf-47d2-bb83-a20229686fb4"
+          "urn:acef:sub:1ff22ed2-7b96-458b-a843-95c7532f523b"
         ]
       },
       {
         "evidence_refs": [
-          "urn:acef:rec:41d17d4c-3f0c-4324-a9a1-003fbd477a0d"
+          "urn:acef:rec:9131819f-d883-4f7a-a9d6-9dc75ce0ff6d"
         ],
         "message": null,
         "outcome": "passed",
@@ -1860,12 +1756,12 @@
         "rule_id": "map1-risk-entity-linked",
         "severity": "warning",
         "subject_scope": [
-          "urn:acef:sub:ce4c5016-6bdf-47d2-bb83-a20229686fb4"
+          "urn:acef:sub:1ff22ed2-7b96-458b-a843-95c7532f523b"
         ]
       },
       {
         "evidence_refs": [
-          "urn:acef:rec:41d17d4c-3f0c-4324-a9a1-003fbd477a0d"
+          "urn:acef:rec:9131819f-d883-4f7a-a9d6-9dc75ce0ff6d"
         ],
         "message": null,
         "outcome": "passed",
@@ -1874,12 +1770,12 @@
         "rule_id": "map1-risk-register",
         "severity": "fail",
         "subject_scope": [
-          "urn:acef:sub:ce4c5016-6bdf-47d2-bb83-a20229686fb4"
+          "urn:acef:sub:1ff22ed2-7b96-458b-a843-95c7532f523b"
         ]
       },
       {
         "evidence_refs": [
-          "urn:acef:rec:54b99c94-b53e-420c-8361-689132621755"
+          "urn:acef:rec:6b10c3a7-f4a8-4d1d-892e-15e9feb373ea"
         ],
         "message": null,
         "outcome": "passed",
@@ -1888,12 +1784,12 @@
         "rule_id": "measure1-evaluation-report",
         "severity": "fail",
         "subject_scope": [
-          "urn:acef:sub:ce4c5016-6bdf-47d2-bb83-a20229686fb4"
+          "urn:acef:sub:1ff22ed2-7b96-458b-a843-95c7532f523b"
         ]
       },
       {
         "evidence_refs": [
-          "urn:acef:rec:54b99c94-b53e-420c-8361-689132621755"
+          "urn:acef:rec:6b10c3a7-f4a8-4d1d-892e-15e9feb373ea"
         ],
         "message": null,
         "outcome": "passed",
@@ -1902,12 +1798,12 @@
         "rule_id": "measure1-methodology-present",
         "severity": "warning",
         "subject_scope": [
-          "urn:acef:sub:ce4c5016-6bdf-47d2-bb83-a20229686fb4"
+          "urn:acef:sub:1ff22ed2-7b96-458b-a843-95c7532f523b"
         ]
       },
       {
         "evidence_refs": [
-          "urn:acef:rec:54b99c94-b53e-420c-8361-689132621755"
+          "urn:acef:rec:6b10c3a7-f4a8-4d1d-892e-15e9feb373ea"
         ],
         "message": null,
         "outcome": "passed",
@@ -1916,18 +1812,10 @@
         "rule_id": "measure1-metrics-present",
         "severity": "warning",
         "subject_scope": [
-          "urn:acef:sub:ce4c5016-6bdf-47d2-bb83-a20229686fb4"
+          "urn:acef:sub:1ff22ed2-7b96-458b-a843-95c7532f523b"
         ]
       }
     ],
-    "structural_diagnostics": [
-      {
-        "category": "schema",
-        "code": "ACEF-002",
-        "message": "Manifest schema violation: '' does not match '^urn:acef:act:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'",
-        "path": "/audit_trail/0/actor_ref",
-        "severity": "fatal"
-      }
-    ]
+    "structural_diagnostics": []
   }
 }

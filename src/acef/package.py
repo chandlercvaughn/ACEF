@@ -10,6 +10,7 @@ import hmac
 import re
 import secrets
 import unicodedata
+import uuid
 from collections.abc import Callable, Iterable
 from copy import deepcopy
 from dataclasses import dataclass
@@ -70,6 +71,23 @@ from acef.schemas.registry import (
 # sub-second precision. Both the model default factories and the injected-
 # clock path MUST format identically so v0.3 behavior is preserved.
 _TIMESTAMP_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
+
+# Fixed namespace for deriving the deterministic producer-actor URN stamped on the
+# auto-minted CREATED audit entry. Spec §3.1 (manifest example, line 873) requires
+# every ``audit_trail`` entry to carry ``actor_ref = urn:acef:act:<uuid>``; the package
+# creator is the producer tool/org. ``uuid5`` (name-based, SHA-1) makes the URN a
+# DETERMINISTIC function of the producer identity — the same ``name|version`` always
+# yields the same actor URN — so the audit_trail is byte-identical across exporters
+# (the §3.1.3 determinism MUST) WITHOUT depending on the random default urn_generator,
+# and the URN is a stable, meaningful producer-actor handle rather than a throwaway uuid4.
+_PRODUCER_ACTOR_NAMESPACE = uuid.UUID("acef0000-0000-5000-8000-000000000001")
+
+
+def _producer_actor_urn(producer: ProducerInfo) -> str:
+    """Derive the deterministic ``urn:acef:act:<uuid>`` for the producer that created
+    the package, stamped on the auto-minted CREATED audit entry (spec §3.1)."""
+    actor_uuid = uuid.uuid5(_PRODUCER_ACTOR_NAMESPACE, f"{producer.name}|{producer.version}")
+    return f"urn:acef:act:{actor_uuid}"
 
 # Spec §3.1 (line 419): obligation_role is "REQUIRED for transparency_marking,
 # disclosure_labeling, and event_log records (EU AI Act and CAC split
@@ -1229,11 +1247,15 @@ class Package:
         # Typed as ``Any`` to avoid an import cycle with acef.redaction.
         self._redaction_policy: Any = redaction_policy
 
-        # Add creation audit entry
+        # Add creation audit entry. It MUST carry a schema-valid actor_ref
+        # (urn:acef:act:<uuid>, frozen manifest schema) — an empty actor_ref FATAL-fails
+        # ACEF-002 on every bundle. The creating actor is the producer; its URN is
+        # derived deterministically from the producer identity (see _producer_actor_urn).
         self._audit_trail.append(
             AuditTrailEntry(
                 event_type=AuditEventType.CREATED,
                 timestamp=self._metadata.timestamp,
+                actor_ref=_producer_actor_urn(self._metadata.producer),
                 description="Initial package creation",
             )
         )

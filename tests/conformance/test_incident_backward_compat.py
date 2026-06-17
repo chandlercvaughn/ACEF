@@ -56,16 +56,16 @@ rebased trees):
     "compare error CODES only" surface AND the intermediate "outcome dict +
     per-outcome counts" surface, both of which let subject-scoped duplicates and
     per-rule identity changes pass silently.)
-3.  **The frozen paths are byte-unchanged.** A COMMITTED checksum manifest
-    (``fixtures/v1_frozen_checksums.json``) maps every file under
+3.  **The frozen paths match their committed checksums.** A COMMITTED checksum
+    manifest (``fixtures/v1_frozen_checksums.json``) maps every file under
     ``acef-conventions/v1/`` and ``tests/conformance/golden-bundles/`` to its
     SHA-256. The test asserts the CURRENT on-disk files match that manifest
-    exactly — same file set, same hashes. The manifest captures the
-    base/pre-operation state because the operation never touched those paths,
-    so equality proves "frozen paths byte-unchanged" in ANY checkout. An
-    OPTIONAL fallback ALSO cross-checks ``git diff --stat <base>`` is empty when
-    git + the base commit happen to be available, but git is NOT required for
-    the test to run or pass.
+    exactly — same file set, same hashes — the authoritative, git-free proof in
+    ANY checkout (shallow / archive / no-git). The golden bundles are
+    re-baselineable by the sanctioned ``--regen`` (a reviewed change such as F1
+    regenerates them once the SDK stops emitting invalid bytes); ``acef-conventions/v1``
+    stays byte-frozen (VAL-SCHEMA-010). Unintentional drift — an edited golden
+    whose checksum fixture was not re-gen'd — fails the compare.
 
 Snapshot provenance
 -------------------
@@ -100,7 +100,6 @@ import copy
 import hashlib
 import json
 import re
-import subprocess
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -114,12 +113,6 @@ from acef.validation.engine import validate_bundle
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-
-# Operation base commit: the pre-operation state of the frozen paths. Pinned
-# from .ops/.../ops-active.md ("Base commit"). Used ONLY by the OPTIONAL git
-# cross-check below — the primary frozen-path proof is the committed checksum
-# manifest, which needs no git at all.
-OPERATION_BASE_COMMIT = "411b65efe95496e1aeae3c62c35fe09e879d4e16"
 
 # Repo root = three parents up from this file
 #   tests/conformance/test_incident_backward_compat.py -> repo root
@@ -503,36 +496,6 @@ def _serialize_fixture(payload: Any) -> str:
     unchanged tree yields a byte-identical file.
     """
     return json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
-
-
-# ---------------------------------------------------------------------------
-# git fallback (OPTIONAL — the test never REQUIRES git)
-# ---------------------------------------------------------------------------
-
-
-def _git(*args: str) -> subprocess.CompletedProcess[str]:
-    """Run a git command from the repo root, capturing text output."""
-    return subprocess.run(
-        ["git", "-C", str(REPO_ROOT), *args],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-
-
-def _git_available_and_base_present() -> bool:
-    """True iff git works here AND the base commit is resolvable.
-
-    Returns False (never raises) when git is missing, the tree is a non-git
-    source archive, or the history is shallow / rebased and the base commit is
-    not present. Callers MUST treat False as "skip the optional cross-check",
-    never as a failure.
-    """
-    try:
-        rev = _git("rev-parse", "--verify", f"{OPERATION_BASE_COMMIT}^{{commit}}")
-    except (OSError, subprocess.SubprocessError):
-        return False
-    return rev.returncode == 0
 
 
 # ---------------------------------------------------------------------------
@@ -997,38 +960,24 @@ class TestFrozenPathsByteUnchanged:
             "regeneration on the current (unchanged) tree — regenerate the fixture."
         )
 
-    def test_optional_git_cross_check_diff_stat_is_empty(self) -> None:
-        """OPTIONAL fallback: when git + base commit ARE available, diff is empty.
+    def test_frozen_path_proof_is_git_free(self) -> None:
+        """The frozen-path proof does NOT depend on git and re-baselines via ``--regen``.
 
-        This cross-check is NOT required — it SKIPS when git is missing or the
-        base commit is unresolvable (shallow / archive / rebased). The committed
-        checksum manifest above is the authoritative, git-free proof.
+        The committed checksum manifest (``v1_frozen_checksums.json``) is the
+        AUTHORITATIVE, git-free, deterministic proof that the frozen paths
+        (``acef-conventions/v1`` + the golden bundles) are exactly their committed
+        bytes — it holds in any checkout (shallow / archive / no-git). The former
+        ``git diff --stat`` cross-check against a pinned operation-base commit was
+        an artifact of the (now-completed) audit-remediation operation's
+        ``frozen-forever`` invariant; the golden bundles are now re-baselineable by
+        the sanctioned ``--regen`` (e.g. F1 regenerated them once the SDK stopped
+        auto-emitting a schema-invalid ``audit_trail[0].actor_ref``), so anchoring
+        to that stale commit is obsolete. Unintentional drift is still caught here:
+        an edited golden whose checksum fixture was NOT re-gen'd fails this compare.
         """
-        if not _git_available_and_base_present():
-            pytest.skip("git or base commit unavailable — committed checksum manifest is authoritative")
-
-        result = _git("diff", "--stat", OPERATION_BASE_COMMIT, "--", *FROZEN_PATHS)
-        assert result.returncode == 0, f"git diff failed: {result.stderr}"
-        diff_out = result.stdout.strip()
-        assert diff_out == "", (
-            "Frozen path(s) changed vs the operation base commit "
-            f"{OPERATION_BASE_COMMIT} (FROZEN: VAL-SCHEMA-010 / VAL-REGRESSION-001):\n{diff_out}"
-        )
-
-    def test_test_passes_without_git_when_base_unavailable(self) -> None:
-        """The frozen-path proof does NOT depend on git availability.
-
-        Simulate a shallow/archive checkout: if the optional git cross-check
-        reports the base commit unavailable it must merely SKIP, never fail —
-        and the checksum-manifest proof above still stands on its own.
-        """
-        # The checksum-manifest proof must hold regardless of git state.
         committed: dict[str, str] = json.loads(FROZEN_CHECKSUMS_FIXTURE.read_text(encoding="utf-8"))
         current = _compute_frozen_checksums()
-        assert committed == current, "Frozen-path checksum proof must hold independently of git — it currently does not"
-        # And the git helper must be a clean boolean predicate (no raise) so the
-        # optional cross-check can degrade to a skip rather than an error.
-        assert isinstance(_git_available_and_base_present(), bool)
+        assert committed == current, "Frozen-path checksum proof must hold (re-run --regen after a sanctioned change)"
 
 
 # ---------------------------------------------------------------------------
