@@ -667,3 +667,36 @@ class TestTemplateRoundTrip:
 
         assert raw["template_id"] == model_dump["template_id"]
         assert len(raw["provisions"]) == len(model_dump["provisions"])
+
+
+class TestGpaiIncidentProvisionCitation:
+    """RFC-0002 §5.7 (line 282): the eu-gpai-code-of-practice-2025 template's incident
+    provision MUST be mapped to Commitment 9 / EU AI Act Article 55 (serious-incident
+    reporting to the AI Office). It mis-cited 'Safety Commitment 3' (which in the
+    published Code is systemic-risk analysis), violating §5.7's verified-primary-source
+    authoring mandate."""
+
+    def _gpai_provisions(self) -> list[dict]:
+        template_dir = Path(__file__).parent.parent.parent / "src" / "acef" / "templates"
+        raw = json.loads((template_dir / "eu-gpai-code-of-practice-2025.json").read_text(encoding="utf-8"))
+        return raw["provisions"]
+
+    def _incident_provision(self) -> dict:
+        return next(p for p in self._gpai_provisions() if p["provision_id"] == "gpai-safety-3")
+
+    def test_incident_provision_cites_commitment_9_and_article_55(self) -> None:
+        ref = self._incident_provision()["normative_text_ref"]
+        assert "Commitment 9" in ref
+        assert "Article 55" in ref
+        assert "Safety Commitment 3" not in ref
+
+    def test_incident_provision_messages_cite_commitment_9_not_3(self) -> None:
+        msgs = [e.get("message", "") for e in self._incident_provision().get("evaluation", [])]
+        assert any("Commitment 9" in m for m in msgs)
+        assert not any("Safety Commitment 3" in m for m in msgs)
+
+    def test_incident_subprovision_not_mislabeled_safety_3(self) -> None:
+        subs = self._incident_provision().get("sub_provisions", [])
+        for sub in subs:
+            ref = sub.get("normative_text_ref", "")
+            assert "Safety 3" not in ref and "Safety Commitment 3" not in ref

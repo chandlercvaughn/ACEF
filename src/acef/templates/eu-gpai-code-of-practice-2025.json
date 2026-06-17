@@ -372,15 +372,15 @@
     {
       "provision_id": "gpai-safety-3",
       "provision_name": "Incident Reporting",
-      "normative_text_ref": "GPAI Code of Practice Safety Commitment 3",
-      "description": "Providers of GPAI models with systemic risk shall report serious incidents to the AI Office within 2-15 days of becoming aware, documenting incident type, severity, notification date, and AI Office reference",
+      "normative_text_ref": "GPAI Code of Practice (July 2025), Safety and Security chapter, Commitment 9 (Serious incident reporting); EU AI Act Article 55",
+      "description": "Providers of GPAI models with systemic risk shall report serious incidents to the AI Office (GPAI Code of Practice Commitment 9, Measures 9.1-9.4; EU AI Act Art. 55), documenting incident type, severity, notification date, and AI Office reference. Measure 9.3 reporting timeline: <=2 days (critical-infrastructure disruption), <=5 days (cybersecurity breach), <=10 days (death), <=15 days (other serious incidents).",
       "effective_date": "2025-08-02",
       "applicable_to": ["gpai-systemic"],
       "sub_provisions": [
         {
           "provision_id": "gpai-safety-3.1",
-          "normative_text_ref": "GPAI CoP Safety 3.1",
-          "description": "Incident reports must be submitted to the AI Office within 2 days for immediate notification and 15 days for the full report"
+          "normative_text_ref": "GPAI CoP Commitment 9, Measure 9.3 (serious-incident reporting timeline)",
+          "description": "Serious incidents are reported to the AI Office on the shortest applicable Measure 9.3 clock (2/5/10/15 days by incident class), with an initial notification followed by a full report"
         }
       ],
       "required_evidence_types": [
@@ -397,7 +397,7 @@
           "rule": "has_record_type",
           "params": {"type": "incident_report", "min_count": 1},
           "severity": "fail",
-          "message": "At least one incident_report record is required — GPAI Code of Practice Safety Commitment 3 mandates documented incident reporting to the AI Office for systemic risk GPAI models",
+          "message": "At least one incident_report record is required — GPAI Code of Practice Commitment 9 (EU AI Act Article 55) mandates documented serious-incident reporting to the AI Office for systemic risk GPAI models",
           "condition": {
             "if_system_type": ["gpai-systemic"]
           }
