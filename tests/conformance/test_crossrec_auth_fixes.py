@@ -636,8 +636,7 @@ def test_namespace_lint_does_not_alter_conformance_outcomes(tmp_path: Path) -> N
     #     errors on the no-freddy run.
     exporter_intrinsic_baseline: list[tuple[str, str | None]] = []
     assert _code_paths(no_freddy.structural_errors) == exporter_intrinsic_baseline, (
-        "clean fixture must validate with NO structural errors — "
-        f"got {no_freddy.structural_errors!r}"
+        f"clean fixture must validate with NO structural errors — got {no_freddy.structural_errors!r}"
     )
     # The ONLY structural delta WITH the x-freddy record is the single ACEF-077
     # namespace lint (which carries no path). Assert exact (code, path) set

@@ -44,7 +44,16 @@ def minimal_package() -> Package:
     pkg.record(
         "risk_register",
         provisions=["article-9"],
-        payload={"description": "Test risk", "likelihood": "medium", "severity": "high"},
+        # A SCHEMA-VALID risk_register payload: risk_id + description + category are
+        # required, and likelihood/severity are closed enums (prior fixture used the
+        # non-enum "medium"/"high", producing a schema-invalid record).
+        payload={
+            "risk_id": "RISK-001",
+            "description": "Test risk",
+            "category": "safety",
+            "likelihood": "possible",
+            "severity": "major",
+        },
         obligation_role="provider",
         entity_refs={"subject_refs": [system.id]},
     )

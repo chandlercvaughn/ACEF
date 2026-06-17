@@ -21,8 +21,11 @@ console = Console()
 def doctor_cmd(path: str) -> None:
     """Diagnose issues with an ACEF Evidence Bundle at PATH.
 
-    Checks structure, integrity, references, and common problems for BOTH
-    directory bundles and ``.acef.tar.gz`` archives.
+    Checks structure, schema, integrity, and referential integrity (and reports
+    common problems) for BOTH directory bundles and ``.acef.tar.gz`` archives. The
+    schema + reference verdict is delegated to the canonical validator, so
+    ``doctor``'s exit status agrees with ``acef validate``: a bundle ``validate``
+    rejects FATAL exits non-zero here too (never "Bundle looks healthy").
     """
     bundle_path = Path(path)
     issues: list[tuple[str, str, str]] = []  # (severity, category, message)
@@ -69,6 +72,11 @@ def doctor_cmd(path: str) -> None:
 
         # Check records
         _check_records(bundle_dir, issues)
+
+        # Check schema + referential integrity — DELEGATED to the canonical
+        # validator so doctor agrees with ``validate`` (previously doctor ran NO
+        # schema/reference phase and called a schema-invalid bundle "healthy").
+        _check_schema_and_references(bundle_dir, issues)
 
     # Report
     console.print()
@@ -295,3 +303,45 @@ def _check_records(bundle_path: Path, issues: list[tuple[str, str, str]]) -> Non
             issues.append(("error", "records", f"Failed to read {jsonl_file.name}: {e}"))
 
     console.print(f"  Total records: {total_records}")
+
+
+# Integrity codes are reported by _check_integrity; the schema/reference phase below
+# surfaces everything ELSE from the canonical validator so doctor agrees with `validate`
+# without double-listing integrity diagnostics.
+_INTEGRITY_CODES = frozenset({"ACEF-010", "ACEF-011", "ACEF-012", "ACEF-013", "ACEF-014"})
+
+
+def _check_schema_and_references(bundle_path: Path, issues: list[tuple[str, str, str]]) -> None:
+    """Check schema + referential integrity by DELEGATING to the canonical validator.
+
+    doctor previously ran NO schema or reference phase, so it called a schema-invalid
+    bundle (missing required field, dangling subject_ref, ...) "healthy" + exit 0 while
+    ``validate`` rejected it FATAL. This delegates to ``validate_bundle`` and surfaces its
+    SCHEMA (ACEF-002/004) + REFERENCE (ACEF-020/...) + other structural diagnostics —
+    everything EXCEPT the integrity codes ``_check_integrity`` already reports — so
+    doctor's verdict matches ``validate``. A malformed bundle the validator cannot parse
+    is already surfaced by the structure/manifest phases above, so any exception here
+    degrades to a skip rather than crashing doctor.
+    """
+    console.print("\nChecking schema + references...")
+    from acef.validation.engine import validate_bundle
+
+    try:
+        assessment = validate_bundle(str(bundle_path))
+    except Exception as e:  # noqa: BLE001 — never crash doctor; structure/manifest phases cover unparseable input
+        console.print(f"  [dim]schema/reference check skipped ({type(e).__name__})[/dim]")
+        return
+
+    surfaced = 0
+    for err in assessment.structural_errors:
+        code = str(err.get("code", ""))
+        if code in _INTEGRITY_CODES:
+            continue
+        severity = str(err.get("severity", "error"))
+        bucket = "error" if severity in ("fatal", "error") else ("warning" if severity == "warning" else "info")
+        path = err.get("path")
+        loc = f" ({path})" if path else ""
+        issues.append((bucket, "schema", f"{code}: {err.get('message', '')}{loc}"))
+        surfaced += 1
+    if surfaced == 0:
+        console.print("  [green]Schema + references valid[/green]")

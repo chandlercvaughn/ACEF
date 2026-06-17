@@ -89,6 +89,7 @@ def _producer_actor_urn(producer: ProducerInfo) -> str:
     actor_uuid = uuid.uuid5(_PRODUCER_ACTOR_NAMESPACE, f"{producer.name}|{producer.version}")
     return f"urn:acef:act:{actor_uuid}"
 
+
 # Spec §3.1 (line 419): obligation_role is "REQUIRED for transparency_marking,
 # disclosure_labeling, and event_log records (EU AI Act and CAC split
 # obligations by role)." For these role-split record types the builder must NOT
