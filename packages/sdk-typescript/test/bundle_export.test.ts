@@ -178,10 +178,16 @@ test("F6: deriveMtime mirrors the Python strict RFC3339 checker (accept/reject +
     assert.equal(mtimeOf("2024-01-15T10:30:00-05:30"), 1705334400);
     assert.equal(mtimeOf("2024-02-29T00:00:00Z"), 1709164800); // valid leap day
     assert.equal(mtimeOf("2024-01-15T10:30:00.999Z"), 1705314600); // fractional truncated
+    assert.equal(mtimeOf("0001-01-01T00:00:00Z"), -62135596800); // min year, far pre-epoch
+    assert.equal(mtimeOf("1969-12-31T23:59:59Z"), -1); // pre-epoch, no fraction
+    // pre-epoch + positive fractional: Python int() truncates toward zero (-1s + 0.999s -> 0).
+    assert.equal(mtimeOf("1969-12-31T23:59:59.999Z"), 0);
+    assert.equal(mtimeOf("1969-12-31T23:59:59.0001Z"), 0);
     // REJECTED — every input the Python checker rejects must throw ACEF-002, never emit an
     // archive with a divergent mtime.
     for (const bad of [
         "20240115T103000Z", // basic form
+        "0000-01-01T00:00:00Z", // year 0000 (Python datetime MINYEAR is 1)
         "2023-02-29T00:00:00Z", // impossible calendar day (non-leap Feb 29)
         "2024-13-01T00:00:00Z", // month 13
         "2024-01-15T10:30:60Z", // leap second :60

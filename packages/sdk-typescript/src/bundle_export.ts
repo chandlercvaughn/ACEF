@@ -428,7 +428,7 @@ export function rebuildManifestForExport(manifestRaw: Obj, records: RawRecord[])
  * is NOT sufficient (it cannot reject impossible CALENDAR dates like ``2023-02-29``), so
  * :func:`strictRfc3339ToEpochSeconds` does range + calendar validation after the match.
  */
-const RFC3339_DATETIME = /^(\d{4})-(\d{2})-(\d{2})[Tt](\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:[Zz]|([+-])(\d{2}):(\d{2}))$/;
+const RFC3339_DATETIME = /^(\d{4})-(\d{2})-(\d{2})[Tt](\d{2}):(\d{2}):(\d{2})(\.\d+)?(?:[Zz]|([+-])(\d{2}):(\d{2}))$/;
 
 function isLeapYear(year: number): boolean {
     return (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
@@ -452,23 +452,31 @@ function strictRfc3339ToEpochSeconds(ts: string): number | null {
     const hour = Number(m[4]);
     const minute = Number(m[5]);
     const second = Number(m[6]);
+    if (year < 1) return null; // year 0000 rejected — Python's datetime MINYEAR is 1
     if (month < 1 || month > 12) return null;
     if (hour > 23 || minute > 59 || second > 59) return null; // :60 leap second rejected (matches Python)
     const daysInMonth = [31, isLeapYear(year) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1]!;
     if (day < 1 || day > daysInMonth) return null;
     let offsetMinutes = 0;
-    if (m[7] !== undefined) {
-        // m[7] = sign, m[8] = offset hours, m[9] = offset minutes (Z/z -> all undefined).
-        const offHour = Number(m[8]);
-        const offMin = Number(m[9]);
+    if (m[8] !== undefined) {
+        // m[8] = sign, m[9] = offset hours, m[10] = offset minutes (Z/z -> all undefined).
+        const offHour = Number(m[9]);
+        const offMin = Number(m[10]);
         if (offHour > 23 || offMin > 59) return null;
-        offsetMinutes = (m[7] === "-" ? -1 : 1) * (offHour * 60 + offMin);
+        offsetMinutes = (m[8] === "-" ? -1 : 1) * (offHour * 60 + offMin);
     }
     const utc = new Date(Date.UTC(year, month - 1, day, hour, minute, second));
     if (year < 100) utc.setUTCFullYear(year); // undo Date.UTC's 0-99 -> 1900-1999 remap
-    // Wall-clock-as-UTC seconds, minus the zone offset, == the true UTC instant; integer
-    // seconds throughout (fractional seconds are ignored, matching Python's int()).
-    return Math.floor(utc.getTime() / 1000) - offsetMinutes * 60;
+    // Integer-second epoch with the zone offset applied (offsets are whole minutes, so no
+    // fractional is introduced here).
+    const baseSeconds = Math.floor(utc.getTime() / 1000) - offsetMinutes * 60;
+    // Python keeps fractional seconds and truncates the WHOLE instant toward zero via int().
+    // For a NEGATIVE base with a positive fractional part the instant is closer to zero, so
+    // the truncated second is base+1 (e.g. -1s + 0.999s = -0.001s -> 0); otherwise the
+    // fractional is discarded. m[7] is the captured ".ddd…" (or undefined).
+    const hasPositiveFraction = m[7] !== undefined && /[1-9]/.test(m[7]);
+    if (hasPositiveFraction && baseSeconds < 0) return baseSeconds + 1;
+    return baseSeconds;
 }
 
 /** Derive the deterministic mtime from manifest metadata.timestamp. */
