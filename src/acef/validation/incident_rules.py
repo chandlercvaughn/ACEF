@@ -1318,53 +1318,77 @@ def _resolve_json_pointer(doc: dict[str, Any], pointer: str) -> tuple[bool, Any]
 
 
 # ---------------------------------------------------------------------------
-# §5.11 source-to-card projection map (disposition-honored check, ACEF-086)
+# §5.11 source-to-card projection (disposition-honored check, ACEF-086)
 # ---------------------------------------------------------------------------
 
-# FROZEN, INSTALL-SAFE source-to-card projection map. This module lives under
-# ``src/acef`` and is ALWAYS packaged in the wheel/sdist, so the disposition-
-# honored ACEF-086 check (below) can resolve every projection edge with NO disk
-# read — fail-CLOSED even in a pip-installed deployment where the root
-# ``acef-conventions/v1.1/`` schema dirs are ABSENT.
+# FROZEN, INSTALL-SAFE set of ``incident_card`` ROOT fields that are PROJECTED from
+# the source ``incident_report`` (RFC-0002 §5.11). This module lives under
+# ``src/acef`` and is ALWAYS packaged, so the disposition-honored ACEF-086 check
+# below resolves every projection edge with NO disk read — fail-CLOSED even in a
+# pip-installed deployment where ``acef-conventions/v1.1/`` is absent.
 #
-# It maps each publishability_map source JSON Pointer that PROJECTS to a public
-# ``incident_card`` ROOT field onto that card-root field name. The
-# disposition-honored check uses ONLY this map: a pointer that is a KEY here and
-# is disposed ``omitted``/``regulator-only`` MUST NOT appear as the mapped
-# card-root field on the public card. Pointers NOT in this map (arbitrary or
-# deeper-nested, e.g. ``/details/severity`` or
-# ``/card_source/coordinated_disclosure/foo``) are IGNORED — no leaf-name
-# inference, no false-positive.
+# A publishability_map source JSON Pointer PROJECTS to a card-root field ``<X>``
+# iff the pointer is exactly ``/<X>`` (report payload root) or ``/card_source/<X>``
+# (the overlay) AND ``<X>`` is one of these projectable card-root fields. A
+# deeper-nested pointer (``/impact_assessment/notes``,
+# ``/card_source/coordinated_disclosure/foo``) names a SUB-field, not a card-root
+# field, and projects to nothing — see :func:`_pointer_to_card_root_field`.
 #
-# AUTHORITY this constant MIRRORS (RFC-0002 §5.11):
+# This is the FULL set of card-root EVIDENCE fields — every ``incident_card`` named
+# root property EXCEPT the three CARD-AUTHORED / COMPUTED meta fields that are NOT
+# projected from a disposed source field: ``declared_publication_basis`` (the
+# basis justification, authored on the card; a published special-category card MUST
+# carry it, so flagging it would be a false positive), and the two §5.5 dedupe keys
+# ``incident_dedupe_key`` / ``incident_dedupe_key_hmac`` (computed on the card).
+# Covering the FULL set (not just the card_source∩incident_card overlap) closes the
+# audit gap where a card-root-but-not-card_source field — ``harm_distribution_basis``
+# (GDPR Art.9), ``transferability``, ``sector_of_deployment``, ``autonomy_level``,
+# ``value_chain_role``, ``taxonomy_crosswalk`` — disposed ``regulator-only``/
+# ``omitted`` yet PUBLISHED on the card was silently accepted (the basis-gate at
+# §5.11 line 333 is a SEPARATE additional check, not a substitute).
 #
-# - ``/card_source/<field>`` -> card root ``<field>`` for every ``card_source``
-#   overlay property (``acef-conventions/v1.1/incident_report.card_source.schema.json``)
-#   whose name is ALSO an ``incident_card`` root property
-#   (``acef-conventions/v1.1/incident_card.schema.json``). That intersection is
-#   exactly {severity_vector, harm_core, coordinated_disclosure,
-#   public_incident_id, id_grade}; card_source-only fields (id_state, disputed,
-#   eu_ai_act_facts, publishability_map) have no card-root counterpart and are
-#   excluded.
-# - PLUS the one incident_report-ROOT overlapping field ``/severity`` -> card root
-#   ``severity`` (the original INCVAL-003 surface: ``severity`` is the only
-#   property shared between the frozen incident_report payload root and the
-#   incident_card root). ``severity`` is NOT a card_source property, so it is
-#   listed explicitly rather than derived from the card_source overlay.
-#
-# DRIFT GUARD: ``tests/unit/test_validation_incident_rules.py`` re-derives this
-# set from the v1.1 schemas in a checkout and asserts equality, so any future
-# additive schema change (a new public card_source field overlapping an
-# incident_card root) is caught at test time in CI — while runtime NEVER depends
-# on schema-file presence.
-_SOURCE_TO_CARD_PROJECTION: dict[str, str] = {
-    "/card_source/severity_vector": "severity_vector",
-    "/card_source/harm_core": "harm_core",
-    "/card_source/coordinated_disclosure": "coordinated_disclosure",
-    "/card_source/public_incident_id": "public_incident_id",
-    "/card_source/id_grade": "id_grade",
-    "/severity": "severity",
-}
+# DRIFT GUARD: ``tests/unit/test_validation_incident_rules.py`` re-derives this set
+# from the v1.1 ``incident_card`` schema in a checkout and asserts equality, so any
+# additive card-root field change is caught in CI while runtime NEVER reads schema.
+_CARD_AUTHORED_FIELDS: frozenset[str] = frozenset(
+    {"declared_publication_basis", "incident_dedupe_key", "incident_dedupe_key_hmac"}
+)
+_INCIDENT_CARD_ROOT_FIELDS: frozenset[str] = frozenset(
+    {
+        "autonomy_level",
+        "coordinated_disclosure",
+        "harm_core",
+        "harm_distribution_basis",
+        "id_grade",
+        "public_incident_id",
+        "sector_of_deployment",
+        "severity",
+        "severity_vector",
+        "taxonomy_crosswalk",
+        "transferability",
+        "value_chain_role",
+    }
+)
+
+
+def _pointer_to_card_root_field(pointer: str) -> str | None:
+    """The ``incident_card`` ROOT field a publishability_map JSON-Pointer projects to
+    (§5.11), or ``None``.
+
+    The public card is a PROJECTION of the source ``incident_report``: a card-root
+    field ``<X>`` is sourced from the report root ``/<X>`` or the card_source overlay
+    ``/card_source/<X>``. Resolution is on the FULL pointer (NEVER a leaf token), so
+    two distinct source fields sharing a leaf name (``/a/notes``, ``/b/notes``) never
+    collide. A deeper-nested pointer names a SUB-field and projects to nothing.
+    """
+    if not isinstance(pointer, str) or not pointer.startswith("/"):
+        return None
+    segments = [seg.replace("~1", "/").replace("~0", "~") for seg in pointer[1:].split("/")]
+    if len(segments) == 1 and segments[0] in _INCIDENT_CARD_ROOT_FIELDS:
+        return segments[0]
+    if len(segments) == 2 and segments[0] == "card_source" and segments[1] in _INCIDENT_CARD_ROOT_FIELDS:
+        return segments[1]
+    return None
 
 
 def _is_public_disclosure(card_payload: dict[str, Any], source_payload: dict[str, Any] | None) -> bool:
@@ -1518,26 +1542,20 @@ def check_publishability(
         # source) — comparing the source against its own map would be a guaranteed
         # false-positive. ``card_payload`` here is the incident_card's payload.
         #
-        # SCOPE — EXPLICIT source-to-card projection map, never leaf-name inference.
-        # ``_SOURCE_TO_CARD_PROJECTION`` (a FROZEN module constant, always packaged
-        # in src/acef — no disk read, install-safe, fail-CLOSED) names the set of
-        # publishability_map pointers that ACTUALLY project to a card ROOT field:
-        # ``/card_source/<field>`` for each card_source overlay field that is also an
-        # incident_card root property (severity_vector, harm_core,
-        # coordinated_disclosure, public_incident_id, id_grade) plus the one
-        # incident_report-ROOT overlapping field ``/severity`` -> card root
-        # ``severity``. A pointer NOT in this map (an arbitrary or deeper-nested
-        # pointer such as ``/details/severity`` or ``/card_source/coordinated_disclosure/foo``)
-        # does NOT name a card-root field, so it is IGNORED — no collapse to a leaf
-        # token, no spurious ACEF-086 against a conformant bundle. This both catches
-        # the real ``/card_source/<field>`` projection leaks AND keeps the
-        # nested-pointer false-positive fix.
+        # SCOPE — EXPLICIT source-to-card projection via :func:`_pointer_to_card_root_field`
+        # (full pointer, never a leaf token). A pointer projects to a card-root field iff
+        # it is ``/<X>`` or ``/card_source/<X>`` for ``<X>`` in the FULL projectable
+        # card-root EVIDENCE set ``_INCIDENT_CARD_ROOT_FIELDS`` — covering NOT just the
+        # card_source∩incident_card overlap but also card-root-but-not-card_source fields
+        # (harm_distribution_basis, transferability, sector_of_deployment, autonomy_level,
+        # value_chain_role, taxonomy_crosswalk). A deeper-nested or non-card-root pointer
+        # projects to nothing and is IGNORED — no leaf-name inference, no false-positive.
+        # Iterate in canonical sorted order so diagnostics are order-independent.
         if rtype == "incident_card":
-            projection_map = _SOURCE_TO_CARD_PROJECTION
-            for pointer, disposition in pub_map.items():
+            for pointer, disposition in sorted(pub_map.items(), key=lambda kv: str(kv[0])):
                 if not isinstance(pointer, str) or disposition not in ("omitted", "regulator-only"):
                     continue
-                card_field = projection_map.get(pointer)
+                card_field = _pointer_to_card_root_field(pointer)
                 if card_field is None:
                     continue  # not a source-to-card projection pointer -> ignore
                 if card_field in card_payload:

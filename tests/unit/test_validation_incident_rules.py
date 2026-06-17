@@ -775,6 +775,86 @@ class TestACEF086PublishabilityGate:
         diags = ir.check_publishability([card, report], source_backed=True)
         assert "ACEF-086" in _codes(diags)
 
+    # --- H3 (audit): disposition-honored check covered ONLY card_source∩incident_card
+    #     fields (+ /severity), so a card-ROOT field that is NOT a card_source field
+    #     (harm_distribution_basis, transferability, sector_of_deployment, ...) disposed
+    #     regulator-only/omitted but PUBLISHED on the card was silently accepted. -----
+
+    _FACTS = {
+        "edition": "reg-2024-1689",
+        "serious_incident_triggers": ["3.49.a"],
+        "widespread": False,
+        "death_involved": False,
+    }
+
+    def _published_report(self, card_source_extra: dict[str, Any], payload_extra: dict[str, Any]) -> dict[str, Any]:
+        cs = {
+            "public_incident_id": _VALID_ID,
+            "id_grade": "self-asserted",
+            "id_state": "PUBLISHED",
+            "harm_core": dict(_VALID_HARM_CORE),
+            "eu_ai_act_facts": dict(self._FACTS),
+        }
+        cs.update(card_source_extra)
+        rec = _report_record(cs)
+        rec["payload"].update(payload_extra)
+        return rec
+
+    def test_regulator_only_harm_distribution_basis_published_raises_086(self) -> None:
+        # harm_distribution_basis is a card-ROOT field but NOT a card_source field;
+        # disposed regulator-only at the source yet PUBLISHED on the public card (with a
+        # separately-satisfying basis) — the disposition MUST still be honored (§5.11
+        # line 331/333: the basis-gate is a SEPARATE additional check).
+        report = self._published_report(
+            {"publishability_map": {"/harm_distribution_basis": "regulator-only"}},
+            {"harm_distribution_basis": ["race"]},  # source carries it at root (pointer resolves)
+        )
+        card = _published_card(
+            {
+                "harm_distribution_basis": ["race"],
+                "declared_publication_basis": {
+                    "art6_basis": "legitimate_interests",
+                    "art9_condition": "substantial_public_interest",
+                },
+            }
+        )
+        diags = ir.check_publishability([card, report], source_backed=True)
+        assert "ACEF-086" in _codes(diags)
+        assert any("harm_distribution_basis" in d.message and "not honored" in d.message.lower() for d in diags)
+
+    def test_regulator_only_transferability_published_raises_086(self) -> None:
+        # transferability is a card-root non-special-category field — there is NO
+        # basis-gate backstop, so the disposition-honored check is the ONLY guard.
+        report = self._published_report(
+            {"publishability_map": {"/transferability": "regulator-only"}},
+            {"transferability": "high"},
+        )
+        card = _published_card({"transferability": "high"})
+        diags = ir.check_publishability([card, report], source_backed=True)
+        assert "ACEF-086" in _codes(diags)
+        assert any("transferability" in d.message and "not honored" in d.message.lower() for d in diags)
+
+    def test_omitted_sector_of_deployment_published_raises_086(self) -> None:
+        report = self._published_report(
+            {"publishability_map": {"/sector_of_deployment": "omitted"}},
+            {"sector_of_deployment": "healthcare"},
+        )
+        card = _published_card({"sector_of_deployment": "healthcare"})
+        diags = ir.check_publishability([card, report], source_backed=True)
+        assert "ACEF-086" in _codes(diags)
+        assert any("sector_of_deployment" in d.message and "not honored" in d.message.lower() for d in diags)
+
+    def test_regulator_only_card_root_field_absent_from_card_passes(self) -> None:
+        # Honored disposition: the source disposes harm_distribution_basis regulator-only
+        # AND the public card does NOT carry it -> no ACEF-086 (no false positive).
+        report = self._published_report(
+            {"publishability_map": {"/harm_distribution_basis": "regulator-only"}},
+            {"harm_distribution_basis": ["race"]},
+        )
+        card = _published_card({})  # harm_distribution_basis NOT on the public card
+        diags = ir.check_publishability([card, report], source_backed=True)
+        assert not any("harm_distribution_basis" in d.message and "not honored" in d.message.lower() for d in diags)
+
     # --- INCVAL-003: source-backed disposition-honored check -------------
 
     def _report_with_severity_disposition(self, disposition: str) -> dict[str, Any]:
@@ -2353,53 +2433,58 @@ class TestCheckIncidentEdges:
 # ---------------------------------------------------------------------------
 
 
-def _derive_projection_from_v1_1_schemas() -> dict[str, str] | None:
-    """Derive the §5.11 projection set from the on-disk v1.1 schemas, the same
-    read the pre-fix runtime did. Returns ``None`` when the schema dir is ABSENT
-    (installed-only CI) so the drift-guard test can skip rather than fail."""
+def _derive_card_root_fields_from_schema() -> frozenset[str] | None:
+    """Derive the projectable §5.11 card-root EVIDENCE field set from the on-disk
+    ``incident_card`` schema: its named root properties MINUS the card-authored /
+    computed meta fields (``declared_publication_basis`` + the two §5.5 dedupe keys).
+    Returns ``None`` when the schema dir is ABSENT (installed-only CI)."""
     here = Path(__file__).resolve()
-    card_path: Path | None = None
-    source_path: Path | None = None
     for ancestor in here.parents:
         c = ancestor / "acef-conventions" / "v1.1" / "incident_card.schema.json"
-        s = ancestor / "acef-conventions" / "v1.1" / "incident_report.card_source.schema.json"
-        if c.is_file() and s.is_file():
-            card_path, source_path = c, s
-            break
-    if card_path is None or source_path is None:
-        return None
-    card_schema = json.loads(card_path.read_text(encoding="utf-8"))
-    source_schema = json.loads(source_path.read_text(encoding="utf-8"))
-    card_root_props = card_schema.get("properties", {})
-    card_source_props = source_schema.get("properties", {})
-    projection: dict[str, str] = {}
-    for field in card_source_props:
-        if isinstance(field, str) and field in card_root_props:
-            projection[f"/card_source/{field}"] = field
-    if "severity" in card_root_props:
-        projection["/severity"] = "severity"
-    return projection
+        if c.is_file():
+            card_schema = json.loads(c.read_text(encoding="utf-8"))
+            named = {k for k in (card_schema.get("properties") or {}) if isinstance(k, str)}
+            return frozenset(named - ir._CARD_AUTHORED_FIELDS)
+    return None
 
 
 class TestProjectionMapInstallSafety:
-    """The frozen-constant projection map is install-safe and fail-closed."""
+    """The frozen-constant card-root projection set is install-safe and fail-closed."""
 
     def test_runtime_projection_source_is_frozen_constant_not_disk_read(self) -> None:
-        # The runtime disposition-honored check MUST source its projection map from
-        # the frozen module constant, never from a disk read. (If a schema-reading
-        # function survives only as a checkout test helper, the runtime accessor must
-        # equal the frozen constant.)
-        assert isinstance(ir._SOURCE_TO_CARD_PROJECTION, dict)
-        assert ir._SOURCE_TO_CARD_PROJECTION  # non-empty
-        # The exact frozen set the constant must mirror (schema-derived in fe58b71f).
-        assert ir._SOURCE_TO_CARD_PROJECTION == {
-            "/card_source/severity_vector": "severity_vector",
-            "/card_source/harm_core": "harm_core",
-            "/card_source/coordinated_disclosure": "coordinated_disclosure",
-            "/card_source/public_incident_id": "public_incident_id",
-            "/card_source/id_grade": "id_grade",
-            "/severity": "severity",
-        }
+        # The runtime disposition-honored check MUST source its projection set from
+        # the frozen module constant, never from a disk read.
+        assert isinstance(ir._INCIDENT_CARD_ROOT_FIELDS, frozenset)
+        assert ir._INCIDENT_CARD_ROOT_FIELDS  # non-empty
+        # The exact frozen projectable card-root EVIDENCE set (full named incident_card
+        # root properties minus the card-authored/computed meta fields).
+        assert ir._INCIDENT_CARD_ROOT_FIELDS == frozenset(
+            {
+                "autonomy_level",
+                "coordinated_disclosure",
+                "harm_core",
+                "harm_distribution_basis",
+                "id_grade",
+                "public_incident_id",
+                "sector_of_deployment",
+                "severity",
+                "severity_vector",
+                "taxonomy_crosswalk",
+                "transferability",
+                "value_chain_role",
+            }
+        )
+
+    def test_pointer_to_card_root_field_full_pointer_no_leaf_collapse(self) -> None:
+        # Projection resolves on the FULL pointer (report root /<X> or overlay
+        # /card_source/<X>), never a leaf token; a deeper-nested pointer projects to
+        # nothing (no leaf-name collision).
+        assert ir._pointer_to_card_root_field("/harm_distribution_basis") == "harm_distribution_basis"
+        assert ir._pointer_to_card_root_field("/card_source/severity_vector") == "severity_vector"
+        assert ir._pointer_to_card_root_field("/severity") == "severity"
+        assert ir._pointer_to_card_root_field("/impact_assessment/notes") is None
+        assert ir._pointer_to_card_root_field("/card_source/coordinated_disclosure/foo") is None
+        assert ir._pointer_to_card_root_field("/declared_publication_basis") is None  # card-authored, excluded
 
     def test_installed_layout_absent_schemas_still_fires_086(self, monkeypatch: Any) -> None:
         # INSTALLED-LAYOUT SIMULATION. Force every ``acef-conventions/v1.1`` schema
@@ -2444,20 +2529,20 @@ class TestProjectionMapInstallSafety:
         )
 
     def test_frozen_constant_matches_schema_derived_set_drift_guard(self) -> None:
-        # SCHEMA-DRIFT GUARD (checkout-only). Derive the projection set from the v1.1
-        # schemas on disk and assert it EQUALS the frozen constant — so any future
-        # schema drift (a new public card_source field that overlaps an incident_card
-        # root) is caught in CI. The constant is the runtime authority; this test only
-        # guards it from going stale. If the schema dir is absent (installed-only CI),
-        # SKIP — the constant remains authoritative and install-safe.
-        derived = _derive_projection_from_v1_1_schemas()
+        # SCHEMA-DRIFT GUARD (checkout-only). Derive the projectable card-root EVIDENCE
+        # set from the v1.1 incident_card schema on disk and assert it EQUALS the frozen
+        # constant — so any future schema drift (a new incident_card root field) is
+        # caught in CI. The constant is the runtime authority; this test only guards it
+        # from going stale. If the schema dir is absent (installed-only CI), SKIP.
+        derived = _derive_card_root_fields_from_schema()
         if derived is None:
             pytest.skip(
                 "v1.1 schema dir absent (installed-only layout); the frozen "
-                "_SOURCE_TO_CARD_PROJECTION constant is authoritative — the schema "
+                "_INCIDENT_CARD_ROOT_FIELDS constant is authoritative — the schema "
                 "cross-check is a checkout-only drift guard"
             )
-        assert derived == ir._SOURCE_TO_CARD_PROJECTION, (
-            "v1.1 schemas drifted from the frozen _SOURCE_TO_CARD_PROJECTION constant; "
-            "update the constant (and its citation comment) to mirror the new schema set"
+        assert derived == ir._INCIDENT_CARD_ROOT_FIELDS, (
+            "v1.1 incident_card schema drifted from the frozen _INCIDENT_CARD_ROOT_FIELDS "
+            "constant; update the constant (and _CARD_AUTHORED_FIELDS if a new card-authored "
+            "meta field was added) to mirror the new schema set"
         )
