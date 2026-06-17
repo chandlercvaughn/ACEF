@@ -2668,9 +2668,26 @@ class Package:
         these provisions) is what threads the delegated ACEF-08x checks via
         ``run_incident_rules``'s manifest+requested union, so that enforcement is
         unaffected.
+
+        Idempotent AND self-healing: if an Art.73 profile already exists but its
+        ``applicable_provisions`` is stale or incomplete — the legacy ``["art-73"]``
+        placeholder, or a subset predeclared by a caller or carried in from a loaded
+        older bundle — it is REPAIRED in place (the real ids are merged in and the
+        non-matching ``art-73`` placeholder dropped) so the same empty/partial-rollup
+        bug cannot survive a pre-existing declaration (roborev on ead1716). Any OTHER
+        caller-declared ids are preserved.
         """
-        if not any(p.profile_id == _ART73_PROFILE_ID for p in self._profiles):
-            self.add_profile(_ART73_PROFILE_ID, provisions=["article-3-49", "article-73"])
+        canonical = ["article-3-49", "article-73"]
+        existing = next((p for p in self._profiles if p.profile_id == _ART73_PROFILE_ID), None)
+        if existing is None:
+            self.add_profile(_ART73_PROFILE_ID, provisions=canonical)
+            return
+        if not set(canonical) <= set(existing.applicable_provisions):
+            repaired = [p for p in existing.applicable_provisions if p != "art-73"]
+            for provision_id in canonical:
+                if provision_id not in repaired:
+                    repaired.append(provision_id)
+            existing.applicable_provisions = repaired
 
     @staticmethod
     def _sorted_canonical(seq: Iterable[Any], *, numeric: bool = False) -> list[Any]:

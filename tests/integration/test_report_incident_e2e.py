@@ -175,7 +175,7 @@ class TestReportIncidentEndToEnd:
         art73_ids = {"article-3-49", "article-73"}
 
         # --- confidential REPORT-ONLY ---
-        key_path, key = _write_ec_key(tmp_path)
+        _, key = _write_ec_key(tmp_path)
         report_pkg = _new_pkg()
         minted_r = mint_incident_id("openai.com", key, year=2026)
         report_pkg.add_subject("ai_system", name="Sys", risk_classification="high-risk", modalities=["text"])
@@ -222,6 +222,41 @@ class TestReportIncidentEndToEnd:
         )
         assert c_outcomes["article-73"] in _ok, c_outcomes["article-73"]
         assert c_outcomes["article-3-49"] in _ok, c_outcomes["article-3-49"]
+
+    def test_art73_repairs_a_stale_predeclared_profile(self, tmp_path: Path) -> None:
+        """roborev on ead1716: ``_declare_art73_profile`` only checked whether the profile
+        id already existed. If a STALE eu-ai-act-art73-2026 profile (the legacy ``["art-73"]``
+        placeholder, or a subset) is predeclared — or loaded from an older bundle — BEFORE an
+        incident builder runs, the method left it untouched, so the empty/partial-rollup bug
+        persisted for that bundle. It must REPAIR an existing-but-incomplete declaration to
+        bind both real provisions and drop the non-matching placeholder."""
+        _, key = _write_ec_key(tmp_path)
+        pkg = _new_pkg()
+        pkg.add_profile("eu-ai-act-art73-2026", provisions=["art-73"])  # stale legacy placeholder
+        pkg.add_subject("ai_system", name="Sys", risk_classification="high-risk", modalities=["text"])
+        minted = mint_incident_id("openai.com", key, year=2026)
+        pkg.report_incident(
+            public_incident_id=minted.public_incident_id,
+            harm_core=dict(_HARM_CORE),
+            incident_type="operational_failure",
+            description="report on a package with a stale predeclared Art.73 profile",
+            awareness_date="2026-08-01T00:00:00Z",
+            eu_ai_act_facts={"serious_incident_triggers": ["3.49.a"], "widespread": False, "death_involved": True},
+        )
+        prof = next(p for p in pkg.profiles if p.profile_id == "eu-ai-act-art73-2026")
+        assert {"article-3-49", "article-73"} <= set(prof.applicable_provisions), prof.applicable_provisions
+        assert "art-73" not in prof.applicable_provisions, "the stale placeholder must be dropped"
+
+        # And the repaired declaration actually drives a non-empty rollup.
+        bundle_dir = tmp_path / "stale-repaired.acef"
+        pkg.export(str(bundle_dir))
+        assessment = validate_bundle(
+            bundle_dir, profiles=["eu-ai-act-art73-2026"], evaluation_instant="2026-09-01T00:00:00Z"
+        )
+        evaluated = {ps.provision_id for ps in assessment.provision_summary}
+        assert {"article-3-49", "article-73"} <= evaluated, (
+            f"a repaired stale profile must evaluate both Art.73 provisions; got {sorted(evaluated)}"
+        )
 
     def test_public_card_with_special_category_basis_validates_clean(self, tmp_path: Path) -> None:
         # A public card projecting a special-category field MUST carry a satisfying
