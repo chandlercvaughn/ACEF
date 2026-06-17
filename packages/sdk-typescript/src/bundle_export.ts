@@ -450,6 +450,12 @@ function isLeapYear(year: number): boolean {
 function strictRfc3339ToEpochSeconds(ts: string): number | null {
     const m = RFC3339_DATETIME.exec(ts);
     if (!m) return null;
+    // Require the WHOLE input to match. JS ``$`` (no ``m`` flag) already anchors at the
+    // absolute end (it does not match before a trailing ``\n``), but an explicit full-match
+    // check is bulletproof against any anchor / line-terminator subtlety, so a stray
+    // trailing character can never slip a value past the Python exporter's rejection
+    // (roborev on 41c41ed).
+    if (m[0] !== ts) return null;
     const year = Number(m[1]);
     const month = Number(m[2]);
     const day = Number(m[3]);

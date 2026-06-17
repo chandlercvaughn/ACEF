@@ -1,14 +1,17 @@
 """ACEF provision rollup — 7-step deterministic precedence algorithm.
 
-Per spec Section 3.7:
+Per spec Section 3.7 (first match wins):
 1. Any fail-severity rule failed → NOT_SATISFIED
 2. Any rule errored → NOT_ASSESSED
 3. All rules skipped → SKIPPED
 4. Evidence gap exists, no fails failed → GAP_ACKNOWLEDGED
 5. All fails passed, some warnings failed → PARTIALLY_SATISFIED
-6. All non-skipped rules passed → SATISFIED (LITERAL: a failed info-severity
-   rule means NOT all passed, so it falls through to NOT_ASSESSED, never SATISFIED)
-7. No rules for provision (or a residual info-failed mix matching no step) → NOT_ASSESSED
+6. Otherwise (every fail- and warning-severity rule passed, not all skipped) → SATISFIED.
+   A FAILED info-severity rule is NON-GATING (F7): info is informational (§3.5), and the
+   spec's provision-outcome precedence list (checklist line 1704) reserves NOT_ASSESSED for
+   an errored (step 2) or rule-less (step 7) provision only — never for a fully-evaluated,
+   error-free one. The info failure is recorded per-rule but does NOT demote the provision.
+7. No rules for provision → NOT_ASSESSED
 """
 
 from __future__ import annotations

@@ -194,6 +194,7 @@ test("F6: deriveMtime mirrors the Python strict RFC3339 checker (accept/reject +
         "2024-01-15T10:30:00.999Z", // fractional seconds (whole-second only)
         "2024-01-15T10:30:00.000001Z", // microsecond fractional
         "1969-12-31T23:59:59.999Z", // pre-epoch fractional
+        "2024-01-15T10:30:00Z\n", // trailing newline (full-match required)
         "not-a-date",
         "",
     ]) {
