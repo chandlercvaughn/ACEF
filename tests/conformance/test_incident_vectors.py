@@ -889,3 +889,69 @@ def test_hmac_variant_equals_independent_recipe_and_passes() -> None:
         "the on-disk incident_dedupe_key_hmac does not equal the §5.5 HMAC recipe recomputed independently"
     )
     assert "ACEF-086" not in _emitted_codes(_validate(vector))
+
+
+@pytest.mark.conformance
+def test_v1_0_regression_version_gate_is_load_bearing(tmp_path: Path) -> None:
+    """The §6 v1.0 incident_report regression proves a REAL version gate, not an
+    innocuous payload that both versions accept (roborev Low on 8db5635).
+
+    The discriminator: the SAME bundle bytes — a public incident_report carrying a
+    MALFORMED ``incident_dedupe_key`` (``sha256:short``, which the v1.1 §5.5 dedupe-shape
+    rule rejects with ACEF-086) — differ ONLY in the declared manifest ``core_version``.
+    The malformed key is force-injected AFTER ``pkg.record()`` so the SDK's ``_ensure_v1_1``
+    auto-upgrade (which would otherwise drag any dedupe-bearing payload up to 1.1.0 and
+    defeat the test) never fires; the manifest keeps the requested core_version.
+
+    The engine routes the incident rules ONLY on the v1.1 schema path
+    (``acef.validation.engine`` gates ``run_incident_rules`` on ``schema_version ==
+    'v1.1'``):
+
+      * core_version 1.0.0 -> schema_version v1 -> incident rules SKIPPED -> the malformed
+        key is never shape-checked -> NO ACEF-086 (the v1.0 backward-compat path).
+      * core_version 1.1.0 -> schema_version v1.1 -> rules RUN -> ACEF-086.
+
+    Identical content, opposite outcomes keyed solely on the declared core_version: the
+    version gate is load-bearing, so the committed clean v1.0 regression vector is clean
+    BECAUSE it is routed to v1, not merely because its payload is innocuous."""
+    gen = _load_generator()
+    # The §6 v1.0 regression vector's own payload shape (v1.0 incident_report, no
+    # v1.1-only card_source), kept in lockstep with the generator spec.
+    base_payload = {
+        "incident_type": "operational_failure",
+        "severity": "major",
+        "description": "A v1.0-shape incident report with no v1.1 card_source.",
+        "notification_timeline": [
+            {"recipient": "AI Office", "notification_date": gen._AWARENESS, "method": "portal_submission"}
+        ],
+    }
+    outcomes: dict[str, tuple[str, set[str]]] = {}
+    for core_version in ("1.0.0", "1.1.0"):
+        bundle_dir = tmp_path / f"version-gate-{core_version}.acef"
+        gen._build_bundle(
+            bundle_dir,
+            record_type="incident_report",
+            payload=dict(base_payload),
+            confidentiality="public",
+            core_version=core_version,
+            force_payload_fields={"incident_dedupe_key": "sha256:short"},
+        )
+        manifest = json.loads((bundle_dir / "acef-manifest.json").read_text(encoding="utf-8"))
+        emitted = {str(e.get("code")) for e in validate_bundle(str(bundle_dir), profiles=[]).structural_errors}
+        outcomes[core_version] = (str(manifest["versioning"]["core_version"]), emitted)
+
+    # The injected key did NOT trigger the SDK auto-upgrade — each manifest kept its
+    # requested core_version, so the two bundles differ ONLY by the declared version.
+    assert outcomes["1.0.0"][0] == "1.0.0", "force-injected dedupe key must not auto-upgrade the v1.0 manifest"
+    assert outcomes["1.1.0"][0] == "1.1.0"
+    # v1.0 path: incident rules gated OFF -> the malformed dedupe key is NOT shape-checked.
+    assert "ACEF-086" not in outcomes["1.0.0"][1], (
+        "a malformed incident_dedupe_key under core_version 1.0.0 must NOT raise ACEF-086 — "
+        "the v1.1 incident rules are gated off on the v1 schema path; the regression is "
+        f"clean BECAUSE of the version gate. Got {sorted(outcomes['1.0.0'][1])!r}"
+    )
+    # v1.1 path: the SAME malformed key is shape-checked -> ACEF-086. Proves the gate matters.
+    assert "ACEF-086" in outcomes["1.1.0"][1], (
+        "the SAME malformed incident_dedupe_key under core_version 1.1.0 MUST raise ACEF-086 — "
+        f"otherwise the version gate would be inert. Got {sorted(outcomes['1.1.0'][1])!r}"
+    )

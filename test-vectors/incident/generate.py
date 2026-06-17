@@ -266,12 +266,26 @@ def _build_bundle(
     # content-hashes.json, and fold it into the Merkle root — so the forged key is part
     # of the integrity-covered content (a structurally-valid bundle that violates the
     # §5.5 RULE), exactly what a hand-forged non-SDK producer would ship. Byte-stable:
-    # the forced fields are fixed literals and the export is deterministic. Verified to
-    # validate to exactly ACEF-086 (no spurious ACEF-074/078 redaction error) because a
-    # regulator-only access-class record carries the full payload, not a redaction
-    # transform commitment.
+    # the forced fields are fixed literals and the export is deterministic.
     if force_payload_fields:
         first_env.payload.update(force_payload_fields)
+        # `pkg.record()` minted the X2 redaction attestation (event_log) over the
+        # PRE-injection (stripped) payload, so its original/redacted payload hashes no
+        # longer describe the bytes we are about to export (roborev Medium). Re-mint the
+        # attestation over the POST-injection payload via the SAME production
+        # apply_redaction recipe and patch the two payload-derived hashes back onto the
+        # in-bundle attestation record (its record_id/timestamp/policy fields are
+        # unchanged), so the forged non-conformant bundle is INTERNALLY consistent — the
+        # event_log truthfully commits to the exported incident payload — exactly as a
+        # real producer that shipped this payload would attest. The throwaway record_id
+        # minted by the recompute is discarded; only the content-derived hashes are used.
+        if first_env.redaction_attestation_ref is not None and redaction_policy is not None:
+            from acef.redaction import apply_redaction
+
+            _, _fresh_attestation = apply_redaction(first_env.payload, redaction_policy, clock=lambda: _FIXED_CLOCK)
+            _attestation = next(rec for rec in pkg.records if rec.record_id == first_env.redaction_attestation_ref)
+            _attestation.payload["original_payload_hash"] = _fresh_attestation.payload["original_payload_hash"]
+            _attestation.payload["redacted_payload_hash"] = _fresh_attestation.payload["redacted_payload_hash"]
     # Optional second record + a typed public_projection_of edge (report→card). Used
     # by the §5.8 incident-edge SEMANTIC vector: the edge endpoints are the two
     # record URNs, and the edge is authored via the production add_relationship (which
