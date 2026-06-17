@@ -121,20 +121,37 @@ def evaluate_rules_for_subject(
 
             provision_effective = not _is_before(evaluation_instant, provision.effective_date)
 
-        # Expand required_evidence_types to has_record_type rules if no evaluation rules exist
-        rules = list(provision.evaluation)
-        if not rules and provision.required_evidence_types:
-            for rt in provision.required_evidence_types:
-                min_count = provision.minimum_evidence_count.get(rt, 1)
-                rules.append(
-                    EvaluationRule(
-                        rule_id=f"{provision.provision_id}-{rt}-exists",
-                        rule="has_record_type",
-                        params={"type": rt, "min_count": min_count},
-                        severity="fail",
-                        message=f"At least {min_count} {rt} record(s) required",
-                    )
+        # Spec §3.5 (line 1221): required_evidence_types / minimum_evidence_count are
+        # syntactic sugar ALWAYS expanded into has_record_type (fail-severity) EXISTENCE
+        # rules BEFORE evaluation — unconditionally, NOT only when the provision has no
+        # evaluation rules. The prior `if not rules` gate silently DROPPED the entire
+        # existence requirement whenever ANY evaluation rule was present, so a provision
+        # whose evaluation rules are universal operators (which PASS vacuously on zero
+        # matching records, empty-set semantics) rolled up to SATISFIED with ZERO
+        # evidence — a regulator-facing false-PASS (e.g. China-CAC cac-watermark). The
+        # precedence clause governs ONLY same-type conflicts: an EXPLICIT has_record_type
+        # rule for type T wins, so the auto-generated existence rule for T is skipped (a
+        # min_count disagreement resolves to the evaluation rule).
+        rules: list[EvaluationRule] = []
+        explicit_has_record_types = {
+            str(r.params.get("type"))
+            for r in provision.evaluation
+            if r.rule == "has_record_type" and isinstance(r.params, dict) and r.params.get("type")
+        }
+        for rt in provision.required_evidence_types:
+            if rt in explicit_has_record_types:
+                continue
+            min_count = provision.minimum_evidence_count.get(rt, 1)
+            rules.append(
+                EvaluationRule(
+                    rule_id=f"{provision.provision_id}-{rt}-exists",
+                    rule="has_record_type",
+                    params={"type": rt, "min_count": min_count},
+                    severity="fail",
+                    message=f"At least {min_count} {rt} record(s) required",
                 )
+            )
+        rules.extend(provision.evaluation)
 
         for rule in rules:
             result = _evaluate_single_rule(

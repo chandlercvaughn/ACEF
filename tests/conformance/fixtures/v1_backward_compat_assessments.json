@@ -312,6 +312,21 @@
         "outcome": "passed",
         "profile_id": "china-cac-labeling-2025",
         "provision_id": "cac-watermark",
+        "rule_id": "cac-watermark-transparency_marking-exists",
+        "severity": "fail",
+        "subject_scope": [
+          "urn:acef:sub:bf06e980-8674-432a-b78c-afd102593b97"
+        ]
+      },
+      {
+        "evidence_refs": [
+          "urn:acef:rec:3e60933e-618f-4fd8-a5f1-e73f1a6b1b27",
+          "urn:acef:rec:f1ec2064-ba92-4f89-9c5c-e76caf7ee379"
+        ],
+        "message": null,
+        "outcome": "passed",
+        "profile_id": "china-cac-labeling-2025",
+        "provision_id": "cac-watermark",
         "rule_id": "cac-watermark-verification",
         "severity": "info",
         "subject_scope": [

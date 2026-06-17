@@ -20,7 +20,7 @@
   "acef-conventions/v1/transparency_disclosure.schema.json": "f8ed413da73e24197c4171947972d5c503f0be77252cb27366a592284119f216",
   "acef-conventions/v1/transparency_marking.schema.json": "be0ca67034f372d6d7376fdd34377b78e9e59233500dab829c6d0803394ad4d0",
   "acef-conventions/v1/variant-registry.json": "a9650a9993494f9f083664be7285aecc66a03dd1663dad38279e6b8596d225d0",
-  "tests/conformance/golden-bundles/china-cac-labeling.acef-assessment.json": "ccd7c25f35ad3741ce4cfc2f160626d12ba9bda5ee0761aa9220edc9b4e4a9af",
+  "tests/conformance/golden-bundles/china-cac-labeling.acef-assessment.json": "578dbcd306b2c448c3a35512bd8fc22f25417693b56c457f8645b6c080769cfb",
   "tests/conformance/golden-bundles/china-cac-labeling/acef-manifest.json": "1045c764de5fcb17ab3c1d2acedf93225f4622ea9dc59e053b4355c8ed41b9c0",
   "tests/conformance/golden-bundles/china-cac-labeling/hashes/content-hashes.json": "ee79fb2cfd8294692e697095b342f215123e734d99b0d357a7962b5fd21e4742",
   "tests/conformance/golden-bundles/china-cac-labeling/hashes/merkle-tree.json": "a3233a0792da128f1d48074ff14ac7d1955ece35391335941fcebf40fe903f28",

@@ -351,8 +351,76 @@ class TestEvaluateRulesForSubject:
             profile_id="test-profile",
             evaluation_instant="2025-06-15T00:00:00Z",
         )
-        assert len(results) == 1
-        assert results[0].outcome == RuleOutcome.PASSED
+        # F2: the required_evidence_types existence rule is ALWAYS expanded (spec §3.5
+        # line 1221), so the provision yields TWO results — the risk_register existence
+        # rule AND the evidence_freshness rule — both PASSED (a risk_register IS present).
+        assert len(results) == 2
+        assert all(r.outcome == RuleOutcome.PASSED for r in results)
+        assert any(r.rule_id == "fresh-prov-risk_register-exists" for r in results)
+
+    def test_required_evidence_types_existence_enforced_even_with_evaluation_rules(self) -> None:
+        """F2 (CRITICAL): required_evidence_types/minimum_evidence_count are syntactic
+        sugar ALWAYS expanded into has_record_type existence rules before evaluation (spec
+        §3.5 line 1221) — NOT only when the provision has no evaluation rules. Previously
+        the existence requirement was silently DROPPED whenever any evaluation rule was
+        present, so a provision whose evaluation rules are universal operators (which PASS
+        vacuously on zero matching records) rolled up to SATISFIED with ZERO evidence —
+        a regulator-facing false-PASS (the shipped China-CAC cac-watermark provision)."""
+        provisions = [
+            Provision(
+                provision_id="watermark",
+                provision_name="Marking",
+                normative_text_ref="CAC Art. X",
+                description="Synthetic-content marking must be present.",
+                required_evidence_types=["transparency_marking"],
+                evaluation=[
+                    EvaluationRule(
+                        rule_id="marking-method-present",
+                        rule="field_present",
+                        params={"field": "/marking_method"},
+                        severity="fail",
+                        message="marking_method required",
+                    ),
+                ],
+            ),
+        ]
+        results = evaluate_rules_for_subject(provisions, [], profile_id="china-cac")
+        existence = [r for r in results if r.rule_id == "watermark-transparency_marking-exists"]
+        assert existence, "required_evidence_types MUST expand into a has_record_type existence rule"
+        assert existence[0].outcome == RuleOutcome.FAILED, (
+            "zero transparency_marking records MUST FAIL the existence requirement (no false-PASS)"
+        )
+
+    def test_explicit_has_record_type_dedups_the_auto_existence_rule(self) -> None:
+        """Spec §3.5 line 1221 precedence: if the provision already declares an explicit
+        has_record_type rule for type T, that rule wins and the auto-generated existence
+        rule for T is SKIPPED (a min_count disagreement resolves to the evaluation rule)."""
+        provisions = [
+            Provision(
+                provision_id="p",
+                provision_name="P",
+                normative_text_ref="x",
+                description="x",
+                required_evidence_types=["risk_register"],
+                minimum_evidence_count={"risk_register": 5},  # disagrees with the explicit rule
+                evaluation=[
+                    EvaluationRule(
+                        rule_id="explicit-rr",
+                        rule="has_record_type",
+                        params={"type": "risk_register", "min_count": 1},
+                        severity="fail",
+                        message="at least 1 risk_register",
+                    ),
+                ],
+            ),
+        ]
+        results = evaluate_rules_for_subject(provisions, [_make_record()], profile_id="t")
+        rr_existence = [r for r in results if r.rule_id == "p-risk_register-exists"]
+        assert not rr_existence, "the auto existence rule for risk_register must be deduped by the explicit one"
+        # The explicit rule (min_count 1) PASSES on the single record (the min_count:5
+        # sugar did NOT override it).
+        explicit = [r for r in results if r.rule_id == "explicit-rr"]
+        assert explicit and explicit[0].outcome == RuleOutcome.PASSED
 
     def test_scope_risk_classification_filtering(self) -> None:
         provisions = [
