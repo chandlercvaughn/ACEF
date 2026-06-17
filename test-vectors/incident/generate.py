@@ -279,10 +279,18 @@ def _build_bundle(
         # event_log truthfully commits to the exported incident payload — exactly as a
         # real producer that shipped this payload would attest. The throwaway record_id
         # minted by the recompute is discarded; only the content-derived hashes are used.
+        # A DETERMINISTIC urn_generator is injected even though the minted id is thrown
+        # away, so the recompute honours this generator's no-wall-clock / NO-RANDOM
+        # contract (apply_redaction's default urn_generator reads uuid4()).
         if first_env.redaction_attestation_ref is not None and redaction_policy is not None:
             from acef.redaction import apply_redaction
 
-            _, _fresh_attestation = apply_redaction(first_env.payload, redaction_policy, clock=lambda: _FIXED_CLOCK)
+            _, _fresh_attestation = apply_redaction(
+                first_env.payload,
+                redaction_policy,
+                clock=lambda: _FIXED_CLOCK,
+                urn_generator=_deterministic_urn_generator(),
+            )
             _attestation = next(rec for rec in pkg.records if rec.record_id == first_env.redaction_attestation_ref)
             _attestation.payload["original_payload_hash"] = _fresh_attestation.payload["original_payload_hash"]
             _attestation.payload["redacted_payload_hash"] = _fresh_attestation.payload["redacted_payload_hash"]

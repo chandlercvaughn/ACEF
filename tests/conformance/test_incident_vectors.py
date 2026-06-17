@@ -926,6 +926,7 @@ def test_v1_0_regression_version_gate_is_load_bearing(tmp_path: Path) -> None:
         ],
     }
     outcomes: dict[str, tuple[str, set[str]]] = {}
+    record_bytes: dict[str, bytes] = {}
     for core_version in ("1.0.0", "1.1.0"):
         bundle_dir = tmp_path / f"version-gate-{core_version}.acef"
         gen._build_bundle(
@@ -939,18 +940,30 @@ def test_v1_0_regression_version_gate_is_load_bearing(tmp_path: Path) -> None:
         manifest = json.loads((bundle_dir / "acef-manifest.json").read_text(encoding="utf-8"))
         emitted = {str(e.get("code")) for e in validate_bundle(str(bundle_dir), profiles=[]).structural_errors}
         outcomes[core_version] = (str(manifest["versioning"]["core_version"]), emitted)
+        record_bytes[core_version] = (bundle_dir / "records" / "incident_report.jsonl").read_bytes()
 
     # The injected key did NOT trigger the SDK auto-upgrade — each manifest kept its
     # requested core_version, so the two bundles differ ONLY by the declared version.
     assert outcomes["1.0.0"][0] == "1.0.0", "force-injected dedupe key must not auto-upgrade the v1.0 manifest"
     assert outcomes["1.1.0"][0] == "1.1.0"
-    # v1.0 path: incident rules gated OFF -> the malformed dedupe key is NOT shape-checked.
-    assert "ACEF-086" not in outcomes["1.0.0"][1], (
-        "a malformed incident_dedupe_key under core_version 1.0.0 must NOT raise ACEF-086 — "
-        "the v1.1 incident rules are gated off on the v1 schema path; the regression is "
-        f"clean BECAUSE of the version gate. Got {sorted(outcomes['1.0.0'][1])!r}"
+    # The incident_report record (the malformed-key-bearing content) is BYTE-IDENTICAL
+    # across the two builds, so the ONLY difference between the bundles is the declared
+    # manifest core_version — the routing, not the content, explains the divergent outcome.
+    assert record_bytes["1.0.0"] == record_bytes["1.1.0"], (
+        "the incident_report record must be byte-identical across the 1.0.0 and 1.1.0 builds "
+        "so the version gate is the sole variable"
     )
-    # v1.1 path: the SAME malformed key is shape-checked -> ACEF-086. Proves the gate matters.
+    # v1.0 path: routed to the v1 schema/rule path, incident rules gated OFF -> the SAME
+    # malformed dedupe key is NEVER shape-checked, AND nothing else fails -> a FULLY CLEAN
+    # emitted set (not merely ACEF-086 absent). Were the v1.0 bundle invalid for another
+    # structural reason, this would catch it and the "clean because of the gate" claim
+    # would not hold.
+    assert outcomes["1.0.0"][1] == set(), (
+        "a malformed incident_dedupe_key under core_version 1.0.0 must validate FULLY CLEAN — "
+        "the v1.1 incident rules are gated off on the v1 schema path; the regression is clean "
+        f"BECAUSE of the version gate, with no other structural failure. Got {sorted(outcomes['1.0.0'][1])!r}"
+    )
+    # v1.1 path: the SAME bytes, routed to v1.1, shape-check the dedupe key -> ACEF-086.
     assert "ACEF-086" in outcomes["1.1.0"][1], (
         "the SAME malformed incident_dedupe_key under core_version 1.1.0 MUST raise ACEF-086 — "
         f"otherwise the version gate would be inert. Got {sorted(outcomes['1.1.0'][1])!r}"
