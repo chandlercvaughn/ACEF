@@ -417,7 +417,7 @@
           "rule": "field_present",
           "params": {"record_type": "incident_report", "field": "/payload/notification_date"},
           "severity": "warning",
-          "message": "Incident reports should include notification_date to verify compliance with the 2-15 day reporting timeline to the AI Office",
+          "message": "Incident reports should include notification_date to verify compliance with the Measure 9.3 reporting timeline (2/5/10/15 days by incident class) to the AI Office",
           "condition": {
             "if_system_type": ["gpai-systemic"]
           }

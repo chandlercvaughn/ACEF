@@ -701,14 +701,17 @@ class TestGpaiIncidentProvisionCitation:
             ref = sub.get("normative_text_ref", "")
             assert "Safety 3" not in ref and "Safety Commitment 3" not in ref
 
-    def test_incident_messages_have_no_stale_two_vs_fifteen_phrasing(self) -> None:
-        # Measure 9.3 has FOUR bands (2/5/10/15 days); no message may keep the stale
-        # binary "2-day vs 15-day" phrasing.
+    def test_incident_messages_have_no_stale_range_timeline_phrasing(self) -> None:
+        # Measure 9.3 has FOUR bands (2/5/10/15 days); NO message/description may keep
+        # the stale binary "2-day vs 15-day" OR the range-only "2-15 day" shorthand,
+        # both of which collapse the four classes.
         prov = self._incident_provision()
         texts = [e.get("message", "") for e in prov.get("evaluation", [])]
         texts.append(prov.get("description", ""))
         texts.extend(sub.get("description", "") for sub in prov.get("sub_provisions", []))
-        assert not any("2-day vs 15-day" in t for t in texts)
-        # The severity rule message references Measure 9.3 / the four-band timeline.
-        sev_msg = next(e["message"] for e in prov["evaluation"] if e["rule_id"] == "gpai-s3-incident-severity")
-        assert "9.3" in sev_msg or "2/5/10/15" in sev_msg
+        for stale in ("2-day vs 15-day", "2-15 day", "2-15-day"):
+            assert not any(stale in t for t in texts), f"stale timeline phrasing {stale!r} remains"
+        # The severity + notification-date rule messages reference Measure 9.3 / the bands.
+        by_rule = {e["rule_id"]: e["message"] for e in prov["evaluation"]}
+        for rid in ("gpai-s3-incident-severity", "gpai-s3-notification-date"):
+            assert "9.3" in by_rule[rid] or "2/5/10/15" in by_rule[rid]
