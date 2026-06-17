@@ -430,6 +430,27 @@ class TestGenericRecordPathNormalizesIncidentArrays:
         assert forward["notification_timeline"] == entries
         assert canonicalize(forward) != canonicalize(backward)
 
+    def test_notification_timeline_tagged_order_significant_in_schema(self) -> None:
+        # §5.10 line 318 (normative MUST): the sole order-significant array exception
+        # (notification_timeline[]) MUST be EXPLICITLY tagged order-significant in its
+        # SCHEMA — runtime non-sorting (above) is not enough; an implementer reading
+        # only the schema must be able to tell it must NOT be sorted before hashing.
+        import json
+        from pathlib import Path
+
+        here = Path(__file__).resolve()
+        schema_path = next(
+            a / "acef-conventions" / "v1.1" / "incident_report.schema.json"
+            for a in here.parents
+            if (a / "acef-conventions" / "v1.1" / "incident_report.schema.json").is_file()
+        )
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        nt = schema["properties"]["notification_timeline"]
+        assert nt.get("x-order-significant") is True, (
+            "§5.10 MUST: notification_timeline must carry an explicit 'x-order-significant': true "
+            "tag in incident_report.schema.json"
+        )
+
     def test_record_does_not_mutate_caller_payload(self) -> None:
         # The generic path must NOT destructively reorder the caller's input dict
         # (the typed builders operate on their own assembled payload). A caller

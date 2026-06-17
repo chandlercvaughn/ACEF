@@ -96,7 +96,8 @@
     },
     "notification_timeline": {
       "type": "array",
-      "description": "Timeline of regulatory and stakeholder notifications (GPAI Art. 55 requires 2-15 day notification).",
+      "x-order-significant": true,
+      "description": "Order-SIGNIFICANT (RFC-0002 §5.10): the SOLE order-significant array exception — element order is meaningful and MUST NOT be sorted before hashing (unlike every other order-insensitive incident array). Timeline of regulatory and stakeholder notifications (GPAI Art. 55 requires 2-15 day notification).",
       "items": {
         "type": "object",
         "properties": {
