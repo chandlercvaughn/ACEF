@@ -161,18 +161,38 @@ test("buildVirtualBundle emits the full export_directory file set", () => {
     assert.equal(vb.mtime, 1777593600);
 });
 
-test("F6: buildVirtualBundle rejects a non-RFC3339 metadata.timestamp (Python/TS parity)", () => {
+test("F6: deriveMtime mirrors the Python strict RFC3339 checker (accept/reject + exact mtime parity)", () => {
     if (!existsSync(VERIFIED_DELIVERY)) return;
     const loaded = loadBundle(VERIFIED_DELIVERY);
     const meta = loaded.manifestRaw["metadata"] as Record<string, unknown>;
-    // Basic-form (non-RFC3339) — the Python exporter now rejects it (ACEF-002); the TS
-    // exporter MUST reject identically, never emit an archive with a divergent mtime.
-    meta["timestamp"] = "20240115T103000Z";
-    assert.throws(() => buildVirtualBundle(loaded), /ACEF-002/);
-    // A strict RFC 3339 timestamp still exports cleanly (no over-rejection).
-    meta["timestamp"] = "2024-01-15T10:30:00Z";
-    const vb = buildVirtualBundle(loaded);
-    assert.equal(vb.mtime, Math.floor(Date.parse("2024-01-15T10:30:00+00:00") / 1000));
+    const mtimeOf = (ts: string): number => {
+        meta["timestamp"] = ts;
+        return buildVirtualBundle(loaded).mtime;
+    };
+    // ACCEPTED — exact epoch-second parity with the Python exporter (values computed from
+    // int(datetime.fromisoformat(...).timestamp())).
+    assert.equal(mtimeOf("2024-01-15T10:30:00Z"), 1705314600);
+    assert.equal(mtimeOf("2024-01-15t10:30:00Z"), 1705314600); // lowercase t (RFC 3339 §5.6)
+    assert.equal(mtimeOf("2024-01-15T10:30:00z"), 1705314600); // lowercase z
+    assert.equal(mtimeOf("2024-01-15T10:30:00+02:00"), 1705307400);
+    assert.equal(mtimeOf("2024-01-15T10:30:00-05:30"), 1705334400);
+    assert.equal(mtimeOf("2024-02-29T00:00:00Z"), 1709164800); // valid leap day
+    assert.equal(mtimeOf("2024-01-15T10:30:00.999Z"), 1705314600); // fractional truncated
+    // REJECTED — every input the Python checker rejects must throw ACEF-002, never emit an
+    // archive with a divergent mtime.
+    for (const bad of [
+        "20240115T103000Z", // basic form
+        "2023-02-29T00:00:00Z", // impossible calendar day (non-leap Feb 29)
+        "2024-13-01T00:00:00Z", // month 13
+        "2024-01-15T10:30:60Z", // leap second :60
+        "2024-01-15T24:00:00Z", // hour 24
+        "2024-01-15T10:30:00+25:00", // out-of-range offset
+        "not-a-date",
+        "",
+    ]) {
+        meta["timestamp"] = bad;
+        assert.throws(() => buildVirtualBundle(loaded), /ACEF-002/, `must reject ${JSON.stringify(bad)}`);
+    }
 });
 
 test("each JSONL file ends with a single trailing newline", () => {

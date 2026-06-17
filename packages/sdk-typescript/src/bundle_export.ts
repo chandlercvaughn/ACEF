@@ -423,39 +423,78 @@ export function rebuildManifestForExport(manifestRaw: Obj, records: RawRecord[])
 }
 
 /**
- * Strict RFC 3339 date-time, mirroring the Python exporter's _STRICT_FORMAT_CHECKER
- * (jsonschema "date-time"): YYYY-MM-DDTHH:MM:SS, optional fractional seconds, and a
- * Z/z or ±HH:MM zone. Date.parse is far more lenient (it accepts basic-form and other
- * non-RFC3339 inputs), so it cannot be the gate.
+ * Strict RFC 3339 date-time shape — case-insensitive ``T``/``Z`` separators (RFC 3339
+ * §5.6), optional fractional seconds, and a ``Z``/``z`` or ``±HH:MM`` zone. A regex alone
+ * is NOT sufficient (it cannot reject impossible CALENDAR dates like ``2023-02-29``), so
+ * :func:`strictRfc3339ToEpochSeconds` does range + calendar validation after the match.
  */
-const RFC3339_DATETIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?([Zz]|[+-]\d{2}:\d{2})$/;
+const RFC3339_DATETIME = /^(\d{4})-(\d{2})-(\d{2})[Tt](\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:[Zz]|([+-])(\d{2}):(\d{2}))$/;
+
+function isLeapYear(year: number): boolean {
+    return (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+}
+
+/**
+ * Validate a STRICT RFC 3339 date-time and return its epoch seconds, or ``null`` if it is
+ * not valid. Mirrors the Python exporter's ``_STRICT_FORMAT_CHECKER`` (jsonschema
+ * "date-time") EXACTLY on every edge the determinism contract cares about: case-insensitive
+ * ``T``/``Z``; month 1-12; valid calendar day incl. leap years (``2023-02-29`` rejected,
+ * ``2024-02-29`` accepted); hour 0-23, minute 0-59, second 0-59 (a ``:60`` leap second is
+ * REJECTED, matching Python); offset hour 0-23, minute 0-59. ``Date.parse`` cannot be the
+ * gate — it is lenient (basic-form) AND it NORMALIZES impossible dates instead of rejecting.
+ */
+function strictRfc3339ToEpochSeconds(ts: string): number | null {
+    const m = RFC3339_DATETIME.exec(ts);
+    if (!m) return null;
+    const year = Number(m[1]);
+    const month = Number(m[2]);
+    const day = Number(m[3]);
+    const hour = Number(m[4]);
+    const minute = Number(m[5]);
+    const second = Number(m[6]);
+    if (month < 1 || month > 12) return null;
+    if (hour > 23 || minute > 59 || second > 59) return null; // :60 leap second rejected (matches Python)
+    const daysInMonth = [31, isLeapYear(year) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1]!;
+    if (day < 1 || day > daysInMonth) return null;
+    let offsetMinutes = 0;
+    if (m[7] !== undefined) {
+        // m[7] = sign, m[8] = offset hours, m[9] = offset minutes (Z/z -> all undefined).
+        const offHour = Number(m[8]);
+        const offMin = Number(m[9]);
+        if (offHour > 23 || offMin > 59) return null;
+        offsetMinutes = (m[7] === "-" ? -1 : 1) * (offHour * 60 + offMin);
+    }
+    const utc = new Date(Date.UTC(year, month - 1, day, hour, minute, second));
+    if (year < 100) utc.setUTCFullYear(year); // undo Date.UTC's 0-99 -> 1900-1999 remap
+    // Wall-clock-as-UTC seconds, minus the zone offset, == the true UTC instant; integer
+    // seconds throughout (fractional seconds are ignored, matching Python's int()).
+    return Math.floor(utc.getTime() / 1000) - offsetMinutes * 60;
+}
 
 /** Derive the deterministic mtime from manifest metadata.timestamp. */
 function deriveMtime(manifestRaw: Obj): number {
     const metadata = asObj(manifestRaw["metadata"]);
     const ts = metadata["timestamp"];
     // F6 cross-SDK parity: derive the deterministic tar member mtime ONLY from a strict
-    // RFC 3339 date-time, exactly as the Python exporter (src/acef/export.py) now does.
-    // The previous `return 0` fallbacks for missing/non-string/Date.parse-rejected
-    // timestamps meant a non-RFC3339 value (e.g. basic-form "20240115T103000Z") that
-    // Python REJECTS would still emit an archive here with a divergent mtime — breaking
+    // RFC 3339 date-time, exactly as the Python exporter (src/acef/export.py) does. The old
+    // `return 0` fallbacks meant a non-RFC3339 value (basic-form "20240115T103000Z") that
+    // Python REJECTS would still emit a TS archive with a divergent mtime — breaking
     // byte-identical cross-language export. Fail closed with the same ACEF-002.
-    if (typeof ts !== "string" || !RFC3339_DATETIME.test(ts)) {
+    if (typeof ts !== "string") {
+        throw new Error(
+            `[ACEF-002] metadata.timestamp ${JSON.stringify(ts)} is not a strict RFC 3339 date-time string, so a ` +
+                `deterministic, cross-language tar member mtime cannot be derived from it.`,
+        );
+    }
+    const epochSeconds = strictRfc3339ToEpochSeconds(ts);
+    if (epochSeconds === null) {
         throw new Error(
             `[ACEF-002] metadata.timestamp ${JSON.stringify(ts)} is not a strict RFC 3339 date-time, so a ` +
                 `deterministic, cross-language tar member mtime cannot be derived from it. Re-export with an ` +
                 `RFC 3339 metadata.timestamp (YYYY-MM-DDTHH:MM:SSZ).`,
         );
     }
-    const normalized = ts.replace(/[Zz]$/, "+00:00");
-    const ms = Date.parse(normalized);
-    if (Number.isNaN(ms)) {
-        throw new Error(
-            `[ACEF-002] metadata.timestamp ${JSON.stringify(ts)} passed RFC 3339 validation but could not be ` +
-                `parsed into a UTC instant for the deterministic tar mtime.`,
-        );
-    }
-    return Math.floor(ms / 1000);
+    return epochSeconds;
 }
 
 /**
