@@ -158,13 +158,15 @@ def test_required_conformance_classes_only() -> None:
 
 def test_required_fail_codes_each_have_a_vector() -> None:
     """Every reserved incident error in the v1.1-required §8 set has at least one
-    fail vector that triggers it: ACEF-082/083/084/085/086/088 (082..086 + 088).
-    ACEF-087 (near_miss INFO) is exercised as a PASS-with-info vector; ACEF-081 is
-    exercised through the OECD advisory + multi-profile pass vectors."""
+    fail vector that triggers it: ACEF-081/082/083/084/085/086/088. ACEF-081's binding
+    per-profile-attributed ERROR is exercised by fail-multi-profile-missing-member-081
+    (the §6-enumerated multi-profile FAIL bundle); the OECD voluntary ACEF-081 stays an
+    ADVISORY warning on its pass vector. ACEF-087 (near_miss INFO) is a PASS-with-info
+    vector."""
     fail_codes: set[str] = set()
     for v in _vectors_for("fail"):
         fail_codes.update(str(c) for c in v.get("expect_codes", []))
-    for required in ("ACEF-082", "ACEF-084", "ACEF-085", "ACEF-086", "ACEF-088"):
+    for required in ("ACEF-081", "ACEF-082", "ACEF-084", "ACEF-085", "ACEF-086", "ACEF-088"):
         assert required in fail_codes, f"no fail vector triggers {required}"
     # ACEF-083 is exercised by BOTH (a) the offline-class pattern-failure fail
     # vector (offline-deterministic) AND (b) the online-conformance forged-assigner
@@ -191,6 +193,8 @@ _EXPECTED_INVENTORY: dict[tuple[str, str], frozenset[str]] = {
             "pass-oecd-voluntary-advisory",
             "pass-near-miss-info",
             "pass-dedupe-key-public-card",
+            "pass-hash-committed-card",
+            "pass-v1-0-incident-report-regression",
         }
     ),
     ("offline-deterministic", "fail"): frozenset(
@@ -202,6 +206,7 @@ _EXPECTED_INVENTORY: dict[tuple[str, str], frozenset[str]] = {
             "fail-harm-core-crosswalk-085",
             "fail-severity-band-088",
             "fail-publishability-086",
+            "fail-multi-profile-missing-member-081",
         }
     ),
     ("source-backed", "pass"): frozenset(

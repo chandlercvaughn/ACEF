@@ -175,6 +175,8 @@ def _build_bundle(
     confidentiality: str = "public",
     second_record: dict[str, Any] | None = None,
     projection_edge: bool = False,
+    core_version: str = "1.1.0",
+    force_payload_fields: dict[str, Any] | None = None,
 ) -> None:
     """Materialize a v1.1 incident bundle directory carrying ONE incident record.
 
@@ -233,8 +235,10 @@ def _build_bundle(
         urn_generator=_deterministic_urn_generator(),
         redaction_policy=redaction_policy,
     )
-    # v1.1 gating: route Phase-1 schema validation to the v1.1 incident schema set.
-    pkg._versioning = Versioning(core_version="1.1.0", profiles_version="1.0.0")
+    # Schema gating: route Phase-1 schema validation to the requested core_version's
+    # incident schema set (1.1.0 for the v1.1 incident records; 1.0.0 for the v1.0
+    # incident_report backward-compat regression vector — §5.10/§6).
+    pkg._versioning = Versioning(core_version=core_version, profiles_version="1.0.0")
     pkg.add_subject(
         "ai_system",
         name="Vector Subject",
@@ -250,6 +254,24 @@ def _build_bundle(
         confidentiality=confidentiality,
         timestamp=_RECORD_TS,
     )
+    # ADVERSARIAL re-injection (force_payload_fields): re-stamp fields the SDK
+    # deliberately STRIPS from a CONFORMANT producer's output, so the vector can
+    # exercise a NON-conformant producer's bundle. The only case today is the
+    # subject-bearing plaintext `incident_dedupe_key` on a NON-public record: the
+    # production builder removes it (RFC-0002 §5.5 public-only spine,
+    # package.normalize_incident_dedupe_for_confidentiality), so a conformant SDK can
+    # never emit the §5.5 leak the ACEF-086 fail vector must carry. Re-stamping it onto
+    # the in-memory envelope payload AFTER `pkg.record()` (post-strip) but BEFORE
+    # `pkg.export()` makes the SDK's OWN export pipeline canonicalize it, hash it into
+    # content-hashes.json, and fold it into the Merkle root — so the forged key is part
+    # of the integrity-covered content (a structurally-valid bundle that violates the
+    # §5.5 RULE), exactly what a hand-forged non-SDK producer would ship. Byte-stable:
+    # the forced fields are fixed literals and the export is deterministic. Verified to
+    # validate to exactly ACEF-086 (no spurious ACEF-074/078 redaction error) because a
+    # regulator-only access-class record carries the full payload, not a redaction
+    # transform commitment.
+    if force_payload_fields:
+        first_env.payload.update(force_payload_fields)
     # Optional second record + a typed public_projection_of edge (report→card). Used
     # by the §5.8 incident-edge SEMANTIC vector: the edge endpoints are the two
     # record URNs, and the edge is authored via the production add_relationship (which
@@ -469,6 +491,127 @@ def _vector_specs() -> list[dict[str, Any]]:
                 },
             },
             "forbid_codes": ["ACEF-082", "ACEF-083", "ACEF-084", "ACEF-085", "ACEF-088"],
+        }
+    )
+
+    # P1b: a published incident_card carrying a hash-committed `*_commitment` field
+    # (§5.11). In the card-only (offline-deterministic) class the ONLY commitment check
+    # is FORMAT (`sha256:<64hex>`); the linkage/preimage check is source-backed. A
+    # well-formed commitment passes clean — the §6-enumerated "published card with a
+    # hash-committed field" pass vector.
+    specs.append(
+        {
+            "name": "pass-hash-committed-card",
+            "conformance_class": "offline-deterministic",
+            "disposition": "pass",
+            "profiles": [],
+            "record_type": "incident_card",
+            "title": "Published card with a hash-committed field (§5.11 commitment FORMAT)",
+            "body": (
+                "A PUBLIC incident_card (coordinated_disclosure.status=public) carrying a "
+                "`description_commitment` of valid `sha256:<64hex>` shape — the hash-committed "
+                "projection of a non-public source field (§5.11). In the card-only "
+                "offline-deterministic class the commitment is checked for FORMAT only (the "
+                "preimage/linkage check is source-backed), so a well-formed commitment "
+                "validates clean. The §6-enumerated 'published card with a hash-committed field'."
+            ),
+            "payload": {
+                "public_incident_id": _VALID_ID,
+                "id_grade": "self-asserted",
+                "harm_core": dict(_VALID_HARM_CORE),
+                "coordinated_disclosure": {"status": "public", "reporter_role": "internal"},
+                "description_commitment": "sha256:" + "a" * 64,
+            },
+            "forbid_codes": ["ACEF-082", "ACEF-083", "ACEF-085", "ACEF-086", "ACEF-088"],
+        }
+    )
+
+    # P1c: §5.10/§6 backward-compat regression — a v1.0-shape incident_report under
+    # core_version 1.0.0 (NO v1.1-only card_source). The version gate routes 1.0.0 -> the
+    # frozen v1/ incident_report schema, so NO ACEF-08x incident rule fires. The
+    # §6-enumerated "v0 golden incident_report regression under core_version: 1.0.0".
+    specs.append(
+        {
+            "name": "pass-v1-0-incident-report-regression",
+            "conformance_class": "offline-deterministic",
+            "disposition": "pass",
+            "profiles": [],
+            "record_type": "incident_report",
+            "core_version": "1.0.0",
+            "confidentiality": "public",
+            "title": "v1.0 incident_report regression under core_version 1.0.0 (§5.10/§6)",
+            "body": (
+                "A v1.0-shape incident_report (incident_type / severity / description, with the "
+                "v1.0 notification_timeline) carrying NO v1.1-only card_source, in a bundle "
+                "declaring core_version 1.0.0. The schema-version gate routes 1.0.0 to the frozen "
+                "v1/ incident_report schema and the v1.1 incident rules do not apply, so the "
+                "record validates CLEAN — no ACEF-081..088. This is the §5.10/§6 additive-superset "
+                "backward-compatibility regression: a v1.0 report keeps validating under 1.0.0."
+            ),
+            "payload": {
+                "incident_type": "operational_failure",
+                "severity": "major",
+                "description": "A v1.0-shape incident report with no v1.1 card_source.",
+                "notification_timeline": [
+                    {"recipient": "AI Office", "notification_date": _AWARENESS, "method": "portal_submission"}
+                ],
+            },
+            "forbid_codes": [
+                "ACEF-081",
+                "ACEF-082",
+                "ACEF-083",
+                "ACEF-084",
+                "ACEF-085",
+                "ACEF-086",
+                "ACEF-088",
+            ],
+        }
+    )
+
+    # === FAIL — offline-deterministic (card-only) ===
+
+    # F0: the §6-enumerated multi-profile binding ACEF-081. A card declaring BOTH the EU
+    # Art.73 and OECD profiles but OMITTING the binding `eu_ai_act` crosswalk member: the
+    # eu-ai-act-art73 profile's mandatory member is absent, so a per-profile-attributed
+    # ACEF-081 (ERROR) fires (the OECD member is present, so OECD does not fail).
+    specs.append(
+        {
+            "name": "fail-multi-profile-missing-member-081",
+            "conformance_class": "offline-deterministic",
+            "disposition": "fail",
+            "profiles": [_ART73_PROFILE, _OECD_PROFILE],
+            "record_type": "incident_card",
+            "title": "Multi-profile card missing the binding eu_ai_act member (per-profile ACEF-081)",
+            "body": (
+                "A PUBLIC incident_card declaring BOTH the EU Art.73 (`eu-ai-act-art73-2026`) and "
+                "OECD (`oecd-ai-incidents-2025`) profiles, carrying the `oecd` crosswalk member but "
+                "OMITTING the `eu_ai_act` member that the binding Art.73 profile mandates. The "
+                "union-requiredness rule (Q16) therefore fails for eu-ai-act-art73 only: a "
+                "per-profile-attributed ACEF-081 ERROR fires with details.profile_id="
+                "eu-ai-act-art73-2026 (the OECD member is present, so OECD does not fail). This is "
+                "the §6-enumerated multi-profile binding ACEF-081 FAIL bundle."
+            ),
+            "payload": {
+                "public_incident_id": _VALID_ID,
+                "id_grade": "self-asserted",
+                "severity": "major",
+                "severity_vector": _SEV_VECTOR_MAJOR,
+                "harm_core": dict(_VALID_HARM_CORE),
+                "taxonomy_crosswalk": {
+                    "oecd": {
+                        "edition": "oecd-crf-2025",
+                        "criteria": [{"id": f"oecd-crf-2025/{n}", "value": f"v-{n}"} for n in _OECD_MANDATORY],
+                    },
+                },
+                "coordinated_disclosure": {"status": "coordinated", "reporter_role": "internal"},
+            },
+            # Omitting eu_ai_act couples two ERRORs: ACEF-081 (the binding mandatory
+            # crosswalk member is missing) AND ACEF-084 (the Art.73 clock facts —
+            # which ARE that member — are therefore absent). Both are per-profile
+            # attributed to eu-ai-act-art73-2026. (ACEF-032 INFO "provision not yet
+            # effective" also surfaces — non-blocking, not a fail code.)
+            "expect_codes": ["ACEF-081", "ACEF-084"],
+            "forbid_codes": ["ACEF-022"],
         }
     )
 
@@ -1042,11 +1185,16 @@ def _vector_specs() -> list[dict[str, Any]]:
     # D3 (FAIL): a forged NON-public incident_report that EMITS the subject-bearing
     # incident_dedupe_key — the emit-on-non-public confidentiality violation. The
     # validator raises ACEF-086 (the reserved §5.11 publishability code, NEVER
-    # ACEF-022).
+    # ACEF-022). The key is supplied via ``force_payload_fields`` (re-injected onto the
+    # in-memory envelope AFTER ``pkg.record()``'s §5.5 public-only strip, BEFORE export)
+    # because a CONFORMANT SDK producer removes the plaintext key from a non-public
+    # record — only a NON-conformant producer ships the leak this vector must carry. The
+    # forged key is exported through the SDK's own canonicalize/content-hash/Merkle
+    # pipeline, so the bundle is structurally valid (it fails the §5.5 RULE, not
+    # integrity). See ``_build_bundle`` for the mechanism.
     forged_dedupe_payload = _card_source_report_payload(
         triggers=["3.49.a"], widespread=False, death=False, deadline="2026-08-16T00:00:00Z"
     )
-    forged_dedupe_payload["incident_dedupe_key"] = _DEDUPE_KEY
     specs.append(
         {
             "name": "fail-dedupe-key-emit-non-public-086",
@@ -1064,6 +1212,7 @@ def _vector_specs() -> list[dict[str, Any]]:
                 "key on a non-public record, or publish the record."
             ),
             "payload": forged_dedupe_payload,
+            "force_payload_fields": {"incident_dedupe_key": _DEDUPE_KEY},
             "expect_codes": ["ACEF-086"],
             "forbid_codes": ["ACEF-022"],
         }
@@ -1201,6 +1350,8 @@ def generate() -> None:
             confidentiality=confidentiality,
             second_record=spec.get("second_record"),
             projection_edge=bool(spec.get("projection_edge", False)),
+            core_version=spec.get("core_version", "1.1.0"),
+            force_payload_fields=spec.get("force_payload_fields"),
         )
 
         if spec.get("expect_codes"):
