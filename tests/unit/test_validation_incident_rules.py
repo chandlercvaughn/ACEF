@@ -855,6 +855,59 @@ class TestACEF086PublishabilityGate:
         diags = ir.check_publishability([card, report], source_backed=True)
         assert not any("harm_distribution_basis" in d.message and "not honored" in d.message.lower() for d in diags)
 
+    # --- H2 (audit): commitment-linkage keyed on the LEAF token silently collapsed two
+    #     same-leaf hash-committed source fields, last-writer-wins -> order-dependent
+    #     false-accept/reject. §5.11 line 327 requires EXACTLY ONE source field. --------
+
+    def test_commitment_leaf_collision_is_ambiguous_086(self) -> None:
+        from acef.integrity import canonicalize, sha256_hex
+
+        val = "secret-notes"
+        report = self._published_report(
+            {
+                "publishability_map": {
+                    "/impact_assessment/notes": "hash-committed",
+                    "/description_block/notes": "hash-committed",
+                }
+            },
+            {"impact_assessment": {"notes": "OTHER"}, "description_block": {"notes": val}},
+        )
+        card = _published_card({"notes_commitment": "sha256:" + sha256_hex(canonicalize(val))})
+        diags = ir.check_publishability([card, report], source_backed=True)
+        assert "ACEF-086" in _codes(diags)
+        assert any("ambiguous" in d.message.lower() and "notes" in d.message for d in diags)
+
+    def test_commitment_leaf_collision_order_independent(self) -> None:
+        from acef.integrity import canonicalize, sha256_hex
+
+        val = "secret-notes"
+        good = "sha256:" + sha256_hex(canonicalize(val))
+
+        def _has_086(pmap: dict[str, Any]) -> bool:
+            report = self._published_report(
+                {"publishability_map": pmap},
+                {"impact_assessment": {"notes": "OTHER"}, "description_block": {"notes": val}},
+            )
+            card = _published_card({"notes_commitment": good})
+            return "ACEF-086" in _codes(ir.check_publishability([card, report], source_backed=True))
+
+        a = _has_086({"/impact_assessment/notes": "hash-committed", "/description_block/notes": "hash-committed"})
+        b = _has_086({"/description_block/notes": "hash-committed", "/impact_assessment/notes": "hash-committed"})
+        # Same logical input, keys reordered -> SAME (ambiguous) verdict, not a flip.
+        assert a is True and b is True
+
+    def test_single_hash_committed_leaf_still_links_no_regression(self) -> None:
+        from acef.integrity import canonicalize, sha256_hex
+
+        val = "the description"
+        report = self._published_report(
+            {"publishability_map": {"/description": "hash-committed"}},
+            {"description": val},
+        )
+        card = _published_card({"description_commitment": "sha256:" + sha256_hex(canonicalize(val))})
+        diags = ir.check_publishability([card, report], source_backed=True)
+        assert "ACEF-086" not in _codes(diags)
+
     # --- INCVAL-003: source-backed disposition-honored check -------------
 
     def _report_with_severity_disposition(self, disposition: str) -> dict[str, Any]:

@@ -1574,22 +1574,27 @@ def check_publishability(
                         )
                     )
 
-        # Commitment linkage: every *_commitment card key MUST correspond to a
-        # source field whose disposition is hash-committed, with a matching
-        # sha256(JCS(source_value)) preimage.
-        hash_committed_pointers = {
-            ptr: disp for ptr, disp in pub_map.items() if disp == "hash-committed" and isinstance(ptr, str)
-        }
-        # Build {field_name: pointer} from the last path token for linkage.
-        committed_field_to_pointer: dict[str, str] = {}
-        for ptr in hash_committed_pointers:
-            last = ptr.split("/")[-1].replace("~1", "/").replace("~0", "~")
-            committed_field_to_pointer[last] = ptr
+        # Commitment linkage: every ``<field>_commitment`` card key MUST correspond to
+        # EXACTLY ONE source field disposed 'hash-committed' (§5.11 line 327), with a
+        # matching sha256(JCS(source_value)) preimage AT THAT SOURCE PATH. The source
+        # field is identified by its NAME — the JSON-Pointer LEAF token. So two distinct
+        # hash-committed source pointers sharing a leaf (``/a/notes``, ``/b/notes``) are
+        # an 'exactly one' VIOLATION, NOT a silent last-writer-wins overwrite: the old
+        # ``dict[leaf] = ptr`` collapse kept only the last-iterated pointer, making the
+        # verdict ORDER-DEPENDENT (a false-ACCEPT of a card whose secret source is never
+        # verified when the survivor's value matched, a false-REJECT otherwise). Group by
+        # leaf into a SORTED list and require exactly one; a collision raises ACEF-086.
+        committed_field_to_pointers: dict[str, list[str]] = {}
+        for ptr, disp in sorted(pub_map.items(), key=lambda kv: str(kv[0])):
+            if disp != "hash-committed" or not isinstance(ptr, str):
+                continue
+            leaf = ptr.split("/")[-1].replace("~1", "/").replace("~0", "~")
+            committed_field_to_pointers.setdefault(leaf, []).append(ptr)
 
         for key, value in commitments.items():
             field_name = key[: -len("_commitment")]
-            linked_pointer = committed_field_to_pointer.get(field_name)
-            if linked_pointer is None:
+            linked_pointers = committed_field_to_pointers.get(field_name, [])
+            if not linked_pointers:
                 diags.append(
                     ValidationDiagnostic(
                         "ACEF-086",
@@ -1603,6 +1608,22 @@ def check_publishability(
                     )
                 )
                 continue
+            if len(linked_pointers) > 1:
+                diags.append(
+                    ValidationDiagnostic(
+                        "ACEF-086",
+                        (
+                            f"Record {_record_id_of(rec)!r}: commitment {key!r} is AMBIGUOUS — more than "
+                            f"one source field disposed 'hash-committed' shares the name {field_name!r} "
+                            f"({', '.join(repr(p) for p in linked_pointers)}); §5.11 commitment-linkage "
+                            f"requires EXACTLY ONE source field per commitment. Disambiguate the "
+                            f"publishability_map so a single hash-committed source field corresponds to {key!r}."
+                        ),
+                        path=f"/{_record_id_of(rec)}/{key}",
+                    )
+                )
+                continue
+            linked_pointer = linked_pointers[0]
             resolved, source_value = _resolve_json_pointer(source_payload, linked_pointer)
             if not resolved:
                 continue  # pointer-resolution diagnostic already emitted above
