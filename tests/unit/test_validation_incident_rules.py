@@ -1437,6 +1437,48 @@ class TestACEF082:
         assert "ACEF-082" not in _codes(diags)
 
 
+class TestSeverityVectorTrailingWhitespace:
+    """A trailing newline (or any trailing character) must NOT pass the ACEF-SEV:1.0
+    grammar. The grammar anchored its end with ``$`` (not ``\\Z``), and Python/JSON
+    ``$`` matches BEFORE a final ``\\n`` — so ``<vector>\\n`` parsed as valid, the
+    newline was captured into the last metric (``BR:P`` -> ``BR:P\\n``), and band()
+    silently DOWNGRADED (critical -> major). That breaks §5.4 recomputability and lets
+    a producer bypass ACEF-082 (parse) and ACEF-088 (band consistency)."""
+
+    _CLEAN = "ACEF-SEV:1.0/HT:R/HG:H/RV:A/SC:C/BR:P"  # HG:H AND BR:P -> 'critical'
+
+    def test_trailing_newline_not_parseable(self) -> None:
+        assert ir.is_parseable_severity_vector(self._CLEAN) is True
+        assert ir.is_parseable_severity_vector(self._CLEAN + "\n") is False
+
+    def test_trailing_newline_bands_to_none_not_downgraded(self) -> None:
+        assert ir.band(self._CLEAN) == "critical"
+        assert ir.band(self._CLEAN + "\n") is None  # NOT the silently-downgraded 'major'
+
+    def test_trailing_carriage_return_and_space_also_rejected(self) -> None:
+        assert ir.is_parseable_severity_vector(self._CLEAN + "\r") is False
+        assert ir.is_parseable_severity_vector(self._CLEAN + " ") is False
+
+    def test_trailing_newline_raises_082(self) -> None:
+        card = {
+            "record_id": "r",
+            "record_type": "incident_card",
+            "payload": {"severity_vector": self._CLEAN + "\n"},
+        }
+        assert "ACEF-082" in _codes(ir.check_severity_vector_parse([card]))
+
+    def test_trailing_newline_closes_088_downgrade_bypass(self) -> None:
+        # A stored severity='major' alongside a CRITICAL vector + trailing newline must
+        # not pass silently: the vector is now rejected at parse (ACEF-082), so the
+        # mismatch can no longer hide behind a band() corrupted by the captured newline.
+        card = {
+            "record_id": "r",
+            "record_type": "incident_card",
+            "payload": {"severity": "major", "severity_vector": self._CLEAN + "\n"},
+        }
+        assert "ACEF-082" in _codes(ir.check_severity_vector_parse([card]))
+
+
 # ---------------------------------------------------------------------------
 # ACEF-083 — offline id-trust (NO attribution; forged card passes)
 # ---------------------------------------------------------------------------

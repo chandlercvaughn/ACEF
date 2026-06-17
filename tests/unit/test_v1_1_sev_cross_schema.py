@@ -313,6 +313,25 @@ def test_severity_vector_accepts_well_formed(
             "wrong version token",
             id="wrong-version",
         ),
+        # --- trailing whitespace: the `$` anchor matched BEFORE a final `\n`, so a
+        #     well-formed vector + trailing newline validated, then the newline was
+        #     captured into the last metric and band() silently downgraded. The end
+        #     anchor must reject ANY trailing character (newline/CR/space). --------
+        pytest.param(
+            "ACEF-SEV:1.0/HT:R/HG:H/RV:A/SC:C/BR:P\n",
+            "trailing newline after the last metric (was accepted by the `$` anchor)",
+            id="trailing-newline",
+        ),
+        pytest.param(
+            "ACEF-SEV:1.0/HT:R/HG:H/RV:A/SC:C/BR:P\r",
+            "trailing carriage return after the last metric",
+            id="trailing-cr",
+        ),
+        pytest.param(
+            "ACEF-SEV:1.0/HT:R/HG:H/RV:A/SC:C/BR:P ",
+            "trailing space after the last metric",
+            id="trailing-space",
+        ),
     ],
 )
 def test_severity_vector_rejects_malformed(

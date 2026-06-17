@@ -78,7 +78,14 @@ _PUBLIC_INCIDENT_ID_PATTERN = re.compile(r"^AIIC-([A-Z0-9]{2,8})-([0-9]{4})-[0-9
 _SEV_VECTOR_PATTERN = re.compile(
     r"^ACEF-SEV:1\.0/HT:[PRKES]/HG:[HLN]/RV:[AUI]/SC:[CU]/BR:[IGP]"
     r"(/RZ:[ESN])?(/RP:(0(\.[0-9]+)?|1(\.0+)?)@[1-9][0-9]*)?(/XF:[YNX])?"
-    r"(/AU:[LOA])?(/EX:[HLN])?(/KC:[HML])?(/SF:[PN])?(/VL:[FTAC])?(/DB:[YN])?$"
+    # End the grammar at the last metric with an ABSOLUTE end-of-string assertion,
+    # NOT ``$``: Python (and JSON-Schema) ``$`` matches BEFORE a single trailing
+    # ``\n``, so ``<vector>\n`` would parse as valid and the captured newline would
+    # silently corrupt band() (critical -> major) and bypass ACEF-082/088 (§5.4
+    # recomputability). ``(?![\s\S])`` rejects ANY trailing character (newline, CR,
+    # space) and is portable across Python ``re`` and the ECMA-262 dialect the schema
+    # ``pattern`` mirrors.
+    r"(/AU:[LOA])?(/EX:[HLN])?(/KC:[HML])?(/SF:[PN])?(/VL:[FTAC])?(/DB:[YN])?(?![\s\S])"
 )
 
 
