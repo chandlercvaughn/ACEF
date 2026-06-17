@@ -297,6 +297,21 @@ class TestAttachmentExists:
         passed, _ = op_attachment_exists({"record_type": "evaluation_report"}, [])
         assert not passed
 
+    def test_naive_obligation_reference_vs_aware_record_no_typeerror(self):
+        # F12: reference_date=obligation_effective_date resolves to provision_effective_date.
+        # A BARE-DATE effective date ("2026-08-02") parses NAIVE (tzinfo=None) while a
+        # Z-suffixed record timestamp parses AWARE (tzinfo=UTC), so `rec_dt >= cutoff` raised
+        # `TypeError: can't compare offset-naive and offset-aware datetimes`. Both must be
+        # normalized to UTC so the spec-normative obligation_effective_date reference works.
+        rec = _make_record(timestamp="2026-08-01T12:00:00Z")
+        passed, refs = op_evidence_freshness(
+            {"max_days": 180, "reference_date": "obligation_effective_date"},
+            [rec],
+            provision_effective_date="2026-08-02",
+        )
+        assert passed is True
+        assert rec.record_id in refs
+
     def test_media_type_filter(self):
         att = AttachmentRef(path="artifacts/report.pdf", media_type="application/pdf")
         records = [_make_record("evaluation_report", attachments=[att])]

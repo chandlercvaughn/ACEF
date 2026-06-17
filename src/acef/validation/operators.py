@@ -13,7 +13,7 @@ import signal
 import sys
 import threading
 from collections.abc import Callable
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import jsonpointer  # type: ignore[import-untyped]  # no published stubs / py.typed (no types-jsonpointer on PyPI)
@@ -595,6 +595,12 @@ def op_evidence_freshness(
 
     try:
         ref_dt = datetime.fromisoformat(ref_str.replace("Z", "+00:00"))
+        # F12: a BARE-DATE reference (e.g. the obligation_effective_date "2026-08-02") parses
+        # NAIVE, while Z-suffixed record timestamps parse AWARE — comparing the two raised
+        # TypeError. Normalize a naive reference to UTC (a bare date denotes a UTC calendar
+        # day; the spec forbids wall-clock, so no local-zone ambiguity).
+        if ref_dt.tzinfo is None:
+            ref_dt = ref_dt.replace(tzinfo=UTC)
     except ValueError as exc:
         # The reference date was supplied but is malformed. Spec §3.5 lists
         # ACEF-045 (invalid pattern parameter) and ACEF-043 (invalid pointer)
@@ -614,6 +620,10 @@ def op_evidence_freshness(
     for rec in records:
         try:
             rec_dt = datetime.fromisoformat(rec.timestamp.replace("Z", "+00:00"))
+            # F12: normalize a naive record timestamp to UTC too, so the comparison below
+            # never mixes naive and aware datetimes regardless of the input forms.
+            if rec_dt.tzinfo is None:
+                rec_dt = rec_dt.replace(tzinfo=UTC)
         except ValueError as exc:
             # A record with a malformed timestamp cannot satisfy a freshness
             # check; surface the bad data as ACEF-050 (malformed JSONL
