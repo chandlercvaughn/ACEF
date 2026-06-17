@@ -29,6 +29,7 @@ from acef.integrity import (
     utf16_collation_key,
 )
 from acef.records_util import canonicalize_record, compute_shard_boundaries, sort_records
+from acef.schemas.registry import _STRICT_FORMAT_CHECKER
 
 if TYPE_CHECKING:
     from acef.package import Package
@@ -552,10 +553,24 @@ def export_archive(package: Package, output_path: str) -> Path:
             manifest_path = bundle_dir / "acef-manifest.json"
             manifest_data = json.loads(manifest_path.read_text(encoding="utf-8"))
             timestamp_str = manifest_data.get("metadata", {}).get("timestamp", "")
-            try:
-                mtime = int(datetime.fromisoformat(timestamp_str.replace("Z", "+00:00")).timestamp())
-            except (ValueError, AttributeError):
-                mtime = 0
+            # F6: derive the deterministic tar member mtime ONLY from a strict RFC 3339
+            # date-time. ``datetime.fromisoformat`` is LENIENT — it accepts basic-form /
+            # non-RFC3339 ISO-8601 (e.g. "20240115T103000Z") that the TypeScript exporter
+            # rejects, so a non-RFC3339 timestamp would yield a DIVERGENT mtime / archive
+            # bytes across the Python and TS SDKs; the old silent ``mtime=0`` fallback also
+            # masked an unparseable timestamp. Validate against the SAME strict date-time
+            # format checker the schema uses (reused, not reimplemented) and fail closed
+            # with a structured ACEF-002 so both languages reject identically.
+            if not isinstance(timestamp_str, str) or not _STRICT_FORMAT_CHECKER.conforms(timestamp_str, "date-time"):
+                raise ACEFExportError(
+                    f"metadata.timestamp {timestamp_str!r} is not a strict RFC 3339 date-time, so a "
+                    "deterministic, cross-language tar member mtime cannot be derived from it "
+                    "(Python's datetime.fromisoformat accepts basic-form/non-RFC3339 inputs the "
+                    "TypeScript exporter rejects). Re-export with an RFC 3339 metadata.timestamp "
+                    "(YYYY-MM-DDTHH:MM:SSZ).",
+                    code="ACEF-002",
+                )
+            mtime = int(datetime.fromisoformat(timestamp_str.replace("Z", "+00:00")).timestamp())
 
             # Collect all files in lexicographic order using forward slashes
             # (per spec: all paths MUST use forward slashes)

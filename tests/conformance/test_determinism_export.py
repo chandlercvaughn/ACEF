@@ -14,10 +14,15 @@ from __future__ import annotations
 
 import hashlib
 import itertools
+import json
 from collections.abc import Callable
 from datetime import datetime, timedelta
 from pathlib import Path
 
+import pytest
+
+from acef.errors import ACEFExportError
+from acef.loader import load
 from acef.models.urns import URNType
 from acef.package import Package
 from tests.conformance.fixtures.deterministic_input_vector import build
@@ -203,3 +208,35 @@ def test_val_sdk_determinism_hash_001_dedupe_key_stable() -> None:
     assert dk_a == dk_b, f"dedupe_key must be byte-equal across identical-input calls.\n  a={dk_a!r}\n  b={dk_b!r}"
     assert dk_a.startswith("sha256:"), f"dedupe_key must be sha256-prefixed; got {dk_a!r}"
     assert len(dk_a) == len("sha256:") + 64, f"dedupe_key wrong length: {dk_a!r}"
+
+
+def test_archive_export_rejects_non_rfc3339_timestamp(tmp_path: Path) -> None:
+    """F6 (audit high): the .acef.tar.gz member ``mtime`` is derived from
+    ``metadata.timestamp`` via ``datetime.fromisoformat``, which is LENIENT — it accepts
+    basic-form / non-RFC3339 ISO-8601 (e.g. ``20240115T103000Z``) that the TypeScript
+    exporter rejects, so the same logical bundle would yield DIVERGENT archive bytes across
+    languages; and a silently-caught parse failure fell back to ``mtime=0``. Export must
+    instead REJECT a non-strict-RFC3339 ``metadata.timestamp`` with a structured
+    ``ACEFExportError`` (ACEF-002), so Python and TS agree (both reject)."""
+    pkg = Package(producer={"name": "acef-sdk", "version": "0.1.0"})
+    pkg.add_subject("ai_system", name="S", risk_classification="high-risk", modalities=["text"])
+    bundle_dir = tmp_path / "dir.acef"
+    pkg.export(str(bundle_dir))
+
+    # Tamper the manifest timestamp to a non-RFC3339 BASIC form, reload, re-export as archive.
+    manifest_path = bundle_dir / "acef-manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["metadata"]["timestamp"] = "20240115T103000Z"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    reloaded = load(str(bundle_dir))
+
+    with pytest.raises(ACEFExportError) as exc_info:
+        reloaded.export(str(tmp_path / "out.acef.tar.gz"))
+    assert exc_info.value.code == "ACEF-002", exc_info.value
+    assert "RFC 3339" in str(exc_info.value)
+
+    # A strict RFC 3339 timestamp still exports cleanly (no over-rejection).
+    manifest["metadata"]["timestamp"] = "2024-01-15T10:30:00Z"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    load(str(bundle_dir)).export(str(tmp_path / "ok.acef.tar.gz"))
+    assert (tmp_path / "ok.acef.tar.gz").exists()
