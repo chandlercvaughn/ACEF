@@ -14,6 +14,7 @@ Supports:
 
 from __future__ import annotations
 
+import copy
 import re
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -179,11 +180,13 @@ def apply_redaction(
         "redaction_policy_version": policy.version,
     }
     if access_policy is not None:
-        redacted_payload["access_policy"] = access_policy
-    elif isinstance(payload.get("access_policy"), dict):
-        # Preserve any existing access_policy in the source payload so
-        # callers don't lose it when redacting in-place.
-        redacted_payload["access_policy"] = payload["access_policy"]
+        # DEEP-COPY the caller's access_policy (F5): storing it by reference let a later
+        # mutation of the caller's dict change the committed bytes and invalidate the
+        # attestation's redacted_payload_hash. Only an EXPLICIT caller access_policy
+        # (access-control metadata) is included — the SOURCE payload's own access_policy is
+        # NEVER carried over (it may hold the very secrets the commitment is meant to hide;
+        # the old `elif payload.get("access_policy")` branch was a cleartext leak, removed).
+        redacted_payload["access_policy"] = copy.deepcopy(access_policy)
 
     # 3. Hash the redacted payload too — the attestation needs both
     # hashes so verifiers can independently confirm the transformation.

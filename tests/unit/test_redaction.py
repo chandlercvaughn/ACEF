@@ -10,6 +10,8 @@ STORED payload bytes — mirroring ``Package.record``.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import pytest
 
 from acef.errors import ACEFFormatError
@@ -17,8 +19,18 @@ from acef.integrity import canonicalize, sha256_hex
 from acef.models.enums import Confidentiality
 from acef.models.records import RecordEnvelope
 from acef.package import Package
-from acef.redaction import RedactionPolicy, redact_package, redact_record, verify_redaction
+from acef.redaction import (
+    RedactionPolicy,
+    apply_redaction,
+    redact_package,
+    redact_record,
+    verify_redaction,
+)
 from acef.validation.cross_record import enforce_redaction_policy_version
+
+
+def _fixed_clock() -> datetime:
+    return datetime(2026, 1, 1, tzinfo=UTC)
 
 
 def _make_record(
@@ -32,6 +44,39 @@ def _make_record(
         payload=payload or {"description": "sensitive data", "score": 95},
         confidentiality=confidentiality,
     )
+
+
+class TestApplyRedactionAccessPolicy:
+    """F5 (audit high): ``apply_redaction`` builds the published hash-commitment payload.
+
+    The whole point of the hash commitment is that the sensitive payload is REPLACED by a
+    hash — so no source field may survive in cleartext, and the committed bytes must be
+    stable against later caller mutation.
+    """
+
+    def test_does_not_carry_over_source_payload_access_policy(self) -> None:
+        # F5 DEFECT 1 (carry-over leak): a top-level ``access_policy`` in the SOURCE payload
+        # (which may hold arbitrary secrets) must NOT be copied into the published redacted
+        # commitment. Only a caller-supplied access_policy kwarg (access-control metadata)
+        # may appear there.
+        policy = RedactionPolicy(version="1.0.0")
+        payload = {"risk_id": "R1", "access_policy": {"roles": ["SECRET-ROLE"], "ssn": "123-45-6789"}}
+        redacted, _ = apply_redaction(payload, policy, clock=_fixed_clock)
+        assert "access_policy" not in redacted, f"source access_policy leaked into commitment: {redacted}"
+        assert "123-45-6789" not in canonicalize(redacted).decode("utf-8"), "source secret leaked in cleartext"
+
+    def test_explicit_access_policy_is_deepcopied(self) -> None:
+        # F5 DEFECT 2 (reference aliasing): an explicit caller access_policy must be
+        # DEEP-COPIED, so a later mutation of the caller's dict cannot change the committed
+        # bytes and invalidate the attestation's redacted_payload_hash.
+        policy = RedactionPolicy(version="1.0.0")
+        caller_policy = {"roles": ["INITIAL"]}
+        redacted, _ = apply_redaction({"risk_id": "R1"}, policy, clock=_fixed_clock, access_policy=caller_policy)
+        before = sha256_hex(canonicalize(redacted))
+        caller_policy["roles"].append("MODIFIED")
+        after = sha256_hex(canonicalize(redacted))
+        assert before == after, "mutating the caller's access_policy changed the committed bytes (aliasing)"
+        assert redacted["access_policy"] == {"roles": ["INITIAL"]}
 
 
 class TestRedactRecordLegacyMode:
