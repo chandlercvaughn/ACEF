@@ -981,7 +981,11 @@ def _load_directory(bundle_dir: Path) -> Package:
 
     # Parse entities
     entities_raw = _require_object(manifest_data.get("entities", {}), "entities")
-    entities = EntitiesBlock()
+    # Thread the entities-CONTAINER vendor extras (x-*) so an ``entities.x-vendor/*`` key
+    # survives load->export (F18, §6.4 open-boundary lossless). The four child entity types
+    # already thread their own extras; the container did not, silently dropping them.
+    # EntitiesBlock inherits ACEFBaseModel (extra='allow'), so it accepts + re-emits them.
+    entities = EntitiesBlock(**_extras(entities_raw, {"components", "datasets", "actors", "relationships"}))
 
     component_known = {"component_id", "name", "type", "version", "subject_refs", "provider"}
     for idx, comp_data in enumerate(_require_array(entities_raw.get("components", []), "entities.components")):

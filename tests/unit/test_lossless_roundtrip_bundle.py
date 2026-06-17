@@ -148,6 +148,24 @@ def test_top_level_vendor_extension_survives_bundle_roundtrip(tmp_path: Path) ->
     assert out["x-vendor-top/meta"] == {"k": "v", "n": 42}
 
 
+def test_entities_block_vendor_extension_survives_bundle_roundtrip(tmp_path: Path) -> None:
+    """F18: an entities-CONTAINER x-* vendor key survives acef.load() → build_manifest().
+
+    The four child entity types (Component/Dataset/Actor/Relationship) already thread their
+    extras, but the loader built ``EntitiesBlock()`` fresh WITHOUT the container-level extras,
+    so an ``entities.x-vendor/*`` key was silently DROPPED (§6.4 open-boundary lossless
+    violation)."""
+    bundle = tmp_path / "bundle"
+    manifest = _manifest()
+    manifest["entities"]["x-vendor/entities-meta"] = {"custom_field": "should_survive", "data": {"nested": "value"}}
+    _write_bundle(bundle, manifest=manifest, record=_record())
+
+    pkg = acef.load(str(bundle))
+    out = pkg.build_manifest().to_dict()
+
+    assert out["entities"]["x-vendor/entities-meta"] == {"custom_field": "should_survive", "data": {"nested": "value"}}
+
+
 # ----- VAL-FIX-LOADER-002 — metadata-object vendor x-* + created_at -----
 
 
