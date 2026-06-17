@@ -554,6 +554,54 @@ def enforce_mode_gated_forbidden_types(
                 )
             )
             continue
+
+        # Rule (e): accepted_risk_ref is forbidden under public_artifact (and the stricter
+        # unattributed_artifact). The frozen manifest analysis_mode schema contract:
+        # "'public_artifact' forbids delivery_verdict / disposition_record / accepted_risk_ref
+        # ...". accepted_risk_ref is a finding_record FIELD (an external risk-acceptance
+        # pointer), NOT a record type, so it is gated here rather than via the forbidden-type
+        # table (F3 — previously unenforced, so the schema promised an ACEF-080 the validator
+        # never emitted).
+        if mode in ("public_artifact", "unattributed_artifact") and rt == "finding_record":
+            accepted_risk_ref = _payload_of(rec).get("accepted_risk_ref")
+            if isinstance(accepted_risk_ref, str) and accepted_risk_ref.strip():
+                diags.append(
+                    ValidationDiagnostic(
+                        "ACEF-080",
+                        (
+                            f"Bundle declares analysis_mode={mode!r} but finding_record "
+                            f"{rec_id!r} carries accepted_risk_ref={accepted_risk_ref!r}. Per "
+                            "the ACEF-080 mode-gate rule (the frozen analysis_mode schema "
+                            f"contract), {mode!r} mode forbids accepted_risk_ref (an external "
+                            "risk-acceptance pointer)."
+                        ),
+                    )
+                )
+                continue
+
+        # Rule (f): public_artifact CAPS persona_observation
+        # attribution_advisory.confidence at low/medium (frozen schema contract). A higher
+        # confidence is forbidden -> ACEF-080 (F3). unattributed_artifact already forbids ANY
+        # attribution via rule (d), so the cap is subsumed there.
+        if mode == "public_artifact" and rt == "persona_observation":
+            advisory = _payload_of(rec).get("attribution_advisory")
+            if isinstance(advisory, dict):
+                confidence = advisory.get("confidence")
+                if isinstance(confidence, str) and confidence not in ("low", "medium"):
+                    diags.append(
+                        ValidationDiagnostic(
+                            "ACEF-080",
+                            (
+                                f"Bundle declares analysis_mode='public_artifact' but "
+                                f"persona_observation {rec_id!r} has "
+                                f"attribution_advisory.confidence={confidence!r}. Per the "
+                                "ACEF-080 mode-gate rule (the frozen analysis_mode schema "
+                                "contract), public_artifact caps "
+                                "attribution_advisory.confidence at low/medium."
+                            ),
+                        )
+                    )
+                    continue
     return diags
 
 

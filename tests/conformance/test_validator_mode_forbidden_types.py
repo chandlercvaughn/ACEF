@@ -205,6 +205,70 @@ def test_risk_treatment_non_disposition_subtype_ok_in_public_artifact() -> None:
     assert "ACEF-080" not in [d.code for d in diags]
 
 
+@pytest.mark.parametrize("mode", ["public_artifact", "unattributed_artifact"])
+def test_accepted_risk_ref_forbidden_in_public_artifact_modes(mode: str) -> None:
+    """F3: the frozen analysis_mode schema contract states public_artifact (and the stricter
+    unattributed_artifact) forbids ``accepted_risk_ref`` — a finding_record FIELD pointing at
+    an external risk acceptance. A finding_record carrying it MUST emit ACEF-080."""
+    manifest = base_manifest(analysis_mode=mode)
+    records = [
+        base_record(
+            record_id="urn:acef:rec:77770000-0000-0000-0000-000000000001",
+            record_type="finding_record",
+            payload={"finding_id": "F-1", "accepted_risk_ref": "urn:acef:rsk:some-accepted-risk"},
+        ),
+    ]
+    diags = enforce_mode_gated_forbidden_types(manifest, records)
+    assert any(d.code == "ACEF-080" for d in diags), [d.message for d in diags]
+    assert any("accepted_risk_ref" in d.message for d in diags), [d.message for d in diags]
+
+
+def test_finding_record_without_accepted_risk_ref_ok_in_public_artifact() -> None:
+    """A finding_record with NO accepted_risk_ref is allowed in public_artifact (no over-rejection)."""
+    manifest = base_manifest(analysis_mode="public_artifact")
+    records = [
+        base_record(
+            record_id="urn:acef:rec:77770000-0000-0000-0000-000000000002",
+            record_type="finding_record",
+            payload={"finding_id": "F-2"},
+        ),
+    ]
+    diags = enforce_mode_gated_forbidden_types(manifest, records)
+    assert "ACEF-080" not in [d.code for d in diags]
+
+
+@pytest.mark.parametrize("confidence", ["high", "very_high"])
+def test_persona_confidence_above_cap_forbidden_in_public_artifact(confidence: str) -> None:
+    """F3: public_artifact caps persona_observation.attribution_advisory.confidence at
+    low/medium. A confidence above the cap MUST emit ACEF-080."""
+    manifest = base_manifest(analysis_mode="public_artifact")
+    records = [
+        base_record(
+            record_id="urn:acef:rec:88880000-0000-0000-0000-000000000001",
+            record_type="persona_observation",
+            payload={"attribution_advisory": {"confidence": confidence}},
+        ),
+    ]
+    diags = enforce_mode_gated_forbidden_types(manifest, records)
+    assert any(d.code == "ACEF-080" for d in diags), [d.message for d in diags]
+    assert any("confidence" in d.message for d in diags), [d.message for d in diags]
+
+
+@pytest.mark.parametrize("confidence", ["low", "medium"])
+def test_persona_confidence_within_cap_ok_in_public_artifact(confidence: str) -> None:
+    """low/medium persona confidence is within the cap — allowed in public_artifact."""
+    manifest = base_manifest(analysis_mode="public_artifact")
+    records = [
+        base_record(
+            record_id="urn:acef:rec:88880000-0000-0000-0000-000000000002",
+            record_type="persona_observation",
+            payload={"attribution_advisory": {"confidence": confidence}},
+        ),
+    ]
+    diags = enforce_mode_gated_forbidden_types(manifest, records)
+    assert "ACEF-080" not in [d.code for d in diags]
+
+
 def test_disposition_record_forbidden_in_unattributed_artifact() -> None:
     """unattributed_artifact mode inherits public_artifact restrictions."""
     manifest = base_manifest(analysis_mode="unattributed_artifact")
