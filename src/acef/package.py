@@ -2922,17 +2922,20 @@ class Package:
         triggers = sorted(derived_triggers | supplied)
         # F34: many harm_class values (e.g. 'discrimination') derive NO Art.3(49) trigger.
         # With no caller-supplied trigger either, the merged block would carry
-        # serious_incident_triggers=[] — and the card_source.eu_ai_act_facts /
-        # taxonomy_crosswalk.eu_ai_act schema requires >= 1 member (minItems:1), so the
-        # builder would silently emit a bundle that fails validation with a cryptic FATAL
-        # ACEF-004. Fail FAST at construction with an actionable message instead.
+        # serious_incident_triggers=[] and the bundle would be REJECTED at validation: the
+        # confidential card_source.eu_ai_act_facts schema requires >= 1 member directly
+        # (minItems:1 -> FATAL ACEF-004), and on the public path the Art.73 completeness
+        # validator requires the trigger facts (the public taxonomy_crosswalk.eu_ai_act schema
+        # itself only pins `edition`). Fail FAST at construction with an actionable message
+        # instead of emitting a bundle that only fails downstream.
         if not triggers:
             raise ValueError(
                 f"harm_class={harm_class!r} derives no EU AI Act Art.3(49) serious-incident "
-                "trigger and none was supplied via eu_ai_act_facts.serious_incident_triggers. "
-                "The incident card_source.eu_ai_act_facts / taxonomy_crosswalk.eu_ai_act schema "
-                "requires at least one serious_incident_triggers member, so the bundle would fail "
-                "validation (ACEF-004). Supply an explicit eu_ai_act_facts="
+                "trigger and none was supplied via eu_ai_act_facts.serious_incident_triggers. The "
+                "incident evidence requires at least one serious_incident_triggers member (the "
+                "confidential card_source.eu_ai_act_facts schema enforces this directly; the public "
+                "path is enforced by the Art.73 completeness validator), so the bundle would be "
+                "rejected at validation. Supply an explicit eu_ai_act_facts="
                 "{'serious_incident_triggers': [...]} — e.g. ['3.49.c'] for a fundamental-rights "
                 "harm, ['3.49.d'] for property/environment harm."
             )
