@@ -5,6 +5,8 @@
   "description": "The v1.1 incident_report payload overlay (RFC-0002 §5.1; Appendix E Revision-3 note: 'the v1.1 incident_report overlay adds ONLY the private card_source block'). This is a FAITHFUL ADDITIVE SUPERSET of the frozen acef-conventions/v1/incident_report.schema.json payload: every v1.0 incident_report field is preserved verbatim, the v1.0 required set ([incident_type, severity, description]) is unchanged, and additionalProperties stays true — so a v1.0-valid incident_report (with NO card_source) validates UNCHANGED under this overlay. The ONLY addition is the optional, now-VALIDATED card_source property, which $refs the v1.1 incident_report.card_source.schema.json closed projection-source block. Before this overlay existed, v1.1 incident_report validation fell back to the frozen v1/ schema (additionalProperties: true), so a payload.card_source of {} was silently accepted and NEVER checked; under the overlay, when card_source is present it is validated against incident_report.card_source.schema.json, so an empty card_source ({}) is REJECTED (its requireds public_incident_id/id_grade/id_state/harm_core/publishability_map/eu_ai_act_facts fail). Gated on manifest.versioning.core_version 1.1.0; the frozen v1/ payload is byte-unchanged. The privileged-analysis fields (root_cause_analysis, lessons_learned, corrective_actions, impact_assessment) remain on incident_report and are NEVER part of card_source's public projection (§5.11). Production resolver/record-type wiring (registry.py, validate_record_payload) is F-M2-SCHEMA-GATING's scope; this file authors the overlay schema only.",
   "type": "object",
   "required": ["incident_type", "severity", "description"],
+  "x-order-significant-arrays": ["notification_timeline"],
+  "x-order-significant-arrays-note": "RFC-0002 §5.10: notification_timeline[] is the SOLE order-significant array — element order is meaningful and MUST NOT be sorted before hashing (unlike every other order-insensitive incident array). This schema-ROOT registry tags it without altering the notification_timeline property, which is inherited byte-for-byte from the frozen v1/ incident_report payload (additive-superset invariant); a per-property tag would mutate a v1.0 field.",
   "properties": {
     "incident_type": {
       "type": "string",
@@ -96,8 +98,7 @@
     },
     "notification_timeline": {
       "type": "array",
-      "x-order-significant": true,
-      "description": "Order-SIGNIFICANT (RFC-0002 §5.10): the SOLE order-significant array exception — element order is meaningful and MUST NOT be sorted before hashing (unlike every other order-insensitive incident array). Timeline of regulatory and stakeholder notifications (GPAI Art. 55 requires 2-15 day notification).",
+      "description": "Timeline of regulatory and stakeholder notifications (GPAI Art. 55 requires 2-15 day notification).",
       "items": {
         "type": "object",
         "properties": {

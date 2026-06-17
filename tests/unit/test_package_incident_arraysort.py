@@ -435,6 +435,13 @@ class TestGenericRecordPathNormalizesIncidentArrays:
         # (notification_timeline[]) MUST be EXPLICITLY tagged order-significant in its
         # SCHEMA — runtime non-sorting (above) is not enough; an implementer reading
         # only the schema must be able to tell it must NOT be sorted before hashing.
+        #
+        # The tag is a schema-ROOT registry ("x-order-significant-arrays") rather than a
+        # per-property annotation: notification_timeline is inherited BYTE-FOR-BYTE from
+        # the frozen v1/ incident_report payload, and the v1.1 additive-superset invariant
+        # (test_v1_1_card_source_schema) forbids mutating any v1.0 property — a
+        # per-property tag would alter a v1.0 field. The root registry tags it without
+        # touching the property.
         import json
         from pathlib import Path
 
@@ -445,11 +452,13 @@ class TestGenericRecordPathNormalizesIncidentArrays:
             if (a / "acef-conventions" / "v1.1" / "incident_report.schema.json").is_file()
         )
         schema = json.loads(schema_path.read_text(encoding="utf-8"))
-        nt = schema["properties"]["notification_timeline"]
-        assert nt.get("x-order-significant") is True, (
-            "§5.10 MUST: notification_timeline must carry an explicit 'x-order-significant': true "
-            "tag in incident_report.schema.json"
+        order_significant = schema.get("x-order-significant-arrays")
+        assert isinstance(order_significant, list) and "notification_timeline" in order_significant, (
+            "§5.10 MUST: incident_report.schema.json must tag notification_timeline order-significant "
+            "via the schema-root 'x-order-significant-arrays' registry"
         )
+        # The frozen-inherited property itself is UNCHANGED (additive-superset invariant).
+        assert "x-order-significant" not in schema["properties"]["notification_timeline"]
 
     def test_record_does_not_mutate_caller_payload(self) -> None:
         # The generic path must NOT destructively reorder the caller's input dict
