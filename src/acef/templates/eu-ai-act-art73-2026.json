@@ -40,7 +40,7 @@
           "description": "Serious harm to property or the environment — 15-day default clock."
         }
       ],
-      "required_evidence_types": ["incident_card", "incident_report"],
+      "required_evidence_types": [],
       "minimum_evidence_count": {},
       "evidence_freshness_max_days": null,
       "retention_years": 10,
@@ -94,7 +94,7 @@
           "description": "In the event of the death of a person, the report shall be provided immediately and no later than 10 days after the date on which the provider (or deployer) became aware of, or has reason to believe, the causal link to the AI system."
         }
       ],
-      "required_evidence_types": ["incident_card", "incident_report"],
+      "required_evidence_types": [],
       "minimum_evidence_count": {},
       "evidence_freshness_max_days": null,
       "retention_years": 10,

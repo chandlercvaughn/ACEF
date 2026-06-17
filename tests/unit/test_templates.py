@@ -715,3 +715,40 @@ class TestGpaiIncidentProvisionCitation:
         by_rule = {e["rule_id"]: e["message"] for e in prov["evaluation"]}
         for rid in ("gpai-s3-incident-severity", "gpai-s3-notification-date"):
             assert "9.3" in by_rule[rid] or "2/5/10/15" in by_rule[rid]
+
+
+class TestArt73RequiredEvidenceTypesIsNotAConjunctiveOR:
+    """roborev on f09ced3: ``required_evidence_types`` is expanded UNCONDITIONALLY into
+    one CONJUNCTIVE ``has_record_type`` *fail*-rule per listed type
+    (``rule_engine.py`` — EVERY listed type MUST be present, deduped against an
+    explicit ``has_record_type``). The eu-ai-act-art73-2026 Art.73 surface, however, is
+    an OR: the Art.3(49) trigger facts + ``public_incident_id`` are reachable on EITHER
+    a public ``incident_card`` (``taxonomy_crosswalk.eu_ai_act``) OR a CONFIDENTIAL
+    ``incident_report.card_source`` (RFC-0002 §5.7) — and that existential is DELEGATED
+    to the validator (ACEF-084, ``validator_delegated_enforcement``), because the generic
+    DSL has no OR/existential combinator.
+
+    Listing both incident types in ``required_evidence_types`` therefore mis-encodes the
+    OR as a conjunctive AND: a perfectly valid REPORT-ONLY (confidential, no public card)
+    or CARD-ONLY Art.73 filing that BINDS these provisions would gain a fail-severity
+    existence rule for the absent alternative and falsely roll up NOT_SATISFIED. The
+    OR-alternative record types MUST stay OUT of ``required_evidence_types``; the
+    either/or is the validator's job. This guard fails RED against the pre-fix template
+    (both types listed on both provisions).
+    """
+
+    _OR_ALTERNATIVES = frozenset({"incident_card", "incident_report"})
+
+    def test_art73_provisions_do_not_encode_or_alternatives_as_required_types(self) -> None:
+        template = load_template("eu-ai-act-art73-2026")
+        offenders = {
+            prov.provision_id: sorted(self._OR_ALTERNATIVES.intersection(prov.required_evidence_types))
+            for prov in template.provisions
+            if self._OR_ALTERNATIVES.intersection(prov.required_evidence_types)
+        }
+        assert not offenders, (
+            "Art.73 OR-alternative incident record types are encoded as CONJUNCTIVE "
+            f"required_evidence_types (forces BOTH, breaking the §5.7 either/or): {offenders}. "
+            "required_evidence_types expands to per-type fail rules; the existential OR is "
+            "delegated to ACEF-084, so incident_card/incident_report must not be listed there."
+        )
