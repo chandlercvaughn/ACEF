@@ -22,6 +22,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 
@@ -447,3 +448,61 @@ class TestReportIncidentEndToEnd:
         rec_a = (dir_a / "records" / "incident_report.jsonl").read_bytes()
         rec_b = (dir_b / "records" / "incident_report.jsonl").read_bytes()
         assert rec_a == rec_b
+
+    def test_report_incident_fails_fast_when_harm_class_derives_no_trigger(self, tmp_path: Path) -> None:
+        """F34: a harm_class that derives NO Art.3(49) trigger (e.g. 'discrimination') with no
+        explicit eu_ai_act_facts.serious_incident_triggers previously emitted
+        serious_incident_triggers=[] -> an INVALID bundle that fails validation with a cryptic
+        FATAL ACEF-004. The builder must fail FAST at construction with a clear, actionable
+        ValueError naming serious_incident_triggers."""
+        _, key = _write_ec_key(tmp_path)
+        pkg = _new_pkg()
+        minted = mint_incident_id("openai.com", key, year=2026)
+        harm = dict(_HARM_CORE, harm_class="discrimination")
+        with pytest.raises(ValueError, match="serious_incident_triggers"):
+            pkg.report_incident(
+                public_incident_id=minted.public_incident_id,
+                harm_core=harm,
+                incident_type="operational_failure",
+                description="discrimination incident with no derivable Art.3(49) trigger",
+                awareness_date="2026-08-01T00:00:00Z",
+                eu_ai_act_facts={},
+            )
+
+    def test_incident_card_fails_fast_when_harm_class_derives_no_trigger(self, tmp_path: Path) -> None:
+        """F34 (card path): same fail-fast contract for the public incident_card builder."""
+        _, key = _write_ec_key(tmp_path)
+        pkg = _new_pkg()
+        minted = mint_incident_id("openai.com", key, year=2026)
+        harm = dict(_HARM_CORE, harm_class="discrimination")
+        with pytest.raises(ValueError, match="serious_incident_triggers"):
+            pkg.incident_card(
+                public_incident_id=minted.public_incident_id,
+                harm_core=harm,
+                severity_vector="ACEF-SEV:1.0/HT:P/HG:H/RV:A/SC:U/BR:I",
+                awareness_date="2026-08-01T00:00:00Z",
+                eu_ai_act_facts={},
+            )
+
+    def test_nonderiving_harm_class_with_explicit_trigger_validates_clean(self, tmp_path: Path) -> None:
+        """The fix-hint path works: supplying an explicit Art.3(49) trigger for a non-deriving
+        harm_class produces a valid, signable bundle (no over-rejection)."""
+        key_path, key = _write_ec_key(tmp_path)
+        pkg = _new_pkg()
+        minted = mint_incident_id("openai.com", key, year=2026)
+        harm = dict(_HARM_CORE, harm_class="discrimination")
+        pkg.add_subject("ai_system", name="Sys", risk_classification="high-risk", modalities=["text"])
+        rec = pkg.report_incident(
+            public_incident_id=minted.public_incident_id,
+            harm_core=harm,
+            incident_type="operational_failure",
+            description="discrimination incident with an explicit fundamental-rights trigger",
+            awareness_date="2026-08-01T00:00:00Z",
+            eu_ai_act_facts={"serious_incident_triggers": ["3.49.c"], "widespread": False, "death_involved": False},
+        )
+        assert rec.payload["card_source"]["eu_ai_act_facts"]["serious_incident_triggers"] == ["3.49.c"]
+        pkg.sign(key_path)
+        bundle_dir = tmp_path / "discrim.acef"
+        pkg.export(str(bundle_dir))
+        assessment = validate_bundle(bundle_dir, profiles=["eu-ai-act-art73-2026"])
+        assert _error_diags(assessment) == [], _error_diags(assessment)
