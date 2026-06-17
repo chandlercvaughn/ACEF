@@ -423,7 +423,8 @@ def enforce_mode_gated_forbidden_types(
     +-----------------------+-------------------------------------------+
     | public_artifact       | delivery_verdict; risk_treatment whose     |
     |                       | treatment_subtype=external_disposition     |
-    |                       | (i.e., disposition_record / V3 variant)    |
+    |                       | (i.e., disposition_record / V3 variant);   |
+    |                       | finding_record carrying accepted_risk_ref  |
     +-----------------------+-------------------------------------------+
     | canary                | delivery_verdict;                          |
     |                       | transparency_disclosure with               |
@@ -561,10 +562,13 @@ def enforce_mode_gated_forbidden_types(
         # ...". accepted_risk_ref is a finding_record FIELD (an external risk-acceptance
         # pointer), NOT a record type, so it is gated here rather than via the forbidden-type
         # table (F3 — previously unenforced, so the schema promised an ACEF-080 the validator
-        # never emitted).
+        # never emitted). The FIELD's PRESENCE is forbidden (roborev on 8905e06): an empty or
+        # whitespace accepted_risk_ref is still the forbidden field, so any non-null value
+        # trips ACEF-080 (the schema validates the value TYPE; the mode-gate forbids presence).
         if mode in ("public_artifact", "unattributed_artifact") and rt == "finding_record":
-            accepted_risk_ref = _payload_of(rec).get("accepted_risk_ref")
-            if isinstance(accepted_risk_ref, str) and accepted_risk_ref.strip():
+            payload = _payload_of(rec)
+            if "accepted_risk_ref" in payload and payload["accepted_risk_ref"] is not None:
+                accepted_risk_ref = payload["accepted_risk_ref"]
                 diags.append(
                     ValidationDiagnostic(
                         "ACEF-080",
@@ -572,36 +576,23 @@ def enforce_mode_gated_forbidden_types(
                             f"Bundle declares analysis_mode={mode!r} but finding_record "
                             f"{rec_id!r} carries accepted_risk_ref={accepted_risk_ref!r}. Per "
                             "the ACEF-080 mode-gate rule (the frozen analysis_mode schema "
-                            f"contract), {mode!r} mode forbids accepted_risk_ref (an external "
-                            "risk-acceptance pointer)."
+                            f"contract), {mode!r} mode forbids the accepted_risk_ref field (an "
+                            "external risk-acceptance pointer)."
                         ),
                     )
                 )
                 continue
 
-        # Rule (f): public_artifact CAPS persona_observation
-        # attribution_advisory.confidence at low/medium (frozen schema contract). A higher
-        # confidence is forbidden -> ACEF-080 (F3). unattributed_artifact already forbids ANY
-        # attribution via rule (d), so the cap is subsumed there.
-        if mode == "public_artifact" and rt == "persona_observation":
-            advisory = _payload_of(rec).get("attribution_advisory")
-            if isinstance(advisory, dict):
-                confidence = advisory.get("confidence")
-                if isinstance(confidence, str) and confidence not in ("low", "medium"):
-                    diags.append(
-                        ValidationDiagnostic(
-                            "ACEF-080",
-                            (
-                                f"Bundle declares analysis_mode='public_artifact' but "
-                                f"persona_observation {rec_id!r} has "
-                                f"attribution_advisory.confidence={confidence!r}. Per the "
-                                "ACEF-080 mode-gate rule (the frozen analysis_mode schema "
-                                "contract), public_artifact caps "
-                                "attribution_advisory.confidence at low/medium."
-                            ),
-                        )
-                    )
-                    continue
+        # NOTE (F3 / roborev on 8905e06): the frozen analysis_mode schema description also
+        # says public_artifact "caps persona_observation.attribution_advisory.confidence at
+        # low/medium". But ``persona_observation`` is NOT a registered v1.1 record type (it is
+        # absent from RECORD_TYPES; a record bearing it is rejected as ACEF-003 unknown type
+        # before this mode-gate runs), and there is no attribution_advisory schema in v1.1.
+        # The cap is therefore UNENFORCEABLE on any valid v1.1 bundle — implementing a rule
+        # for a phantom record type would be dead code that the test suite could only exercise
+        # via the helper, never a real bundle path. The cap is a v1.2 concern (it requires
+        # registering the persona_observation record type + attribution_advisory schema
+        # first); no rule is emitted here until that type exists.
     return diags
 
 
