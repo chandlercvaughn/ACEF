@@ -813,3 +813,50 @@ def test_validate_bundle_string_value_but_non_canonicalizable_not_acef_001(
         f"The base-exception catch must keep the surrogate-key fault out of the ACEF-001 backstop. Got: {sorted(codes)}"
     )
     assert assessment.evidence_bundle_ref.content_hash == ""
+
+
+class TestExportErrorMessageNamesContentNFCCause:
+    """F15: a non-NFC string VALUE in a record payload makes export fail at the
+    hash-domain NFC check (spec §3.1.1). The error message previously blamed only
+    a 'normalization-on-read filesystem', misattributing a content fault the
+    producer accepted without normalizing. It must now name the content cause."""
+
+    def _pkg_with_nfd_payload(self) -> Package:
+        pkg = Package(producer={"name": "t", "version": "1.0"})
+        pkg.add_subject(
+            "ai_system",
+            name="Sys",
+            risk_classification="high-risk",
+            modalities=["text"],
+            lifecycle_phase="deployment",
+        )
+        pkg.record(
+            "risk_register",
+            provisions=["article-9"],
+            payload={
+                "risk_id": "R1",
+                "category": "safety",
+                "description": "café incident note",  # NFD (non-NFC) content value
+                "likelihood": "possible",
+                "severity": "major",
+            },
+            obligation_role="provider",
+        )
+        return pkg
+
+    def test_directory_export_error_names_content_nfc_cause(self, tmp_path: Path) -> None:
+        pkg = self._pkg_with_nfd_payload()
+        with pytest.raises(ACEFExportError) as exc:
+            pkg.export(str(tmp_path / "b.acef"))
+        msg = str(exc.value).lower()
+        assert "normalize" in msg and "nfc" in msg, msg
+        # Must NOT blame only the filesystem — the content cause is named.
+        assert "non-nfc text value" in msg or "record payload" in msg, msg
+
+    def test_archive_export_error_names_content_nfc_cause(self, tmp_path: Path) -> None:
+        pkg = self._pkg_with_nfd_payload()
+        with pytest.raises(ACEFExportError) as exc:
+            pkg.export(str(tmp_path / "b.acef.tar.gz"))
+        msg = str(exc.value).lower()
+        assert "normalize" in msg and "nfc" in msg, msg
+        assert "non-nfc text value" in msg or "record payload" in msg, msg

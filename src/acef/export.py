@@ -478,14 +478,21 @@ def export_directory(package: Package, output_path: str) -> Path:
             sign_bundle(bundle_dir, package.signing_key)
 
     except ACEFCanonicalizationError as e:
-        # A normalization-on-read filesystem (e.g. HFS+ returning NFD for an
-        # NFC-written name) can make a hash-domain file fail canonicalization at
-        # export; surface a structured ACEFExportError (ACEF-051), never the raw
-        # ValueError-subclass ACEFCanonicalizationError.
+        # The hash domain requires strict UTF-8 NFC (spec §3.1.1). A failure here
+        # has TWO possible causes and the message must not blame only the
+        # filesystem (audit finding F15 — the producer accepts non-NFC content
+        # without normalizing, so the common cause is content): (a) a non-NFC
+        # string VALUE in a record payload / manifest field — normalize all text
+        # to UTF-8 NFC before recording (the SDK does NOT auto-normalize); or
+        # (b) a normalization-on-read filesystem (e.g. HFS+) returning a non-NFC
+        # name for an NFC-written file. Surfaced as a structured ACEFExportError
+        # (ACEF-051), never the raw ValueError-subclass ACEFCanonicalizationError.
         raise ACEFExportError(
-            f"Bundle is not hash-domain canonicalizable on export (a "
-            f"normalization-on-read filesystem may return a non-NFC name for an "
-            f"NFC-written file; spec §3.1.1): {e}",
+            f"Bundle is not hash-domain canonicalizable on export. Cause is either "
+            f"(a) a non-NFC text value in a record payload or manifest field "
+            f"(normalize all text to UTF-8 NFC before recording — the SDK does not "
+            f"auto-normalize), or (b) a normalization-on-read filesystem returning a "
+            f"non-NFC name for an NFC-written file (spec §3.1.1): {e}",
             code="ACEF-051",
         ) from e
     except OSError as e:
