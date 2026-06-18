@@ -1540,9 +1540,19 @@ def _attestation_verifies(
         record_dict = rec.to_jsonl_dict()
         subset = {pointer: jsonpointer.resolve_pointer(record_dict, pointer) for pointer in att.signed_fields}
         canonical = canonicalize(subset)
-        verify_detached_jws(
+        header = verify_detached_jws(
             att.signature, canonical, manifest_timestamp=manifest_timestamp, trust_anchors=trust_anchors
         )
+        # Trust-posture symmetry with the harness verifier and bundle signatures:
+        # when trust anchors ARE configured, only an ANCHORED x5c chain counts. A
+        # jwk-only attestation is self-attested — an attacker can re-sign a tampered
+        # record with their own auto-embedded key — so it does NOT satisfy
+        # record_attested under configured anchors (verify_detached_jws ignores
+        # anchors for a jwk-only signature, so an anchor set alone is not a secure
+        # path). With NO anchors, a jwk-only attestation is self-attested and counts
+        # (spec §3.5 record_attested row).
+        if trust_anchors and not header.get("x5c"):
+            return False
     except Exception:
         # Intentionally broad: a record carrying ANY unverifiable attestation
         # (ACEFSigningError, JsonPointerException, rfc8785 domain errors, …)

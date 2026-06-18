@@ -592,3 +592,45 @@ class TestX5cAttestationTrustAnchoring:
         )
         assert len(results) == 1
         assert results[0].outcome == RuleOutcome.FAILED
+
+
+def _jwk_only_attested_record() -> RecordEnvelope:
+    """A record whose attestation JWS embeds the signer's own jwk (no x5c) — the
+    self-attested form an attacker can mint with their own key."""
+    attacker_key = ec.generate_private_key(ec.SECP256R1())
+    rec = _make_record()
+    subset = {"/payload": jsonpointer.resolve_pointer(rec.to_jsonl_dict(), "/payload")}
+    signature = create_detached_jws(canonicalize(subset), attacker_key, kid="attacker-kid")
+    rec.attestation = Attestation(method="jws", signer="urn:acef:actor:NOT-THE-ATTACKER", signature=signature)
+    return rec
+
+
+class TestRecordAttestedJwkOnlyTrustPosture:
+    """Fresh systems committee (REG-1 @905302e): record_attested's jwk-only path was
+    asymmetric with the harness verifier — a jwk-only attestation forged with the
+    attacker's own auto-embedded key was COUNTED even when trust anchors were
+    configured. Now, under configured anchors, only an anchored x5c chain counts."""
+
+    def test_jwk_only_attestation_not_counted_under_configured_anchors(self) -> None:
+        rec = _jwk_only_attested_record()
+        unrelated, _ = _ca_cert_and_key("unrelated-anchor", _WINDOW_START, _WINDOW_END)
+        passed, refs = op_record_attested(
+            {"record_type": "risk_register", "min_count": 1},
+            [rec],
+            manifest_timestamp=_TS_INSIDE_WINDOW,
+            trust_anchors=[unrelated],
+        )
+        assert passed is False
+        assert refs == []
+
+    def test_jwk_only_attestation_counted_without_anchors(self) -> None:
+        """Backward compatibility: with NO anchors a jwk-only attestation is
+        self-attested and still counts (spec §3.5 record_attested row)."""
+        rec = _jwk_only_attested_record()
+        passed, refs = op_record_attested(
+            {"record_type": "risk_register", "min_count": 1},
+            [rec],
+            manifest_timestamp=_TS_INSIDE_WINDOW,
+        )
+        assert passed is True
+        assert refs == [rec.record_id]
