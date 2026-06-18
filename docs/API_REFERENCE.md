@@ -514,14 +514,29 @@ Create a redacted copy of a package. Alias for `redact_package()`.
 
 **Returns:** `Package` -- a new package with selected records redacted.
 
-### `acef.redact_record(record, *, method, access_policy) -> RecordEnvelope`
+### `acef.redact_record(record, *, policy, method, access_policy, urn_generator) -> tuple[RecordEnvelope, RecordEnvelope | None]`
 
 Create a redacted copy of a single record.
 
-**Returns:** `RecordEnvelope` with:
-- `confidentiality` set to `hash-committed`
-- `payload` replaced with `{"_redacted": True, "_commitment": "sha256:<hash>"}`
-- `redaction_method` set to `"sha256-hash-commitment:<hash>"`
+**Returns:** a 2-tuple `(redacted_record, attestation_record)`:
+
+- `redacted_record` -- a `RecordEnvelope` with:
+  - `confidentiality` set to `hash-committed`
+  - `payload` replaced with the hash-commitment shape
+    (`{"_redacted": True, "_commitment": "sha256:<hash>"}` in legacy mode; the
+    canonical commitment object in policy mode)
+  - `redaction_method` set to `"<method>:<hash>"`
+- `attestation_record` -- in **policy mode** (a `policy` is supplied), the Core
+  `event_log` attestation record describing the stored payload bytes; its URN is
+  wired into the redacted record's `redaction_attestation_ref` (X2) and the
+  caller MUST add this attestation record to the bundle. In **legacy mode** (no
+  `policy`), this is `None`.
+
+Unpack both elements -- the function never returns a bare `RecordEnvelope`:
+
+```python
+redacted, attestation = acef.redact_record(record, policy=policy)
+```
 
 ### `acef.redaction.verify_redaction(redacted_record, original_payload) -> bool`
 

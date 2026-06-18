@@ -965,9 +965,11 @@ ACEF defines a structured error taxonomy with unique codes, severities, and cate
 
 ## 7. v1.1 Agent-Reliability Record Types
 
-ACEF v0.4 introduces six new record types and a typed builder for each on
-`acef.Package`. This section provides one fully-worked example per record
-type. Each example is self-contained: copy it into a Python file, run with
+ACEF v0.4 introduces five new Evidence record types — each with a typed builder
+on `acef.Package` — plus the Assessment-side `coverage_cell` field (constructed
+via its Pydantic model, NOT a `Package` builder; see its subsection below). This
+section provides one fully-worked example for each. Each example is
+self-contained: copy it into a Python file, run with
 the ACEF SDK installed, and the bundle constructs cleanly. The version-
 gating semantics are described in
 [`MIGRATION-v0.3-to-v0.4.md`](MIGRATION-v0.3-to-v0.4.md#version-gating-semantics);

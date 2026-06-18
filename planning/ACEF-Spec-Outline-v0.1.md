@@ -1701,7 +1701,7 @@ The conformance test suite is a collection of golden files and test cases that d
 | **Multi-subject evaluation** | Per-subject default evaluation produces separate `provision_summary` entries per subject; `evaluation_scope: "package"` provisions produce one entry for the whole bundle |
 | **DSL operators** | Each built-in operator (including `exists_where`, `bundle_signed`, `record_attested`, `attachment_kind_exists`) has pass and fail test vectors |
 | **Empty-set semantics** | Existential operators fail on zero records; universal operators pass vacuously on zero records |
-| **Provision roll-up** | Deterministic `provision_outcome` computed correctly for each precedence case (not-satisfied > error > skipped > gap-acknowledged > partially-satisfied > satisfied) |
+| **Provision roll-up** | Deterministic `provision_outcome` computed correctly for each precedence case (not-satisfied > not-assessed > skipped > gap-acknowledged > partially-satisfied > satisfied) |
 | **Extension handling** | Vendor-namespaced extensions are preserved on round-trip and ignored by standard validators; `x-*` fields cannot change conformance outcomes (ACEF-053) |
 | **Error taxonomy** | Each error code in Section 3.6 has at least one negative test case that triggers it |
 | **Redacted packages** | Packages with `confidentiality: hash-committed` records verify correctly with partial evidence |

@@ -16,7 +16,7 @@ the normative source brief is
 ACEF v0.4 is a **purely additive minor release** that introduces agent-
 reliability primitives needed by continuous-verification products. It adds:
 
-- 6 new Core record types
+- 5 new Core (Evidence) record types, plus the Assessment-side `coverage_cell` field
 - 5 new payload variants on existing record types
 - 6 cross-cutting envelope/manifest fields (X1-X6) implemented as
   **version-gated, conditional-required**
@@ -42,7 +42,9 @@ section below explains the mechanism.
 
 ### New Record Types
 
-ACEF Core gains six new record types under `acef-conventions/v1.1/`. Their
+ACEF Core gains five new Evidence record types under `acef-conventions/v1.1/`
+(the Assessment-side `coverage_cell` field, described below, is not one of them —
+it has no Evidence-record schema and no `Package` builder). Their
 SDK builders are exposed on `acef.Package` as typed methods (see "Tooling
 Changes" → "SDK" below). The corresponding Pydantic payload models live in
 `src/acef/models/agent_reliability.py`.
