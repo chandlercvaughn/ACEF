@@ -272,6 +272,77 @@ class TestFieldValue:
         )
         assert passed
 
+    def test_sequential_adjacent_quantifier_redos_rejected_deterministically(self):
+        """PhD RE-review (CRYPTO-1 / standards-editor W1): the §3.5 'deterministic
+        resource bound' MUST also covers the SEQUENTIAL / adjacent-quantifier ReDoS
+        class — two or more unbounded quantifiers over overlapping atoms with no
+        mandatory separator (``a*a*…c``, ``.*.*x``, ``[a-z]+[a-z]+$``). These have NO
+        quantified group, so the group-anchored nested-quantifier check missed them
+        and ``re.search`` then ran with NO time guard (a live DoS: minutes at
+        field-realistic lengths). They MUST now be rejected statically as ACEF-045,
+        FAST, on every platform.
+
+        The match input is deliberately SHORT so this assertion proves the *static
+        pre-match rejection mechanism* (the deterministic resource bound) and never
+        depends on, or risks, the backtracking blow-up itself.
+        """
+        import time
+
+        records = [_make_record("risk_register", payload={"name": "aaaa!"})]
+        for pat in (
+            r"a*a*a*a*a*a*a*a*a*a*c",  # ten adjacent unbounded `a*`
+            r".*.*.*.*.*.*.*x",  # adjacent `.*` (overlap = everything)
+            r"[a-z]+[a-z]+[a-z]+[a-z]+$",  # adjacent class quantifiers
+            r"\d+\d+\d+x",  # adjacent shorthand-class quantifiers
+            r"a+a+a+a+!",  # adjacent literal quantifiers
+            r"(a*a*)b",  # adjacency WRAPPED inside a group
+            r"\w*\w*z",  # \w overlaps itself
+            r"a.*b.*c",  # quadratic: two `.*` over an overlapping separator
+        ):
+            t0 = time.monotonic()
+            with pytest.raises(ACEFEvaluationError) as exc_info:
+                op_field_value(
+                    {"record_type": "risk_register", "field": "/payload/name", "op": "regex", "value": pat}, records
+                )
+            assert exc_info.value.code == "ACEF-045", f"{pat!r} must be ACEF-045"
+            assert time.monotonic() - t0 < 1.0, f"{pat!r} must be rejected statically/fast, not via a timeout"
+
+    def test_adjacent_quantifier_detector_unit(self):
+        """Unit-level RED anchor for the new static detector: the adjacent /
+        sequential ReDoS class is True; benign separated or single-quantifier
+        patterns are False (so the check does not over-reject real matchers)."""
+        from acef.validation.operators import _has_adjacent_unbounded_quantifiers as has_adjacent
+
+        for bad in (r"a*a*c", r".*.*x", r"[a-z]+[a-z]+$", r"\d+\d+", r"(a*a*)b", r"a.*b.*c", r"\w+\w+"):
+            assert has_adjacent(bad) is True, f"{bad!r} is adjacent-quantifier ReDoS and must be detected"
+        for good in (
+            r"Model-v\d+\.\d+",  # \d+ separated by mandatory \.
+            r"\d+-\d+-\d+",  # separated by mandatory -
+            r"[a-z]+@[a-z]+\.[a-z]+",  # separated by mandatory @ and \.
+            r"^(ab)+$",  # single quantified group, body not adjacent
+            r"abc.*def",  # only ONE unbounded quantifier
+            r"^https?://[a-z]+",  # `s?` nullable then a single [a-z]+
+        ):
+            assert has_adjacent(good) is False, f"{good!r} is safe and must NOT be flagged as ReDoS"
+
+    def test_safe_separated_quantifiers_still_match(self):
+        """End-to-end guard: patterns where a MANDATORY separator disjoint from the
+        surrounding quantified classes breaks the ambiguity, or that carry only a
+        single unbounded quantifier, must still MATCH (not be rejected as ReDoS)."""
+        cases = [
+            (r"\d+-\d+-\d+", "2024-11-30"),
+            (r"[a-z]+@[a-z]+\.[a-z]+", "user@example.com"),
+            (r"^v\d+\.\d+\.\d+$", "v1.2.3"),
+            (r"^https?://[a-z]+", "https://acef"),
+            (r"abc.*def", "abcXYZdef"),
+        ]
+        for pat, text in cases:
+            records = [_make_record("risk_register", payload={"name": text})]
+            passed, _ = op_field_value(
+                {"record_type": "risk_register", "field": "/payload/name", "op": "regex", "value": pat}, records
+            )
+            assert passed, f"{pat!r} should match {text!r} and must NOT be rejected as ReDoS"
+
     def test_unknown_op_raises_acef_046(self):
         """F13: a typo'd comparison operator must raise ACEF-046, not silently
         FALSE-FAIL the rule. Before the fix _compare's fallthrough returned False."""

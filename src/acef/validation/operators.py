@@ -9,9 +9,9 @@ Empty-set semantics:
 from __future__ import annotations
 
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, NamedTuple
 
 import jsonpointer  # type: ignore[import-untyped]  # no published stubs / py.typed (no types-jsonpointer on PyPI)
 
@@ -374,13 +374,320 @@ def _has_nested_unbounded_quantifier(pattern: str) -> bool:
     return False
 
 
+# --- Sequential / adjacent-quantifier ReDoS detection (PhD re-review) ----------
+# The nested-quantifier check above is GROUP-anchored: it only inspects a body
+# wrapped in an unbounded-quantified group. It therefore MISSES the third
+# catastrophic-backtracking family — two or more UNBOUNDED quantifiers applied to
+# adjacent atoms whose character sets OVERLAP, with no mandatory disjoint
+# separator between them (``a*a*…c``, ``.*.*x``, ``[a-z]+[a-z]+$``, ``\d+\d+x``).
+# These carry no group, so the group walker returns immediately; ``re.search``
+# then runs the backtracking engine with no time guard (degree-k polynomial /
+# superpolynomial blow-up). The analyzer below is a deterministic,
+# platform-independent static over-approximation that rejects this family too,
+# completing the spec §3.5 resource bound. It is conservative (it can over-reject
+# some safe constructs, e.g. ``a.*b.*c`` which is genuinely quadratic, or two
+# adjacent quantified groups), which is acceptable for the short rule-level DSL
+# matchers — a future linear-time engine would accept the safe ones precisely.
+
+_RE_DIGITS: frozenset[str] = frozenset("0123456789")
+_RE_WORD: frozenset[str] = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_")
+_RE_SPACE: frozenset[str] = frozenset(" \t\n\r\f\v")
+
+
+class _Atom(NamedTuple):
+    """One regex atom plus its quantifier, as seen by the adjacency scanner.
+
+    ``wildcard`` True means the atom's class is treated as matching ANYTHING
+    (``.``, ``\\D``/``\\W``/``\\S``, a negated/shorthand-bearing ``[...]``, or a
+    group whose first set could not be pinned) — it overlaps every other class.
+    ``charset`` is the concrete ASCII set otherwise. ``zero_width`` marks anchors
+    / lookarounds (``^``, ``$``, ``\\b``), which are transparent to adjacency.
+    ``body`` is the inner pattern of a group, for recursion.
+    """
+
+    wildcard: bool
+    charset: frozenset[str]
+    unbounded: bool
+    nullable: bool
+    zero_width: bool
+    body: str | None
+
+
+def _charsets_overlap(a: tuple[bool, frozenset[str]], b: tuple[bool, frozenset[str]]) -> bool:
+    """True if two ``(wildcard, charset)`` classes can match a common character."""
+    if a[0] or b[0]:
+        return True
+    return bool(a[1] & b[1])
+
+
+def _matching_paren(segment: str, i: int) -> int:
+    """Index of the ``)`` that matches the ``(`` at ``segment[i]`` (skipping
+    escapes and ``[...]`` classes). Returns the last index if unbalanced — the
+    invalid pattern will be rejected later by ``re.compile`` regardless."""
+    depth, j, n = 0, i, len(segment)
+    while j < n:
+        c = segment[j]
+        if c == "\\":
+            j += 2
+            continue
+        if c == "[":
+            j += 1
+            while j < n and segment[j] != "]":
+                if segment[j] == "\\":
+                    j += 1
+                j += 1
+            j += 1
+            continue
+        if c == "(":
+            depth += 1
+        elif c == ")":
+            depth -= 1
+            if depth == 0:
+                return j
+        j += 1
+    return n - 1
+
+
+def _strip_group_prefix(inner: str) -> tuple[str, bool]:
+    """Strip a group's ``(?:`` / ``(?<name>`` / lookaround prefix, returning the
+    body to analyze and whether the group is ZERO-WIDTH (a lookaround)."""
+    if inner.startswith("?:"):
+        return inner[2:], False
+    if inner.startswith("?=") or inner.startswith("?!"):
+        return inner[2:], True
+    if inner.startswith("?<=") or inner.startswith("?<!"):
+        return inner[3:], True
+    if inner.startswith("?P<") or inner.startswith("?<"):
+        gt = inner.find(">")
+        if gt != -1:
+            return inner[gt + 1 :], False
+    return inner, False
+
+
+def _split_top_level_alternation(segment: str) -> list[str]:
+    """Split ``segment`` on ``|`` at group-depth 0 (skipping escapes and classes).
+    Each branch is an independent sequence for adjacency analysis."""
+    parts: list[str] = []
+    depth, start, j, n = 0, 0, 0, len(segment)
+    while j < n:
+        c = segment[j]
+        if c == "\\":
+            j += 2
+            continue
+        if c == "[":
+            j += 1
+            while j < n and segment[j] != "]":
+                if segment[j] == "\\":
+                    j += 1
+                j += 1
+            j += 1
+            continue
+        if c == "(":
+            depth += 1
+        elif c == ")":
+            if depth > 0:
+                depth -= 1
+        elif c == "|" and depth == 0:
+            parts.append(segment[start:j])
+            start = j + 1
+        j += 1
+    parts.append(segment[start:])
+    return parts
+
+
+def _parse_char_class(pattern: str, i: int) -> tuple[bool, frozenset[str], int]:
+    """Parse a ``[...]`` class starting at ``pattern[i]``. Returns
+    ``(wildcard, members, next_index_past_])``. A negated class or one containing
+    a shorthand (``\\d`` etc.) is treated as ``wildcard=True`` (conservative)."""
+    n = len(pattern)
+    j = i + 1
+    negated = False
+    if j < n and pattern[j] == "^":
+        negated = True
+        j += 1
+    members: set[str] = set()
+    shorthand = False
+    prev: str | None = None
+    first = True
+    while j < n and (first or pattern[j] != "]"):
+        first = False
+        c = pattern[j]
+        if c == "\\" and j + 1 < n:
+            esc = pattern[j + 1]
+            if esc in ("d", "D", "w", "W", "s", "S"):
+                shorthand = True
+                prev = None
+            else:
+                members.add(esc)
+                prev = esc
+            j += 2
+            continue
+        if c == "-" and prev is not None and j + 1 < n and pattern[j + 1] != "]":
+            hi = pattern[j + 1]
+            lo_o, hi_o = ord(prev), ord(hi)
+            if lo_o <= hi_o:
+                for o in range(lo_o, hi_o + 1):
+                    members.add(chr(o))
+            prev = None
+            j += 2
+            continue
+        members.add(c)
+        prev = c
+        j += 1
+    next_i = j + 1 if j < n else n
+    if negated or shorthand:
+        return True, frozenset(), next_i
+    return False, frozenset(members), next_i
+
+
+def _first_charset(segment: str) -> tuple[bool, frozenset[str]]:
+    """The ``(wildcard, charset)`` of the first CONSUMING atom of ``segment``,
+    unioned across top-level alternation branches. An empty or anchor-only branch
+    yields ``wildcard=True`` (conservative)."""
+    acc: set[str] = set()
+    for branch in _split_top_level_alternation(segment):
+        got = False
+        for atom in _iter_atoms(branch):
+            if atom.zero_width:
+                continue
+            if atom.wildcard:
+                return True, frozenset()
+            acc |= atom.charset
+            got = True
+            break
+        if not got:
+            return True, frozenset()
+    return False, frozenset(acc)
+
+
+def _iter_atoms(segment: str) -> Iterator[_Atom]:
+    """Yield each atom of ``segment`` (one group-nesting level) with its
+    quantifier classification. Groups are yielded with their ``body`` for
+    recursion and a first-set charset for outer adjacency."""
+    i, n = 0, len(segment)
+    while i < n:
+        c = segment[i]
+        wildcard = False
+        charset: frozenset[str] = frozenset()
+        zero_width = False
+        body: str | None = None
+        if c == "\\":
+            esc = segment[i + 1] if i + 1 < n else ""
+            if esc in ("b", "B", "A", "Z"):
+                zero_width = True
+            elif esc == "d":
+                charset = _RE_DIGITS
+            elif esc == "w":
+                charset = _RE_WORD
+            elif esc == "s":
+                charset = _RE_SPACE
+            elif esc in ("D", "W", "S"):
+                wildcard = True
+            else:
+                charset = frozenset({esc}) if esc else frozenset()
+            i += 2
+        elif c == "[":
+            wildcard, charset, i = _parse_char_class(segment, i)
+        elif c == "(":
+            close = _matching_paren(segment, i)
+            inner = segment[i + 1 : close]
+            body_inner, zw = _strip_group_prefix(inner)
+            body = body_inner
+            if zw:
+                zero_width = True
+            else:
+                wildcard, charset = _first_charset(body_inner)
+            i = close + 1
+        elif c == ".":
+            wildcard = True
+            i += 1
+        elif c in ("^", "$"):
+            zero_width = True
+            i += 1
+        elif c in (")", "]"):
+            i += 1
+            continue
+        else:
+            charset = frozenset({c})
+            i += 1
+        unbounded = False
+        nullable = False
+        if i < n and not zero_width:
+            q = segment[i]
+            if q == "*":
+                unbounded, nullable = True, True
+                i += 1
+            elif q == "+":
+                unbounded, nullable = True, False
+                i += 1
+            elif q == "?":
+                unbounded, nullable = False, True
+                i += 1
+            elif q == "{":
+                cb = segment.find("}", i)
+                if cb != -1:
+                    inner_b = segment[i + 1 : cb]
+                    unbounded = _brace_is_unbounded(segment, i)
+                    lo = inner_b.split(",", 1)[0].strip()
+                    nullable = lo in ("", "0")
+                    i = cb + 1
+            if i < n and segment[i] in ("?", "+"):  # lazy / possessive marker
+                i += 1
+        yield _Atom(wildcard, charset, unbounded, nullable, zero_width, body)
+
+
+def _scan_branch_adjacent(branch: str) -> bool:
+    """True if ``branch`` (one alternation branch) contains two adjacent unbounded
+    quantifiers over overlapping classes with no disjoint mandatory separator."""
+    pending: tuple[bool, frozenset[str]] | None = None
+    for atom in _iter_atoms(branch):
+        if atom.body is not None and _has_adjacent_unbounded_quantifiers(atom.body):
+            return True
+        if atom.zero_width:
+            continue
+        cs = (atom.wildcard, atom.charset)
+        if pending is not None and atom.unbounded and _charsets_overlap(pending, cs):
+            return True
+        if atom.unbounded:
+            pending = cs
+        elif atom.nullable:
+            # A nullable atom (``x?``, ``x{0,m}``) can match empty, so it does NOT
+            # break adjacency between the surrounding unbounded quantifiers.
+            continue
+        elif pending is not None and not _charsets_overlap(pending, cs):
+            # A MANDATORY atom whose class is disjoint from the pending unbounded
+            # one is a real separator (``\d+-\d+``) — it removes the ambiguity.
+            pending = None
+    return False
+
+
+def _has_adjacent_unbounded_quantifiers(pattern: str) -> bool:
+    """Detect the SEQUENTIAL / adjacent-quantifier catastrophic-backtracking class
+    DETERMINISTICALLY (no wall clock): two or more unbounded quantifiers over
+    overlapping atoms in sequence (``a*a*…c``, ``.*.*x``, ``[a-z]+[a-z]+$``),
+    including the form wrapped inside a group (``(a*a*)b``). Complements the
+    group-anchored :func:`_has_nested_unbounded_quantifier`; together they cover
+    the nested, alternation-overlap, and sequential ReDoS families the spec §3.5
+    resource bound rejects."""
+    for branch in _split_top_level_alternation(pattern):
+        if _scan_branch_adjacent(branch):
+            return True
+    return False
+
+
 def _safe_regex_search(pattern: str, text: str) -> bool:
-    """Execute a regex search with length limits and optional timeout.
+    """Execute a regex search under a DETERMINISTIC, platform-independent bound.
 
     Mitigates ReDoS attacks by:
     1. Limiting pattern length to _MAX_REGEX_PATTERN_LENGTH characters
     2. Limiting input text length to _MAX_REGEX_INPUT_LENGTH characters
-    3. Applying a SIGALRM-based timeout on Unix systems (main thread only)
+    3. Rejecting BEFORE matching — as ACEF-045 — every catastrophic-backtracking
+       signature: the nested-quantifier and alternation-overlap families
+       (:func:`_has_nested_unbounded_quantifier`) AND the sequential /
+       adjacent-quantifier family (:func:`_has_adjacent_unbounded_quantifiers`).
+       This static rejection is the portable resource bound (spec §3.5); it
+       replaced the old SIGALRM wall-clock timeout, which only fired on the Unix
+       main thread and gave a platform-DEPENDENT provision verdict.
     4. Pre-validating against known Python-only (non-ECMA-262) constructs
        per :func:`_validate_ecma262_compatible`
 
@@ -427,6 +734,20 @@ def _safe_regex_search(pattern: str, text: str) -> bool:
         raise ACEFEvaluationError(
             "Regex pattern has a nested unbounded quantifier (catastrophic-backtracking risk); "
             f"rejected deterministically per the spec §3.5 resource bound: {pattern!r}",
+            code="ACEF-045",
+        )
+
+    # Sequential / adjacent-quantifier ReDoS (e.g. ``a*a*…c``, ``.*.*x``,
+    # ``[a-z]+[a-z]+$``): two unbounded quantifiers over overlapping atoms with no
+    # disjoint mandatory separator. The group-anchored check above does not see
+    # these (no quantified group), so without this the validator would run the
+    # backtracking engine unbounded. Rejected statically, identically on every
+    # platform — completing the spec §3.5 deterministic resource bound.
+    if _has_adjacent_unbounded_quantifiers(pattern):
+        raise ACEFEvaluationError(
+            "Regex pattern has adjacent unbounded quantifiers over overlapping classes "
+            "(catastrophic-backtracking risk); rejected deterministically per the spec "
+            f"§3.5 resource bound: {pattern!r}",
             code="ACEF-045",
         )
 
