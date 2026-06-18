@@ -738,16 +738,30 @@ class TestChinaCacCitationsMatchFinalMeasures:
                 refs[sub["provision_id"]] = sub["normative_text_ref"]
         return refs
 
-    def test_provision_citations_match_final_articles(self) -> None:
+    def test_every_provision_and_subprovision_cites_the_exact_final_article(self) -> None:
+        """roborev Low on 1119cee: the prior test only substring-checked the four
+        PARENT ids, so a SUB-provision could silently regress to a stale draft
+        article (Art. 5/6/8/9/14) without failing. Assert the EXACT
+        ``normative_text_ref`` for every parent AND sub-provision, and pin the
+        provision set so a newly-added (un-asserted) provision fails rather than
+        slipping through."""
         refs = self._refs()
         expected = {
-            "cac-explicit-label": "Art. 4",
-            "cac-implicit-metadata": "Art. 5",
-            "cac-watermark": "Art. 5",
-            "cac-log-retention": "Art. 9",
+            "cac-explicit-label": "CAC Labeling Measures Art. 4",
+            "cac-explicit-label.text": "CAC Labeling Measures Art. 4",
+            "cac-explicit-label.audiovisual": "CAC Labeling Measures Art. 4",
+            "cac-implicit-metadata": "CAC Labeling Measures Art. 5",
+            "cac-implicit-metadata.fields": "CAC Labeling Measures Art. 5",
+            "cac-implicit-metadata.persistence": "CAC Labeling Measures Art. 5",
+            "cac-watermark": "CAC Labeling Measures Art. 5",
+            "cac-watermark.robustness": "CAC Labeling Measures Art. 5",
+            "cac-log-retention": "CAC Labeling Measures Art. 9",
+            "cac-log-retention.unlabeled": "CAC Labeling Measures Art. 9",
+            "cac-log-retention.platform": "CAC Labeling Measures Art. 9",
         }
-        for pid, article in expected.items():
-            assert article in refs[pid], f"{pid}: expected {article!r}, got {refs[pid]!r}"
+        assert set(refs) == set(expected), f"provision/sub-provision set drifted: {set(refs) ^ set(expected)}"
+        for pid, exact in expected.items():
+            assert refs[pid] == exact, f"{pid}: expected exact {exact!r}, got {refs[pid]!r}"
 
     def test_no_citation_exceeds_the_final_14_articles(self) -> None:
         import re
@@ -758,11 +772,16 @@ class TestChinaCacCitationsMatchFinalMeasures:
             assert "Art. 15" not in ref, f"{pid} cites the non-existent Art. 15: {ref!r}"
             assert "10(2)" not in ref, f"{pid} cites the non-existent Art. 10(2): {ref!r}"
 
-    def test_digital_watermarks_not_listed_under_explicit_labels(self) -> None:
-        # Digital watermarks are IMPLICIT labeling (Art. 5), not explicit (Art. 4). The
-        # explicit-label provision description must not list them.
+    def test_digital_watermarks_not_listed_under_any_explicit_label_description(self) -> None:
+        # Digital watermarks are IMPLICIT labeling (Art. 5), not explicit (Art. 4).
+        # roborev Low on 1119cee: the prior test checked only the PARENT description,
+        # so a SUB-provision could reintroduce "watermark" under explicit labels
+        # without failing. Check the explicit-label parent AND every sub-provision.
         explicit = next(p for p in self._raw()["provisions"] if p["provision_id"] == "cac-explicit-label")
-        assert "watermark" not in explicit["description"].lower(), explicit["description"]
+        descriptions = [("cac-explicit-label", explicit["description"])]
+        descriptions += [(s["provision_id"], s["description"]) for s in explicit.get("sub_provisions", [])]
+        for pid, desc in descriptions:
+            assert "watermark" not in desc.lower(), f"{pid} (explicit-label) mentions watermark: {desc!r}"
 
 
 class TestArt73RequiredEvidenceTypesIsNotAConjunctiveOR:
