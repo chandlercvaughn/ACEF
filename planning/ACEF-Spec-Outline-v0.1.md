@@ -1,9 +1,19 @@
-# AI Compliance Evidence Format (ACEF) — Specification Outline v0.3
+# AI Compliance Evidence Format (ACEF) — Core Specification
 
-**Status:** Working Draft
-**Date:** 2026-03-17
+**Document status:** Working Draft (standards-track)
+**Document revision:** 0.4 — 2026-03-17 (supersedes outline revisions 0.1–0.3; see Appendix B for the change log)
+**Format version covered:** ACEF Core **v1**. Schema conventions ship in two registries — `v1.0` (frozen) and `v1.1` (additive). The only valid `manifest.versioning.core_version` values are `1.0.0` and `1.1.0`; a `1.0.0` bundle MUST validate identically under this revision and under any pre-0.4 revision.
 **Owner:** AI Commons (non-profit, open standard)
-**Analogies:** OTLP for compliance, CycloneDX/SPDX for AI governance, C2PA for provenance, W3C PROV for entity relationships
+**Normative references:** RFC 8785 (JSON Canonicalization Scheme), RFC 7515 (JWS), RFC 5280 (PKIX certificate path validation), RFC 6901 (JSON Pointer), RFC 8259 / RFC 7493 (JSON / I-JSON), BCP 14 (RFC 2119 + RFC 8174), Unicode 15.x (NFC normalization), ECMA-262 (RegExp dialect).
+**Adjacent standards (informative):** see §8 (Related Work and Relationship to Existing Standards).
+
+> Note on the document filename. The historical filename `ACEF-Spec-Outline-v0.1.md` is retained for stable cross-references; the authoritative version identity is the **Document revision** and **Format version** stated above, not the filename.
+
+### 0. Conformance and Normative Language
+
+The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", "SHOULD NOT", "RECOMMENDED", "NOT RECOMMENDED", "MAY", and "OPTIONAL" in this document are to be interpreted as described in BCP 14 [RFC 2119] [RFC 8174] when, and only when, they appear in all capitals, as shown here. The same words in lower case carry their ordinary English meaning and impose no conformance requirement.
+
+A conforming **producer** is software that emits ACEF Evidence Bundles or Assessment Bundles. A conforming **validator** is software that consumes them and evaluates regulation mapping templates. A conformance claim is scoped to a stated **conformance class** (§6.6) and a stated **format version** (`core_version`). An implementation that does not satisfy every applicable MUST for its claimed class and version is non-conforming, regardless of how many SHOULD/MAY items it satisfies.
 
 ---
 
