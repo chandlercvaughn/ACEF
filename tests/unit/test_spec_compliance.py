@@ -243,3 +243,34 @@ class TestSpecTemplateCitationsResolve:
         templates_dir = self._REPO_ROOT / "src" / "acef" / "templates"
         for name in ("eu-ai-act-2024.json", "nist-ai-rmf-1.0.json"):
             assert (templates_dir / name).exists(), f"cited regulation template missing: {name}"
+
+    def test_no_planning_doc_claims_per_regulation_templates_ship_the_v1_1_binding(self) -> None:
+        """F26 follow-up (roborev Medium on 2b2dc31): the prior commit corrected
+        the dead template paths but left stale claims in the RFC-0001 finding_record
+        row + the freddy D6 heading that the per-regulation TEMPLATES ship/are the
+        vehicle for the v1.1 record-type mappings — directly contradicting the
+        corrected text that those templates are UNCHANGED. The binding ships as the
+        §4 matrix + the v1.1 validation surface, never as template edits."""
+        stale_phrases = [
+            "per-regulation templates ship",
+            "ship in the per-regulation templates",
+            "templates ship in v0.4",
+        ]
+        for doc in sorted((self._REPO_ROOT / "planning").glob("*.md")):
+            text = doc.read_text(encoding="utf-8").lower()
+            for phrase in stale_phrases:
+                assert phrase not in text, f"{doc.name} still claims {phrase!r} (templates are unchanged in v0.4)"
+
+    def test_spec_v1_1_note_cites_actual_enforcement_surfaces(self) -> None:
+        """F26 follow-up (roborev Medium on 2b2dc31): the spec v1.1-additions note
+        attributed BOTH structural validity AND evidence-binding to
+        ``v1_1_rules.py`` — but that module only enforces coverage-cell
+        banned-language, state-class taxonomy, and analysis-mode gates. Structural
+        validity is the v1.1 JSON Schemas; harness/delivery/causation evidence-binding
+        is ``cross_record.py``. The note MUST cite the actual surfaces."""
+        spec = (self._REPO_ROOT / "planning" / "ACEF-Spec-Outline-v0.1.md").read_text(encoding="utf-8")
+        note_idx = spec.find("Note (v1.1 additions)")
+        assert note_idx != -1, "spec lost its v1.1-additions note"
+        note = spec[note_idx : note_idx + 1200]
+        assert "acef-conventions/v1.1/" in note, "v1.1 note must cite the v1.1 schemas for structural validity"
+        assert "cross_record.py" in note, "v1.1 note must cite cross_record.py for evidence-binding"

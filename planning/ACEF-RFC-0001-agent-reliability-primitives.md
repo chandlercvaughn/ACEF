@@ -82,7 +82,7 @@ Without that mapping, the record type would belong in `x-freddy/*`, not Core.
 |---|---|---|---|---|
 | `authorized_test_scope` | Art. 9 (risk management), Art. 17 (QMS) | GOVERN-1, MAP-1 | — | Any agent-reliability product testing a third-party AI system must declare scope, identities, side-effect policy, ownership proof. Foundational to risk-management evidence under Art. 9 and QMS scope under Art. 17. |
 | `scope_boundary_event` | Art. 9 (risk management), Art. 12 (logging), Art. 14 (human oversight) | MEASURE-2, MANAGE-4 | — | Out-of-scope test attempts are control-plane integrity events distinct from `event_log` (routine) and `incident_report` (post-market). Required under Art. 9 risk-monitoring and Art. 14 kill-switch evidence. |
-| `finding_record` | Art. 9, Art. 15 (accuracy/robustness/cybersecurity) | MEASURE-2.x, MANAGE-4.x | GPAI Art. 55 (when finding rises to systemic-risk threshold) | Reproducible-defect-with-evidence records distinct from `incident_report` (operator-facing, post-market). Per-regulation templates ship in v0.4 (D6) accepting `finding_record` as evidence for Art. 9 risk identification and Art. 15 accuracy/robustness obligations. |
+| `finding_record` | Art. 9, Art. 15 (accuracy/robustness/cybersecurity) | MEASURE-2.x, MANAGE-4.x | GPAI Art. 55 (when finding rises to systemic-risk threshold) | Reproducible-defect-with-evidence records distinct from `incident_report` (operator-facing, post-market). The §4 alignment matrix plus the v1.1 validation surface (D6) accept `finding_record` as evidence for Art. 9 risk identification and Art. 15 accuracy/robustness obligations; the per-regulation mapping templates are unchanged in v0.4. |
 | `delivery_verdict` | Art. 12 (logging), Art. 13 (transparency), Art. 14 (human oversight) | MEASURE-2.x | — | "Provider acknowledgment is not delivery" — verified delivery requires read-back. Evidence for Art. 13/14 obligations that information actually reached the system owner. |
 | `coverage_cell` | Art. 15 (continuous robustness/cybersecurity), Art. 17 (QMS continuous improvement) | MEASURE-2.x (ongoing measurement), MANAGE-3 | GPAI CoP commitment to ongoing model evaluation | Assessment-time expression of "for this subject, across this scenario set, within this time window, bound evidence is fresh and covers the cell". Cross-vendor concept for any continuous-verification product. |
 | `harness_attestation` | Art. 9, Art. 12, Art. 13, Art. 15, Art. 17 (cross-cutting) | GOVERN-1.3, MEASURE-2.x, MANAGE-1 | GPAI Art. 55 attestation | Per-state-transition signed attestation generalizing the Prove-It Doctrine. The cross-cutting integrity primitive that binds every other new record type to its evidence chain. Foundational to verifiable-evidence claims across all frameworks. |
@@ -90,9 +90,13 @@ Without that mapping, the record type would belong in `x-freddy/*`, not Core.
 The §4 cross-regulation alignment matrix in the spec is amended to add one row
 per new record type, with at minimum one regulation mapping per row. The
 matrix documents the provision mappings; the binding for these record types is
-enforced by the v1.1 validation rules (`src/acef/validation/v1_1_rules.py`, with
-the conformance corpus under `test-vectors/freddy/`), NOT by editing the general
-per-regulation mapping templates (`src/acef/templates/eu-ai-act-2024.json`,
+enforced by the v1.1 validation surface — the v1.1 JSON Schemas under
+`acef-conventions/v1.1/` for structural validity, `src/acef/validation/cross_record.py`
+for harness/delivery/causation evidence-binding, and
+`src/acef/validation/v1_1_rules.py` for the coverage-cell banned-language /
+state-class taxonomy / analysis-mode-gate rule families (conformance corpus under
+`test-vectors/freddy/`) — NOT by editing the general per-regulation mapping
+templates (`src/acef/templates/eu-ai-act-2024.json`,
 `src/acef/templates/nist-ai-rmf-1.0.json`), which are unchanged in v0.4. ACEF
 working groups review and approve the matrix mappings before v0.4 freeze.
 
