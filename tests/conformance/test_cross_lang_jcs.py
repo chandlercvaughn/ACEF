@@ -27,6 +27,7 @@ from typing import Any
 import pytest
 
 from acef.integrity import canonicalize
+from tests.conformance._crosslang import require_ts_cli
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 TS_CLI = REPO_ROOT / "packages" / "sdk-typescript" / "dist-test" / "test" / "jcs-cli.js"
@@ -42,6 +43,22 @@ _VECTORS: list[tuple[str, Any]] = [
     ("primitive-integer", 42),
     ("primitive-negative-integer", -7),
     ("primitive-zero", 0),
+    # Non-integer floats — the HARDEST part of RFC 8785 §3.2.2 (ECMAScript
+    # shortest-float serialization). Python delegates to the rfc8785 lib; TS
+    # reimplements it (encodeNumber/Number.toString). A one-ULP divergence here
+    # changes the SHA-256, so these MUST be byte-equal across the two SDKs
+    # (PhD-review finding 33 — the prior vector set had zero non-integer floats).
+    ("float-half", {"n": 1.5}),
+    ("float-tenth", {"n": 0.1}),
+    ("float-third-ish", {"n": 0.3333333333333333}),
+    ("float-negative", {"n": -2.5}),
+    ("float-negative-zero", {"n": -0.0}),
+    ("float-small", {"n": 1e-7}),
+    ("float-large", {"n": 1.23456789e21}),
+    ("float-very-small", {"n": 5e-324}),
+    ("float-max-double", {"n": 1.7976931348623157e308}),
+    ("float-mixed-array", {"vals": [0.1, 0.2, 0.3, 1.5, -7.25]}),
+    ("float-in-record-shape", {"score": 0.9216, "threshold": 0.5, "drift": -0.0125}),
     ("empty-object", {}),
     ("empty-array", []),
     ("object-key-sort-ascii", {"b": 1, "a": 2}),
@@ -80,10 +97,7 @@ _VECTORS: list[tuple[str, Any]] = [
 
 def _ts_canonicalize(value: Any) -> bytes:
     """Run the TS jcs-cli subprocess and capture raw bytes from stdout."""
-    if not TS_CLI.exists():
-        pytest.skip(
-            f"TS jcs-cli not built (run `cd packages/sdk-typescript && npm run build:test`). Looked for {TS_CLI}",
-        )
+    require_ts_cli(TS_CLI, what="TS jcs-cli")
     result = subprocess.run(
         ["node", str(TS_CLI)],
         input=json.dumps(value).encode("utf-8"),

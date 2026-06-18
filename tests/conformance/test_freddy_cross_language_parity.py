@@ -45,6 +45,7 @@ import pytest
 
 import acef
 from acef.export import export_archive
+from tests.conformance._crosslang import require_ts_cli
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 FREDDY_PASS_DIR = REPO_ROOT / "test-vectors" / "freddy" / "pass"
@@ -163,10 +164,7 @@ def test_expected_bundle_counts() -> None:
 def test_freddy_pass_bundle_archive_parity(bundle_dir: Path) -> None:
     """VAL-PARITY-002: each of the 9 Freddy pass bundles re-exports to a
     byte-equal ``.acef.tar.gz`` across the Python and TypeScript SDKs."""
-    if not TS_EXPORT_CLI.exists():
-        pytest.skip(
-            f"TS export-cli not built (run `cd packages/sdk-typescript && npm run build`). Looked for {TS_EXPORT_CLI}"
-        )
+    require_ts_cli(TS_EXPORT_CLI, what="TS export-cli")
     bundle_name = _bundle_name(bundle_dir)
     py = _python_archive(bundle_dir, bundle_name)
     ts = _ts_archive(bundle_dir, bundle_name)
@@ -178,10 +176,7 @@ def test_freddy_pass_bundle_archive_parity(bundle_dir: Path) -> None:
 def test_golden_bundle_archive_parity(bundle_dir: Path) -> None:
     """VAL-PARITY-003: each of the 6 v1.0 golden bundles re-exports to a
     byte-equal ``.acef.tar.gz`` across the Python and TypeScript SDKs."""
-    if not TS_EXPORT_CLI.exists():
-        pytest.skip(
-            f"TS export-cli not built (run `cd packages/sdk-typescript && npm run build`). Looked for {TS_EXPORT_CLI}"
-        )
+    require_ts_cli(TS_EXPORT_CLI, what="TS export-cli")
     bundle_name = _bundle_name(bundle_dir)
     py = _python_archive(bundle_dir, bundle_name)
     ts = _ts_archive(bundle_dir, bundle_name)

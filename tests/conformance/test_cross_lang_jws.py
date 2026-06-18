@@ -25,16 +25,16 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec, rsa
 
 from acef.signing import create_detached_jws, verify_detached_jws
+from tests.conformance._crosslang import require_ts_cli
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 TS_CLI = REPO_ROOT / "packages" / "sdk-typescript" / "dist-test" / "test" / "jws-cli.js"
 
 
 def _skip_if_no_ts() -> None:
-    if not TS_CLI.exists():
-        pytest.skip(
-            f"TS jws-cli not built (run `cd packages/sdk-typescript && npm run build:test`). Looked for {TS_CLI}",
-        )
+    # FAIL (not silently skip) when the TS driver is absent, unless explicitly
+    # opted out (ACEF_SKIP_CROSSLANG=1) — see _crosslang.require_ts_cli (finding 32).
+    require_ts_cli(TS_CLI, what="TS jws-cli")
 
 
 def _write_pem(tmpdir: Path, name: str, data: bytes) -> Path:
