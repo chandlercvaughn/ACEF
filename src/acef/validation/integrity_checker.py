@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import base64
 import json
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -511,3 +512,157 @@ def get_signature_info(
         count += 1
 
     return count, algorithms
+
+
+@dataclass(frozen=True)
+class SignatureBinding:
+    """The identity-binding status of one detached JWS over ``content-hashes.json``.
+
+    Closes PhD-review finding 2 (spec Appendix D.3): a valid signature proves
+    *someone* signed the hash domain, not that the signer is the manifest's
+    declared producer. This record makes the distinction explicit and reportable.
+
+    Attributes:
+        binding_level: ``"anchored"`` (x5c chain validates to a configured trust
+            anchor — identity is vouched to the extent the anchor vouches for the
+            subject), ``"self-attested"`` (cryptographically valid but jwk-only,
+            x5c without configured anchors, or an x5c that does not chain to one —
+            integrity holds, attribution does NOT), or ``"unverified"`` (the
+            signature does not cryptographically verify the content-hashes bytes).
+        algorithm: the JWS ``alg`` (``RS256``/``ES256``), or ``None`` if unparseable.
+        signer_subject: the leaf certificate subject DN (RFC 4514) when an ``x5c``
+            is present; ``None`` for jwk-only signatures (no asserted identity).
+        matches_expected_producer: ``True``/``False`` when an ``expected_producer``
+            was supplied AND the signature is ``anchored`` with a subject — whether
+            the configured expected producer string occurs in the subject DN
+            (case-insensitive). ``None`` when no expectation was configured or the
+            signature is not an anchored, subject-bearing signature.
+        signature_file: the ``signatures/*.jws`` filename (empty for the pure
+            ``classify_signature_binding`` helper).
+    """
+
+    binding_level: str
+    algorithm: str | None
+    signer_subject: str | None
+    matches_expected_producer: bool | None
+    signature_file: str = ""
+
+
+def classify_signature_binding(
+    jws_str: str,
+    canonical_input: bytes,
+    *,
+    manifest_timestamp: str | None = None,
+    trust_anchors: list[Certificate] | None = None,
+    expected_producer: str | None = None,
+) -> SignatureBinding:
+    """Classify a single detached JWS's identity binding (spec Appendix D.3).
+
+    Pure function over the JWS string and the canonical ``content-hashes.json``
+    bytes — no filesystem access — so it is directly testable. ``signature_bindings``
+    is the bundle-directory wrapper. Determining the level NEVER weakens
+    verification: a signature is ``anchored`` only if it cryptographically verifies
+    AND its x5c chain terminates at a configured trust anchor.
+    """
+    from acef.errors import ACEFSigningError
+    from acef.signing import _base64url_decode, _parse_x5c_chain, verify_detached_jws
+
+    # Parse the protected header (first dot-separated segment).
+    try:
+        header = json.loads(_base64url_decode(jws_str.split(".", 1)[0]))
+    except (ValueError, json.JSONDecodeError, UnicodeDecodeError, IndexError):
+        return SignatureBinding("unverified", None, None, None)
+    alg = header.get("alg") if isinstance(header, dict) else None
+    alg = alg if isinstance(alg, str) else None
+
+    # Surface the leaf certificate subject (the asserted identity) when present.
+    signer_subject: str | None = None
+    x5c = header.get("x5c") if isinstance(header, dict) else None
+    if isinstance(x5c, list) and x5c:
+        try:
+            signer_subject = _parse_x5c_chain(x5c)[0].subject.rfc4514_string()
+        except (ACEFSigningError, ValueError, IndexError):
+            signer_subject = None
+
+    # Cryptographic validity is necessary for any non-"unverified" level. This is
+    # the SAME check the integrity phase runs; we never accept a binding the
+    # integrity phase would reject.
+    try:
+        verify_detached_jws(jws_str, canonical_input, manifest_timestamp=manifest_timestamp, trust_anchors=None)
+    except ACEFSigningError:
+        return SignatureBinding("unverified", alg, signer_subject, None)
+
+    # Anchored iff it ALSO verifies under the configured trust anchors with an x5c.
+    binding_level = "self-attested"
+    if isinstance(x5c, list) and x5c and trust_anchors:
+        try:
+            verify_detached_jws(
+                jws_str, canonical_input, manifest_timestamp=manifest_timestamp, trust_anchors=trust_anchors
+            )
+            binding_level = "anchored"
+        except ACEFSigningError:
+            binding_level = "self-attested"
+
+    matches: bool | None = None
+    if expected_producer is not None and binding_level == "anchored" and signer_subject is not None:
+        matches = expected_producer.casefold() in signer_subject.casefold()
+
+    return SignatureBinding(binding_level, alg, signer_subject, matches)
+
+
+def signature_bindings(
+    bundle_dir: Path,
+    *,
+    trust_anchors: list[Certificate] | None = None,
+    expected_producer: str | None = None,
+) -> list[SignatureBinding]:
+    """Report the identity binding of every ``signatures/*.jws`` in a bundle.
+
+    The reportable counterpart to the boolean ``get_signature_info`` count: it tells
+    a consumer not just *whether* a bundle is signed but *by whom and how strongly*
+    (anchored vs self-attested vs unverified), and — when an ``expected_producer`` is
+    configured — flags an anchored signature whose subject does not match it (the
+    "valid signature, wrong signer" case, spec Appendix D.3). Returns an empty list
+    when no ``signatures/`` directory or ``content-hashes.json`` is present.
+    """
+    sig_dir = bundle_dir / "signatures"
+    content_hashes_path = bundle_dir / "hashes" / "content-hashes.json"
+    if not sig_dir.exists() or not content_hashes_path.exists():
+        return []
+
+    from acef.integrity import canonicalize_json_str
+
+    try:
+        canonical_input = canonicalize_json_str(content_hashes_path.read_text(encoding="utf-8"))
+    except (ValueError, UnicodeDecodeError, OSError):
+        return []
+
+    manifest_timestamp: str | None = None
+    manifest_path = bundle_dir / "acef-manifest.json"
+    if manifest_path.exists():
+        try:
+            mdata = json.loads(manifest_path.read_text(encoding="utf-8"))
+            _md = mdata.get("metadata") if isinstance(mdata, dict) else None
+            _ts = _md.get("timestamp") if isinstance(_md, dict) else None
+            manifest_timestamp = _ts if isinstance(_ts, str) else None
+        except (json.JSONDecodeError, UnicodeDecodeError, OSError):
+            manifest_timestamp = None
+
+    bindings: list[SignatureBinding] = []
+    for sig_file in sorted(sig_dir.glob("*.jws")):
+        try:
+            jws_str = sig_file.read_text(encoding="utf-8").strip()
+        except (UnicodeDecodeError, OSError):
+            bindings.append(SignatureBinding("unverified", None, None, None, sig_file.name))
+            continue
+        b = classify_signature_binding(
+            jws_str,
+            canonical_input,
+            manifest_timestamp=manifest_timestamp,
+            trust_anchors=trust_anchors,
+            expected_producer=expected_producer,
+        )
+        bindings.append(
+            SignatureBinding(b.binding_level, b.algorithm, b.signer_subject, b.matches_expected_producer, sig_file.name)
+        )
+    return bindings
