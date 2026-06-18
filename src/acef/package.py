@@ -1174,7 +1174,13 @@ def _atomic_package_mutation(
     @_wraps(method)
     def _wrapper(self: Package, *args: _P.args, **kwargs: _P.kwargs) -> _R:
         saved_core = self._versioning.core_version
-        saved_profiles = list(self._profiles)
+        # DEEP-copy the profiles (roborev on 7dfe76e): _declare_art73_profile()
+        # self-heals an EXISTING ProfileEntry by rewriting its applicable_provisions
+        # IN PLACE, so a shallow list copy would restore the list but leave that
+        # object mutated on rollback. model_copy(deep=True) snapshots each entry's
+        # mutable fields. Records are only ever APPENDED (never mutated in place),
+        # so a shallow list copy restores them correctly.
+        saved_profiles = [p.model_copy(deep=True) for p in self._profiles]
         saved_records = list(self._records)
         try:
             return method(self, *args, **kwargs)

@@ -675,3 +675,31 @@ class TestIncidentBuilderAtomicity:
             )
         assert pkg._versioning.core_version == "1.0.0", "core_version mutated despite a failed incident_card"
         assert not any(p.profile_id == _ART73_PROFILE_ID for p in pkg._profiles), "Art.73 profile declared on failure"
+
+    def test_failure_after_self_heal_restores_stale_art73_profile_provisions(self) -> None:
+        """roborev on 7dfe76e: _declare_art73_profile() self-heals an EXISTING
+        Art.73 profile by rewriting applicable_provisions IN PLACE. A shallow
+        list snapshot would restore the list but leave that object mutated. With
+        a STALE pre-seeded profile + a post-declaration failure, the deep-copy
+        rollback must restore the original (stale) applicable_provisions."""
+        from acef.package import _ART73_PROFILE_ID
+        from acef.redaction import RedactionPolicy
+
+        pkg = _pkg_no_policy()
+        pkg.add_profile(_ART73_PROFILE_ID, provisions=["art-73"])  # legacy stale placeholder
+        stale = next(p for p in pkg._profiles if p.profile_id == _ART73_PROFILE_ID)
+        assert stale.applicable_provisions == ["art-73"]
+
+        with pytest.raises(ValueError):
+            pkg.report_incident(
+                public_incident_id=_PUBLIC_ID,
+                harm_core=dict(_HARM_CORE),
+                incident_type="operational_failure",
+                description="self-heal then fail",
+                awareness_date=_AWARENESS,  # valid — so _declare_art73_profile runs + self-heals
+                eu_ai_act_facts={"serious_incident_triggers": ["3.49.a"], "widespread": False, "death_involved": True},
+                redaction_policy=RedactionPolicy(version="1.0.0"),
+                redaction_policy_version="9.9.9",  # mismatch AFTER the self-heal -> ValueError
+            )
+        restored = next(p for p in pkg._profiles if p.profile_id == _ART73_PROFILE_ID)
+        assert restored.applicable_provisions == ["art-73"], "in-place profile self-heal not rolled back on failure"

@@ -396,7 +396,7 @@
     </div>
     <div class="scenario" data-stop="4" onclick="activateScenario(this, 4)">
       <div class="s-label">Missing Risk Register</div>
-      <div class="s-desc">A fail-severity rule found no risk_register record. Caught at Step 4.</div>
+      <div class="s-desc">A fail-severity required-evidence rule found no risk_register record (this is how ACEF-040 "required evidence missing" is realized). Caught at Step 4.</div>
       <div class="s-result" style="color: #fca5a5;">&#x2192; NOT_SATISFIED</div>
     </div>
     <div class="scenario" data-stop="3" onclick="activateScenario(this, 3)">
@@ -447,7 +447,7 @@
     <div class="step-num">1</div>
     <div class="step-body">
       <div class="step-question">Did a fatal error occur during evaluation?</div>
-      <div class="step-detail">ACEF-040 through ACEF-045: invalid JSON pointer, duplicate rule_id, bad regex, etc. The engine itself broke — it can't produce a reliable result.</div>
+      <div class="step-detail">ACEF-043 through ACEF-046: invalid JSON pointer, duplicate rule_id, bad regex, unknown comparison operator, etc. The engine itself broke — it can't produce a reliable result. (ACEF-040 "required evidence missing" is NOT here — it is a fail-severity rule FAILURE, not an engine error, and rolls up to NOT_SATISFIED.)</div>
     </div>
     <div class="step-outcome outcome-not-assessed">NOT_<br>ASSESSED</div>
   </div>
