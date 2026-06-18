@@ -55,7 +55,14 @@ def test_spec_documents_evaluation_instant_producer_control_caveat() -> None:
     spec = (Path(__file__).resolve().parents[2] / "planning" / "ACEF-Spec-Outline-v0.1.md").read_text(encoding="utf-8")
     idx = spec.find("Default when the caller omits `evaluation_instant`")
     assert idx != -1, "spec must document the omitted-caller evaluation_instant default"
-    section = spec[idx : idx + 1500]
+    section = spec[idx : idx + 2400]
     assert "producer-controlled" in section, "must flag metadata.timestamp as producer-controlled"
     assert "pass an explicit `evaluation_instant`" in section, "must direct consumers to pass an explicit instant"
     assert "D.4" in section, "must cross-reference the Appendix D.4 freshness non-goal"
+    # The reproducibility requirement is carved out for non-evaluated structural-
+    # error stubs (no manifest / non-string metadata.timestamp), where no
+    # date-sensitive rule runs and the recorded instant is a non-gating placeholder.
+    assert "Carve-out" in section and "non-gating placeholder" in section, (
+        "spec must narrow the no-wall-clock requirement to the EVALUATED path "
+        "(structural-error stubs run no date-sensitive rules)"
+    )
