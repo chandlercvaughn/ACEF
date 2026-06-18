@@ -452,3 +452,30 @@ class TestF38ACEF040Realization:
         finally:
             template_file.unlink(missing_ok=True)
             load_template.cache_clear()
+
+
+class TestF29ProvisionEffectiveReconciliation:
+    """F29: provision-not-yet-effective has TWO mechanisms — the engine-level
+    unconditional EXCLUSION (the live primary path) and the REDUNDANT
+    if_provision_effective DSL condition (frozen-schema-supported + unit-tested).
+    The spec must describe the engine-level exclusion as the mechanism, not
+    present the DSL condition as the sole owner; and the DSL condition must remain
+    defined (it is NOT removed — that would break the frozen schema + tests)."""
+
+    _REPO = Path(__file__).resolve().parents[2]
+
+    def test_spec_reconciles_engine_exclusion_with_redundant_dsl_condition(self) -> None:
+        spec = (self._REPO / "planning" / "ACEF-Spec-Outline-v0.1.md").read_text(encoding="utf-8")
+        idx = spec.find("Provision-not-yet-effective is handled by the **engine")
+        assert idx != -1, "spec §3.7 must describe the engine-level not-yet-effective exclusion"
+        para = spec[idx : idx + 800].lower()
+        assert "excluded from evaluation" in para
+        assert "acef-032" in para
+        assert "redundant" in para and "if_provision_effective" in para
+
+    def test_if_provision_effective_remains_in_the_frozen_schema(self) -> None:
+        schema = json.loads(
+            (self._REPO / "acef-conventions" / "v1" / "template.schema.json").read_text(encoding="utf-8")
+        )
+        text = json.dumps(schema)
+        assert "if_provision_effective" in text, "the redundant condition is retained (frozen-schema contract)"

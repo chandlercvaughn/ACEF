@@ -65,6 +65,16 @@ def _check_condition(
     if condition is None:
         return True
 
+    # ``if_provision_effective`` is a valid, FROZEN-schema-supported DSL condition
+    # (acef-conventions/v1/template.schema.json) that a template author MAY set,
+    # and it is exercised directly in tests (test_rule_engine.py). For the STANDARD
+    # engine path it is REDUNDANT, not dead-but-removable (audit finding F29): the
+    # engine excludes not-yet-effective provisions from evaluation entirely
+    # (engine.py — provisions_to_evaluate drops ``not_yet_effective`` before this
+    # function runs + emits ACEF-032), so ``provision_effective`` is always True
+    # there and this branch never fires via the engine. It is retained because the
+    # schema promises it and direct rule-evaluation callers can still supply a
+    # not-yet-effective provision. Spec §3.7 documents both mechanisms.
     if condition.get("if_provision_effective") is True and not provision_effective:
         return False
 
