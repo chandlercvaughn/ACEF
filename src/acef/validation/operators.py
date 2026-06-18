@@ -495,10 +495,69 @@ def _split_top_level_alternation(segment: str) -> list[str]:
     return parts
 
 
+_HEX = frozenset("0123456789abcdefABCDEF")
+
+
+def _consume_escape(segment: str, i: int) -> tuple[bool, frozenset[str], bool, int]:
+    """Consume the escape sequence at ``segment[i] == '\\'`` exactly as the regex
+    engine compiles it, returning ``(wildcard, charset, zero_width, next_index)``.
+
+    Hex/unicode escapes are RESOLVED to their actual character (``\\x61`` -> ``a``,
+    ``\\u0061`` -> ``a``) so the adjacency scanner sees the same atom the compiled
+    engine does — otherwise ``^\\x61+\\x61+$`` would be mis-tokenized as disjoint
+    literals and ``a+a+`` would slip through (roborev HIGH on 849ac31). Escapes
+    that cannot be resolved to one concrete character (``\\cX``, octal,
+    backreferences, ``\\u{...}``, ``\\N{...}``) are treated as ``wildcard`` so they
+    overlap any neighbor (conservative). Consuming the FULL length is essential so
+    the quantifier attaches to the right atom and a class is not closed early."""
+    n = len(segment)
+    if i + 1 >= n:
+        return False, frozenset({"\\"}), False, i + 1
+    esc = segment[i + 1]
+    if esc in ("b", "B", "A", "Z"):
+        return False, frozenset(), True, i + 2  # zero-width assertion
+    if esc == "d":
+        return False, _RE_DIGITS, False, i + 2
+    if esc == "w":
+        return False, _RE_WORD, False, i + 2
+    if esc == "s":
+        return False, _RE_SPACE, False, i + 2
+    if esc in ("D", "W", "S"):
+        return True, frozenset(), False, i + 2
+    if esc == "x":
+        h = segment[i + 2 : i + 4]
+        if len(h) == 2 and all(ch in _HEX for ch in h):
+            return False, frozenset({chr(int(h, 16))}), False, i + 4
+        return True, frozenset(), False, i + 2
+    if esc == "u":
+        if i + 2 < n and segment[i + 2] == "{":  # \u{...} (u-flag form) — unresolved
+            close = segment.find("}", i + 2)
+            return True, frozenset(), False, (close + 1 if close != -1 else i + 2)
+        h = segment[i + 2 : i + 6]
+        if len(h) == 4 and all(ch in _HEX for ch in h):
+            return False, frozenset({chr(int(h, 16))}), False, i + 6
+        return True, frozenset(), False, i + 2
+    if esc == "N" and i + 2 < n and segment[i + 2] == "{":  # \N{NAME}
+        close = segment.find("}", i + 2)
+        return True, frozenset(), False, (close + 1 if close != -1 else i + 2)
+    if esc == "c" and i + 2 < n:  # \cX control escape
+        return True, frozenset(), False, i + 3
+    if esc in "01234567":  # octal escape or backreference — unresolved
+        j = i + 1
+        while j < n and j < i + 4 and segment[j] in "01234567":
+            j += 1
+        return True, frozenset(), False, j
+    if esc in "89":  # backreference
+        return True, frozenset(), False, i + 2
+    # Simple escaped literal: \. \+ \\ \/ \( … -> the literal character itself.
+    return False, frozenset({esc}), False, i + 2
+
+
 def _parse_char_class(pattern: str, i: int) -> tuple[bool, frozenset[str], int]:
     """Parse a ``[...]`` class starting at ``pattern[i]``. Returns
     ``(wildcard, members, next_index_past_])``. A negated class or one containing
-    a shorthand (``\\d`` etc.) is treated as ``wildcard=True`` (conservative)."""
+    a shorthand (``\\d`` etc.) or unresolved escape is treated as ``wildcard=True``
+    (conservative)."""
     n = len(pattern)
     j = i + 1
     negated = False
@@ -513,14 +572,18 @@ def _parse_char_class(pattern: str, i: int) -> tuple[bool, frozenset[str], int]:
         first = False
         c = pattern[j]
         if c == "\\" and j + 1 < n:
-            esc = pattern[j + 1]
-            if esc in ("d", "D", "w", "W", "s", "S"):
+            w, cset, _zw, j = _consume_escape(pattern, j)
+            if w or len(cset) != 1:
+                # A shorthand (\d) or unresolved escape (\x{bad}, \cX, octal,
+                # backref) — make the whole class conservatively wildcard. (Also
+                # covers a zero-width escape, which cannot meaningfully appear in
+                # a class; flagging wildcard is safe.)
                 shorthand = True
                 prev = None
             else:
-                members.add(esc)
-                prev = esc
-            j += 2
+                ch = next(iter(cset))
+                members.add(ch)
+                prev = ch
             continue
         if c == "-" and prev is not None and j + 1 < n and pattern[j + 1] != "]":
             hi = pattern[j + 1]
@@ -572,20 +635,7 @@ def _iter_atoms(segment: str) -> Iterator[_Atom]:
         zero_width = False
         body: str | None = None
         if c == "\\":
-            esc = segment[i + 1] if i + 1 < n else ""
-            if esc in ("b", "B", "A", "Z"):
-                zero_width = True
-            elif esc == "d":
-                charset = _RE_DIGITS
-            elif esc == "w":
-                charset = _RE_WORD
-            elif esc == "s":
-                charset = _RE_SPACE
-            elif esc in ("D", "W", "S"):
-                wildcard = True
-            else:
-                charset = frozenset({esc}) if esc else frozenset()
-            i += 2
+            wildcard, charset, zero_width, i = _consume_escape(segment, i)
         elif c == "[":
             wildcard, charset, i = _parse_char_class(segment, i)
         elif c == "(":
@@ -637,27 +687,40 @@ def _iter_atoms(segment: str) -> Iterator[_Atom]:
 
 
 def _scan_branch_adjacent(branch: str) -> bool:
-    """True if ``branch`` (one alternation branch) contains two adjacent unbounded
-    quantifiers over overlapping classes with no disjoint mandatory separator."""
-    pending: tuple[bool, frozenset[str]] | None = None
+    """True if ``branch`` (one alternation branch) contains two unbounded
+    quantifiers over overlapping classes that are *reachable* from each other —
+    i.e. with no mandatory atom of a disjoint class forced between them.
+
+    ``pending`` is the SET of unbounded-quantified classes still reachable at the
+    current position. A nullable unbounded atom (``a*``, ``a{0,}``) can match
+    empty, so it ADDS its class without dropping earlier pending ones — that is
+    what catches ``a*b*a*`` (the middle ``b*`` matches empty, leaving the two
+    ``a*`` adjacent; roborev HIGH on 849ac31). A NON-nullable unbounded atom
+    (``a+``) must consume ≥1 char, so it breaks earlier reachability and becomes
+    the sole pending class. A mandatory atom disjoint from all pending classes is
+    a real separator and clears the set (``\\d+-\\d+``)."""
+    pending: list[tuple[bool, frozenset[str]]] = []
     for atom in _iter_atoms(branch):
         if atom.body is not None and _has_adjacent_unbounded_quantifiers(atom.body):
             return True
         if atom.zero_width:
             continue
         cs = (atom.wildcard, atom.charset)
-        if pending is not None and atom.unbounded and _charsets_overlap(pending, cs):
+        if atom.unbounded and any(_charsets_overlap(p, cs) for p in pending):
             return True
         if atom.unbounded:
-            pending = cs
+            if atom.nullable:
+                pending.append(cs)  # matches empty -> earlier classes stay reachable
+            else:
+                pending = [cs]  # consumes >=1 -> earlier classes no longer reachable
         elif atom.nullable:
-            # A nullable atom (``x?``, ``x{0,m}``) can match empty, so it does NOT
-            # break adjacency between the surrounding unbounded quantifiers.
+            # A nullable BOUNDED atom (``x?``, ``x{0,m}``) can match empty: it does
+            # NOT break adjacency, and is not itself an unbounded source.
             continue
-        elif pending is not None and not _charsets_overlap(pending, cs):
-            # A MANDATORY atom whose class is disjoint from the pending unbounded
-            # one is a real separator (``\d+-\d+``) — it removes the ambiguity.
-            pending = None
+        elif pending and all(not _charsets_overlap(p, cs) for p in pending):
+            # A MANDATORY atom whose class is disjoint from EVERY pending unbounded
+            # class is a real separator — it removes the ambiguity.
+            pending = []
     return False
 
 

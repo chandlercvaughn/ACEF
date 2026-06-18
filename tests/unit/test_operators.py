@@ -325,6 +325,43 @@ class TestFieldValue:
         ):
             assert has_adjacent(good) is False, f"{good!r} is safe and must NOT be flagged as ReDoS"
 
+    def test_adjacent_quantifier_nullable_separator_bypass(self):
+        """roborev HIGH on 849ac31: a NULLABLE unbounded separator (`b*`) between
+        two overlapping unbounded quantifiers (`a*…a*`) must NOT hide the
+        adjacency — `b*` can match empty, leaving the two `a*` adjacent. The
+        detector must track ALL pending classes reachable through nullable atoms,
+        not just the most recent."""
+        from acef.validation.operators import _has_adjacent_unbounded_quantifiers as has_adjacent
+
+        for bad in (r"a*b*a*$", r"a*b*c*a*", r"a*[xy]*a*", r"\d*[a-z]*\d*"):
+            assert has_adjacent(bad) is True, f"{bad!r} hides an adjacent ReDoS behind a nullable separator"
+        # A NON-nullable disjoint separator (`b+`) genuinely separates -> safe.
+        for good in (r"a*b+a*", r"\d+-\d+"):
+            assert has_adjacent(good) is False, f"{good!r} is separated by a mandatory disjoint atom and is safe"
+
+    def test_adjacent_quantifier_escape_atom_bypass(self):
+        """roborev HIGH on 849ac31: hex/unicode escape atoms must be tokenized as
+        the engine compiles them. `^\\x61+\\x61+$` compiles to `^a+a+$` (adjacent
+        overlapping) and must be detected; a naive `\\`+char tokenizer split it
+        into disjoint literals and let it through."""
+        from acef.validation.operators import _has_adjacent_unbounded_quantifiers as has_adjacent
+
+        for bad in (r"^\x61+\x61+$", r"a+a+", r"\x61*\x61*c", r"[\x61-\x7a]+[\x61-\x7a]+"):
+            assert has_adjacent(bad) is True, f"{bad!r} compiles to an adjacent-quantifier ReDoS and must be detected"
+        # Disjoint resolved escapes separated by a mandatory atom stay safe.
+        for good in (r"\x61+-\x61+", r"\x61+\x62*z"):
+            assert has_adjacent(good) is False, f"{good!r} resolves to disjoint/separated atoms and is safe"
+
+    def test_adjacent_quantifier_escape_bypass_end_to_end(self):
+        """The escape bypass rejected through the real operator path as ACEF-045."""
+        records = [_make_record("risk_register", payload={"name": "aaaa"})]
+        with pytest.raises(ACEFEvaluationError) as exc_info:
+            op_field_value(
+                {"record_type": "risk_register", "field": "/payload/name", "op": "regex", "value": r"^\x61+\x61+$"},
+                records,
+            )
+        assert exc_info.value.code == "ACEF-045"
+
     def test_safe_separated_quantifiers_still_match(self):
         """End-to-end guard: patterns where a MANDATORY separator disjoint from the
         surrounding quantified classes breaks the ambiguity, or that carry only a
