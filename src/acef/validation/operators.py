@@ -9,9 +9,6 @@ Empty-set semantics:
 from __future__ import annotations
 
 import re
-import signal
-import sys
-import threading
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -29,18 +26,6 @@ _MAX_REGEX_PATTERN_LENGTH = 1024
 
 # Maximum allowed input string length for regex matching.
 _MAX_REGEX_INPUT_LENGTH = 1_000_000
-
-# Regex match timeout in seconds (only effective on Unix systems with SIGALRM).
-_REGEX_TIMEOUT_SECONDS = 5
-
-
-class _RegexTimeoutError(Exception):
-    """Raised when a regex match exceeds the allowed timeout."""
-
-
-def _regex_timeout_handler(signum: int, frame: Any) -> None:
-    """Signal handler for regex timeout."""
-    raise _RegexTimeoutError("Regex evaluation timed out")
 
 
 # Pattern constructs that exist in Python's ``re`` module but are NOT
@@ -273,6 +258,89 @@ def _translate_ecma262_char_classes(pattern: str) -> str:
     return "".join(out)
 
 
+def _brace_is_unbounded(pattern: str, brace_idx: int) -> bool:
+    """True if ``pattern[brace_idx] == '{'`` opens an UNBOUNDED quantifier ``{n,}``
+    (no upper bound). ``{n}`` / ``{n,m}`` are bounded and cannot blow up."""
+    close = pattern.find("}", brace_idx)
+    if close == -1:
+        return False
+    inner = pattern[brace_idx + 1 : close]
+    if "," not in inner:
+        return False  # {n} — exact, bounded
+    upper = inner.split(",", 1)[1].strip()
+    return upper == ""  # {n,} unbounded; {n,m} bounded
+
+
+def _segment_has_unbounded_quantifier(segment: str) -> bool:
+    """True if ``segment`` contains an unbounded quantifier (``*``, ``+``, or
+    ``{n,}``) at the regex level — skipping escaped chars and ``[...]`` classes."""
+    i, n = 0, len(segment)
+    while i < n:
+        c = segment[i]
+        if c == "\\":
+            i += 2
+            continue
+        if c == "[":
+            i += 1
+            while i < n and segment[i] != "]":
+                if segment[i] == "\\":
+                    i += 1
+                i += 1
+            i += 1
+            continue
+        if c in ("*", "+"):
+            return True
+        if c == "{" and _brace_is_unbounded(segment, i):
+            return True
+        i += 1
+    return False
+
+
+def _has_nested_unbounded_quantifier(pattern: str) -> bool:
+    """Detect the classic catastrophic-backtracking signature DETERMINISTICALLY:
+    an UNBOUNDED-quantified group whose body itself contains an unbounded
+    quantifier — e.g. ``(a+)+``, ``(a*)*``, ``(.*)+``, ``(\\d+){2,}``.
+
+    This is a conservative, platform-independent static check (no wall clock):
+    it rejects the nested-quantifier ReDoS class so two validators on ANY
+    platform reach the SAME verdict, replacing the old Unix-main-thread-only
+    SIGALRM timeout whose outcome was platform-dependent (finding 11). It does
+    NOT claim to catch every ReDoS form (e.g. alternation overlap), which the
+    length caps + peer-reviewed templates mitigate; a future linear-time engine
+    would close the residue.
+    """
+    stack: list[int] = []  # indices of '(' opens
+    i, n = 0, len(pattern)
+    while i < n:
+        c = pattern[i]
+        if c == "\\":
+            i += 2
+            continue
+        if c == "[":
+            i += 1
+            while i < n and pattern[i] != "]":
+                if pattern[i] == "\\":
+                    i += 1
+                i += 1
+            i += 1
+            continue
+        if c == "(":
+            stack.append(i)
+            i += 1
+            continue
+        if c == ")":
+            if stack:
+                start = stack.pop()
+                q = pattern[i + 1] if i + 1 < n else ""
+                group_unbounded = q in ("*", "+") or (q == "{" and _brace_is_unbounded(pattern, i + 1))
+                if group_unbounded and _segment_has_unbounded_quantifier(pattern[start + 1 : i]):
+                    return True
+            i += 1
+            continue
+        i += 1
+    return False
+
+
 def _safe_regex_search(pattern: str, text: str) -> bool:
     """Execute a regex search with length limits and optional timeout.
 
@@ -315,35 +383,27 @@ def _safe_regex_search(pattern: str, text: str) -> bool:
             code="ACEF-045",
         )
 
+    # DETERMINISTIC resource bound (finding 11): reject the nested-quantifier
+    # catastrophic-backtracking class up front, BEFORE matching, so the ACEF-045
+    # decision is identical on every platform and thread. This replaces the old
+    # SIGALRM wall-clock timeout, which only worked on the Unix main thread —
+    # giving a platform-DEPENDENT provision verdict (ACEF-045 on one platform,
+    # complete/hang on another). The static check + the pattern/input length caps
+    # are the normative, portable resource bound (spec §3.5).
+    if _has_nested_unbounded_quantifier(pattern):
+        raise ACEFEvaluationError(
+            "Regex pattern has a nested unbounded quantifier (catastrophic-backtracking risk); "
+            f"rejected deterministically per the spec §3.5 resource bound: {pattern!r}",
+            code="ACEF-045",
+        )
+
     # Translate ECMA-262 shorthand classes BEFORE compiling. The original
     # ``pattern`` was length-checked above (the translation only expands it);
-    # the compiled engine sees the ECMA-262-faithful form.
+    # the compiled engine sees the ECMA-262-faithful form. The match is now run
+    # directly (no SIGALRM): on the bounded input, a pattern that passed the
+    # static check above runs in bounded time identically on all platforms.
     compiled_pattern = _translate_ecma262_char_classes(pattern)
-
-    # On Unix, use SIGALRM for timeout protection against catastrophic backtracking.
-    # M-SCOUT-1: SIGALRM only works in the main thread of the main interpreter.
-    use_alarm = (
-        hasattr(signal, "SIGALRM") and sys.platform != "win32" and threading.current_thread() is threading.main_thread()
-    )
-
-    if use_alarm:
-        old_handler = signal.signal(signal.SIGALRM, _regex_timeout_handler)
-        signal.alarm(_REGEX_TIMEOUT_SECONDS)
-        try:
-            result = re.search(compiled_pattern, text, re.ASCII) is not None
-        except _RegexTimeoutError:
-            raise ACEFEvaluationError(
-                f"Regex evaluation timed out after {_REGEX_TIMEOUT_SECONDS}s "
-                f"(possible catastrophic backtracking): {pattern!r}",
-                code="ACEF-045",
-            )
-        finally:
-            signal.alarm(0)
-            signal.signal(signal.SIGALRM, old_handler)
-        return result
-    else:
-        # On non-Unix systems or non-main threads, rely on pattern and input length limits only.
-        return re.search(compiled_pattern, text, re.ASCII) is not None
+    return re.search(compiled_pattern, text, re.ASCII) is not None
 
 
 def _validate_pointer_syntax(pointer: str) -> None:

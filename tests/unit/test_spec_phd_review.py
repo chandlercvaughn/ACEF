@@ -232,6 +232,34 @@ class TestFindings26And30RelatedWork:
         assert "evaluat" in sec.lower(), "Related Work must honestly gate the research claim on evaluation"
 
 
+class TestFinding11RegexDeterminism:
+    """The regex resource bound was a Unix-main-thread-only SIGALRM timeout — a
+    platform-dependent provision verdict. The spec must mandate a DETERMINISTIC,
+    platform-independent bound (static nested-quantifier rejection + caps)."""
+
+    def test_spec_mandates_a_deterministic_not_wallclock_bound(self) -> None:
+        text = _spec_text()
+        idx = text.find("Deterministic resource bound")
+        assert idx != -1, "§3.5 must mandate a deterministic regex resource bound"
+        note = text[idx : idx + 1400].lower()
+        assert "platform-independent" in note or "platform independent" in note
+        assert "not a wall-clock timeout" in note or "not a wall clock" in note, (
+            "the bound must explicitly reject a wall-clock timeout (the non-determinism source)"
+        )
+        assert "nested" in note and "quantifier" in note, "the static nested-quantifier rejection must be specified"
+
+    def test_implementation_has_no_wallclock_regex_timeout(self) -> None:
+        # The SIGALRM MACHINERY (the platform-dependent path) must be gone — the
+        # word may still appear in an explanatory comment, but the code must not
+        # import/use signal-based timeouts.
+        src = (_REPO_ROOT / "src" / "acef" / "validation" / "operators.py").read_text(encoding="utf-8")
+        assert "import signal" not in src, "operators.py must not import signal (the platform-dependent timeout)"
+        assert "signal.alarm" not in src and "signal.signal" not in src, (
+            "operators.py must not use signal.alarm/SIGALRM for a wall-clock regex timeout"
+        )
+        assert "_has_nested_unbounded_quantifier" in src, "operators.py must use the deterministic static check"
+
+
 class TestFinding29InteropHonesty:
     """The spec asserted shipped interop it does not implement: 'W3C PROV-compatible
     entity model', 'wraps C2PA manifests'. No PROV/C2PA/SBOM serializer exists. The

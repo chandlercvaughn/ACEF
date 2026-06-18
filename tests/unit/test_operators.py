@@ -233,6 +233,34 @@ class TestFieldValue:
             )
         assert exc_info.value.code == "ACEF-045"
 
+    def test_catastrophic_backtracking_pattern_rejected_deterministically(self):
+        """PhD-review finding 11: a catastrophic-backtracking pattern previously
+        raised ACEF-045 ONLY on Unix-main-thread (SIGALRM) and hung/completed
+        elsewhere — a platform-dependent provision verdict. A nested unbounded
+        quantifier is now rejected by a DETERMINISTIC static check (ACEF-045) on
+        every platform, FAST (no 5s wall-clock timeout)."""
+        import time
+
+        records = [_make_record("risk_register", payload={"name": "aaaaaaaaaaaaaaaaaaaaaaaa!"})]
+        for pat in (r"(a+)+$", r"(a*)*$", r"(.*)+b", r"(\d+)+x"):
+            t0 = time.monotonic()
+            with pytest.raises(ACEFEvaluationError) as exc_info:
+                op_field_value(
+                    {"record_type": "risk_register", "field": "/payload/name", "op": "regex", "value": pat}, records
+                )
+            assert exc_info.value.code == "ACEF-045", f"{pat!r} must be ACEF-045"
+            # Deterministic static rejection — NOT a 5s wall-clock timeout.
+            assert time.monotonic() - t0 < 1.0, f"{pat!r} must be rejected statically/fast, not via a timeout"
+
+    def test_safe_quantified_group_still_matches(self):
+        """A non-nested quantified group (e.g. (ab)+) is SAFE and must still match —
+        the static check rejects only NESTED unbounded quantifiers, not all groups."""
+        records = [_make_record("risk_register", payload={"name": "abababab"})]
+        passed, _ = op_field_value(
+            {"record_type": "risk_register", "field": "/payload/name", "op": "regex", "value": r"^(ab)+$"}, records
+        )
+        assert passed
+
     def test_unknown_op_raises_acef_046(self):
         """F13: a typo'd comparison operator must raise ACEF-046, not silently
         FALSE-FAIL the rule. Before the fix _compare's fallthrough returned False."""
