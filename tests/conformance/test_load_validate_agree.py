@@ -191,6 +191,21 @@ def _diag_codes(structural_errors: list[dict[str, Any]]) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
+def test_banned_verifier_classes_alignment() -> None:
+    """F43: the loader (``load_rejections._BANNED_VERIFIER_CLASSES``) and the
+    validator (``cross_record._BANNED_VERIFIER_CLASSES``) carry DUPLICATED banned
+    verifier-class lists, with a comment asserting they 'stay aligned' — but no
+    test actually compared them (this file's ACEF-070 cases use a HARD-CODED
+    ['persona','llm']). A future addition to one module but not the other would
+    silently diverge load-vs-validate behavior. Enforce the invariant directly."""
+    from acef.load_rejections import _BANNED_VERIFIER_CLASSES as LOADER_BANNED
+    from acef.validation.cross_record import _BANNED_VERIFIER_CLASSES as VALIDATOR_BANNED
+
+    assert set(LOADER_BANNED) == set(VALIDATOR_BANNED), (
+        f"banned verifier-class lists diverged: loader={set(LOADER_BANNED)} validator={set(VALIDATOR_BANNED)}"
+    )
+
+
 @pytest.mark.parametrize("verifier_class", ["persona", "llm"])
 def test_load_validate_agree_acef_070(
     tmp_path: Path,
