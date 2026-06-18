@@ -1071,10 +1071,14 @@ def _evaluate_profiles(
             nye_per_subject = [p for p in nye_provisions if p.evaluation_scope != "package"]
 
             # Package-scoped not-yet-effective: one summary, empty subject_scope.
+            # Passing ``provisions=[prov]`` also covers a RULE-LESS not-yet-effective
+            # provision: ``_synthesize_skipped`` returns no results for it, so it
+            # surfaces NOT_ASSESSED via the §3.7 step-1 no-rules backfill instead of
+            # vanishing. A rule-bearing provision still gets its SKIPPED summary from
+            # the synthesized results (it is not in the rule-less set — no
+            # double-count).
             for prov in nye_package:
-                skipped_results = _synthesize_skipped(prov, [])
-                if skipped_results:
-                    _collect_results(assessment, skipped_results, profile_id, records)
+                _collect_results(assessment, _synthesize_skipped(prov, []), profile_id, records, provisions=[prov])
 
             # Per-subject not-yet-effective: one summary PER applicable subject,
             # each scoped to that subject (mirrors the effective per-subject
@@ -1091,20 +1095,19 @@ def _evaluate_profiles(
                         for prov in nye_per_subject:
                             if prov.applicable_to and risk_class and risk_class not in prov.applicable_to:
                                 continue
-                            skipped_results = _synthesize_skipped(prov, [subject_id])
-                            if skipped_results:
-                                _collect_results(
-                                    assessment,
-                                    skipped_results,
-                                    profile_id,
-                                    records,
-                                    subject_scope=[subject_id],
-                                )
+                            _collect_results(
+                                assessment,
+                                _synthesize_skipped(prov, [subject_id]),
+                                profile_id,
+                                records,
+                                subject_scope=[subject_id],
+                                provisions=[prov],
+                            )
                 else:
                     for prov in nye_per_subject:
-                        skipped_results = _synthesize_skipped(prov, [])
-                        if skipped_results:
-                            _collect_results(assessment, skipped_results, profile_id, records)
+                        _collect_results(
+                            assessment, _synthesize_skipped(prov, []), profile_id, records, provisions=[prov]
+                        )
 
         # Exclude not-yet-effective provisions from further evaluation.
         provisions_to_evaluate = [p for p in provisions_to_evaluate if p.provision_id not in not_yet_effective]

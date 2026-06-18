@@ -690,3 +690,60 @@ class TestRulelessProvisionEndToEnd:
             if template_path.exists():
                 template_path.unlink()
             load_template.cache_clear()
+
+    def test_ruleless_not_yet_effective_provision_surfaces_not_assessed(self, tmp_dir: Path) -> None:
+        """roborev Medium on 11abc69: a provision that is BOTH rule-less AND
+        not-yet-effective must still surface (NOT_ASSESSED), not vanish. The NYE
+        synthesis produces no SKIPPED results for a rule-less provision, and it is
+        then excluded from further evaluation — so without the §3.7 step-1 backfill
+        in the NYE branch it disappears entirely."""
+        from acef.models.enums import ProvisionOutcome
+        from acef.package import Package as Pkg
+        from acef.templates.models import Provision, Template
+        from acef.templates.registry import load_template
+        from acef.validation.engine import validate_bundle
+
+        tid = "conformance-ruleless-future-effective"
+        template = Template(
+            template_id=tid,
+            template_name="Conformance Rule-less Future-Effective Provision Test",
+            version="1.0.0",
+            provisions=[
+                Provision(
+                    provision_id="ruleless-future-01",
+                    provision_name="Rule-less Future-Effective Package Provision",
+                    evaluation_scope="package",
+                    effective_date="2099-01-01",
+                    # no rules
+                ),
+            ],
+        )
+        template_path = Path(__file__).parent.parent.parent / "src" / "acef" / "templates" / f"{tid}.json"
+        template_path.write_text(template.model_dump_json(indent=2), encoding="utf-8")
+        try:
+            load_template.cache_clear()
+            pkg = Pkg(producer={"name": "ruleless-future", "version": "1.0.0"})
+            sys1 = pkg.add_subject("ai_system", name="System A", risk_classification="high-risk", modalities=["text"])
+            pkg.add_profile(tid, provisions=["ruleless-future-01"])
+            pkg.record(
+                "risk_register",
+                provisions=["ruleless-future-01"],
+                payload={"description": "R", "likelihood": "low", "severity": "low"},
+                obligation_role="provider",
+                entity_refs={"subject_refs": [sys1.id]},
+            )
+            bundle_dir = tmp_dir / "ruleless_future"
+            pkg.export(str(bundle_dir))
+            # Evaluate BEFORE the future effective_date.
+            assessment = validate_bundle(bundle_dir, profiles=[tid], evaluation_instant="2026-01-01T00:00:00Z")
+
+            summaries = [s for s in assessment.provision_summary if s.provision_id == "ruleless-future-01"]
+            assert len(summaries) == 1, (
+                f"Rule-less not-yet-effective provision must surface exactly one summary, got {len(summaries)} "
+                f"(provision_ids: {[s.provision_id for s in assessment.provision_summary]})"
+            )
+            assert summaries[0].provision_outcome == ProvisionOutcome.NOT_ASSESSED
+        finally:
+            if template_path.exists():
+                template_path.unlink()
+            load_template.cache_clear()
