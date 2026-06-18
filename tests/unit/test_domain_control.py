@@ -1060,10 +1060,12 @@ class TestIPPinnedHTTPSConnection:
             conn.connect()
         assert attempts == ["93.184.216.34", "93.184.216.35"], "should try all validated IPs in order"
 
-    def test_connect_defers_to_super_when_proxy_tunnel_configured(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """roborev Medium on e6d4bd8: with a proxy (_tunnel_host set) the proxy
-        resolves the origin — IP pinning must NOT apply; defer to the standard
-        proxy-aware connect instead of pinning the origin IP on the proxy port."""
+    def test_connect_fails_closed_under_proxy_tunnel(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """roborev High on 59cb4bb: deferring to the proxy-aware super().connect()
+        under a tunnel let the PROXY resolve the origin, bypassing the pre-validated
+        public-IP pin and reopening the DNS-rebinding / internal-network SSRF case in
+        proxy environments. Proxies are DISABLED for this verifier, so a configured
+        tunnel host must FAIL CLOSED — never delegate to the proxy, never connect."""
         from acef.domain_control import _IPPinnedHTTPSConnection
 
         called = {"super": False, "create_connection": False}
@@ -1076,11 +1078,116 @@ class TestIPPinnedHTTPSConnection:
             raise OSError("pinned path must not run under a proxy")
 
         monkeypatch.setattr(socket, "create_connection", _fake_create_connection)
-        # Patch the PARENT connect so we can observe the defer without real network.
         import http.client
 
         monkeypatch.setattr(http.client.HTTPSConnection, "connect", _fake_super_connect)
         conn = _IPPinnedHTTPSConnection("example.com", _pinned_ips=["93.184.216.34"])
         conn._tunnel_host = "example.com"  # simulate a configured proxy
-        conn.connect()
-        assert called["super"] is True and called["create_connection"] is False
+        with pytest.raises(OSError, match="proxy tunneling is disabled"):
+            conn.connect()
+        assert called["super"] is False, "must NOT delegate to the proxy-aware connect (SSRF)"
+        assert called["create_connection"] is False, "must NOT connect under a proxy tunnel"
+
+    def test_connect_enforces_a_global_deadline_across_blackholed_ips(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """roborev Medium on 59cb4bb: a domain returning many blackholed addresses
+        must not amplify one verification to len(ips)×timeout. A single global
+        deadline bounds the TOTAL attempts; with a fake clock that each attempt
+        advances by 0.2 s and a 0.5 s budget, exactly 3 attempts fit (0.0/0.2/0.4),
+        not all 20 — the pre-fix loop would have tried every address."""
+        from acef.domain_control import _IPPinnedHTTPSConnection
+
+        clock = {"t": 0.0}
+        attempts: list[str] = []
+
+        def _fake_monotonic() -> float:
+            return clock["t"]
+
+        def _fake_create_connection(address: tuple, timeout: object = None) -> object:
+            attempts.append(address[0])
+            clock["t"] += 0.2  # each attempt "consumes" 0.2 s of the budget
+            raise OSError("blackholed")
+
+        monkeypatch.setattr("acef.domain_control._time.monotonic", _fake_monotonic)
+        monkeypatch.setattr(socket, "create_connection", _fake_create_connection)
+        conn = _IPPinnedHTTPSConnection("example.com", _pinned_ips=[f"93.184.216.{i}" for i in range(1, 21)])
+        conn.timeout = 0.5
+        with pytest.raises(OSError):
+            conn.connect()
+        assert len(attempts) == 3, f"global deadline must bound attempts, got {len(attempts)}"
+
+
+class TestWellKnownFetcherProxyAndAmplificationGuards:
+    """roborev on 59cb4bb: the fetcher DISABLES environment proxies (a proxy would
+    resolve the origin and bypass the IP pin — SSRF), and DEDUPES + CAPS the resolved
+    address set it pins (so a long blackholed A/AAAA set cannot amplify connect
+    timeouts)."""
+
+    _URL = "https://attacker.example/.well-known/acef-incident-challenge"
+
+    @staticmethod
+    def _stub_addrs(monkeypatch: pytest.MonkeyPatch, ips: list[str]) -> None:
+        def _fake_getaddrinfo(host: object, port: object, *a: object, **k: object) -> list[tuple]:
+            return [(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", (ip, 443)) for ip in ips]
+
+        monkeypatch.setattr(socket, "getaddrinfo", _fake_getaddrinfo)
+
+    class _FakeResp:
+        status = 200
+        headers = {"Content-Type": "text/plain", "Content-Length": "5"}
+
+        def read(self, _n: int) -> bytes:
+            return b"proof"
+
+        def __enter__(self) -> Any:
+            return self
+
+        def __exit__(self, *a: object) -> bool:
+            return False
+
+    class _FakeOpener:
+        def open(self, _request: object, timeout: int = 5) -> Any:
+            return TestWellKnownFetcherProxyAndAmplificationGuards._FakeResp()
+
+    def test_fetcher_disables_environment_proxies(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import urllib.request
+
+        self._stub_addrs(monkeypatch, ["93.184.216.34"])
+        captured: dict[str, tuple] = {}
+
+        def _fake_build_opener(*handlers: object) -> object:
+            captured["handlers"] = handlers
+            return self._FakeOpener()
+
+        monkeypatch.setattr("acef.domain_control._urllib_request.build_opener", _fake_build_opener)
+        # An attacker-set environment proxy must NOT be honored by this security verifier.
+        monkeypatch.setenv("HTTPS_PROXY", "http://attacker-proxy.example:8080")
+        monkeypatch.setenv("https_proxy", "http://attacker-proxy.example:8080")
+        self._default_fetch()
+        proxy_handlers = [h for h in captured["handlers"] if isinstance(h, urllib.request.ProxyHandler)]
+        assert proxy_handlers, "fetcher must install an explicit ProxyHandler to disable env proxies"
+        assert all(h.proxies == {} for h in proxy_handlers), "the ProxyHandler must carry NO proxies"
+
+    def test_fetcher_dedupes_and_caps_pinned_ips(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from acef.domain_control import _MAX_PINNED_IPS, _IPPinnedHTTPSHandler
+
+        # 20 distinct public IPs + duplicates — the pre-fix code pinned all 21.
+        ips = [f"93.184.216.{i}" for i in range(1, 21)] + ["93.184.216.1", "93.184.216.2"]
+        self._stub_addrs(monkeypatch, ips)
+        captured: dict[str, list[str]] = {}
+
+        def _fake_build_opener(*handlers: object) -> object:
+            for h in handlers:
+                if isinstance(h, _IPPinnedHTTPSHandler):
+                    captured["pinned"] = list(h._pinned_ips)
+            return self._FakeOpener()
+
+        monkeypatch.setattr("acef.domain_control._urllib_request.build_opener", _fake_build_opener)
+        self._default_fetch()
+        pinned = captured["pinned"]
+        assert len(pinned) <= _MAX_PINNED_IPS, f"pinned set must be capped at {_MAX_PINNED_IPS}, got {len(pinned)}"
+        assert len(pinned) == len(set(pinned)), "pinned set must be deduplicated"
+
+    def _default_fetch(self) -> None:
+        resp = _default_http_fetcher(self._URL)
+        # The fake opener returns a 200 "proof"; we only assert the guard wiring above.
+        assert resp.status in (0, 200)

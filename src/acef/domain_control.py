@@ -97,6 +97,7 @@ import http.client as _http_client
 import ipaddress
 import json
 import socket as _socket
+import time as _time
 import urllib.error as _urllib_error
 import urllib.parse as _urllib_parse
 import urllib.request as _urllib_request
@@ -413,6 +414,20 @@ def _is_internal_ip(ip_str: str) -> bool:
     )
 
 
+#: Maximum number of resolved addresses the pinned connection will ATTEMPT. An
+#: attacker-controlled assigner domain can return an arbitrarily long A/AAAA set of
+#: blackholed public addresses; without a cap each one would consume a full connect
+#: timeout, amplifying a single verification to ``len(addrs)×timeout`` (roborev
+#: Medium on 59cb4bb). 8 comfortably covers a legitimate dual-stack host with a few
+#: spares while bounding the attempt count. The fetcher dedupes before capping.
+_MAX_PINNED_IPS = 8
+
+#: Fallback TOTAL connect budget (seconds) when the connection carries no explicit
+#: timeout (``socket._GLOBAL_DEFAULT_TIMEOUT`` sentinel / ``None``). The fetcher
+#: always sets a 5 s ``opener.open`` timeout, so this is defense in depth.
+_WELL_KNOWN_CONNECT_BUDGET_S = 5.0
+
+
 class _IPPinnedHTTPSConnection(_http_client.HTTPSConnection):
     """HTTPSConnection that connects to a PRE-VALIDATED IP while presenting the
     original hostname for TLS SNI + certificate validation.
@@ -430,24 +445,34 @@ class _IPPinnedHTTPSConnection(_http_client.HTTPSConnection):
         self._pinned_ips = _pinned_ips
 
     def connect(self) -> None:
-        # A proxy (e.g. HTTPS_PROXY) is configured: urllib sets host/port to the
-        # PROXY and stores the origin in ``_tunnel_host`` — the proxy resolves the
-        # origin, so origin-IP pinning does not apply. Defer to the standard
-        # proxy-aware connect (roborev Medium on e6d4bd8 — pinning would otherwise
-        # connect to the origin IP on the proxy port and skip CONNECT).
+        # A proxy (e.g. HTTPS_PROXY) would set ``_tunnel_host`` and make urllib CONNECT
+        # to the PROXY, letting it resolve the origin — which bypasses the pre-validated
+        # public-IP pin and reopens the DNS-rebinding / internal-network SSRF hole in
+        # proxy environments (roborev High on 59cb4bb). The fetcher DISABLES proxies for
+        # this security verifier (``ProxyHandler({})``), so a tunnel host must never be
+        # set; if one somehow is, FAIL CLOSED rather than delegate to the proxy.
         if getattr(self, "_tunnel_host", None):
-            super().connect()
-            return
-        # Try EVERY validated address in order (roborev Low on e6d4bd8 — pinning
-        # only the first would fail a valid domain whose first address is
-        # transiently unreachable while another validated one would succeed),
-        # skipping any internal IP (defense in depth).
+            raise OSError("proxy tunneling is disabled for the domain-control verifier (SSRF guard)")
+        # A SINGLE global deadline bounds the TOTAL connect time across all pinned IPs:
+        # without it, N blackholed addresses each consuming the full per-attempt timeout
+        # amplify one verification to N×timeout (roborev Medium on 59cb4bb). The pinned
+        # set is also deduped + capped (``_MAX_PINNED_IPS``) upstream in the fetcher.
+        # Try EVERY validated address in order within the budget (roborev Low on e6d4bd8
+        # — a domain whose first address is transiently unreachable must still succeed on
+        # another validated one), skipping any internal IP (defense in depth).
+        budget = (
+            self.timeout if isinstance(self.timeout, int | float) and self.timeout > 0 else _WELL_KNOWN_CONNECT_BUDGET_S
+        )
+        deadline = _time.monotonic() + budget
         last_exc: OSError | None = None
         for ip in self._pinned_ips:
             if _is_internal_ip(ip):
                 continue
+            remaining = deadline - _time.monotonic()
+            if remaining <= 0:
+                break
             try:
-                sock = _socket.create_connection((ip, self.port or 443), self.timeout)
+                sock = _socket.create_connection((ip, self.port or 443), timeout=remaining)
             except OSError as exc:
                 last_exc = exc
                 continue
@@ -460,7 +485,7 @@ class _IPPinnedHTTPSConnection(_http_client.HTTPSConnection):
             return
         if last_exc is not None:
             raise last_exc
-        raise OSError("no usable (non-internal) pinned IP to connect to")
+        raise OSError("no usable (non-internal) pinned IP to connect to within the connect budget")
 
 
 class _IPPinnedHTTPSHandler(_urllib_request.HTTPSHandler):
@@ -598,20 +623,39 @@ def _default_http_fetcher(url: str, *, max_bytes: int = WELL_KNOWN_MAX_BYTES) ->
         addrinfos = _socket.getaddrinfo(parsed.hostname, 443, proto=_socket.IPPROTO_TCP)
     except _socket.gaierror as exc:
         raise DomainControlLookupError(f".well-known DNS resolution failed: {exc}") from exc
+    # Inspect EVERY returned address for an internal target (deny on ANY — a domain
+    # that resolves to a mix of public and internal addresses is a rebinding pivot),
+    # but DEDUPE and CAP the set the connection will actually attempt: getaddrinfo can
+    # return the same IP several times (one tuple per socktype), and an attacker can
+    # return an arbitrarily long blackholed A/AAAA set to amplify connect timeouts
+    # (roborev Medium on 59cb4bb). The internal-scan stays exhaustive; only the ATTEMPT
+    # list is bounded.
+    seen: set[str] = set()
     pinned_ips: list[str] = []
     for info in addrinfos:
         candidate = str(info[4][0])
         if _is_internal_ip(candidate):
             return HttpResponse(status=0, content_type="", body="")
-        pinned_ips.append(candidate)
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        if len(pinned_ips) < _MAX_PINNED_IPS:
+            pinned_ips.append(candidate)
     if not pinned_ips:
         # getaddrinfo returned no usable address → no valid proof, no fetch.
         return HttpResponse(status=0, content_type="", body="")
 
-    # Build a dedicated opener that NEVER follows redirects (SSRF guard) and PINS
-    # the HTTPS connection to the validated IP set (no connect-time re-resolution;
-    # all validated addresses are tried in order).
-    opener = _urllib_request.build_opener(_NoFollowRedirectHandler(), _IPPinnedHTTPSHandler(pinned_ips))
+    # Build a dedicated opener that NEVER follows redirects (SSRF guard), DISABLES
+    # environment proxies (an empty ``ProxyHandler`` overrides build_opener's default
+    # env-reading one — a proxy would resolve the origin itself, bypassing the pinned
+    # public-IP set and reopening SSRF in proxy environments; roborev High on 59cb4bb),
+    # and PINS the HTTPS connection to the validated IP set (no connect-time
+    # re-resolution; the deduped/capped addresses are tried in order within a budget).
+    opener = _urllib_request.build_opener(
+        _urllib_request.ProxyHandler({}),
+        _NoFollowRedirectHandler(),
+        _IPPinnedHTTPSHandler(pinned_ips),
+    )
     request = _urllib_request.Request(url, method="GET")  # noqa: S310 — https + host validated above
     try:
         with opener.open(request, timeout=5) as response:  # noqa: S310
