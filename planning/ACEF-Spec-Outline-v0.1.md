@@ -1725,7 +1725,23 @@ The conformance test suite is a collection of golden files and test cases that d
 | **Deterministic sharding** | Shard splitting follows "earlier of 100k records or 256 MB" rule; record ordering is timestamp-ascending with record_id sub-sort |
 | **Bundle identity (over the unpacked tree)** | The bundle digest (SHA-256 of RFC 8785-canonicalized `content-hashes.json`) recomputed from the unpacked hash domain is byte-reproducible across exporters. Archive member-metadata rules (order, mtime, owner `0/0`, perms `0644`/`0755`) are specified, but the tar/gzip octet stream is a transport container and is NOT byte-compared for conformance (§3.1.3). |
 
-### 6.6 Golden Bundle Specifications
+### 6.6 Conformance Classes
+
+A **conformance class** is the surface of checks a validator claims to perform. A conformance claim (§0) MUST name its class. Three classes are defined; the first is the mandatory baseline, the second extends it for multi-record bundles, and the third is OPTIONAL and live.
+
+| Class | Inputs | Network | Reproducible | Mandatory? |
+|---|---|---|---|---|
+| **offline-deterministic** | the bundle bytes alone | none | yes (byte-stable across validators) | **Yes** — every conforming validator MUST implement it |
+| **source-backed** | the bundle **plus** companion records a public projection may omit | none | yes | Conditional — required when a profile defines a projected/redacted public artifact (e.g. the incident card-only vs source-backed split) |
+| **online-conformance** | the bundle plus a **live external observation** | required | no (proves a property only **at check time**) | **OPTIONAL** — a conforming validator MAY decline to run it |
+
+1. **offline-deterministic (baseline, MUST).** Every check is computable from the bundle's own bytes: schema/structural validation, the full integrity model (content-hashes, Merkle root, and JWS *self-consistency* — the signature verifies against the key the JWS itself carries), DSL rule evaluation over the bundle's records, RFC 8785 canonicalization, and the §3.7 roll-up. This class is **reproducible**: two conforming validators MUST produce identical `provision_outcome`/`structural_errors` for the same bundle, with no dependence on wall-clock, network, or external state. **Standard ACEF conformance (§6.4) is the offline-deterministic class** unless a declared profile names another. It is **attribution-free** where identity is involved: it proves a signature is *internally consistent*, never that a named party authored the bundle (that is the online class, below).
+2. **source-backed (MUST when a profile defines a public projection).** A public bundle may carry only a redacted/projected record (e.g. a public `incident_card`) while the unredacted companion (e.g. `incident_report.card_source`) is held privately. The source-backed class is run by a holder of **both** records and additionally verifies cross-record pointer resolution and that every commitment equals `sha256(JCS(source_value))` at its mapped path (preimage/linkage). It performs **no** network lookup — it is reproducible like the offline class, just over a larger input. The incident profile's *card-only* (= offline-deterministic) vs *source-backed* split (RFC-0002 §5.11) is the canonical instance.
+3. **online-conformance (OPTIONAL, live).** This class performs a live external observation — e.g. the OPTIONAL DNS-01 / `.well-known` domain-control proof — that establishes a property **at check time only** (e.g. that a registrant controlled a domain at the moment of the check). It is **not** reproducible offline and is **not** a durable credential. Its verdict is tri-valued (`verified` / `unverified` / `reject`); a presented-but-invalid proof raises a class-tagged error, while a missing proof or a lookup that cannot complete is the explicit non-result `unverified` and raises nothing. **A bundle is fully conformant under the offline-deterministic (and, where applicable, source-backed) class without ever running the online class**; offline conformance MUST NOT depend on it.
+
+**Error-code class tagging.** Where a single error code can arise in more than one class, the diagnostic MUST carry the class tag. The normative instance is **ACEF-083**, emitted as `class: offline-deterministic` (pattern / JWS-self-consistency / bundled-snapshot-membership failure) or `class: online-conformance` (a presented-but-invalid live domain-control proof); see §3.6 and RFC-0002 §5.3/§7. A class a validator does not run cannot change a conformance outcome computed by a class it does run.
+
+### 6.7 Golden Bundle Specifications
 
 The following golden bundles MUST be published alongside the spec to enable end-to-end conformance testing. Each bundle is a complete, valid ACEF Evidence Bundle with accompanying Assessment Bundle.
 

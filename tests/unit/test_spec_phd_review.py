@@ -106,6 +106,34 @@ class TestFinding13IntegerDomain:
         )
 
 
+class TestFinding15ConformanceClasses:
+    """The offline-deterministic / source-backed / online-conformance classes drive
+    ACEF-083 and the incident validation modes but lived only in RFC-0002 (no
+    normative force). They must have a normative home in the core spec, and the §0
+    'conformance class (§6.6)' reference must resolve to that section."""
+
+    def test_classes_defined_in_core_spec(self) -> None:
+        text = _spec_text()
+        for cls in ("offline-deterministic", "source-backed", "online-conformance"):
+            assert cls in text, f"core spec must normatively define the {cls!r} conformance class"
+
+    def test_section_66_is_conformance_classes(self) -> None:
+        text = _spec_text()
+        assert "### 6.6 Conformance Classes" in text, "spec must add §6.6 Conformance Classes (the §0 reference target)"
+        # The previously-numbered §6.6 (Golden Bundles) must be renumbered, not lost.
+        assert "Golden Bundle Specifications" in text, "Golden Bundle Specifications section must still exist"
+        # No duplicate §6.6 heading.
+        assert text.count("### 6.6 ") == 1, "exactly one §6.6 heading must exist"
+
+    def test_offline_class_is_the_baseline_and_online_is_optional(self) -> None:
+        text = _spec_text()
+        idx = text.find("### 6.6 Conformance Classes")
+        assert idx != -1
+        sec = text[idx : idx + 2600]
+        assert "MUST" in sec, "the baseline (offline-deterministic) class must be a MUST for conformance"
+        assert "OPTIONAL" in sec, "the online-conformance class must be marked OPTIONAL"
+
+
 class TestVersionModelAlignment:
     """roborev Medium on 9fc5db0: the header core_version model must match §6.2
     (semver 1.0.x/1.1.x ranges), not assert a conflicting exact-values-only set."""
