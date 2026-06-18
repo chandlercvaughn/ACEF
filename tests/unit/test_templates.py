@@ -54,6 +54,15 @@ VALID_INSTRUMENT_STATUSES = frozenset({"final", "draft"})
 
 TEMPLATE_IDS = ["eu-ai-act-2024", "nist-ai-rmf-1.0", "china-cac-labeling-2025"]
 
+# F19: the structural-invariant tests below previously ran against only the 3
+# templates above, leaving 10 of the 13 shipped templates unvalidated — a
+# malformed operator / param / duplicate rule_id in any of them would not be
+# caught. Run the structural invariants against EVERY shipped template.
+ALL_TEMPLATE_IDS = sorted(list_templates())
+# test_vectors are OPTIONAL per the template schema; assert non-emptiness only for
+# the templates that actually ship them (the others are conformant without).
+TEMPLATES_WITH_TEST_VECTORS = [tid for tid in ALL_TEMPLATE_IDS if load_template(tid).test_vectors]
+
 
 # ── Discovery Tests ──
 
@@ -61,10 +70,14 @@ TEMPLATE_IDS = ["eu-ai-act-2024", "nist-ai-rmf-1.0", "china-cac-labeling-2025"]
 class TestTemplateDiscovery:
     """Test template listing and discovery."""
 
-    def test_list_templates_returns_all_three(self) -> None:
+    def test_list_templates_includes_all_shipped_templates(self) -> None:
         available = list_templates()
+        # The well-known core templates plus every shipped template are present;
+        # ALL_TEMPLATE_IDS (the structural-coverage set) is exactly list_templates().
         for tid in TEMPLATE_IDS:
             assert tid in available, f"Template {tid} not found in registry"
+        assert sorted(available) == ALL_TEMPLATE_IDS
+        assert len(available) >= 13, f"expected at least 13 shipped templates, got {len(available)}"
 
     def test_list_templates_returns_sorted(self) -> None:
         available = list_templates()
@@ -77,23 +90,26 @@ class TestTemplateDiscovery:
 class TestTemplateLoading:
     """Test loading and Pydantic deserialization."""
 
-    @pytest.mark.parametrize("template_id", TEMPLATE_IDS)
+    @pytest.mark.parametrize("template_id", ALL_TEMPLATE_IDS)
     def test_load_template_succeeds(self, template_id: str) -> None:
         template = load_template(template_id)
         assert isinstance(template, Template)
         assert template.template_id == template_id
 
-    @pytest.mark.parametrize("template_id", TEMPLATE_IDS)
+    @pytest.mark.parametrize("template_id", ALL_TEMPLATE_IDS)
     def test_template_has_provisions(self, template_id: str) -> None:
         template = load_template(template_id)
         assert len(template.provisions) > 0
 
-    @pytest.mark.parametrize("template_id", TEMPLATE_IDS)
+    @pytest.mark.parametrize("template_id", TEMPLATES_WITH_TEST_VECTORS)
     def test_template_has_test_vectors(self, template_id: str) -> None:
+        # test_vectors are OPTIONAL per the template schema; this asserts the
+        # ones that DO ship vectors carry a non-empty list. Templates without
+        # vectors are conformant and excluded from this parametrization.
         template = load_template(template_id)
         assert len(template.test_vectors) > 0
 
-    @pytest.mark.parametrize("template_id", TEMPLATE_IDS)
+    @pytest.mark.parametrize("template_id", ALL_TEMPLATE_IDS)
     def test_compute_template_digest(self, template_id: str) -> None:
         digest = compute_template_digest(template_id)
         assert digest.startswith("sha256:")
@@ -116,7 +132,7 @@ class TestTemplateLoading:
 class TestTemplateStructure:
     """Test structural requirements per spec Section 3.4."""
 
-    @pytest.mark.parametrize("template_id", TEMPLATE_IDS)
+    @pytest.mark.parametrize("template_id", ALL_TEMPLATE_IDS)
     def test_template_fields_present(self, template_id: str) -> None:
         template = load_template(template_id)
         assert template.template_id
@@ -128,12 +144,12 @@ class TestTemplateStructure:
         assert template.legal_force in VALID_LEGAL_FORCES
         assert template.instrument_status in VALID_INSTRUMENT_STATUSES
 
-    @pytest.mark.parametrize("template_id", TEMPLATE_IDS)
+    @pytest.mark.parametrize("template_id", ALL_TEMPLATE_IDS)
     def test_applicable_system_types_nonempty(self, template_id: str) -> None:
         template = load_template(template_id)
         assert len(template.applicable_system_types) > 0
 
-    @pytest.mark.parametrize("template_id", TEMPLATE_IDS)
+    @pytest.mark.parametrize("template_id", ALL_TEMPLATE_IDS)
     def test_all_provisions_have_required_fields(self, template_id: str) -> None:
         template = load_template(template_id)
         for prov in template.provisions:
@@ -142,13 +158,13 @@ class TestTemplateStructure:
             assert prov.normative_text_ref, "Provision must have normative_text_ref"
             assert prov.description, "Provision must have description"
 
-    @pytest.mark.parametrize("template_id", TEMPLATE_IDS)
+    @pytest.mark.parametrize("template_id", ALL_TEMPLATE_IDS)
     def test_all_provisions_have_evaluation_rules(self, template_id: str) -> None:
         template = load_template(template_id)
         for prov in template.provisions:
             assert len(prov.evaluation) > 0, f"Provision {prov.provision_id} has no evaluation rules"
 
-    @pytest.mark.parametrize("template_id", TEMPLATE_IDS)
+    @pytest.mark.parametrize("template_id", ALL_TEMPLATE_IDS)
     def test_provision_ids_unique(self, template_id: str) -> None:
         template = load_template(template_id)
         ids = [p.provision_id for p in template.provisions]
@@ -161,7 +177,7 @@ class TestTemplateStructure:
 class TestRuleValidation:
     """Test that all evaluation rules conform to DSL spec Section 3.5."""
 
-    @pytest.mark.parametrize("template_id", TEMPLATE_IDS)
+    @pytest.mark.parametrize("template_id", ALL_TEMPLATE_IDS)
     def test_all_rule_operators_valid(self, template_id: str) -> None:
         template = load_template(template_id)
         for prov in template.provisions:
@@ -170,21 +186,21 @@ class TestRuleValidation:
                     f"Invalid operator '{rule.rule}' in rule '{rule.rule_id}' of provision '{prov.provision_id}'"
                 )
 
-    @pytest.mark.parametrize("template_id", TEMPLATE_IDS)
+    @pytest.mark.parametrize("template_id", ALL_TEMPLATE_IDS)
     def test_all_rule_severities_valid(self, template_id: str) -> None:
         template = load_template(template_id)
         for prov in template.provisions:
             for rule in prov.evaluation:
                 assert rule.severity in VALID_SEVERITIES, f"Invalid severity '{rule.severity}' in rule '{rule.rule_id}'"
 
-    @pytest.mark.parametrize("template_id", TEMPLATE_IDS)
+    @pytest.mark.parametrize("template_id", ALL_TEMPLATE_IDS)
     def test_all_rules_have_messages(self, template_id: str) -> None:
         template = load_template(template_id)
         for prov in template.provisions:
             for rule in prov.evaluation:
                 assert rule.message, f"Rule '{rule.rule_id}' in provision '{prov.provision_id}' has empty message"
 
-    @pytest.mark.parametrize("template_id", TEMPLATE_IDS)
+    @pytest.mark.parametrize("template_id", ALL_TEMPLATE_IDS)
     def test_rule_ids_globally_unique(self, template_id: str) -> None:
         template = load_template(template_id)
         all_ids: list[str] = []
@@ -195,7 +211,7 @@ class TestRuleValidation:
             f"Duplicate rule IDs in {template_id}: {[x for x in all_ids if all_ids.count(x) > 1]}"
         )
 
-    @pytest.mark.parametrize("template_id", TEMPLATE_IDS)
+    @pytest.mark.parametrize("template_id", ALL_TEMPLATE_IDS)
     def test_has_record_type_rules_have_type_param(self, template_id: str) -> None:
         template = load_template(template_id)
         for prov in template.provisions:
@@ -206,7 +222,7 @@ class TestRuleValidation:
                         f"has_record_type rule '{rule.rule_id}' missing 'min_count' param"
                     )
 
-    @pytest.mark.parametrize("template_id", TEMPLATE_IDS)
+    @pytest.mark.parametrize("template_id", ALL_TEMPLATE_IDS)
     def test_field_present_rules_have_required_params(self, template_id: str) -> None:
         template = load_template(template_id)
         for prov in template.provisions:
@@ -220,7 +236,7 @@ class TestRuleValidation:
                         f"'{rule.params['field']}' must use JSON Pointer (RFC 6901)"
                     )
 
-    @pytest.mark.parametrize("template_id", TEMPLATE_IDS)
+    @pytest.mark.parametrize("template_id", ALL_TEMPLATE_IDS)
     def test_field_value_rules_have_required_params(self, template_id: str) -> None:
         template = load_template(template_id)
         valid_ops = {"eq", "ne", "gt", "gte", "lt", "lte", "in", "regex"}
@@ -236,7 +252,7 @@ class TestRuleValidation:
                     )
                     assert rule.params["field"].startswith("/")
 
-    @pytest.mark.parametrize("template_id", TEMPLATE_IDS)
+    @pytest.mark.parametrize("template_id", ALL_TEMPLATE_IDS)
     def test_evidence_freshness_rules_have_required_params(self, template_id: str) -> None:
         template = load_template(template_id)
         valid_refs = {"validation_time", "package_time", "obligation_effective_date"}
@@ -249,7 +265,7 @@ class TestRuleValidation:
                     assert "reference_date" in rule.params
                     assert rule.params["reference_date"] in valid_refs
 
-    @pytest.mark.parametrize("template_id", TEMPLATE_IDS)
+    @pytest.mark.parametrize("template_id", ALL_TEMPLATE_IDS)
     def test_exists_where_rules_have_required_params(self, template_id: str) -> None:
         template = load_template(template_id)
         for prov in template.provisions:
@@ -262,7 +278,7 @@ class TestRuleValidation:
                     assert "min_count" in rule.params
                     assert rule.params["field"].startswith("/")
 
-    @pytest.mark.parametrize("template_id", TEMPLATE_IDS)
+    @pytest.mark.parametrize("template_id", ALL_TEMPLATE_IDS)
     def test_entity_linked_rules_have_required_params(self, template_id: str) -> None:
         template = load_template(template_id)
         valid_entity_types = {"subject", "component", "dataset", "actor"}
@@ -273,7 +289,7 @@ class TestRuleValidation:
                     assert "entity_type" in rule.params
                     assert rule.params["entity_type"] in valid_entity_types
 
-    @pytest.mark.parametrize("template_id", TEMPLATE_IDS)
+    @pytest.mark.parametrize("template_id", ALL_TEMPLATE_IDS)
     def test_attachment_kind_exists_rules_have_required_params(self, template_id: str) -> None:
         template = load_template(template_id)
         for prov in template.provisions:
@@ -283,7 +299,7 @@ class TestRuleValidation:
                     assert "attachment_type" in rule.params
                     assert "min_count" in rule.params
 
-    @pytest.mark.parametrize("template_id", TEMPLATE_IDS)
+    @pytest.mark.parametrize("template_id", ALL_TEMPLATE_IDS)
     def test_attachment_exists_rules_have_required_params(self, template_id: str) -> None:
         template = load_template(template_id)
         for prov in template.provisions:
@@ -627,7 +643,7 @@ class TestChinaCACTemplate:
 class TestTemplateRoundTrip:
     """Test that templates survive Pydantic round-trip serialization."""
 
-    @pytest.mark.parametrize("template_id", TEMPLATE_IDS)
+    @pytest.mark.parametrize("template_id", ALL_TEMPLATE_IDS)
     def test_round_trip_preserves_data(self, template_id: str) -> None:
         template = load_template(template_id)
         serialized = template.model_dump(mode="json")
@@ -648,7 +664,7 @@ class TestTemplateRoundTrip:
                 assert orig_rule.params == rest_rule.params
                 assert orig_rule.severity == rest_rule.severity
 
-    @pytest.mark.parametrize("template_id", TEMPLATE_IDS)
+    @pytest.mark.parametrize("template_id", ALL_TEMPLATE_IDS)
     def test_json_file_matches_model(self, template_id: str) -> None:
         template_dir = Path(__file__).parent.parent.parent / "src" / "acef" / "templates"
         with open(template_dir / f"{template_id}.json") as f:
