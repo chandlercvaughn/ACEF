@@ -263,6 +263,53 @@ class TestFieldValue:
             # Deterministic static rejection — NOT a 5s wall-clock timeout.
             assert time.monotonic() - t0 < 1.0, f"{pat!r} must be rejected statically/fast, not via a timeout"
 
+    def test_bounded_counted_quantifier_redos_rejected(self):
+        """Fresh systems committee (CONF-A-REDOS-BOUNDED / CRYPTO-NEW-1 @905302e):
+        BOUNDED counted repetition of a nullable/overlapping/nested body backtracks
+        exponentially — ``(a?){n}``, ``(a|a){n}``, ``(.?){n}``, ``(a{0,n}){0,n}`` —
+        yet uses only bounded ``{n}``/``{n,m}`` quantifiers and so escaped the
+        unbounded-only checks (n=12 hangs ~14s). Plus a NULLABLE body under an
+        UNBOUNDED quantifier (``(a?)+``) that the nested-only check also missed.
+        All MUST be rejected statically as ACEF-045, FAST (input kept short so this
+        proves the static pre-match rejection, never the blow-up)."""
+        import time
+
+        records = [_make_record("risk_register", payload={"name": "aaaa!"})]
+        for pat in (
+            r"(a?){28}a{28}",  # nullable body, counted repetition
+            r"(a|a){24}b",  # alternation-overlap body, counted
+            r"(.?){24}x",  # nullable wildcard body, counted
+            r"(a{0,30}){0,30}$",  # nullable counted body, counted outer
+            r"(a?)+",  # nullable body, UNBOUNDED (missed the nested-only check)
+            r"(a?)*b",
+            r"((a?)){28}",  # nullable body hidden one group deep
+            r"(a*){12}",  # nested unbounded body, counted
+        ):
+            t0 = time.monotonic()
+            with pytest.raises(ACEFEvaluationError) as exc_info:
+                op_field_value(
+                    {"record_type": "risk_register", "field": "/payload/name", "op": "regex", "value": pat}, records
+                )
+            assert exc_info.value.code == "ACEF-045", f"{pat!r} must be ACEF-045"
+            assert time.monotonic() - t0 < 1.0, f"{pat!r} must be rejected statically/fast"
+
+    def test_bounded_counted_quantifier_safe_patterns_still_match(self):
+        """The bounded-repetition check must NOT over-reject a counted group with a
+        NON-nullable, non-alternating, non-nested body (fixed-length repetition)."""
+        cases = [
+            (r"^(ab){3}$", "ababab"),
+            (r"^(\d{4}){2}$", "12345678"),  # body \d{4} is non-nullable bounded
+            (r"^[A-Z]{2,4}$", "ABC"),  # a class, not a group
+            (r"^a{4}$", "aaaa"),
+            (r"^(abc){2}xyz$", "abcabcxyz"),
+        ]
+        for pat, text in cases:
+            records = [_make_record("risk_register", payload={"name": text})]
+            passed, _ = op_field_value(
+                {"record_type": "risk_register", "field": "/payload/name", "op": "regex", "value": pat}, records
+            )
+            assert passed, f"{pat!r} should match {text!r} and must NOT be rejected as ReDoS"
+
     def test_safe_quantified_group_still_matches(self):
         """A non-nested quantified group (e.g. (ab)+) is SAFE and must still match —
         the static check rejects only NESTED unbounded quantifiers, not all groups."""

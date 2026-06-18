@@ -263,7 +263,10 @@ def _translate_ecma262_char_classes(pattern: str) -> str:
 
 def _brace_is_unbounded(pattern: str, brace_idx: int) -> bool:
     """True if ``pattern[brace_idx] == '{'`` opens an UNBOUNDED quantifier ``{n,}``
-    (no upper bound). ``{n}`` / ``{n,m}`` are bounded and cannot blow up."""
+    (no upper bound). ``{n}`` / ``{n,m}`` are *bounded*, but bounded does NOT mean
+    safe: a bounded counted repetition of an ambiguous body (``(a?){n}``,
+    ``(a{0,n}){0,n}``) still backtracks exponentially — that family is caught by
+    :func:`_has_catastrophic_group_repetition`, not here."""
     close = pattern.find("}", brace_idx)
     if close == -1:
         return False
@@ -767,6 +770,120 @@ def _has_adjacent_unbounded_quantifiers(pattern: str) -> bool:
     return False
 
 
+# --- Bounded/nullable group-repetition ReDoS (fresh systems committee) ---------
+# The three families above are all defined over UNBOUNDED quantifiers (*, +, {n,}).
+# But a group repeated MORE THAN ONCE — by an unbounded quantifier OR a BOUNDED
+# counted quantifier whose upper bound is >= 2 ({n} n>=2, {n,m} m>=2) — whose body
+# is NULLABLE (matches empty), has an ALTERNATION, or contains a nested unbounded
+# quantifier also backtracks exponentially: (a?){28}a{28}, (a|a){24}b, (.?){24}x,
+# (a{0,n}){0,n}$, and even (a?)+ (nullable body under +) which the nested-only
+# check missed because `a?` carries no unbounded quantifier. These use only small,
+# length-cap-safe patterns, so neither the pattern- nor input-length cap mitigates
+# them; they must be rejected statically.
+
+
+_REP_INF = 1 << 30  # sentinel "unbounded" upper repetition bound (so hi >= 2 is uniform)
+
+
+def _group_repetition_hi(pattern: str, idx: int) -> int | None:
+    """For a quantifier at ``pattern[idx]`` (the char immediately after a group's
+    ``)``), return its UPPER repetition bound: a positive int for ``{n}``/``{n,m}``,
+    a large sentinel for an unbounded ``*``/``+``/``{n,}``, ``1`` for ``?``, or
+    ``None`` when there is no quantifier. The sentinel ``_REP_INF`` stands in for
+    'unbounded' so callers test ``hi >= 2`` uniformly."""
+    if idx >= len(pattern):
+        return None
+    q = pattern[idx]
+    if q in ("*", "+"):
+        return _REP_INF
+    if q == "?":
+        return 1
+    if q == "{":
+        close = pattern.find("}", idx)
+        if close == -1:
+            return None
+        inner = pattern[idx + 1 : close]
+        if "," not in inner:
+            try:
+                return int(inner)  # {n}
+            except ValueError:
+                return None
+        lo, hi = inner.split(",", 1)
+        hi = hi.strip()
+        if hi == "":
+            return _REP_INF  # {n,} unbounded
+        try:
+            return int(hi)  # {n,m}
+        except ValueError:
+            return None
+    return None
+
+
+def _atom_is_nullable(atom: _Atom) -> bool:
+    """True if ``atom`` can match the empty string: a zero-width anchor, a
+    nullable quantifier (``*``, ``?``, ``{0,…}``), or a group whose body is
+    recursively nullable (e.g. ``(a?)`` with no outer quantifier)."""
+    if atom.zero_width or atom.nullable:
+        return True
+    if atom.body is not None:
+        return _segment_is_nullable(atom.body)
+    return False
+
+
+def _segment_is_nullable(segment: str) -> bool:
+    """True if ``segment`` can match the empty string — i.e. some top-level
+    alternation branch consists entirely of nullable atoms (an empty branch is
+    nullable)."""
+    for branch in _split_top_level_alternation(segment):
+        if all(_atom_is_nullable(a) for a in _iter_atoms(branch)):
+            return True
+    return False
+
+
+def _has_catastrophic_group_repetition(pattern: str) -> bool:
+    """Detect catastrophic GROUP repetition the unbounded-only checks miss: a group
+    repeated more than once (unbounded quantifier OR a bounded counted quantifier
+    with upper bound >= 2) whose body is NULLABLE, contains a top-level
+    ALTERNATION, or contains a nested unbounded quantifier. Deterministic and
+    platform-independent (no wall clock)."""
+    stack: list[int] = []  # indices of '(' opens
+    i, n = 0, len(pattern)
+    while i < n:
+        c = pattern[i]
+        if c == "\\":
+            i += 2
+            continue
+        if c == "[":
+            i += 1
+            while i < n and pattern[i] != "]":
+                if pattern[i] == "\\":
+                    i += 1
+                i += 1
+            i += 1
+            continue
+        if c == "(":
+            stack.append(i)
+            i += 1
+            continue
+        if c == ")":
+            if stack:
+                start = stack.pop()
+                hi = _group_repetition_hi(pattern, i + 1)
+                repeats_multiply = hi is not None and hi >= 2  # _REP_INF >= 2
+                if repeats_multiply:
+                    body = pattern[start + 1 : i]
+                    if (
+                        _segment_is_nullable(body)
+                        or _segment_has_alternation(body)
+                        or _segment_has_unbounded_quantifier(body)
+                    ):
+                        return True
+            i += 1
+            continue
+        i += 1
+    return False
+
+
 def _safe_regex_search(pattern: str, text: str) -> bool:
     """Execute a regex search under a DETERMINISTIC, platform-independent bound.
 
@@ -775,11 +892,13 @@ def _safe_regex_search(pattern: str, text: str) -> bool:
     2. Limiting input text length to _MAX_REGEX_INPUT_LENGTH characters
     3. Rejecting BEFORE matching — as ACEF-045 — every catastrophic-backtracking
        signature: the nested-quantifier and alternation-overlap families
-       (:func:`_has_nested_unbounded_quantifier`) AND the sequential /
-       adjacent-quantifier family (:func:`_has_adjacent_unbounded_quantifiers`).
-       This static rejection is the portable resource bound (spec §3.5); it
-       replaced the old SIGALRM wall-clock timeout, which only fired on the Unix
-       main thread and gave a platform-DEPENDENT provision verdict.
+       (:func:`_has_nested_unbounded_quantifier`), the sequential /
+       adjacent-quantifier family (:func:`_has_adjacent_unbounded_quantifiers`),
+       AND the bounded/nullable group-repetition family
+       (:func:`_has_catastrophic_group_repetition`). This static rejection is the
+       portable resource bound (spec §3.5); it replaced the old SIGALRM wall-clock
+       timeout, which only fired on the Unix main thread and gave a
+       platform-DEPENDENT provision verdict.
     4. Pre-validating against known Python-only (non-ECMA-262) constructs
        per :func:`_validate_ecma262_compatible`
 
@@ -838,6 +957,21 @@ def _safe_regex_search(pattern: str, text: str) -> bool:
     if _has_adjacent_unbounded_quantifiers(pattern):
         raise ACEFEvaluationError(
             "Regex pattern has adjacent unbounded quantifiers over overlapping classes "
+            "(catastrophic-backtracking risk); rejected deterministically per the spec "
+            f"§3.5 resource bound: {pattern!r}",
+            code="ACEF-045",
+        )
+
+    # Bounded/nullable group-repetition ReDoS (e.g. ``(a?){n}a{n}``, ``(a|a){n}b``,
+    # ``(a{0,n}){0,n}$``, ``(a?)+``): a group repeated more than once — by an
+    # unbounded quantifier OR a bounded counted quantifier with upper bound >= 2 —
+    # whose body is nullable / overlapping-alternation / nested-unbounded. These
+    # carry no unbounded quantifier of their own (or hide a nullable body), so the
+    # two checks above miss them; they backtrack exponentially on inputs far under
+    # the length caps. Rejected statically, completing the §3.5 resource bound.
+    if _has_catastrophic_group_repetition(pattern):
+        raise ACEFEvaluationError(
+            "Regex pattern repeats a nullable/overlapping/nested group (counted or unbounded) "
             "(catastrophic-backtracking risk); rejected deterministically per the spec "
             f"§3.5 resource bound: {pattern!r}",
             code="ACEF-045",
