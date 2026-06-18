@@ -121,9 +121,21 @@ class TestArt73Clock:
         facts = {"death_involved": False, "widespread": False, "serious_incident_triggers": ["3.49.b"]}
         assert ir.shortest_art73_clock_days(facts) == 2
 
-    def test_widespread_two_days(self) -> None:
-        facts = {"death_involved": False, "widespread": True, "serious_incident_triggers": ["3.49.c"]}
-        assert ir.shortest_art73_clock_days(facts) == 2
+    def test_widespread_is_an_independent_two_day_trigger(self) -> None:
+        # PhD-review finding 21 (verified against Reg. (EU) 2024/1689 Art. 73(3)):
+        # 'widespread infringement' is an INDEPENDENT 2-day trigger (OR'd with
+        # 3.49.b), defined separately in Art. 3 — NOT a modifier of the 3.49.c
+        # fundamental-rights trigger. Proof of independence:
+        #  - a 3.49.c incident ALONE is the general 15-day clock;
+        c_only = {"death_involved": False, "widespread": False, "serious_incident_triggers": ["3.49.c"]}
+        assert ir.shortest_art73_clock_days(c_only) == 15
+        #  - the SAME 3.49.c incident that is ALSO widespread is 2 days BECAUSE of
+        #    widespread (independently), not because widespread modifies 3.49.c;
+        c_and_widespread = {"death_involved": False, "widespread": True, "serious_incident_triggers": ["3.49.c"]}
+        assert ir.shortest_art73_clock_days(c_and_widespread) == 2
+        #  - widespread ALONE (no 3.49 trigger at all) is still 2 days.
+        widespread_only = {"death_involved": False, "widespread": True, "serious_incident_triggers": []}
+        assert ir.shortest_art73_clock_days(widespread_only) == 2
 
     def test_general_fifteen_days(self) -> None:
         # Non-fatal 3.49.a serious-health-harm takes the general 15-day clock.
