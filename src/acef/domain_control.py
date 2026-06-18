@@ -95,6 +95,7 @@ import base64
 import hashlib
 import ipaddress
 import json
+import socket as _socket
 import urllib.error as _urllib_error
 import urllib.parse as _urllib_parse
 import urllib.request as _urllib_request
@@ -508,6 +509,35 @@ def _default_http_fetcher(url: str, *, max_bytes: int = WELL_KNOWN_MAX_BYTES) ->
         # A non-https scheme or an IP-literal host is anomalous → no valid proof,
         # and we do NOT issue the request at all.
         return HttpResponse(status=0, content_type="", body="")
+
+    # DNS-rebinding / SSRF residual guard (F33): the host check above validates only
+    # the hostname STRING (it rejects IP literals) — it does NOT check what the host
+    # RESOLVES to. Resolve the host now and refuse to fetch if ANY returned address is
+    # private / loopback / link-local (this covers the 169.254.169.254 cloud-metadata
+    # endpoint) / reserved / multicast / unspecified, so a public-looking hostname whose
+    # A/AAAA record points at an internal address cannot be used to reach internal
+    # services. (A residual TOCTOU window remains — the OS re-resolves at connect time;
+    # pinning the socket to a validated IP is a follow-up. This closes the
+    # always-resolves-internal case, which is the practical SSRF vector here.)
+    try:
+        addrinfos = _socket.getaddrinfo(parsed.hostname, 443, proto=_socket.IPPROTO_TCP)
+    except _socket.gaierror as exc:
+        raise DomainControlLookupError(f".well-known DNS resolution failed: {exc}") from exc
+    for info in addrinfos:
+        sockaddr = info[4]
+        try:
+            resolved_ip = ipaddress.ip_address(sockaddr[0])
+        except ValueError:
+            return HttpResponse(status=0, content_type="", body="")
+        if (
+            resolved_ip.is_private
+            or resolved_ip.is_loopback
+            or resolved_ip.is_link_local
+            or resolved_ip.is_reserved
+            or resolved_ip.is_multicast
+            or resolved_ip.is_unspecified
+        ):
+            return HttpResponse(status=0, content_type="", body="")
 
     # Build a dedicated opener that NEVER follows redirects (SSRF guard). Using a
     # bespoke opener (not the global urlopen) keeps the no-follow policy local.

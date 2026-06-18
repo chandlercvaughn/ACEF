@@ -945,3 +945,56 @@ def _dns_timeout(name: str) -> list[str]:
 
 def _http_timeout(url: str) -> HttpResponse:
     raise TimeoutError("http timeout")
+
+
+class TestWellKnownFetcherDnsRebindingGuard:
+    """F33: _default_http_fetcher resolves the host and refuses to fetch when the
+    resolved IP is private/loopback/link-local/reserved/multicast/unspecified —
+    closing the DNS-rebinding SSRF residual where a public-looking hostname's
+    A/AAAA record points at an internal address (incl. 169.254.169.254 metadata)."""
+
+    _URL = "https://attacker.example/.well-known/acef-incident-challenge"
+
+    @staticmethod
+    def _stub_resolution(monkeypatch: pytest.MonkeyPatch, ip: str) -> None:
+        def _fake_getaddrinfo(host: object, port: object, *a: object, **k: object) -> list[tuple]:
+            return [(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", (ip, 443))]
+
+        monkeypatch.setattr(socket, "getaddrinfo", _fake_getaddrinfo)
+
+    @pytest.mark.parametrize("internal_ip", ["127.0.0.1", "169.254.169.254", "10.0.0.5", "192.168.1.1", "0.0.0.0"])
+    def test_internal_resolution_is_refused_without_a_fetch(
+        self, monkeypatch: pytest.MonkeyPatch, internal_ip: str
+    ) -> None:
+        self._stub_resolution(monkeypatch, internal_ip)
+
+        def _poison(*a: object, **k: object) -> object:
+            raise AssertionError(f"fetch issued despite internal resolution {internal_ip!r} (SSRF)")
+
+        monkeypatch.setattr("acef.domain_control._urllib_request.build_opener", _poison)
+        resp = _default_http_fetcher(self._URL)
+        assert resp.status == 0 and resp.body == ""
+
+    def test_public_resolution_proceeds_past_the_guard(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._stub_resolution(monkeypatch, "93.184.216.34")  # public (example.com range)
+
+        class _FakeResp:
+            status = 200
+            headers = {"Content-Type": "text/plain", "Content-Length": "5"}
+
+            def read(self, _n: int) -> bytes:
+                return b"proof"
+
+            def __enter__(self) -> _FakeResp:
+                return self
+
+            def __exit__(self, *a: object) -> bool:
+                return False
+
+        class _FakeOpener:
+            def open(self, _request: object, timeout: int = 5) -> _FakeResp:
+                return _FakeResp()
+
+        monkeypatch.setattr("acef.domain_control._urllib_request.build_opener", lambda *a, **k: _FakeOpener())
+        resp = _default_http_fetcher(self._URL)
+        assert resp.status == 200 and resp.body == "proof"
