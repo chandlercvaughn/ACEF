@@ -92,6 +92,22 @@ class TestProvisionRollup:
         summary = compute_provision_outcome("prov-1", "test-profile", results, [])
         assert summary.provision_outcome == ProvisionOutcome.SATISFIED
 
+    def test_step6_passed_plus_skipped_mix_gives_satisfied(self):
+        """F40: a PASSED + SKIPPED mix (no fails/errors/warnings/gaps) is
+        SATISFIED — skipped rules (condition false: out-of-scope / not-yet-
+        effective) are non-applicable and do NOT block satisfaction. The literal
+        "ALL rules passed" is a special case; a passed+skipped mix must NOT fall
+        through to NOT_ASSESSED (reserved for an ERRORED or rule-less provision).
+        Two conformant validators must agree here — pins spec §3.7 step 6 ↔ impl."""
+        results = [
+            _rule_result(RuleOutcome.PASSED, RuleSeverity.FAIL, rule_id="r1"),
+            _rule_result(RuleOutcome.SKIPPED, RuleSeverity.FAIL, rule_id="r2"),
+            _rule_result(RuleOutcome.PASSED, RuleSeverity.WARNING, rule_id="r3"),
+            _rule_result(RuleOutcome.SKIPPED, RuleSeverity.WARNING, rule_id="r4"),
+        ]
+        summary = compute_provision_outcome("prov-1", "test-profile", results, [])
+        assert summary.provision_outcome == ProvisionOutcome.SATISFIED
+
     def test_step7_no_rules_gives_not_assessed(self):
         """Step 7: No rules for provision -> NOT_ASSESSED."""
         summary = compute_provision_outcome("prov-1", "test-profile", [], [])
