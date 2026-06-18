@@ -75,6 +75,9 @@ def test_spec_documents_evaluation_instant_producer_control_caveat() -> None:
     assert "recorded **verbatim**" in section or "recorded verbatim" in section, (
         "spec must note a present-but-non-ISO metadata.timestamp is recorded verbatim, not wall-clock"
     )
+    assert "wall-clock" in section and ("absent or non-string" in section or "absent/non-string" in section), (
+        "spec must note an absent/non-string metadata.timestamp falls back to wall-clock"
+    )
 
 
 def test_non_iso_metadata_timestamp_is_fatal_and_rejected(tmp_path: Path) -> None:
@@ -111,4 +114,11 @@ def test_non_iso_metadata_timestamp_is_fatal_and_rejected(tmp_path: Path) -> Non
         "a non-ISO metadata.timestamp must produce a FATAL ACEF-002 at /metadata/timestamp "
         f"(not merely some integrity fatal); structural_errors="
         f"{[(e.get('code'), e.get('path')) for e in assessment.structural_errors]}"
+    )
+    # And the spec's "recorded verbatim" claim is load-bearing: a present-but-non-ISO
+    # string is used as evaluation_instant verbatim (NOT a wall-clock value) — which
+    # is exactly why such diagnostics are non-deterministic and non-authoritative.
+    assert assessment.evaluation_instant == "not-a-real-date", (
+        "a present-but-non-ISO metadata.timestamp must be recorded verbatim as evaluation_instant, "
+        f"got {assessment.evaluation_instant!r}"
     )
