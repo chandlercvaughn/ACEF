@@ -93,6 +93,32 @@ class TestFinding13IntegerDomain:
         text = _spec_text()
         assert "RFC 7493" in text, "spec must cite RFC 7493 (I-JSON) for the integer domain"
         assert "2^53" in text or "9007199254740991" in text, "spec must state the safe-integer boundary numerically"
+        # roborev Low on 94b1b34: the rule must keep BOTH the authoring/export
+        # rejection AND the ACEF-051 hash-time backstop (not regress to hash-only),
+        # and must cover the whole hash domain (manifest + artifacts), not just records.
+        idx = text.find("Integer domain (I-JSON)")
+        assert idx != -1, "spec lost the I-JSON integer-domain rule"
+        rule = text[idx : idx + 900]
+        assert "ACEF-051" in rule, "integer-domain rule must keep the ACEF-051 hash-time backstop"
+        assert "reject" in rule.lower(), "integer-domain rule must require producer rejection (authoring/export)"
+        assert "acef-manifest.json" in rule and "artifact" in rule.lower(), (
+            "integer-domain rule must cover the whole hash domain (manifest + artifacts), not only records"
+        )
+
+
+class TestVersionModelAlignment:
+    """roborev Medium on 9fc5db0: the header core_version model must match §6.2
+    (semver 1.0.x/1.1.x ranges), not assert a conflicting exact-values-only set."""
+
+    def test_header_and_section_62_use_the_same_version_ranges(self) -> None:
+        text = _spec_text()
+        head = "\n".join(text.splitlines()[:20])
+        assert "1.0.x" in head and "1.1.x" in head, "header must use the §6.2 semver 1.0.x/1.1.x ranges"
+        # §6.2 must still declare those same ranges (single version model).
+        idx = text.find("### 6.2 Versioning Strategy")
+        assert idx != -1, "spec lost §6.2"
+        sec = text[idx : idx + 1500]
+        assert "1.0.x" in sec and "1.1.x" in sec, "§6.2 must declare the 1.0.x/1.1.x ranges the header references"
 
 
 class TestFinding18RollupPrecedence:
