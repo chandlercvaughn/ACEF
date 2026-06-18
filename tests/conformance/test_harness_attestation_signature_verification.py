@@ -154,7 +154,7 @@ def test_jwk_only_attestation_rejected_with_empty_anchor_list(rsa_key: Any) -> N
     real run_cross_record_validation path (fail closed)."""
     rec = _signed_harness_record(rsa_key)  # jwk-only (no x5c)
     diags = run_cross_record_validation(_MANIFEST, [rec], signature_count=0, trust_anchors=[])
-    assert any(d.code in ("ACEF-012", "ACEF-013") for d in diags), [d.code for d in diags]
+    assert any(d.code == "ACEF-012" for d in diags), [d.code for d in diags]
 
 
 def _x5c_harness_record(nvb: Any, nva: Any) -> tuple[dict[str, Any], Any]:
@@ -263,4 +263,4 @@ def test_expired_x5c_harness_attestation_rejected_at_manifest_timestamp() -> Non
     # manifest timestamp AFTER expiry -> ACEF-012 (cert expired at the manifest time).
     manifest_expired = {"metadata": {"timestamp": "2027-06-01T00:00:00Z"}}
     diags_exp = run_cross_record_validation(manifest_expired, [rec], signature_count=0, trust_anchors=[root])
-    assert any(d.code in ("ACEF-012", "ACEF-013") for d in diags_exp), [d.code for d in diags_exp]
+    assert any(d.code == "ACEF-012" for d in diags_exp), [d.code for d in diags_exp]
