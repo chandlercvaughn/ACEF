@@ -1374,16 +1374,16 @@ Validation results are captured in an **ACEF Assessment Bundle** — a separate,
 
 - **`rule_severity`** — the importance level declared by the rule in the template (`fail` | `warning` | `info`). This is a property of the rule, not the evaluation result.
 - **`outcome`** — the result of evaluating the rule against the evidence (`passed` | `failed` | `skipped` | `error`). `skipped` means the rule's `condition` evaluated to false. `error` means the rule could not be evaluated.
-- **`provision_outcome`** — the roll-up for a provision, computed using the following deterministic precedence algorithm (applied in order, first match wins). **Step 0 (no-rules guard):** a provision with NO rules is **`not-assessed`** (step 7) — this is checked BEFORE the ordered steps below, so the "ALL rules …" universals (steps 3 and 6) never apply vacuously to a rule-less provision:
-  1. If ANY rule with `rule_severity: fail` has `outcome: failed` → **`not-satisfied`**
-  2. If ANY rule has `outcome: error` → **`not-assessed`**
-  3. If the provision has ≥1 rule and ALL rules have `outcome: skipped` → **`skipped`**
-  4. If an `evidence_gap` record exists for this provision AND no fail-severity rules failed → **`gap-acknowledged`**
-  5. If ALL fail-severity rules passed but ANY warning-severity rule has `outcome: failed` → **`partially-satisfied`**
-  6. Otherwise (steps 1–5 did not match AND the provision has ≥1 rule): every applicable fail- and warning-severity rule passed → **`satisfied`**. `skipped` rules (their `condition` evaluated false — out-of-scope or not-yet-effective) and a failed `info`-severity rule are NON-GATING and do NOT block satisfaction: a provision whose applicable gating rules all passed is `satisfied` even if some of its rules were `skipped`. (The narrower literal "ALL rules have `outcome: passed`" is a special case of this; a passed+skipped mix is `satisfied`, not `not-assessed` — `not-assessed` is reserved for an ERRORED provision (step 2) or a rule-less one (step 0/7).)
-  7. If no rules exist for this provision → **`not-assessed`** (the step-0 guard; listed last for numbering continuity, applied first).
+- **`provision_outcome`** — the roll-up for a provision, computed using the following deterministic **first-match-wins precedence algorithm, evaluated strictly top to bottom**. The step number IS the precedence: step *k* is tested only if steps 1…*k*−1 did not match, so the listed order is the precedence order — there is no separate "severity ranking" to reconcile against. Each step's condition is decidable from the rule-outcome multiset, so exactly one step matches every input (totality is proved in Appendix C):
+  1. **No-rules guard.** The provision has **no applicable rules** → **`not-assessed`**. This is step 1 *by construction*: a rule-less provision has an empty rule set, so the universal-quantifier steps below ("ALL rules …") would otherwise match vacuously. Testing it first removes that ambiguity.
+  2. **Any** rule with `rule_severity: fail` has `outcome: failed` → **`not-satisfied`**.
+  3. **Any** rule has `outcome: error` → **`not-assessed`**.
+  4. The provision has ≥1 rule and **ALL** rules have `outcome: skipped` → **`skipped`**.
+  5. An `evidence_gap` record exists for this provision (step 2 did not fire, so no fail-severity rule failed) → **`gap-acknowledged`**.
+  6. **ALL** fail-severity rules passed but **ANY** warning-severity rule has `outcome: failed` → **`partially-satisfied`**.
+  7. Otherwise (≥1 rule; every applicable fail- and warning-severity rule passed) → **`satisfied`**. `skipped` rules (their `condition` evaluated false — out-of-scope or not-yet-effective) and a failed `info`-severity rule are NON-GATING and do NOT block satisfaction. The narrower literal "ALL rules have `outcome: passed`" is a strict special case of this step; a passed+skipped mix is `satisfied`, and `not-assessed` is reserved exclusively for an ERRORED provision (step 3) or a rule-less one (step 1).
 
-  `not-satisfied` always takes precedence over `gap-acknowledged`. An evidence gap acknowledgment does not override a failed mandatory rule. Provision-not-yet-effective is handled by the **engine BEFORE rule evaluation**: a provision whose `effective_date` is after `evaluation_instant` is EXCLUDED from evaluation, its rules produce `skipped` outcomes, and an `ACEF-032` info diagnostic is emitted (§3.6) — NOT by structural errors. The `if_provision_effective` DSL `condition` (defined in `template.schema.json`) is a REDUNDANT rule-level expression of the same gate: it remains a valid, schema-supported authoring mechanism (and is exercised directly in unit tests), but the engine-level exclusion already skips such provisions, so a shipped template never needs to set it.
+  Because step 2 precedes step 5, `not-satisfied` always takes precedence over `gap-acknowledged`: an evidence-gap acknowledgment does not override a failed mandatory rule. Provision-not-yet-effective is handled by the **engine BEFORE rule evaluation**: a provision whose `effective_date` is after `evaluation_instant` is EXCLUDED from evaluation, its rules produce `skipped` outcomes, and an `ACEF-032` info diagnostic is emitted (§3.6) — NOT by structural errors. The `if_provision_effective` DSL `condition` (defined in `template.schema.json`) is a REDUNDANT rule-level expression of the same gate: it remains a valid, schema-supported authoring mechanism (and is exercised directly in unit tests), but the engine-level exclusion already skips such provisions, so a shipped template never needs to set it.
 
 **Multi-subject evaluation unit (normative):** In bundles with multiple subjects, each provision is evaluated **per subject** by default. A rule's `scope` filter determines which subjects it applies to. `provision_summary[]` entries MUST include `subject_scope` identifying which subject(s) the summary covers. If a template explicitly declares `"evaluation_scope": "package"` on a provision, that provision is evaluated once for the entire bundle (useful for organizational policies like `governance_policy` that apply across all systems).
 
@@ -1718,7 +1718,7 @@ The conformance test suite is a collection of golden files and test cases that d
 | **Multi-subject evaluation** | Per-subject default evaluation produces separate `provision_summary` entries per subject; `evaluation_scope: "package"` provisions produce one entry for the whole bundle |
 | **DSL operators** | Each built-in operator (including `exists_where`, `bundle_signed`, `record_attested`, `attachment_kind_exists`) has pass and fail test vectors |
 | **Empty-set semantics** | Existential operators fail on zero records; universal operators pass vacuously on zero records |
-| **Provision roll-up** | Deterministic `provision_outcome` computed correctly for each precedence case (not-satisfied > not-assessed > skipped > gap-acknowledged > partially-satisfied > satisfied) |
+| **Provision roll-up** | Deterministic `provision_outcome` computed per the §3.7 first-match-wins precedence algorithm — step order IS the precedence (no-rules-guard/not-assessed → not-satisfied → not-assessed[error] → skipped → gap-acknowledged → partially-satisfied → satisfied). Each of the 7 steps has a covering test vector; totality/determinism are proved in Appendix C. |
 | **Extension handling** | Vendor-namespaced extensions are preserved on round-trip and ignored by standard validators; `x-*` fields cannot change conformance outcomes (ACEF-053) |
 | **Error taxonomy** | Each error code in Section 3.6 has at least one negative test case that triggers it |
 | **Redacted packages** | Packages with `confidentiality: hash-committed` records verify correctly with partial evidence |
@@ -1894,3 +1894,75 @@ The following gaps have been addressed:
 ### B.3 Cross-Regulation Matrix Expansion
 
 The alignment matrix in Section 4 now covers 16 ACEF record types mapped across 6 regulatory frameworks. The detailed sections define 70+ specific artifact types within those record types. The v0.3 spec should introduce a two-tier system: high-level record type domains in the matrix (as currently shown) with detailed payload field mappings documented per-record-type in the schema registry (Section 3.3).
+
+### B.4 Document Change Log
+
+The **Format version** (ACEF Core v1; `core_version` 1.0.0 / 1.1.0) is independent of this **document revision**. Revisions below are editorial/normative-clarification revisions of the specification text; a `1.0.0` bundle validates identically across all of them.
+
+| Doc revision | Date | Summary |
+|---|---|---|
+| 0.1 | 2026-01 | Initial specification outline (envelope, entity model, bundle layout). |
+| 0.2 | 2026-02 | Multi-system composition, confidentiality/trust levels, sub-provision granularity, signing mechanism (see B.1). |
+| 0.3 | 2026-03 | Circular-integrity model, evidence/assessment separation, error taxonomy ACEF-001..060, conformance program, assessment result schema (see B.1). |
+| 0.4 | 2026-03-17 | v1.1 additive conventions (X1–X6 envelope/manifest fields, agent-reliability + incident record types, error codes ACEF-070..088); **standards-engineering hardening**: BCP 14 normative-language section (§0), normative UTF-16 collation + I-JSON integer domain (§3.1.3), archive-determinism reframed onto the unpacked bundle digest, roll-up precedence rewritten as a single ordered algorithm with a totality proof (Appendix C), conformance classes (§6.6), Security Considerations (Appendix D), error-taxonomy reconciliation (046/077/081–088/024), Related Work (§8). |
+
+---
+
+## Appendix C: Roll-up Determinism — Semi-Formal Proof
+
+This appendix gives a semi-formal proof that the §3.7 `provision_outcome` roll-up is a **total, deterministic, order-independent function**. The executable counterpart is the exhaustive property test `tests/unit/test_rollup_totality.py`, which evaluates the implementation against the model below over the full predicate cross-product.
+
+### C.1 Model
+
+Fix a provision *p*. Its evaluation state is the pair **(R, g)** where:
+
+- **R** is the finite multiset of *rule results* for *p*. Each `r ∈ R` carries `sev(r) ∈ {fail, warning, info}` and `out(r) ∈ {passed, failed, skipped, error}`. R is derived purely from the bundle, the template, and the scalar `evaluation_instant` (provisions whose `effective_date > evaluation_instant` are excluded before R is formed, so "not-yet-effective" never enters this function — §3.7).
+- **g ∈ {true, false}** indicates whether an `evidence_gap` record exists for *p*.
+
+The codomain is **O = {not-assessed, not-satisfied, skipped, gap-acknowledged, partially-satisfied, satisfied}**.
+
+Define the six guard predicates over (R, g), exactly as §3.7 steps 1–6:
+
+- `P₁(R,g) ≜ |R| = 0`
+- `P₂(R,g) ≜ ∃ r∈R. sev(r)=fail ∧ out(r)=failed`
+- `P₃(R,g) ≜ ∃ r∈R. out(r)=error`
+- `P₄(R,g) ≜ |R| ≥ 1 ∧ ∀ r∈R. out(r)=skipped`
+- `P₅(R,g) ≜ g = true`
+- `P₆(R,g) ≜ (∀ r∈R. sev(r)=fail ⇒ out(r)=passed) ∧ (∃ r∈R. sev(r)=warning ∧ out(r)=failed)`
+
+The roll-up is the first-match selector:
+
+> **ρ(R,g) = the value mapped by the least *i* ∈ {1,…,6} with `Pᵢ(R,g)` true; if no `Pᵢ` holds, ρ(R,g) = `satisfied` (step 7).**
+
+with the step→outcome map ⟨not-assessed, not-satisfied, not-assessed, skipped, gap-acknowledged, partially-satisfied⟩ for *i*=1…6.
+
+### C.2 Totality
+
+**Claim.** ρ is defined on every (R, g) ∈ (finite rule-result multiset × 𝔹).
+
+**Proof.** The selector returns step *i* when `Pᵢ` is the least satisfied guard, and otherwise returns step 7 unconditionally. Step 7 has no precondition (it is the logical complement `¬P₁∧…∧¬P₆`), so the domain is partitioned into seven exhaustive cases with no gap. Hence ρ is defined everywhere. ∎
+
+We further show step 7's value (`satisfied`) is *meaningful*, not merely a default. Reaching step 7 means `¬P₁` (≥1 rule), `¬P₂` (no fail-rule failed), `¬P₃` (no errored rule), `¬P₄` (not every rule skipped), `¬P₅` (no gap), `¬P₆`. From `¬P₂` every fail-severity rule has `out ∈ {passed, skipped, error}`; with `¬P₃` no rule errored, so every fail-severity rule passed or was skipped. With `¬P₆`'s second conjunct negated under "all fail passed", no warning-severity rule failed either. With `¬P₄`, at least one rule is non-skipped. Thus every *gating* (fail/warning) rule that ran passed, and at least one gating-or-info rule ran — exactly the informal meaning of `satisfied`. Failed `info`-severity rules and `skipped` rules are non-gating by construction and do not appear in any `Pᵢ` that could pre-empt step 7. ∎
+
+### C.3 Determinism (single-valuedness)
+
+**Claim.** ρ is a function: each (R, g) maps to exactly one outcome.
+
+**Proof.** "Least *i* with `Pᵢ` true, else step 7" selects a unique index for every input, independent of whether the guards overlap (e.g. a provision with both a failed fail-rule and a gap satisfies `P₂` and `P₅`; the selector returns the least index, 2 → `not-satisfied`). Overlap therefore cannot induce multi-valuedness; first-match-wins makes ρ single-valued by construction. Because the spec fixes the index→outcome map, two conforming validators computing ρ on the same (R, g) return the same outcome. ∎
+
+This is the structural fix for the two historical "reinterpretations" the reviewer flagged (info-failure gating; passed+skipped → not-assessed): both are now *definitional* — `info` severity never appears in `P₁…P₆`, and a passed+skipped mixture falls through to step 7 (`satisfied`) — so neither is an open interpretation question.
+
+### C.4 Order-independence (confluence)
+
+**Claim.** ρ does not depend on the order in which rules are evaluated.
+
+**Proof.** Every guard `Pᵢ` is a multiset query using only `∃`/`∀`/`|·|` over R; multiset membership and cardinality are invariant under permutation. Evaluating the template's rules in any order yields the same multiset R (rule evaluation is a pure function of the bundle + `evaluation_instant`, with no rule observing another's result), hence the same ρ. Sharded/parallel evaluation that merges per-rule results into R therefore converges to one value. ∎
+
+### C.5 DSL operator denotational semantics (empty-set)
+
+The roll-up consumes rule outcomes; each outcome is the denotation of a DSL operator over the record set *S* selected by the rule's `scope`. Operators partition into **existential** (∃) and **universal** (∀), which fixes their behavior on `S = ∅`:
+
+- **Existential** — `has_record_type`, `attachment_exists`, `attachment_kind_exists`, `entity_linked`, `record_attested`, `bundle_signed`, `exists_where`: denote `⊤` iff at least one witness exists. On `S = ∅`, **FALSE** (no witness).
+- **Universal** — `field_present`, `field_value`, `evidence_freshness`: denote `∀ s∈S. φ(s)`. On `S = ∅`, **TRUE** (vacuous truth).
+
+These are the standard first-order semantics; pinning them removes the classic "empty-set false-pass/false-fail" ambiguity, and the assignment of each built-in operator to ∃ or ∀ is normative (§3.5). An invalid JSON Pointer or non-ECMA-262 pattern is a rule **error** (`out = error`, codes ACEF-043/ACEF-045/ACEF-046), which routes to `P₃ → not-assessed`, never to a silent pass/fail.

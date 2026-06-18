@@ -95,6 +95,60 @@ class TestFinding13IntegerDomain:
         assert "2^53" in text or "9007199254740991" in text, "spec must state the safe-integer boundary numerically"
 
 
+class TestFinding18RollupPrecedence:
+    """§3.7 stepwise algorithm and the §6.5 precedence string were reconciled only
+    by a 'listed last for numbering continuity, applied first' apology. The order
+    must equal the precedence by construction (no-rules guard is step 1)."""
+
+    def test_no_numbering_apology_remains(self) -> None:
+        text = _spec_text()
+        for apology in ("numbering continuity", "listed last", "applied first"):
+            assert apology not in text, f"roll-up precedence still carries the apology phrase {apology!r}"
+
+    def test_algorithm_first_step_is_the_no_rules_guard(self) -> None:
+        text = _spec_text()
+        idx = text.find("precedence algorithm")
+        assert idx != -1, "spec lost the precedence-algorithm anchor"
+        window = text[idx : idx + 1600]
+        # The first numbered step must be the no-rules → not-assessed guard.
+        m = re.search(r"\n\s*1\.\s+(.{0,160})", window)
+        assert m, "precedence algorithm lost its numbered step 1"
+        step1 = m.group(1).lower()
+        assert "no" in step1 and "rule" in step1 and "not-assessed" in step1, (
+            f"step 1 must be the no-rules → not-assessed guard, got: {m.group(1)!r}"
+        )
+
+    def test_conformance_row_order_matches_algorithm(self) -> None:
+        rows = [ln for ln in _spec_text().splitlines() if "**Provision roll-up**" in ln]
+        assert rows, "spec lost the Provision roll-up conformance row"
+        row = rows[0]
+        # The conformance row must point at the §3.7 algorithm (single source of
+        # truth), not restate a divergent standalone '>' chain, and must keep the
+        # F22 fix (no phantom 'error' provision_outcome).
+        assert "> error >" not in row
+        assert "not-assessed" in row
+        assert "3.7" in row or "§3.7" in row, "conformance row must reference the §3.7 algorithm as the source of truth"
+
+
+class TestFinding10FormalProof:
+    """The roll-up's totality/determinism/confluence were argued only in prose
+    comments. Appendix C must give a semi-formal proof, and the empty-set DSL
+    semantics must be pinned (existential FALSE / universal TRUE on the empty set)."""
+
+    def test_appendix_c_proof_exists(self) -> None:
+        text = _spec_text()
+        assert "## Appendix C" in text, "spec must add Appendix C (roll-up determinism proof)"
+        c = text[text.find("## Appendix C") :].lower()
+        for term in ("totality", "determinism", "order-independence", "empty-set"):
+            assert term in c, f"Appendix C must prove/cover {term!r}"
+
+    def test_empty_set_operator_semantics_pinned(self) -> None:
+        c = _spec_text()
+        c = c[c.find("## Appendix C") :].lower()
+        assert "existential" in c and "universal" in c, "Appendix C must classify operators existential vs universal"
+        assert "vacuous" in c, "Appendix C must state vacuous truth for universal operators on the empty set"
+
+
 class TestFinding17VersionIdentity:
     """Filename v0.1, H1 'v0.3', body v1.1/v0.4 — a versioned standard cannot have
     three different answers to 'what version is this'."""
