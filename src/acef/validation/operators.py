@@ -296,13 +296,14 @@ def _segment_has_unbounded_quantifier(segment: str) -> bool:
     return False
 
 
-def _segment_has_top_level_alternation(segment: str) -> bool:
-    """True if ``segment`` contains a ``|`` at its TOP level — i.e. not inside a
-    nested ``(...)`` group and not inside a ``[...]`` class, and not escaped. An
-    unbounded-quantified group with a top-level alternation is the second classic
-    catastrophic-backtracking class (overlapping branches, e.g. ``(a|aa)+``,
-    ``(a|a)*``)."""
-    depth = 0
+def _segment_has_alternation(segment: str) -> bool:
+    """True if ``segment`` contains a ``|`` at ANY nesting depth (skipping ``\\``
+    escapes and ``[...]`` classes). Checking at any depth — not only the top
+    level — is deliberate: a quantified group's alternation-overlap ReDoS can be
+    WRAPPED in an inner group (``((a|aa))+``, ``(?:(a(?:|a)))+``) and still
+    backtrack catastrophically. This is conservative (it also flags safe nested
+    alternations like ``(a(b|c)d)+``); for the short rule-level DSL matchers that
+    trade is acceptable, and a future linear-time engine would accept them."""
     i, n = 0, len(segment)
     while i < n:
         c = segment[i]
@@ -317,11 +318,7 @@ def _segment_has_top_level_alternation(segment: str) -> bool:
                 i += 1
             i += 1
             continue
-        if c == "(":
-            depth += 1
-        elif c == ")":
-            depth = max(0, depth - 1)
-        elif c == "|" and depth == 0:
+        if c == "|":
             return True
         i += 1
     return False
@@ -369,7 +366,7 @@ def _has_nested_unbounded_quantifier(pattern: str) -> bool:
                 group_unbounded = q in ("*", "+") or (q == "{" and _brace_is_unbounded(pattern, i + 1))
                 if group_unbounded:
                     body = pattern[start + 1 : i]
-                    if _segment_has_unbounded_quantifier(body) or _segment_has_top_level_alternation(body):
+                    if _segment_has_unbounded_quantifier(body) or _segment_has_alternation(body):
                         return True
             i += 1
             continue

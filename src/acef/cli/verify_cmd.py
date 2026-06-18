@@ -192,7 +192,18 @@ def _compute_exit_code(tallies: dict[str, int]) -> int:
         "trust (no anchor enforcement)."
     ),
 )
-def verify_cmd(path: str, fmt: str, quiet: bool, trust_anchor: tuple[str, ...]) -> None:
+@click.option(
+    "--expected-producer",
+    "expected_producer",
+    default=None,
+    help=(
+        "Expected signer identity (spec Appendix D.3): the exact full leaf certificate "
+        "subject DN, e.g. 'CN=acme,O=ACME Corp'. With --trust-anchor, an ANCHORED signature "
+        "whose subject does not match surfaces ACEF-012 (valid signature, wrong signer). "
+        "Omit to verify integrity without enforcing identity."
+    ),
+)
+def verify_cmd(path: str, fmt: str, quiet: bool, trust_anchor: tuple[str, ...], expected_producer: str | None) -> None:
     """Verify an ACEF Evidence Bundle at PATH.
 
     Accepts a directory bundle or an ``.acef.tar.gz`` archive. Runs schema
@@ -266,7 +277,9 @@ def verify_cmd(path: str, fmt: str, quiet: bool, trust_anchor: tuple[str, ...]) 
         # still run and populate ``structural_errors``. ``trust_anchors`` (None
         # unless ``--trust-anchor`` was supplied) enforces x5c chain termination
         # in the Phase-2 integrity check.
-        assessment = validate_bundle(str(target), profiles=None, trust_anchors=trust_anchors)
+        assessment = validate_bundle(
+            str(target), profiles=None, trust_anchors=trust_anchors, expected_producer=expected_producer
+        )
         diagnostics: list[dict[str, Any]] = list(assessment.structural_errors)
 
         # Tally by classification.

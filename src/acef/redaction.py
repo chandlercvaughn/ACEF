@@ -468,8 +468,13 @@ def verify_redaction(
         if not hmac_key:
             return False  # cannot verify an HMAC commitment without the out-of-band key
         actual_hash = _hmac.new(hmac_key, payload_canonical, hashlib.sha256).hexdigest()
-    else:
+    elif method == "sha256-hash-commitment":
         actual_hash = sha256_hex(payload_canonical)
+    else:
+        # An UNKNOWN/unsupported method label (e.g. "rot13:<sha256>",
+        # "hmac-sha256-commitment-v2:<sha256>") MUST NOT fall back to plain SHA-256
+        # and verify true (roborev on 906e8fe). Only the supported methods verify.
+        return False
 
     return actual_hash == expected_hash
 

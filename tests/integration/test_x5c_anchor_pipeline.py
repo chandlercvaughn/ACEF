@@ -575,7 +575,7 @@ class TestExpectedProducerBinding:
         leaf_key, x5c, root = _build_anchored_chain()  # leaf CN == "pipeline-leaf"
         _sign_bundle_with_x5c(bundle_dir, leaf_key, x5c)
 
-        assessment = validate_bundle(str(bundle_dir), trust_anchors=[root], expected_producer="pipeline-leaf")
+        assessment = validate_bundle(str(bundle_dir), trust_anchors=[root], expected_producer="CN=pipeline-leaf")
         assert _signature_diags(assessment.structural_errors) == []
 
     def test_anchored_wrong_subject_emits_acef_012(self, tmp_path: Path) -> None:
@@ -640,5 +640,5 @@ class TestExpectedProducerBinding:
         wrong = acef.validate(str(bundle_dir), trust_anchors=[root], expected_producer="evil-corp")
         diags = _signature_diags(wrong.structural_errors)
         assert len(diags) == 1 and diags[0]["code"] == "ACEF-012"
-        right = acef.validate(str(bundle_dir), trust_anchors=[root], expected_producer="pipeline-leaf")
+        right = acef.validate(str(bundle_dir), trust_anchors=[root], expected_producer="CN=pipeline-leaf")
         assert _signature_diags(right.structural_errors) == []

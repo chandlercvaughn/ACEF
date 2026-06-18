@@ -605,23 +605,16 @@ def classify_signature_binding(
     alg = header.get("alg") if isinstance(header, dict) else None
     alg = alg if isinstance(alg, str) else None
 
-    # Surface the leaf certificate subject (the asserted identity) when present.
-    # Keep both the full DN (for reporting) and the Common-Name value(s) (for an
-    # EXACT identity match — never a substring, which would let `acme` match
-    # `CN=not-acme` / `CN=evil-acme-signer`).
-    from cryptography.x509.oid import NameOID
-
+    # Surface the leaf certificate subject (the asserted identity) when present —
+    # the FULL subject DN (RFC 4514), which is what the expected-producer match
+    # compares against exactly.
     signer_subject: str | None = None
-    signer_cns: list[str] = []
     x5c = header.get("x5c") if isinstance(header, dict) else None
     if isinstance(x5c, list) and x5c:
         try:
-            leaf = _parse_x5c_chain(x5c)[0]
-            signer_subject = leaf.subject.rfc4514_string()
-            signer_cns = [str(attr.value) for attr in leaf.subject.get_attributes_for_oid(NameOID.COMMON_NAME)]
+            signer_subject = _parse_x5c_chain(x5c)[0].subject.rfc4514_string()
         except (ACEFSigningError, ValueError, IndexError):
             signer_subject = None
-            signer_cns = []
 
     # Cryptographic validity is necessary for any non-"unverified" level. This is
     # the SAME check the integrity phase runs; we never accept a binding the
@@ -648,13 +641,12 @@ def classify_signature_binding(
 
     matches: bool | None = None
     if expected_producer is not None and binding_level == "anchored" and signer_subject is not None:
-        # EXACT (case-insensitive) identity match. Primary form: the FULL leaf
-        # subject DN (so two certs sharing a CN but differing elsewhere — e.g.
-        # CN=acme,O=Good vs CN=acme,O=Evil — are distinguished). A bare CN is also
-        # accepted as a convenience; security-sensitive deployments SHOULD configure
-        # the full subject DN to get an unambiguous binding (roborev on 04efe61).
-        want = expected_producer.casefold()
-        matches = want == signer_subject.casefold() or any(cn.casefold() == want for cn in signer_cns)
+        # EXACT (case-insensitive) match against the FULL leaf subject DN — NOT a
+        # bare CN, which would let `acme` accept any CN=acme cert regardless of the
+        # rest of the subject (e.g. CN=acme,O=Good vs CN=acme,O=Evil), preserving the
+        # very attribution collision this binding closes (roborev on c4d166e). A
+        # deployment configures the exact subject DN (e.g. "CN=acme,O=Good") it expects.
+        matches = expected_producer.casefold() == signer_subject.casefold()
 
     return SignatureBinding(binding_level, alg, signer_subject, matches)
 

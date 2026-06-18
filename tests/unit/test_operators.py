@@ -242,8 +242,18 @@ class TestFieldValue:
         import time
 
         records = [_make_record("risk_register", payload={"name": "aaaaaaaaaaaaaaaaaaaaaaaa!"})]
-        # Both ReDoS classes: nested-quantifier AND alternation-overlap (roborev on 6147931).
-        for pat in (r"(a+)+$", r"(a*)*$", r"(.*)+b", r"(\d+)+x", r"(a|aa)+$", r"(a|a)*$"):
+        # Both ReDoS classes incl. WRAPPED alternation variants that evaded a
+        # top-level-only check (roborev on 6147931/7cbc854).
+        for pat in (
+            r"(a+)+$",
+            r"(a*)*$",
+            r"(.*)+b",
+            r"(\d+)+x",
+            r"(a|aa)+$",
+            r"(a|a)*$",
+            r"((a|aa))+$",
+            r"(?:(a(?:|a)))+$",
+        ):
             t0 = time.monotonic()
             with pytest.raises(ACEFEvaluationError) as exc_info:
                 op_field_value(

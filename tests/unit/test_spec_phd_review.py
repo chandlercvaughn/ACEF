@@ -154,15 +154,29 @@ class TestFindings16And19And37ErrorTaxonomy:
     gap unexplained, and 053/077/079 overlapping. §3.6 must reconcile all of it."""
 
     def test_incident_codes_081_to_088_have_normative_rows(self) -> None:
-        # roborev on 3ba09a2: assert the actual §3.6 TABLE ROWS (code + category +
-        # severity columns), not just the code string anywhere — the governance
-        # paragraph also contains the range, so a code-only check would pass even if
-        # the rows were removed.
+        # roborev on 3ba09a2 + c4d166e: assert the actual §3.6 TABLE ROW for each
+        # code AND that the row's category/severity columns match the code's real
+        # metadata (resolve_error_meta) — not merely that some word-shaped row exists.
+        from acef.errors import resolve_error_meta
+
         text = _spec_text()
+        # Anchor to the §3.6 table region (after the heading) so a stray row elsewhere
+        # cannot satisfy the check.
+        start = text.find("### 3.6 Error Taxonomy")
+        end = text.find("### 3.7", start)
+        table = text[start:end]
+        assert start != -1 and end != -1, "spec lost the §3.6 Error Taxonomy section"
         for n in range(81, 89):
             code = f"ACEF-{n:03d}"
-            row = re.search(rf"^\| `{code}` \| \w+ \| `?\w+`? \|", text, re.MULTILINE)
-            assert row is not None, f"§3.6 must have a normative TABLE ROW (code|category|severity) for {code}"
+            sev, cat = resolve_error_meta(code)
+            row = re.search(rf"^\| `{code}` \| (\w+) \| `(\w+)` \|", table, re.MULTILINE)
+            assert row is not None, f"§3.6 table must have a row for {code}"
+            assert row.group(1).lower() == cat.value.lower(), (
+                f"{code} §3.6 category {row.group(1)!r} != code metadata {cat.value!r}"
+            )
+            assert row.group(2).lower() == sev.value.lower(), (
+                f"{code} §3.6 severity {row.group(2)!r} != code metadata {sev.value!r}"
+            )
 
     def test_registry_governance_note_present(self) -> None:
         text = _spec_text()

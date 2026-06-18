@@ -101,7 +101,9 @@ class TestSignatureBindingClassification:
         key = _key()
         cert = _self_signed("acme-corp-signer", key)
         jws = create_detached_jws(_CANON, key, kid="k1", x5c=[_b64_der(cert)])
-        ok = classify_signature_binding(jws, _CANON, trust_anchors=[cert], expected_producer="acme-corp-signer")
+        ok = classify_signature_binding(
+            jws, _CANON, trust_anchors=[cert], expected_producer=cert.subject.rfc4514_string()
+        )
         assert ok.matches_expected_producer is True
         # The "valid signature, wrong signer" case: anchored, but the subject is NOT
         # the producer the deployment expected -> mismatch is reported (not silent).

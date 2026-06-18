@@ -113,8 +113,7 @@ def test_python_and_node_gzip_byte_equal_on_small_inputs() -> None:
     them through the same TS subprocess driver via a temp file."""
     import tempfile
 
-    if not TS_GZIP_CLI.exists():
-        pytest.skip(f"TS gzip-cli not built; looked for {TS_GZIP_CLI}")
+    require_ts_cli(TS_GZIP_CLI, what="TS gzip-cli")
 
     cases = [
         ("empty", b""),
