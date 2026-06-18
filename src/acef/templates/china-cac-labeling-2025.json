@@ -14,20 +14,20 @@
     {
       "provision_id": "cac-explicit-label",
       "provision_name": "Explicit Visible Labels",
-      "normative_text_ref": "CAC Labeling Measures Art. 5-7",
-      "description": "Internet information service providers using generative AI shall add explicit visible labels to AI-generated content including text superscripts, audio cues, and graphic watermarks that persist across sharing and download",
+      "normative_text_ref": "CAC Labeling Measures Art. 4",
+      "description": "Internet information service providers using generative AI shall add explicit visible labels to AI-generated content including text superscripts and audio cues that persist across sharing and download",
       "effective_date": "2025-09-01",
       "applicable_to": [],
       "sub_provisions": [
         {
           "provision_id": "cac-explicit-label.text",
-          "normative_text_ref": "CAC Labeling Measures Art. 5",
+          "normative_text_ref": "CAC Labeling Measures Art. 4",
           "description": "AI-generated text content shall bear explicit visible labels such as superscript annotations"
         },
         {
           "provision_id": "cac-explicit-label.audiovisual",
-          "normative_text_ref": "CAC Labeling Measures Art. 6",
-          "description": "AI-generated audio and visual content shall bear explicit visible labels such as audio cues and graphic watermarks"
+          "normative_text_ref": "CAC Labeling Measures Art. 4",
+          "description": "AI-generated audio and visual content shall bear explicit visible labels such as audio cues and visible on-screen markers"
         }
       ],
       "required_evidence_types": [
@@ -73,19 +73,19 @@
     {
       "provision_id": "cac-implicit-metadata",
       "provision_name": "Implicit Metadata Labels",
-      "normative_text_ref": "CAC Labeling Measures Art. 8-9",
+      "normative_text_ref": "CAC Labeling Measures Art. 5",
       "description": "Service providers shall embed implicit metadata labels in AI-generated content containing provider identification, content identifier, content type, and reference number, enabling machine-readable provenance verification",
       "effective_date": "2025-09-01",
       "applicable_to": [],
       "sub_provisions": [
         {
           "provision_id": "cac-implicit-metadata.fields",
-          "normative_text_ref": "CAC Labeling Measures Art. 8",
+          "normative_text_ref": "CAC Labeling Measures Art. 5",
           "description": "Implicit metadata must include provider name/code, content ID, content type, and reference number"
         },
         {
           "provision_id": "cac-implicit-metadata.persistence",
-          "normative_text_ref": "CAC Labeling Measures Art. 9",
+          "normative_text_ref": "CAC Labeling Measures Art. 5",
           "description": "Implicit metadata labels shall persist across content sharing, downloading, and redistribution"
         }
       ],
@@ -144,14 +144,14 @@
     {
       "provision_id": "cac-watermark",
       "provision_name": "Digital Watermarks",
-      "normative_text_ref": "CAC Labeling Measures Art. 10",
+      "normative_text_ref": "CAC Labeling Measures Art. 5",
       "description": "Service providers are encouraged to apply digital watermarks to AI-generated content for robustness against tampering, compression, and format conversion, complementing explicit and implicit labeling",
       "effective_date": "2025-09-01",
       "applicable_to": [],
       "sub_provisions": [
         {
           "provision_id": "cac-watermark.robustness",
-          "normative_text_ref": "CAC Labeling Measures Art. 10(2)",
+          "normative_text_ref": "CAC Labeling Measures Art. 5",
           "description": "Digital watermarks should be robust against common transformations including compression, cropping, and format conversion"
         }
       ],
@@ -196,19 +196,19 @@
     {
       "provision_id": "cac-log-retention",
       "provision_name": "Log Retention",
-      "normative_text_ref": "CAC Labeling Measures Art. 14-15",
+      "normative_text_ref": "CAC Labeling Measures Art. 9",
       "description": "Service providers shall retain event logs for AI-generated content for a minimum of 6 months (180 days), particularly when explicit labels are omitted at user request, to enable regulatory audit and platform verification",
       "effective_date": "2025-09-01",
       "applicable_to": [],
       "sub_provisions": [
         {
           "provision_id": "cac-log-retention.unlabeled",
-          "normative_text_ref": "CAC Labeling Measures Art. 14",
+          "normative_text_ref": "CAC Labeling Measures Art. 9",
           "description": "When explicit labeling is omitted at user request, the provider must retain audit logs for a minimum of 6 months"
         },
         {
           "provision_id": "cac-log-retention.platform",
-          "normative_text_ref": "CAC Labeling Measures Art. 15",
+          "normative_text_ref": "CAC Labeling Measures Art. 9",
           "description": "Platform operators must implement content verification duties and maintain logs for regulatory compliance"
         }
       ],

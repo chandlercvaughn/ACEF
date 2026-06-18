@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -715,6 +716,53 @@ class TestGpaiIncidentProvisionCitation:
         by_rule = {e["rule_id"]: e["message"] for e in prov["evaluation"]}
         for rid in ("gpai-s3-incident-severity", "gpai-s3-notification-date"):
             assert "9.3" in by_rule[rid] or "2/5/10/15" in by_rule[rid]
+
+
+class TestChinaCacCitationsMatchFinalMeasures:
+    """F14: the china-cac-labeling-2025 template cited DRAFT article numbers. The FINAL
+    Measures for Labeling AI-Generated Synthetic Content (promulgated 2025-03-07, effective
+    2025-09-01) have 14 articles total (Art. 14 = effective date; NO Art. 15), and govern:
+    EXPLICIT labels = Art. 4 (defined in Art. 3); IMPLICIT labels incl. metadata + digital
+    watermarks = Art. 5; the 6-month service-provider log retention = Art. 9. Confirmed
+    against the ChinaLawTranslate canonical bilingual text + multiple legal commentaries."""
+
+    def _raw(self) -> dict[str, Any]:
+        template_dir = Path(__file__).parent.parent.parent / "src" / "acef" / "templates"
+        return json.loads((template_dir / "china-cac-labeling-2025.json").read_text(encoding="utf-8"))
+
+    def _refs(self) -> dict[str, str]:
+        refs: dict[str, str] = {}
+        for prov in self._raw()["provisions"]:
+            refs[prov["provision_id"]] = prov["normative_text_ref"]
+            for sub in prov.get("sub_provisions", []):
+                refs[sub["provision_id"]] = sub["normative_text_ref"]
+        return refs
+
+    def test_provision_citations_match_final_articles(self) -> None:
+        refs = self._refs()
+        expected = {
+            "cac-explicit-label": "Art. 4",
+            "cac-implicit-metadata": "Art. 5",
+            "cac-watermark": "Art. 5",
+            "cac-log-retention": "Art. 9",
+        }
+        for pid, article in expected.items():
+            assert article in refs[pid], f"{pid}: expected {article!r}, got {refs[pid]!r}"
+
+    def test_no_citation_exceeds_the_final_14_articles(self) -> None:
+        import re
+
+        for pid, ref in self._refs().items():
+            for num in re.findall(r"Art\.\s*(\d+)", ref):
+                assert 1 <= int(num) <= 14, f"{pid} cites Art. {num}, but the final Measures have 14 articles: {ref!r}"
+            assert "Art. 15" not in ref, f"{pid} cites the non-existent Art. 15: {ref!r}"
+            assert "10(2)" not in ref, f"{pid} cites the non-existent Art. 10(2): {ref!r}"
+
+    def test_digital_watermarks_not_listed_under_explicit_labels(self) -> None:
+        # Digital watermarks are IMPLICIT labeling (Art. 5), not explicit (Art. 4). The
+        # explicit-label provision description must not list them.
+        explicit = next(p for p in self._raw()["provisions"] if p["provision_id"] == "cac-explicit-label")
+        assert "watermark" not in explicit["description"].lower(), explicit["description"]
 
 
 class TestArt73RequiredEvidenceTypesIsNotAConjunctiveOR:
