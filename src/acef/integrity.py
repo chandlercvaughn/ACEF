@@ -85,7 +85,7 @@ def path_nfc_utf8_problem(value: str) -> str | None:
     own module-specific error type/code; centralizing the *logic* here keeps the
     rule identical everywhere.
 
-    Two checks, in order:
+    Three checks, in order:
 
     1. **Strict UTF-8.** A Python ``str`` may hold lone UTF-16 surrogates (e.g.
        ``"a\\udce9.txt"`` from a POSIX filename decoded with ``surrogateescape``,
@@ -95,7 +95,12 @@ def path_nfc_utf8_problem(value: str) -> str | None:
        un-encodable path could never be written to ``content-hashes.json`` /
        a tar member name consistently, so reject it before the NFC test (which
        would otherwise pass it through).
-    2. **NFC normalization.** Reject paths whose NFC form differs from the
+    2. **No control characters.** Reject any Unicode control character (general
+       category Cc — U+0000–U+001F, U+007F–U+009F, including the NUL byte). These
+       are valid UTF-8 and NFC, so checks 1 and 3 do not see them; rejecting them
+       makes the Appendix D.5 Merkle second-preimage premise true (the 0x00 leaf
+       separator cannot occur inside a path) and keeps keys/tar names API-safe.
+    3. **NFC normalization.** Reject paths whose NFC form differs from the
        supplied form (e.g. an HFS+ NFD-decomposed name) so a conformant
        NFC-normalizing exporter and this one produce identical keys.
 
@@ -103,13 +108,23 @@ def path_nfc_utf8_problem(value: str) -> str | None:
         value: The hash-domain path string to validate.
 
     Returns:
-        ``None`` when the path is strict-UTF-8 and NFC; otherwise a reason
-        string describing the first violation found.
+        ``None`` when the path is strict-UTF-8, control-free, and NFC; otherwise
+        a reason string describing the first violation found.
     """
     try:
         value.encode("utf-8")
     except UnicodeEncodeError:
         return "path is not valid UTF-8 (contains surrogate or un-encodable code points)"
+    # 2. No Unicode control characters (general category Cc: U+0000–U+001F,
+    #    U+007F–U+009F, which INCLUDES the NUL byte). This is the constraint the
+    #    Merkle second-preimage argument (Appendix D.5) relies on — the 0x00 leaf
+    #    separator in ``path_bytes ‖ 0x00 ‖ hexhash`` cannot occur inside a path —
+    #    and it keeps content-hashes.json keys and tar member names free of bytes
+    #    that confuse path/archive APIs. NUL/control are valid UTF-8 and NFC, so
+    #    the two checks above do NOT catch them; this third check does.
+    for ch in value:
+        if unicodedata.category(ch) == "Cc":
+            return f"path contains a Unicode control character (U+{ord(ch):04X}, general category Cc)"
     if unicodedata.normalize("NFC", value) != value:
         return "path is not UTF-8 NFC normalized"
     return None

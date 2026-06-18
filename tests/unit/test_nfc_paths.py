@@ -23,7 +23,7 @@ from pathlib import Path
 
 import pytest
 
-from acef.errors import ACEFError, ACEFExportError
+from acef.errors import ACEFError, ACEFExportError, ACEFFormatError
 from acef.integrity import (
     ACEFCanonicalizationError,
     build_merkle_tree,
@@ -860,3 +860,62 @@ class TestExportErrorMessageNamesContentNFCCause:
         msg = str(exc.value).lower()
         assert "normalize" in msg and "nfc" in msg, msg
         assert "non-nfc text value" in msg or "record payload" in msg, msg
+
+
+# ---------------------------------------------------------------------------
+# PhD re-review CRYPTO-2 — hash-domain paths MUST contain no Unicode control
+# characters (general category Cc: U+0000–U+001F, U+007F–U+009F, incl. the NUL
+# byte). The shared helper enforced only strict-UTF-8 + NFC, so NUL/0x01/0x1f/
+# 0x7f slipped through every site routed through it (package validators, export,
+# compute_content_hashes, build_merkle_tree, loader._validate_path). This is the
+# premise the Appendix D.5 Merkle second-preimage argument relies on: the 0x00
+# leaf separator (path_bytes ‖ 0x00 ‖ hexhash) cannot occur inside a path.
+# ---------------------------------------------------------------------------
+
+_CONTROL_PATHS = ["a\x00b", "a\x01b", "a\x1fb", "a\x7fb", "rec\tord", "a\nb", "a\rb", "a\x9fb"]
+
+
+@pytest.mark.parametrize("p", _CONTROL_PATHS)
+def test_path_problem_helper_flags_control_characters(p: str) -> None:
+    """The shared helper rejects any Unicode control character (category Cc),
+    NUL included. RED before: NUL/control are valid UTF-8 and NFC, so the
+    UTF-8+NFC-only check returned None and admitted them."""
+    from acef.integrity import path_nfc_utf8_problem
+
+    reason = path_nfc_utf8_problem(p)
+    assert reason is not None and "control" in reason.lower(), f"{p!r} must be rejected as a control character"
+
+
+def test_path_problem_helper_accepts_clean_paths() -> None:
+    """Negative control: ordinary ASCII and printable-NFC paths still pass."""
+    from acef.integrity import path_nfc_utf8_problem
+
+    assert path_nfc_utf8_problem("records/risk_register.jsonl") is None
+    assert path_nfc_utf8_problem("artifacts/sub/eval-report.txt") is None
+    assert path_nfc_utf8_problem(_NFC_NAME) is None  # printable composed Unicode
+
+
+def test_build_merkle_tree_rejects_nul_path_key() -> None:
+    """The D.5 premise is now ENFORCED: a NUL-bearing content-hashes key is
+    rejected at Merkle construction, so the 0x00 leaf separator can never occur
+    inside a path. RED before: build_merkle_tree accepted the NUL key."""
+    with pytest.raises(ACEFCanonicalizationError):
+        build_merkle_tree({"a\x00b": "ab" * 32, "c/d.json": "cd" * 32})
+
+
+def test_build_merkle_tree_rejects_nonnul_control_path_key() -> None:
+    """Non-NUL control chars (0x1f) are also rejected at Merkle construction."""
+    with pytest.raises(ACEFCanonicalizationError):
+        build_merkle_tree({"a\x1fb": "ab" * 32, "c/d.json": "cd" * 32})
+
+
+def test_loader_validate_path_rejects_nonnul_control_characters() -> None:
+    """The consumer-side loader path check (delegating to the shared helper) now
+    rejects non-NUL control characters too (0x01/0x1f/0x7f). RED before: NUL was
+    rejected at loader.py:117 but 0x01/0x1f/0x7f passed through."""
+    from acef.loader import _validate_path
+
+    for p in ("records/a\x01b.jsonl", "artifacts/a\x1fb", "artifacts/a\x7fb"):
+        with pytest.raises(ACEFFormatError) as exc_info:
+            _validate_path(p)
+        assert exc_info.value.code == "ACEF-052"
