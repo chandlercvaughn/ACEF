@@ -301,3 +301,62 @@ class TestSpecTemplateCitationsResolve:
                     f"(acef-conventions/v1.1/) nearby"
                 )
                 start = idx + len(needle)
+
+
+class TestF23OrphanArtifactNames:
+    """F23: bias_assessment / acquisition_record appeared in the §2 mapping
+    tables as if they were first-class record types, but neither is a RECORD_TYPES
+    member nor a registered variant — they are payload concepts. Every line that
+    names them must now resolve them to a real parent record type."""
+
+    _SPEC = Path(__file__).resolve().parents[2] / "planning" / "ACEF-Spec-Outline-v0.1.md"
+
+    def test_orphan_names_clarified_to_a_real_record_type(self) -> None:
+        from acef.models.enums import RECORD_TYPES
+
+        spec_lines = self._SPEC.read_text(encoding="utf-8").splitlines()
+        for orphan in ("`bias_assessment`", "`acquisition_record"):
+            hits = [ln for ln in spec_lines if orphan in ln]
+            assert hits, f"spec lost the {orphan} mapping row"
+            for ln in hits:
+                names_real_parent = any(f"`{rt}`" in ln for rt in RECORD_TYPES)
+                assert names_real_parent and "not a standalone record type" in ln.lower(), (
+                    f"orphan {orphan} not resolved to a real record type: {ln!r}"
+                )
+
+
+class TestF28TransparencyMarkingVocabulary:
+    """F28: the §3.4/§3.5/§5.1 examples used the obsolete marking_technique /
+    metadata_format vocabulary that §3.1.5 replaced, so the spec's own example
+    transparency_marking record would FAIL the shipped schema."""
+
+    _REPO = Path(__file__).resolve().parents[2]
+    _SPEC = _REPO / "planning" / "ACEF-Spec-Outline-v0.1.md"
+    _REQUIRED = ("modality", "marking_scheme_id", "scheme_version", "metadata_container", "watermark_applied")
+
+    def test_no_example_uses_the_obsolete_marking_technique_field(self) -> None:
+        spec = self._SPEC.read_text(encoding="utf-8")
+        assert "/payload/marking_technique" not in spec, "spec still uses the obsolete /payload/marking_technique"
+        assert '"marking_technique": "secure_metadata"' not in spec, "spec §5.1 still uses the obsolete payload key"
+
+    def test_section_5_1_example_payload_conforms_to_schema(self) -> None:
+        from jsonschema import Draft202012Validator
+
+        # The §5.1 transparency_marking payload, as documented (kept in sync with
+        # the spec example) — must validate against the shipped schema.
+        documented_payload = {
+            "modality": "image",
+            "marking_scheme_id": "c2pa-content-credentials",
+            "scheme_version": "2.3",
+            "metadata_container": "c2pa-manifest-store",
+            "watermark_applied": True,
+            "watermark_method": "spectral_embedding",
+            "robustness_parameters": {"compression": "jpeg_q30", "cropping": "25%", "screenshot": True},
+            "detection_api_endpoint": "https://api.acme.ai/v1/detect",
+        }
+        spec = self._SPEC.read_text(encoding="utf-8")
+        for key in self._REQUIRED:
+            assert f'"{key}"' in spec, f"§5.1 example missing required transparency_marking field {key!r}"
+        schema = json.loads((self._REPO / "acef-conventions" / "v1" / "transparency_marking.schema.json").read_text())
+        errors = list(Draft202012Validator(schema).iter_errors(documented_payload))
+        assert not errors, f"documented §5.1 payload fails the schema: {[e.message for e in errors]}"

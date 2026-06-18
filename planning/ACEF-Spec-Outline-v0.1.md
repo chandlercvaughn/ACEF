@@ -87,7 +87,7 @@ The EU AI Act is the most implementation-specific regulatory framework globally.
 | Training/validation/test datasets are relevant, representative, error-free, complete | `dataset_card`: name, version, source, size, modality, representativeness assessment, known limitations |
 | Data governance processes | `data_governance_log`: curation steps, bias mitigation methods, quality checks performed |
 | Dataset provenance and lineage | `data_provenance`: source URIs, acquisition method (licensed/scraped/public domain/synthetic), acquisition dates, chain of custody |
-| Bias detection and mitigation | `bias_assessment`: protected attributes tested, metrics used, results, mitigation actions taken |
+| Bias detection and mitigation | `bias_assessment` (NOT a standalone record type — per §2's payload-name convention, this is payload evidence in `evaluation_report`, e.g. `training_data_summary.known_bias_mitigations`, and `dataset_card`): protected attributes tested, metrics used, results, mitigation actions taken |
 
 #### Article 11 — Technical Documentation (Annex IV)
 
@@ -186,7 +186,7 @@ Annex XI defines minimum structured data requirements for GPAI model documentati
 |---|---|
 | Acceptable use policy | `acceptable_use_policy`: policy document, version, restrictions, enforcement mechanisms |
 | Model architecture, parameter count, modality, I/O formats | `model_architecture`: architecture type, parameter count, input modalities, output modalities, context length, format specifications |
-| Data types, provenance, curation, bias detection | Cross-reference to `dataset_card`, `data_provenance`, `bias_assessment` |
+| Data types, provenance, curation, bias detection | Cross-reference to `dataset_card`, `data_provenance`, and bias evidence carried as payload in `evaluation_report` (`training_data_summary.known_bias_mitigations`) — `bias_assessment` is a payload concept, not a standalone record type |
 | Compute used for training | `compute_record`: hardware type, total GPU/TPU hours, cloud provider, training duration |
 | Known/estimated energy consumption | `energy_consumption`: total kWh, carbon intensity (gCO2eq/kWh), methodology (measured vs. estimated), reporting standard |
 | License terms | `model_license`: license type, restrictions, distribution terms |
@@ -299,7 +299,7 @@ The Copyright Office does not impose binding rules but establishes the policy ba
 
 | Guidance Area | ACEF Evidence Artifact |
 |---|---|
-| Lawful vs. unlawful acquisition of training data | `acquisition_record[]`: source, acquisition method, legal basis (license/fair use/public domain), date |
+| Lawful vs. unlawful acquisition of training data | `acquisition_record[]` (NOT a standalone record type — payload fields of `data_provenance`: `acquisition_method`, `acquisition_date`, `legal_basis`, `acquisition_channels`): source, acquisition method, legal basis (license/fair use/public domain), date |
 | Licensing pathway documentation | `license_record[]`: licensor, scope, restrictions, expiration, content type |
 | Curation and filtering processes | `curation_log`: filtering criteria, deduplication methods, content removal decisions |
 | Memorization/regurgitation risk mitigation | `memorization_mitigation`: detection methods, test results, guardrails implemented |
@@ -1083,11 +1083,11 @@ Each template is a separate JSON file that declares what evidence is required fo
           "message": "At least one transparency_marking record required for Art. 50(2)"
         },
         {
-          "rule_id": "art50-marking-technique",
+          "rule_id": "art50-marking-scheme",
           "rule": "field_present",
-          "params": {"record_type": "transparency_marking", "field": "/payload/marking_technique"},
+          "params": {"record_type": "transparency_marking", "field": "/payload/marking_scheme_id"},
           "severity": "fail",
-          "message": "Marking technique must be specified"
+          "message": "Marking scheme must be specified"
         }
       ],
       "tiered_requirements": null
@@ -1192,7 +1192,7 @@ Regulation mapping templates use a formal rule DSL to define evaluation logic. T
 
 **Regex dialect (normative):** The `regex` comparison operator uses [ECMA-262 RegExp](https://tc39.es/ecma262/#sec-regexp-regular-expression-objects) syntax (the JavaScript regex standard). Flags are not supported — all matches are case-sensitive and single-line by default. Implementations MUST reject patterns that do not parse as valid ECMA-262 RegExp (error ACEF-045).
 
-**Path syntax:** All `field` parameters use [JSON Pointer (RFC 6901)](https://www.rfc-editor.org/rfc/rfc6901). Example: `/payload/marking_technique` (NOT dotted notation). Paths are evaluated relative to each record object.
+**Path syntax:** All `field` parameters use [JSON Pointer (RFC 6901)](https://www.rfc-editor.org/rfc/rfc6901). Example: `/payload/marking_scheme_id` (NOT dotted notation). Paths are evaluated relative to each record object.
 
 **Scope filter (optional):**
 
@@ -1526,9 +1526,13 @@ package.record(
     obligation_role="provider",
     entity_refs={"subject_refs": [system.id]},
     payload={
-        "marking_technique": "secure_metadata",
-        "metadata_format": "c2pa-manifest-v2.3",
+        # §3.1.5 normative minimum required fields for transparency_marking:
+        "modality": "image",
+        "marking_scheme_id": "c2pa-content-credentials",
+        "scheme_version": "2.3",
+        "metadata_container": "c2pa-manifest-store",
         "watermark_applied": True,
+        # Optional illustrative fields below:
         "watermark_method": "spectral_embedding",
         "robustness_parameters": {"compression": "jpeg_q30", "cropping": "25%", "screenshot": True},
         "detection_api_endpoint": "https://api.acme.ai/v1/detect",
