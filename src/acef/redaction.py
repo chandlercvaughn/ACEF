@@ -402,6 +402,18 @@ def redact_record(
             f"Unsupported redaction method: {method!r}. Supported methods: {sorted(_SUPPORTED_REDACTION_METHODS)}",
             code="ACEF-004",
         )
+    if method == "hmac-sha256-commitment":
+        # The keyless legacy path cannot produce a real HMAC commitment — it would
+        # compute a PLAIN sha256 and mislabel it as HMAC, a FALSE (still offline-
+        # enumerable) hiding commitment (roborev High on 28df1ec). A hiding
+        # commitment needs the out-of-band key, supplied only to apply_redaction.
+        raise ACEFFormatError(
+            "redaction method 'hmac-sha256-commitment' is only supported via "
+            "apply_redaction(payload, policy, hmac_key=...) — the keyless redact_record "
+            "legacy path cannot carry the out-of-band key, so it cannot produce a hiding "
+            "commitment (spec Appendix D.6)",
+            code="ACEF-004",
+        )
 
     payload_canonical = canonicalize(record.payload)
     payload_hash = sha256_hex(payload_canonical)
@@ -423,28 +435,41 @@ def redact_record(
 def verify_redaction(
     redacted_record: RecordEnvelope,
     original_payload: dict[str, Any],
+    *,
+    hmac_key: bytes | None = None,
 ) -> bool:
     """Verify that a redacted record's hash commitment matches original payload.
 
     Args:
-        redacted_record: The redacted record.
+        redacted_record: The redacted record (``redaction_method`` is
+            ``"<method>:<commitment>"``).
         original_payload: The original (unredacted) payload.
+        hmac_key: REQUIRED to verify an ``hmac-sha256-commitment``; the same
+            out-of-band key used to create it. For ``sha256-hash-commitment``
+            it is ignored.
 
     Returns:
-        True if the commitment matches.
+        True if the commitment matches. For an ``hmac-sha256-commitment`` with
+        no ``hmac_key`` supplied, returns **False** (it cannot be verified
+        offline) — it MUST NOT recompute a plain SHA-256 and accept a
+        commitment merely *labelled* HMAC (roborev on 28df1ec).
     """
     if not redacted_record.redaction_method:
         return False
 
-    # Extract expected hash from redaction method
-    parts = redacted_record.redaction_method.split(":")
-    if len(parts) < 2:
+    # ``redaction_method`` is "<method>:<commitment>"; the method names contain
+    # no ':' so split on the LAST ':'.
+    method, _, expected_hash = redacted_record.redaction_method.rpartition(":")
+    if not method or not expected_hash:
         return False
-    expected_hash = parts[-1]
 
-    # Compute hash of original payload
     payload_canonical = canonicalize(original_payload)
-    actual_hash = sha256_hex(payload_canonical)
+    if method == "hmac-sha256-commitment":
+        if not hmac_key:
+            return False  # cannot verify an HMAC commitment without the out-of-band key
+        actual_hash = _hmac.new(hmac_key, payload_canonical, hashlib.sha256).hexdigest()
+    else:
+        actual_hash = sha256_hex(payload_canonical)
 
     return actual_hash == expected_hash
 

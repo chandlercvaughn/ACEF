@@ -236,3 +236,71 @@ class TestHmacHidingCommitment:
             assert exc.code == "ACEF-004"
         else:
             raise AssertionError("hmac-sha256-commitment without a key must raise ACEF-004")
+
+
+class TestHmacFootgunsClosed:
+    """roborev on 28df1ec: the keyless convenience paths must NOT produce or accept
+    a FALSE hiding commitment (plain sha256 mislabelled as HMAC)."""
+
+    @staticmethod
+    def _clock():
+        import datetime as _dt
+
+        return lambda: _dt.datetime(2026, 1, 1, tzinfo=_dt.UTC)
+
+    def test_legacy_redact_record_rejects_hmac_method(self) -> None:
+        from acef.errors import ACEFFormatError
+        from acef.models.records import EntityRefs, RecordEnvelope
+        from acef.redaction import redact_record
+
+        rec = RecordEnvelope(
+            record_type="risk_register",
+            payload={"diagnosis": "yes"},
+            entity_refs=EntityRefs(),
+            timestamp="2026-01-01T00:00:00Z",
+        )
+        with pytest.raises(ACEFFormatError) as exc:
+            redact_record(rec, method="hmac-sha256-commitment")  # legacy keyless path
+        assert exc.value.code == "ACEF-004"
+        assert "apply_redaction" in str(exc.value), "the error must point to the key-bearing apply_redaction API"
+
+    def test_verify_redaction_does_not_false_positive_on_mislabelled_hmac(self) -> None:
+        from acef.integrity import canonicalize, sha256_hex
+        from acef.models.records import EntityRefs, RecordEnvelope
+        from acef.redaction import verify_redaction
+
+        payload = {"diagnosis": "yes"}
+        plain = sha256_hex(canonicalize(payload))
+        # An attacker labels a PLAIN sha256 commitment as HMAC.
+        forged = RecordEnvelope(
+            record_type="risk_register",
+            payload={"_redacted": True},
+            entity_refs=EntityRefs(),
+            timestamp="2026-01-01T00:00:00Z",
+            redaction_method=f"hmac-sha256-commitment:{plain}",
+        )
+        # WITHOUT a key, an HMAC commitment cannot be verified — must NOT recompute
+        # plain sha256 and accept it.
+        assert verify_redaction(forged, payload) is False
+        assert verify_redaction(forged, payload, hmac_key=b"any-key") is False
+
+    def test_verify_redaction_accepts_real_hmac_with_key(self) -> None:
+        import hashlib
+        import hmac as _hmac
+
+        from acef.integrity import canonicalize
+        from acef.models.records import EntityRefs, RecordEnvelope
+        from acef.redaction import verify_redaction
+
+        payload = {"diagnosis": "yes"}
+        key = b"out-of-band-secret-key-32-bytes!!"
+        commitment = _hmac.new(key, canonicalize(payload), hashlib.sha256).hexdigest()
+        rec = RecordEnvelope(
+            record_type="risk_register",
+            payload={"_redacted": True},
+            entity_refs=EntityRefs(),
+            timestamp="2026-01-01T00:00:00Z",
+            redaction_method=f"hmac-sha256-commitment:{commitment}",
+        )
+        assert verify_redaction(rec, payload, hmac_key=key) is True
+        assert verify_redaction(rec, {"diagnosis": "no"}, hmac_key=key) is False
