@@ -238,8 +238,25 @@ class TestVerifyCliTrustAnchors:
 
 
 class TestLoadTrustAnchors:
-    def test_empty_returns_empty(self) -> None:
-        assert load_trust_anchors([]) == []
+    def test_empty_input_returns_none(self) -> None:
+        """roborev Low on 095670d: an empty input must return ``None``, NOT an
+        empty list. ``verify_x5c_chain`` treats a non-None empty anchor list as
+        an explicit "cannot anchor chain" request (ACEF-012), so a caller doing
+        ``validate(b, trust_anchors=load_trust_anchors(paths))`` with no
+        configured paths would wrongly REJECT a self-attested x5c bundle. None
+        is the pipeline's "no enforcement" sentinel."""
+        assert load_trust_anchors([]) is None
+
+    def test_empty_load_result_does_not_enforce_anchoring(self, tmp_path: Path) -> None:
+        """End-to-end proof of the roborev Low: passing the empty-input load
+        result straight into ``acef.validate`` on an x5c-signed bundle must NOT
+        emit ACEF-012 — no anchors configured means self-attested trust."""
+        bundle_dir = _export_bundle(tmp_path)
+        leaf_key, x5c = _build_self_issued_chain()
+        _sign_bundle_with_x5c(bundle_dir, leaf_key, x5c)
+
+        assessment = acef.validate(str(bundle_dir), trust_anchors=load_trust_anchors([]))
+        assert _sig_codes(assessment.structural_errors) == []
 
     def test_loads_pem(self, tmp_path: Path) -> None:
         _, _, root = _build_anchored_chain()

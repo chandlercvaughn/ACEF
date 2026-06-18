@@ -483,11 +483,11 @@ def verify_x5c_chain(
     return chain[0].public_key()
 
 
-def load_trust_anchors(paths: Iterable[str]) -> list[Certificate]:
+def load_trust_anchors(paths: Iterable[str]) -> list[Certificate] | None:
     """Load locally-configured trust-anchor certificates from disk.
 
     Each path is read as bytes and parsed as an X.509 certificate, trying PEM
-    first then DER. The returned list is the ``trust_anchors`` argument the
+    first then DER. The return value is exactly the ``trust_anchors`` argument the
     validation pipeline (``validate`` / ``validate_bundle`` / ``check_integrity``)
     threads into ``verify_x5c_chain`` to enforce x5c chain termination per spec
     §3.1.3 ("verifiers MUST validate the full certificate chain against a locally
@@ -497,12 +497,22 @@ def load_trust_anchors(paths: Iterable[str]) -> list[Certificate]:
     parameter, but no shipped public surface populated it from operator-supplied
     cert files.
 
+    Empty input returns ``None`` — NOT an empty list — because the pipeline
+    distinguishes the two: ``trust_anchors=None`` means "no anchors configured,
+    self-attested trust" (the default), whereas ``verify_x5c_chain`` treats a
+    NON-None empty list as an explicit anchoring request that no chain can
+    satisfy and rejects every x5c chain with ACEF-012. Returning ``None`` here
+    makes the helper's result safe to pass straight into ``validate`` for ANY
+    input set, including an empty configuration:
+    ``validate(b, trust_anchors=load_trust_anchors(cfg_paths))`` does the right
+    thing whether ``cfg_paths`` is empty or not.
+
     Args:
         paths: Filesystem paths to PEM- or DER-encoded X.509 certificates.
 
     Returns:
-        The parsed certificates, in the order given. An empty iterable yields an
-        empty list (no anchors → no x5c enforcement, the pipeline default).
+        The parsed certificates, in the order given, or ``None`` when ``paths``
+        yields nothing (no anchors → no x5c enforcement, the pipeline default).
 
     Raises:
         ACEFSigningError: a path is unreadable (ACEF-012) or its bytes parse as
@@ -526,7 +536,7 @@ def load_trust_anchors(paths: Iterable[str]) -> list[Certificate]:
                     f"Trust anchor {path!r} is not a valid PEM or DER X.509 certificate: {e}",
                     code="ACEF-012",
                 ) from e
-    return anchors
+    return anchors or None
 
 
 def _load_private_key(key_path: str) -> PrivateKeyTypes:
