@@ -517,6 +517,17 @@ class _CapturingOpener:
 class TestDefaultFetcherHardening:
     """Direct policy tests for ``_default_http_fetcher`` (F1 SSRF, F2 DoS)."""
 
+    @pytest.fixture(autouse=True)
+    def _stub_public_dns(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Stub getaddrinfo to a PUBLIC IP so these policy tests never perform
+        real DNS (F33 added a resolve-and-pin step before the mocked opener is
+        reached; roborev on 6be6ff9 — keep these unit tests network-independent)."""
+
+        def _fake_getaddrinfo(host: object, port: object, *a: object, **k: object) -> list[tuple]:
+            return [(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("93.184.216.34", 443))]
+
+        monkeypatch.setattr(socket, "getaddrinfo", _fake_getaddrinfo)
+
     def test_off_origin_redirect_is_not_followed(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """F1: an off-origin 3xx redirect MUST NOT be followed. The no-follow
         redirect handler converts the 3xx into an HTTPError, which the fetcher maps
@@ -998,3 +1009,34 @@ class TestWellKnownFetcherDnsRebindingGuard:
         monkeypatch.setattr("acef.domain_control._urllib_request.build_opener", lambda *a, **k: _FakeOpener())
         resp = _default_http_fetcher(self._URL)
         assert resp.status == 200 and resp.body == "proof"
+
+
+class TestIPPinnedHTTPSConnection:
+    """F33 (roborev on 6be6ff9): the connection is PINNED to the validated IP, so
+    urllib cannot re-resolve to a different (internal) IP at connect time — the
+    DNS-rebinding TOCTOU. The cert is still validated against the original
+    hostname (SNI/server_hostname), only the IP is pinned."""
+
+    def test_connect_targets_the_pinned_ip_not_a_reresolution(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from acef.domain_control import _IPPinnedHTTPSConnection
+
+        captured: dict[str, object] = {}
+
+        def _fake_create_connection(address: tuple, timeout: object = None) -> object:
+            captured["address"] = address
+            raise OSError("sentinel — no real connect in the test")
+
+        monkeypatch.setattr(socket, "create_connection", _fake_create_connection)
+        conn = _IPPinnedHTTPSConnection("example.com", _pinned_ip="93.184.216.34")
+        with pytest.raises(OSError):
+            conn.connect()
+        # It connected to the PINNED public IP — never re-resolved the hostname.
+        assert captured["address"] == ("93.184.216.34", 443)
+
+    def test_connect_refuses_an_internal_pinned_ip_defense_in_depth(self) -> None:
+        from acef.domain_control import _IPPinnedHTTPSConnection
+
+        for internal in ("127.0.0.1", "169.254.169.254", "10.0.0.1"):
+            conn = _IPPinnedHTTPSConnection("example.com", _pinned_ip=internal)
+            with pytest.raises(OSError):
+                conn.connect()

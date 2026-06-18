@@ -93,6 +93,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import http.client as _http_client
 import ipaddress
 import json
 import socket as _socket
@@ -399,6 +400,62 @@ class _NoFollowRedirectHandler(_urllib_request.HTTPRedirectHandler):
         )
 
 
+def _is_internal_ip(ip_str: str) -> bool:
+    """True if ``ip_str`` is an address the verifier must NEVER connect to —
+    private / loopback / link-local (incl. the 169.254.169.254 cloud-metadata
+    endpoint) / reserved / multicast / unspecified, or unparseable (fail-closed)."""
+    try:
+        ip = ipaddress.ip_address(ip_str)
+    except ValueError:
+        return True
+    return bool(
+        ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast or ip.is_unspecified
+    )
+
+
+class _IPPinnedHTTPSConnection(_http_client.HTTPSConnection):
+    """HTTPSConnection that connects to a PRE-VALIDATED IP while presenting the
+    original hostname for TLS SNI + certificate validation.
+
+    This closes the DNS-rebinding TOCTOU (F33): validating one ``getaddrinfo``
+    result and then letting ``urllib`` re-resolve the hostname at connect time
+    leaves a window where the connect-time answer differs from the validated one
+    (a public IP for the guard, an internal IP for the connection). Pinning the
+    socket to the already-validated IP removes that window. As defense in depth
+    the pinned IP is re-checked here too, so an internal IP can never be reached.
+    """
+
+    def __init__(self, host: str, *, _pinned_ip: str, **kwargs: Any) -> None:
+        super().__init__(host, **kwargs)
+        self._pinned_ip = _pinned_ip
+
+    def connect(self) -> None:
+        # Defense in depth: never connect to a pinned IP that is internal.
+        if _is_internal_ip(self._pinned_ip):
+            raise OSError(f"refusing to connect to internal pinned IP {self._pinned_ip!r}")
+        sock = _socket.create_connection((self._pinned_ip, self.port or 443), self.timeout)
+        # TLS with the ORIGINAL hostname for SNI + certificate validation — the
+        # cert must still match the domain, only the IP is pinned. ``_context`` is
+        # the SSLContext HTTPSConnection initializes (not in the typeshed stub).
+        ssl_context = self._context  # type: ignore[attr-defined]
+        self.sock = ssl_context.wrap_socket(sock, server_hostname=self.host)
+
+
+class _IPPinnedHTTPSHandler(_urllib_request.HTTPSHandler):
+    """urllib HTTPS handler that opens every connection through an
+    :class:`_IPPinnedHTTPSConnection` pinned to a pre-validated IP (F33)."""
+
+    def __init__(self, pinned_ip: str) -> None:
+        super().__init__()
+        self._pinned_ip = pinned_ip
+
+    def https_open(self, req: Any) -> Any:
+        def _factory(host: str, **kwargs: Any) -> _IPPinnedHTTPSConnection:
+            return _IPPinnedHTTPSConnection(host, _pinned_ip=self._pinned_ip, **kwargs)
+
+        return self.do_open(_factory, req)
+
+
 #: Maximum total length of a DNS hostname (RFC 1035 §3.1 — 253 chars in presentation
 #: form, the 255-octet wire limit minus the length/root bytes).
 _MAX_HOSTNAME_LEN = 253
@@ -510,38 +567,29 @@ def _default_http_fetcher(url: str, *, max_bytes: int = WELL_KNOWN_MAX_BYTES) ->
         # and we do NOT issue the request at all.
         return HttpResponse(status=0, content_type="", body="")
 
-    # DNS-rebinding / SSRF residual guard (F33): the host check above validates only
-    # the hostname STRING (it rejects IP literals) — it does NOT check what the host
-    # RESOLVES to. Resolve the host now and refuse to fetch if ANY returned address is
-    # private / loopback / link-local (this covers the 169.254.169.254 cloud-metadata
-    # endpoint) / reserved / multicast / unspecified, so a public-looking hostname whose
-    # A/AAAA record points at an internal address cannot be used to reach internal
-    # services. (A residual TOCTOU window remains — the OS re-resolves at connect time;
-    # pinning the socket to a validated IP is a follow-up. This closes the
-    # always-resolves-internal case, which is the practical SSRF vector here.)
+    # DNS-rebinding / SSRF guard (F33): the host check above validates only the
+    # hostname STRING (it rejects IP literals) — not what the host RESOLVES to.
+    # Resolve ONCE here, refuse if ANY returned address is internal, and PIN the
+    # connection to the validated IP below (so urllib cannot re-resolve to a
+    # different internal IP at connect time — the TOCTOU rebinding window).
     try:
         addrinfos = _socket.getaddrinfo(parsed.hostname, 443, proto=_socket.IPPROTO_TCP)
     except _socket.gaierror as exc:
         raise DomainControlLookupError(f".well-known DNS resolution failed: {exc}") from exc
+    pinned_ip: str | None = None
     for info in addrinfos:
-        sockaddr = info[4]
-        try:
-            resolved_ip = ipaddress.ip_address(sockaddr[0])
-        except ValueError:
+        candidate = str(info[4][0])
+        if _is_internal_ip(candidate):
             return HttpResponse(status=0, content_type="", body="")
-        if (
-            resolved_ip.is_private
-            or resolved_ip.is_loopback
-            or resolved_ip.is_link_local
-            or resolved_ip.is_reserved
-            or resolved_ip.is_multicast
-            or resolved_ip.is_unspecified
-        ):
-            return HttpResponse(status=0, content_type="", body="")
+        if pinned_ip is None:
+            pinned_ip = candidate
+    if pinned_ip is None:
+        # getaddrinfo returned no usable address → no valid proof, no fetch.
+        return HttpResponse(status=0, content_type="", body="")
 
-    # Build a dedicated opener that NEVER follows redirects (SSRF guard). Using a
-    # bespoke opener (not the global urlopen) keeps the no-follow policy local.
-    opener = _urllib_request.build_opener(_NoFollowRedirectHandler())
+    # Build a dedicated opener that NEVER follows redirects (SSRF guard) and PINS
+    # the HTTPS connection to the validated IP (no connect-time re-resolution).
+    opener = _urllib_request.build_opener(_NoFollowRedirectHandler(), _IPPinnedHTTPSHandler(pinned_ip))
     request = _urllib_request.Request(url, method="GET")  # noqa: S310 — https + host validated above
     try:
         with opener.open(request, timeout=5) as response:  # noqa: S310
