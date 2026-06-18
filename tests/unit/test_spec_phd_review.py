@@ -550,6 +550,22 @@ class TestFinding10FormalProof:
         assert "entity_linked" in universal_line, "Appendix C must list entity_linked as universal"
         assert "entity_linked" not in existential_line, "Appendix C must NOT list entity_linked as existential"
 
+    def test_section_3_5_empty_set_classifies_all_ten_operators(self) -> None:
+        """Fresh systems committee (STD-2): the §3.5 '(normative)' empty-set block —
+        which Appendix C.5 cites as THE normative source for every operator's ∃/∀
+        assignment — must classify all 10 built-ins, not 7. evidence_freshness is
+        universal; bundle_signed and record_attested are existential."""
+        c = _spec_text()
+        start = c.find("**Empty-set semantics (normative):**")
+        assert start != -1, "§3.5 must carry the normative empty-set block"
+        block = c[start : start + 1200].lower()
+        existential_line = next((ln for ln in block.split("\n") if "existential operators" in ln), "")
+        universal_line = next((ln for ln in block.split("\n") if "universal operators" in ln), "")
+        for op in ("has_record_type", "exists_where", "attachment_exists", "record_attested", "bundle_signed"):
+            assert op in existential_line, f"§3.5 empty-set existential list must include {op}"
+        for op in ("field_present", "field_value", "entity_linked", "evidence_freshness"):
+            assert op in universal_line, f"§3.5 empty-set universal list must include {op}"
+
 
 class TestFinding17VersionIdentity:
     """Filename v0.1, H1 'v0.3', body v1.1/v0.4 — a versioned standard cannot have
