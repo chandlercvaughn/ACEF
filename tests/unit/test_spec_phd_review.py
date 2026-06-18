@@ -42,6 +42,59 @@ class TestFinding14NormativeLanguage:
             assert kw in text, f"normative keyword {kw!r} must be defined/enumerated"
 
 
+class TestFinding8And38Collation:
+    """'lexicographic' is used for record/path/key ordering but the collation unit
+    (byte / code-point / UTF-16 code-unit) is never defined, so byte-determinism is
+    not entailed by the text. The impl uses UTF-16 code-unit order (RFC 8785)."""
+
+    def test_collation_unit_is_defined_as_utf16(self) -> None:
+        text = _spec_text()
+        assert "UTF-16 code unit" in text or "UTF-16 code-unit" in text, (
+            "spec must define the lexicographic collation unit as UTF-16 code units"
+        )
+        # It must reference RFC 8785's object-member ordering so the choice is anchored.
+        assert "RFC 8785" in text
+        # It must explicitly warn that this diverges from Unicode code-point order.
+        assert "code point" in text.lower() or "code-point" in text.lower(), (
+            "spec must contrast UTF-16 collation with code-point order (the divergence the impl handles)"
+        )
+
+    def test_collation_mentions_supplementary_plane_divergence(self) -> None:
+        text = _spec_text().lower()
+        assert "supplementary" in text or "u+10000" in text or "surrogate" in text, (
+            "spec must name the non-BMP/surrogate case where the two collations diverge"
+        )
+
+
+class TestFinding9ArchiveDeterminism:
+    """DEFLATE byte-output is not portable (zlib-version dependent); the spec's
+    'byte-identical archives MUST' had an escape hatch downgrading it. Bundle
+    identity must be defined over the UNPACKED tree, not the gzip wrapper."""
+
+    def test_archive_bytes_are_not_a_conformance_requirement(self) -> None:
+        text = _spec_text()
+        # The old escape-hatch contradiction must be gone.
+        assert "If an implementation cannot produce identical gzip output" not in text, (
+            "spec still carries the gzip escape-hatch that downgrades a MUST"
+        )
+
+    def test_deflate_body_declared_out_of_conformance_and_hash_domain(self) -> None:
+        text = _spec_text().lower()
+        assert "deflate" in text, "spec must address DEFLATE portability explicitly"
+        # The reframing: identity/conformance is over the unpacked bundle digest.
+        assert "transport" in text, "gzip archive must be framed as a transport container"
+
+
+class TestFinding13IntegerDomain:
+    """The I-JSON safe-integer domain (RFC 7493, |n| <= 2^53-1) is enforced only at
+    hash time; it must be stated as a record-content authoring constraint."""
+
+    def test_safe_integer_domain_is_a_record_constraint(self) -> None:
+        text = _spec_text()
+        assert "RFC 7493" in text, "spec must cite RFC 7493 (I-JSON) for the integer domain"
+        assert "2^53" in text or "9007199254740991" in text, "spec must state the safe-integer boundary numerically"
+
+
 class TestFinding17VersionIdentity:
     """Filename v0.1, H1 'v0.3', body v1.1/v0.4 — a versioned standard cannot have
     three different answers to 'what version is this'."""
