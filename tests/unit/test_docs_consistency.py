@@ -62,6 +62,11 @@ class TestF11RedactRecordReturnsTuple:
         # roborev Low on 4b387cd: the documented signature must show defaults so
         # policy/method/access_policy/urn_generator do not look required.
         assert "policy=None" in header, f"redact_record signature must show defaults: {header!r}"
+        # roborev Low on 58c5678: the quick-reference line must mirror the
+        # defaults too, not just the detailed header.
+        qref = [ln for ln in doc.splitlines() if ln.strip().startswith("acef.redact_record(")]
+        assert qref, "API_REFERENCE lost the redact_record quick-reference line"
+        assert "policy=None" in qref[0], f"redact_record quick-ref must show defaults: {qref[0]!r}"
 
 
 class TestCoverageCellDocsNoRemovedModel:
@@ -139,3 +144,9 @@ class TestF45PriorPackageRefDocstring:
         entry = doc[idx : idx + 400]
         assert "bundle digest" in entry or "sha256" in entry, "prior_package_ref doc must cite the bundle digest"
         assert "urn of a prior" not in entry, "prior_package_ref doc still calls it a URN"
+        # roborev Medium on 316173c: the doc must not point at a nonexistent
+        # public helper (acef.from_prior_bundle); acef.chain is the real export.
+        assert "from_prior_bundle" not in entry, "prior_package_ref doc references nonexistent acef.from_prior_bundle"
+        assert "acef.chain" in entry, "prior_package_ref doc should point at the real acef.chain helper"
+        assert hasattr(acef, "chain"), "acef.chain must be a real public export"
+        assert not hasattr(acef, "from_prior_bundle"), "from_prior_bundle is not a public export — don't document it"

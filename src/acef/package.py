@@ -1178,9 +1178,9 @@ class Package:
                 package — the ``sha256:``-prefixed SHA-256 hash of the prior
                 bundle's RFC 8785-canonicalized ``content-hashes.json`` (spec
                 "Canonical bundle identity"; ``metadata.prior_package_ref`` in
-                ``manifest.schema.json``), NOT a URN. Use ``acef.from_prior_bundle``
-                / ``acef.chain`` to derive it from a prior bundle automatically.
-                ``None`` if this is the first version.
+                ``manifest.schema.json``), NOT a URN. Use ``acef.chain`` to derive
+                it from a prior bundle automatically. ``None`` if this is the
+                first version.
             clock: Optional callable returning the current
                 :class:`datetime` (timezone-aware). When provided, replaces
                 the default ``datetime.now(timezone.utc)`` for all

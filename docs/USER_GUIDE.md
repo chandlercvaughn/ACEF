@@ -1235,9 +1235,10 @@ print(assessment_with_coverage["coverage_cells"][0]["coverage_outcome"])  # → 
   have a `timestamp` newer than `time_window_start - freshness_policy.max_age`.
   This is a validator-level rule consulting the bundle's record set, not a
   model-level invariant.
-- The banned-token check is enforced by the validator (ACEF-079), not by
-  the Pydantic model. A `claim_language` containing `"AI Act-compliant"`
-  constructs cleanly but fails validation.
+- The banned-token check is enforced by the validator (ACEF-079) — it is
+  NOT a JSON-schema constraint and there is no Pydantic model to enforce it
+  at construction time (coverage_cell is a raw dict). A `claim_language`
+  containing `"AI Act-compliant"` builds cleanly but fails validation.
 - The assessment-bundle builder API for attaching coverage_cell entries is
   outside the scope of this section; see
   `src/acef/assessment.py` for the assessment-side API.

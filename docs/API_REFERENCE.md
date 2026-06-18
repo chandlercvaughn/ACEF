@@ -45,7 +45,7 @@ acef.export_assessment(assessment, path, *, key_path)  # Export Assessment Bundl
 
 # Privacy
 acef.redact(pkg, *, record_filter, method, access_policy)  # Redact a package
-acef.redact_record(record, *, policy, method, access_policy, urn_generator)  # Redact a single record -> (redacted, attestation|None)
+acef.redact_record(record, *, policy=None, method="sha256-hash-commitment", access_policy=None, urn_generator=None)  # Redact a single record -> (redacted, attestation|None)
 
 # Multi-source
 acef.merge(packages, *, producer, conflict_strategy)  # Merge packages
