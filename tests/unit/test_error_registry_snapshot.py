@@ -67,7 +67,7 @@ EXPECTED_V1_1_ADDITIONS: list[tuple[str, str, str, str]] = [
         "ACEF-076",
         "error",
         "schema",
-        "state_class record lacks fake-green test reference",
+        "state_class record lacks fake-green test reference, or disposition_record sets internal_state_unchanged=false",
     ),
     (
         "ACEF-077",
@@ -197,3 +197,25 @@ class TestV11Additions:
             assert code.startswith("ACEF-0"), code
             num = int(code.split("-")[1])
             assert 70 <= num <= 80, f"v1.1 code {code} outside reserved 070-080 range"
+
+
+class TestACEF076DualConditionDocumented:
+    """F36: ACEF-076 is INTENTIONALLY shared by two state-mutation discipline
+    failures (state_class fake-green AND disposition_record
+    internal_state_unchanged=false, per ops plan WS3.4 + cross_record.py). The
+    spec row + registry description previously documented only the first. Both
+    surfaces must now name BOTH conditions so the taxonomy is honest."""
+
+    _SPEC = Path(__file__).resolve().parents[2] / "planning" / "ACEF-Spec-Outline-v0.1.md"
+
+    def test_registry_description_names_both_conditions(self) -> None:
+        text = ERROR_REGISTRY["ACEF-076"][2].lower()
+        assert "state_class" in text, text
+        assert "internal_state_unchanged" in text, text
+
+    def test_spec_row_names_both_conditions(self) -> None:
+        spec = self._SPEC.read_text(encoding="utf-8")
+        rows = [ln for ln in spec.splitlines() if "`ACEF-076`" in ln]
+        assert rows, "spec lost its ACEF-076 row"
+        row = rows[0].lower()
+        assert "state_class" in row and "internal_state_unchanged" in row, row

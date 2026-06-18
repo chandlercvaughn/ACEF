@@ -130,7 +130,9 @@ EXPECTED_DESCRIPTIONS: dict[str, str] = {
     "ACEF-073": "causation_chain cites an unknown or unsigned URN",
     "ACEF-074": "Record missing redaction_policy_version when confidentiality != public",
     "ACEF-075": "tenant_label mismatch across records in a single bundle",
-    "ACEF-076": "state_class record lacks fake-green test reference",
+    "ACEF-076": (
+        "state_class record lacks fake-green test reference, or disposition_record sets internal_state_unchanged=false"
+    ),
     "ACEF-077": "voice_rubric_emission contains claim-lexicon token without paired harness_attestation",
     "ACEF-078": "redaction_attestation_ref points to unresolvable URN",
     "ACEF-079": "coverage_cell.claim_language contains banned token",

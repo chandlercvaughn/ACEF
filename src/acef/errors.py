@@ -52,7 +52,8 @@ At time of this writing the registry defines 42 codes total:
     ACEF-073  FATAL/reference   causation_chain cites an unknown or unsigned URN
     ACEF-074  ERROR/schema      Record missing redaction_policy_version when confidentiality != public
     ACEF-075  FATAL/reference   tenant_label mismatch across records in a single bundle
-    ACEF-076  ERROR/schema      state_class record lacks fake-green test reference
+    ACEF-076  ERROR/schema      state_class record lacks fake-green test reference, OR
+                                disposition_record sets internal_state_unchanged=false
     ACEF-077  FATAL/integrity   voice_rubric_emission contains claim-lexicon token without paired harness_attestation
     ACEF-078  ERROR/reference   redaction_attestation_ref points to unresolvable URN
     ACEF-079  ERROR/schema      coverage_cell.claim_language contains banned token
@@ -169,7 +170,7 @@ ERROR_REGISTRY: dict[str, tuple[Severity, ErrorCategory, str]] = {
     "ACEF-076": (
         Severity.ERROR,
         ErrorCategory.SCHEMA,
-        "state_class record lacks fake-green test reference",
+        "state_class record lacks fake-green test reference, or disposition_record sets internal_state_unchanged=false",
     ),
     "ACEF-077": (
         Severity.FATAL,
