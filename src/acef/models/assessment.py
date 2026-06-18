@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
-from pydantic import Field
+from pydantic import Field, PrivateAttr
 
 from acef.models.base import ACEFBaseModel
 from acef.models.enums import ProvisionOutcome, RuleOutcome, RuleSeverity
@@ -129,9 +130,43 @@ class AssessmentBundle(ACEFBaseModel):
     structural_errors: list[dict[str, Any]] = Field(default_factory=list)
     integrity: AssessmentIntegrity | None = None
 
+    # Signing intent set by ``sign()`` and consumed by ``export()`` (mirrors
+    # ``Package._signed`` / ``_signature_key``). Private attrs so they are NOT
+    # serialized into the Assessment Bundle JSON.
+    _sign_key: str | None = PrivateAttr(default=None)
+    _sign_method: str = PrivateAttr(default="jws")
+
     def to_dict(self) -> dict[str, Any]:
         """Serialize to dict for JSON output."""
         return self.model_dump(mode="json")
+
+    def sign(self, key: str, *, method: str = "jws") -> None:
+        """Mark this Assessment Bundle for signing during ``export()``.
+
+        Mirrors :meth:`acef.package.Package.sign`: the actual detached JWS over
+        the canonical RFC-8785 bytes is produced by ``export()`` (delegating to
+        ``assessment_builder.export_assessment``). Spec §5.1 flagship example.
+
+        Args:
+            key: Path to the private key file (PEM; RS256 or ES256).
+            method: Signing method — ``"jws"`` only in v1.
+        """
+        if method != "jws":
+            raise ValueError(f"Unsupported signing method {method!r}; only 'jws' is supported in v1")
+        self._sign_key = key
+        self._sign_method = method
+
+    def export(self, path: str, *, signer: str = "", kid: str | None = None) -> Path:
+        """Export this Assessment Bundle to a ``.acef-assessment.json`` file.
+
+        Mirrors :meth:`acef.package.Package.export`: if ``sign()`` was called the
+        export is signed with that key, otherwise it is written unsigned.
+        Delegates to ``assessment_builder.export_assessment`` (the existing free
+        function) without changing its behavior. Spec §5.1 flagship example.
+        """
+        from acef.assessment_builder import export_assessment
+
+        return export_assessment(self, path, key_path=self._sign_key, signer=signer, kid=kid)
 
     def summary(self) -> str:
         """Human-readable summary of assessment results."""
