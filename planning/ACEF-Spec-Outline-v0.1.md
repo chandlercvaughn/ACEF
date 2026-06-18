@@ -1259,7 +1259,7 @@ ACEF defines a normative error taxonomy so that all validators and SDK implement
 | `ACEF-031` | Profile | `error` | Unknown `template_version` |
 | `ACEF-032` | Profile | `info` | Provision not yet effective (`evaluation_instant` < `effective_date`) — rules produce `skipped` outcome |
 | `ACEF-033` | Profile | `error` | Incompatible module versions between Evidence Bundle and template |
-| `ACEF-040` | Evaluation | `error` | Required evidence type missing (rule severity: `fail`) |
+| `ACEF-040` | Evaluation | `error` | Required evidence type missing — realized as a FAILED fail-severity required-evidence rule that rolls the provision up to `not-satisfied` (the GATING verdict), NOT as a standalone structural diagnostic. Unlike the non-gating `ACEF-041`/`ACEF-042` info/warning surfacings, emitting it separately would duplicate the roll-up and wrongly escalate a voluntary/advisory provision's missing evidence to a blocking error. |
 | `ACEF-041` | Evaluation | `warning` | Evidence freshness exceeded |
 | `ACEF-042` | Evaluation | `info` | `evidence_gap` acknowledged for provision |
 | `ACEF-043` | Evaluation | `error` | Invalid JSON Pointer in rule `field` parameter |

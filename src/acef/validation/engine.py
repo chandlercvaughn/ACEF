@@ -802,6 +802,19 @@ def _collect_results(
                     ).to_dict()
                 )
 
+        # ACEF-040 ("Required evidence type missing") is NOT emitted as a separate
+        # structural diagnostic here, by design (audit finding F38). Unlike its
+        # siblings — ACEF-041 (freshness, WARNING) and ACEF-042 (gap, INFO), which
+        # surface NON-GATING conditions — ACEF-040 is the GATING condition: a
+        # missing required evidence type is realized as a FAILED fail-severity
+        # required-evidence rule (the auto-generated ``{provision}-{type}-exists``
+        # rule, rule_engine.py) which rolls the provision up to NOT_SATISFIED
+        # (rollup step 1). Emitting an additional ERROR structural diagnostic would
+        # (a) duplicate the NOT_SATISFIED verdict and (b) wrongly escalate a
+        # voluntary/advisory provision's missing evidence to a blocking ERROR — a
+        # voluntary filing legitimately rolls up NOT_SATISFIED without ERROR
+        # diagnostics. The spec §3.6 + USER_GUIDE document this realization.
+
 
 def _parse_iso_instant(value: str) -> datetime | None:
     """Parse an ISO 8601 timestamp or date into a UTC datetime.

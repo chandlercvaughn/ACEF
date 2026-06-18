@@ -930,7 +930,7 @@ ACEF defines a structured error taxonomy with unique codes, severities, and cate
 
 | Code | Severity | Description |
 |---|---|---|
-| ACEF-040 | Error | Required evidence type missing |
+| ACEF-040 | Error | Required evidence type missing (realized as a failed required-evidence rule → provision `not-satisfied`, not a standalone diagnostic) |
 | ACEF-041 | Warning | Evidence freshness exceeded |
 | ACEF-042 | Info | evidence_gap acknowledged for provision |
 | ACEF-043 | Error | Invalid JSON Pointer in rule field parameter |

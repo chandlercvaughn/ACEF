@@ -377,3 +377,78 @@ class TestF28TransparencyMarkingVocabulary:
         schema = json.loads((self._REPO / "acef-conventions" / "v1" / "transparency_marking.schema.json").read_text())
         errors = list(Draft202012Validator(schema).iter_errors(documented_payload))
         assert not errors, f"documented §5.1 payload fails the schema: {[e.message for e in errors]}"
+
+
+class TestF38ACEF040Realization:
+    """F38: ACEF-040 ("Required evidence type missing") was advertised as
+    never-emitted, but it is REALIZED — not as a standalone structural diagnostic
+    (that would duplicate the verdict and wrongly escalate a voluntary provision's
+    missing evidence to a blocking ERROR), but as a FAILED fail-severity
+    required-evidence rule that rolls the provision up to NOT_SATISFIED. This test
+    pins that realization: the failure surfaces via the rule outcome + roll-up,
+    and NO standalone ACEF-040 structural diagnostic is emitted."""
+
+    def test_missing_required_evidence_realizes_as_not_satisfied_not_a_diagnostic(self) -> None:
+        from acef.models.enums import ProvisionOutcome, RuleOutcome, RuleSeverity
+        from acef.templates.registry import _get_template_dir, load_template
+
+        template_data = {
+            "template_id": "test-req-evidence",
+            "template_name": "Test Required Evidence",
+            "version": "1.0.0",
+            "jurisdiction": "TEST",
+            "instrument_type": "standard",
+            "legal_force": "binding",
+            "instrument_status": "final",
+            "default_effective_date": "2020-01-01",
+            "applicable_system_types": [],
+            "provisions": [
+                {
+                    "provision_id": "req-ev",
+                    "provision_name": "Requires risk_register",
+                    "effective_date": "2020-01-01",
+                    "required_evidence_types": ["risk_register"],
+                    "evaluation": [
+                        {
+                            "rule_id": "req-ev-governance-present",
+                            "rule": "has_record_type",
+                            "params": {"type": "governance_policy", "min_count": 1},
+                            "severity": "info",
+                            "message": "informational only",
+                        }
+                    ],
+                }
+            ],
+        }
+        template_dir = _get_template_dir()
+        template_file = template_dir / "test-req-evidence.json"
+        template_file.write_text(json.dumps(template_data))
+        try:
+            load_template.cache_clear()
+            pkg = Package(producer={"name": "test", "version": "1.0"})
+            pkg.add_subject("ai_system", name="Sys", risk_classification="high-risk")
+            pkg.add_profile("test-req-evidence", provisions=["req-ev"])
+            # A governance_policy record (satisfies the info rule) but NO
+            # risk_register — so the auto-generated req-ev-risk_register-exists
+            # fail-rule fails → ACEF-040.
+            pkg.record("governance_policy", payload={"policy_type": "ai_governance"})
+
+            assessment = acef.validate(
+                pkg, profiles=["test-req-evidence"], evaluation_instant="2026-01-01T00:00:00Z"
+            )
+            # Realization 1: the auto-generated required-evidence rule FAILED at fail severity.
+            exists_rule = next(
+                (r for r in assessment.results if r.rule_id.endswith("-risk_register-exists")), None
+            )
+            assert exists_rule is not None, "the required-evidence existence rule was not evaluated"
+            assert exists_rule.outcome == RuleOutcome.FAILED
+            assert exists_rule.rule_severity == RuleSeverity.FAIL
+            # Realization 2: the provision rolls up to NOT_SATISFIED (the gating verdict).
+            summary = next(ps for ps in assessment.provision_summary if ps.provision_id == "req-ev")
+            assert summary.provision_outcome == ProvisionOutcome.NOT_SATISFIED
+            # And NO standalone ACEF-040 structural diagnostic is emitted (by design).
+            codes = [e.get("code") for e in assessment.structural_errors]
+            assert "ACEF-040" not in codes, f"ACEF-040 must NOT be a standalone structural diagnostic: {codes}"
+        finally:
+            template_file.unlink(missing_ok=True)
+            load_template.cache_clear()
