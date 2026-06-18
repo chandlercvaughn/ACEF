@@ -1158,10 +1158,16 @@ def _evaluate_profiles(
         # untrusted external JSON; skip any non-dict subject so the
         # ``subject.get(...)`` lookups cannot crash. ``modalities`` may also be
         # a non-list, so coerce it for the downstream scope filter.
-        if subjects and per_subject:
-            for subject in subjects:
-                if not isinstance(subject, dict):
-                    continue
+        # Gate on the CONCRETE (dict) subjects, mirroring the not-yet-effective
+        # sibling above. A non-empty subjects list of only non-dict entries is
+        # truthy but yields no evaluable subject; gating on ``subjects`` (raw
+        # truthiness) would enter this branch, ``continue`` past every entry, and
+        # drop ALL per-subject summaries instead of falling through to the
+        # package-level ``elif`` — a §3.7/Appendix C vanishing-summary defect on an
+        # already-invalid (schema-fatal) input.
+        concrete_subjects = [s for s in subjects if isinstance(s, dict)]
+        if concrete_subjects and per_subject:
+            for subject in concrete_subjects:
                 subject_id = subject.get("subject_id", "")
                 risk_class = subject.get("risk_classification", "")
                 modalities = subject.get("modalities", [])

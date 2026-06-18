@@ -802,3 +802,79 @@ class TestRulelessProvisionEndToEnd:
             if template_path.exists():
                 template_path.unlink()
             load_template.cache_clear()
+
+
+class TestPerSubjectVanishingSummaries:
+    """Fresh systems committee (FM-ENGINE-1 @905302e): a non-empty subjects list of
+    only non-dict entries is truthy but yields no evaluable subject; the effective
+    per-subject branch looped+continued and dropped ALL per-subject summaries
+    instead of falling through to package-level evaluation. Gating on
+    concrete_subjects (the NYE sibling already does) fixes it."""
+
+    def test_per_subject_summaries_survive_all_non_dict_subjects(self, tmp_dir: Path) -> None:
+        import json
+
+        from acef.models.enums import ProvisionOutcome
+        from acef.package import Package as Pkg
+        from acef.templates.models import EvaluationRule, Provision, Template
+        from acef.templates.registry import load_template
+        from acef.validation.engine import validate_bundle
+
+        tid = "conformance-per-subject-nondict"
+        template = Template(
+            template_id=tid,
+            template_name="Per-Subject Non-Dict Subjects Test",
+            version="1.0.0",
+            provisions=[
+                Provision(
+                    provision_id="subj-prov-01",
+                    provision_name="Per-Subject Provision",
+                    evaluation=[
+                        EvaluationRule(
+                            rule_id="subj-prov-01-check",
+                            rule="has_record_type",
+                            params={"type": "risk_register", "min_count": 1},
+                            severity="fail",
+                            message="need a risk register",
+                        ),
+                    ],
+                ),
+            ],
+        )
+        template_path = Path(__file__).parent.parent.parent / "src" / "acef" / "templates" / f"{tid}.json"
+        template_path.write_text(template.model_dump_json(indent=2), encoding="utf-8")
+        try:
+            load_template.cache_clear()
+            pkg = Pkg(producer={"name": "nondict", "version": "1.0.0"})
+            s1 = pkg.add_subject("ai_system", name="S", risk_classification="high-risk", modalities=["text"])
+            pkg.add_profile(tid, provisions=["subj-prov-01"])
+            pkg.record(
+                "risk_register",
+                provisions=["subj-prov-01"],
+                payload={"description": "R", "likelihood": "low", "severity": "low"},
+                obligation_role="provider",
+                entity_refs={"subject_refs": [s1.id]},
+            )
+            bundle_dir = tmp_dir / "nondict"
+            pkg.export(str(bundle_dir))
+            # Tamper: replace subjects with a non-empty list of ONLY non-dict entries.
+            mp = bundle_dir / "acef-manifest.json"
+            manifest = json.loads(mp.read_text(encoding="utf-8"))
+            manifest["subjects"] = ["not-a-dict", 42]
+            mp.write_text(json.dumps(manifest), encoding="utf-8")
+
+            assessment = validate_bundle(bundle_dir, profiles=[tid], evaluation_instant="2026-01-01T00:00:00Z")
+            # The per-subject provision must NOT vanish — it falls back to a
+            # package-level summary (even though the bundle is fatal for the
+            # malformed subjects; this is diagnostic completeness, §3.6).
+            summaries = [s for s in assessment.provision_summary if s.provision_id == "subj-prov-01"]
+            assert len(summaries) >= 1, (
+                f"per-subject provision must not vanish on all-non-dict subjects; "
+                f"provision_ids={[s.provision_id for s in assessment.provision_summary]}"
+            )
+            # The risk_register exists, so the package-level fallback is SATISFIED.
+            assert summaries[0].provision_outcome == ProvisionOutcome.SATISFIED
+        finally:
+            if template_path.exists():
+                template_path.unlink()
+            load_template.cache_clear()
