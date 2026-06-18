@@ -9,9 +9,20 @@ evidence gap:
 
   * Totality   — the implementation returns a valid ``ProvisionOutcome`` for
                  every input (never raises, never returns ``None``).
-  * Agreement  — the implementation equals the proved reference function ``rho``
-                 on every input (so the spec model and the code are the same
-                 function).
+  * Agreement  — over this PROJECTED input domain — standard (non-``x-*``) rule
+                 ids and a package-wide gap — the implementation equals the
+                 proved reference function ``rho`` on every input. The full
+                 ``compute_provision_outcome`` PROJECTS its raw inputs into ρ's
+                 ``(R, g)`` domain before applying ρ: it EXCLUDES ``x-*`` vendor
+                 rule cells (rollup.py:52, spec §3.7 extension semantics) and
+                 DERIVES the gap boolean ``g`` per-subject (rollup.py:101-105).
+                 ``_impl`` below emits only ``r{i}`` ids and a package-wide gap,
+                 so it does not exercise those two projection steps; they are
+                 covered by dedicated tests in ``test_rollup.py``
+                 (``test_x_prefixed_rule_excluded_from_rollup`` and
+                 ``test_subject_scoped_gap_does_not_apply_across_subjects``). The
+                 agreement claim here is therefore scoped to ρ over its projected
+                 domain, NOT to the raw-input→outcome composition as a whole.
   * Order-independence — permuting the rule list never changes the outcome.
 """
 
@@ -69,7 +80,10 @@ def _impl(cells: tuple[tuple[RuleOutcome, RuleSeverity], ...], gap: bool) -> Pro
 
 
 # All multisets of size 0..3 over the 12 cell types (1+12+144+1728 = 1885 tuples),
-# crossed with gap on/off = 3770 inputs — exhaustive over every predicate combination.
+# crossed with gap on/off = 3770 inputs — exhaustive over every predicate
+# combination OF ρ's domain (the projected ``(R, g)`` pair). The two raw-input→
+# ``(R, g)`` projection steps (x-* exclusion; per-subject gap derivation) are
+# outside this generator and are tested separately (see the module docstring).
 _ALL_INPUTS = [
     (cells, gap) for size in range(4) for cells in itertools.product(_CELLS, repeat=size) for gap in (False, True)
 ]

@@ -163,6 +163,49 @@ class TestProvisionRollup:
         )
         assert summary.subject_scope == ["urn:acef:sub:00000000-0000-0000-0000-000000000001"]
 
+    # --- PhD re-review FM-1: the two raw-input -> (R, g) PROJECTION branches that
+    # the 3770-input totality sweep (test_rollup_totality.py) structurally cannot
+    # reach — x-* rule exclusion (rollup.py:52) and per-subject gap derivation
+    # (rollup.py:101-105). The sweep's generator emits only ``r{i}`` rule ids and a
+    # package-wide gap, so these are pinned here directly. ---
+
+    def test_x_prefixed_rule_excluded_from_rollup(self):
+        """A vendor-namespaced (x-*) rule cell MUST NOT drive provision_outcome
+        (spec §3.7 extension semantics, rollup.py:52). A lone x-* FAILED fail rule
+        leaves the standard multiset EMPTY -> NOT_ASSESSED, not NOT_SATISFIED."""
+        results = [_rule_result(RuleOutcome.FAILED, RuleSeverity.FAIL, rule_id="x-vendor-check")]
+        summary = compute_provision_outcome("prov-1", "test-profile", results, [])
+        assert summary.provision_outcome == ProvisionOutcome.NOT_ASSESSED
+        # And mixed with a standard PASSED fail rule, the x-* FAILED is still
+        # excluded, so the provision is SATISFIED (not demoted to NOT_SATISFIED).
+        mixed = [
+            _rule_result(RuleOutcome.PASSED, RuleSeverity.FAIL, rule_id="r1"),
+            _rule_result(RuleOutcome.FAILED, RuleSeverity.FAIL, rule_id="x-vendor-check"),
+        ]
+        summary2 = compute_provision_outcome("prov-1", "test-profile", mixed, [])
+        assert summary2.provision_outcome == ProvisionOutcome.SATISFIED
+
+    def test_subject_scoped_gap_does_not_apply_across_subjects(self):
+        """An evidence_gap bound to subject A MUST NOT mask missing evidence when
+        the provision is assessed for subject B (rollup.py:101-105). With a
+        warning-failed rule, the A-bound gap evaluated for B yields
+        PARTIALLY_SATISFIED (step 5); evaluated for A it yields GAP_ACKNOWLEDGED."""
+        subj_a = "urn:acef:sub:00000000-0000-0000-0000-00000000000a"
+        subj_b = "urn:acef:sub:00000000-0000-0000-0000-00000000000b"
+        results = [_rule_result(RuleOutcome.FAILED, RuleSeverity.WARNING, rule_id="w1")]
+        gap_for_a = RecordEnvelope(
+            record_type="evidence_gap",
+            provisions_addressed=["prov-1"],
+            entity_refs={"subject_refs": [subj_a]},
+            payload={"reason": "pending for subject A"},
+        )
+        # Evaluated for subject B: the A-bound gap does NOT apply -> step 5.
+        summary_b = compute_provision_outcome("prov-1", "test-profile", results, [gap_for_a], subject_scope=[subj_b])
+        assert summary_b.provision_outcome == ProvisionOutcome.PARTIALLY_SATISFIED
+        # Evaluated for subject A: the gap applies -> step 4.
+        summary_a = compute_provision_outcome("prov-1", "test-profile", results, [gap_for_a], subject_scope=[subj_a])
+        assert summary_a.provision_outcome == ProvisionOutcome.GAP_ACKNOWLEDGED
+
     def test_fail_severity_takes_precedence_over_error(self):
         """Step 1 takes precedence over Step 2."""
         results = [
