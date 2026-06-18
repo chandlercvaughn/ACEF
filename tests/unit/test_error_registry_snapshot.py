@@ -73,7 +73,10 @@ EXPECTED_V1_1_ADDITIONS: list[tuple[str, str, str, str]] = [
         "ACEF-077",
         "fatal",
         "integrity",
-        "voice_rubric_emission contains claim-lexicon token without paired harness_attestation",
+        # Vendor-NEUTRAL Core description (PhD-review finding 35); the specific
+        # x-freddy/voice-rubric-emission semantics live in bundled_freddy.py, not Core.
+        "registered vendor-namespace lint reported a fatal integrity violation "
+        "(the namespace's registered lint pattern supplies the specific record type and condition)",
     ),
     (
         "ACEF-078",

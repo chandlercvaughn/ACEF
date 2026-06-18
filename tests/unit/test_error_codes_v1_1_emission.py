@@ -133,7 +133,10 @@ EXPECTED_DESCRIPTIONS: dict[str, str] = {
     "ACEF-076": (
         "state_class record lacks fake-green test reference, or disposition_record sets internal_state_unchanged=false"
     ),
-    "ACEF-077": "voice_rubric_emission contains claim-lexicon token without paired harness_attestation",
+    "ACEF-077": (
+        "registered vendor-namespace lint reported a fatal integrity violation "
+        "(the namespace's registered lint pattern supplies the specific record type and condition)"
+    ),
     "ACEF-078": "redaction_attestation_ref points to unresolvable URN",
     "ACEF-079": "coverage_cell.claim_language contains banned token",
     "ACEF-080": "Bundle declares analysis_mode but lacks required envelope fields for that mode",

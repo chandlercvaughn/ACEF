@@ -54,7 +54,7 @@ At time of this writing the registry defines 42 codes total:
     ACEF-075  FATAL/reference   tenant_label mismatch across records in a single bundle
     ACEF-076  ERROR/schema      state_class record lacks fake-green test reference, OR
                                 disposition_record sets internal_state_unchanged=false
-    ACEF-077  FATAL/integrity   voice_rubric_emission contains claim-lexicon token without paired harness_attestation
+    ACEF-077  FATAL/integrity   registered vendor-namespace lint reported a fatal integrity violation
     ACEF-078  ERROR/reference   redaction_attestation_ref points to unresolvable URN
     ACEF-079  ERROR/schema      coverage_cell.claim_language contains banned token
     ACEF-080  ERROR/reference   Bundle declares analysis_mode but lacks required envelope fields for that mode
@@ -175,7 +175,8 @@ ERROR_REGISTRY: dict[str, tuple[Severity, ErrorCategory, str]] = {
     "ACEF-077": (
         Severity.FATAL,
         ErrorCategory.INTEGRITY,
-        "voice_rubric_emission contains claim-lexicon token without paired harness_attestation",
+        "registered vendor-namespace lint reported a fatal integrity violation "
+        "(the namespace's registered lint pattern supplies the specific record type and condition)",
     ),
     "ACEF-078": (
         Severity.ERROR,

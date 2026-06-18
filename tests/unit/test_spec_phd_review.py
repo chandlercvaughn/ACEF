@@ -232,6 +232,44 @@ class TestFindings26And30RelatedWork:
         assert "evaluat" in sec.lower(), "Related Work must honestly gate the research claim on evaluation"
 
 
+class TestFinding35VendorNeutralACEF077:
+    """ACEF-077 (a Core code) was DEFINED for the x-freddy namespace, welding a
+    vendor name into the Core taxonomy (contradicting vendor-neutrality, spec L61).
+    The Core definition must be vendor-NEUTRAL; freddy is only an example registrant
+    living in the namespace-lints extension."""
+
+    def test_core_error_registry_077_is_vendor_neutral(self) -> None:
+        from acef.errors import ERROR_REGISTRY
+
+        _sev, _cat, desc = ERROR_REGISTRY["ACEF-077"]
+        low = desc.lower()
+        assert "freddy" not in low and "voice_rubric" not in low and "voice-rubric" not in low, (
+            f"Core ACEF-077 description must be vendor-neutral, got: {desc!r}"
+        )
+        assert "namespace" in low and "lint" in low, "Core ACEF-077 must describe the generic namespace-lint mechanism"
+
+    def test_spec_077_row_leads_generic_with_freddy_only_as_example(self) -> None:
+        text = _spec_text()
+        rows = [ln for ln in text.splitlines() if ln.startswith("| `ACEF-077`")]
+        assert rows, "spec lost the ACEF-077 row"
+        row = rows[0]
+        assert "vendor-NEUTRAL" in row or "vendor-neutral" in row, (
+            "the ACEF-077 row must state the Core code is neutral"
+        )
+        # freddy may appear ONLY framed as an example registrant, not as the definition.
+        if "freddy" in row.lower():
+            assert "example" in row.lower(), "x-freddy may appear in the ACEF-077 row ONLY as an example registrant"
+
+    def test_freddy_lint_still_works_as_a_registered_extension(self) -> None:
+        # The generic mechanism + the freddy extension must still function.
+        import acef.validation.namespace_lints.bundled_freddy  # noqa: F401 — registers on import
+        from acef.validation.namespace_lints import list_registered_namespaces
+
+        assert "x-freddy/voice-rubric-emission" in list_registered_namespaces(), (
+            "the freddy lint must still register through the generic namespace-lint extension"
+        )
+
+
 class TestFinding11RegexDeterminism:
     """The regex resource bound was a Unix-main-thread-only SIGALRM timeout — a
     platform-dependent provision verdict. The spec must mandate a DETERMINISTIC,
