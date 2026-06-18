@@ -96,6 +96,7 @@ def validate_bundle(
     timestamp: str | None = None,
     assessment_id: str | None = None,
     trust_anchors: list[Certificate] | None = None,
+    expected_producer: str | None = None,
 ) -> AssessmentBundle:
     """Validate an ACEF Evidence Bundle and produce an Assessment Bundle.
 
@@ -325,6 +326,7 @@ def validate_bundle(
             package_timestamp=package_timestamp,
             profiles=profiles,
             trust_anchors=trust_anchors,
+            expected_producer=expected_producer,
         )
     except Exception as exc:  # noqa: BLE001 — deliberate untrusted-input backstop
         # A not-yet-guarded path raised. Surface it as a FATAL structural
@@ -375,6 +377,7 @@ def _run_validation_phases(
     package_timestamp: str,
     profiles: list[str] | None,
     trust_anchors: list[Certificate] | None = None,
+    expected_producer: str | None = None,
 ) -> None:
     """Run validation Phases 1–4, appending diagnostics into ``assessment``.
 
@@ -528,7 +531,9 @@ def _run_validation_phases(
     # self-attested trust per spec §3.1.3) flows from validate_bundle into
     # the signature checks so x5c chains can be anchored to locally
     # configured roots (VAL-FIX-LOADER-005).
-    integrity_diagnostics = check_integrity(bundle_path, trust_anchors=trust_anchors)
+    integrity_diagnostics = check_integrity(
+        bundle_path, trust_anchors=trust_anchors, expected_producer=expected_producer
+    )
     _flush(integrity_diagnostics)
 
     # Phase 3: Reference checking

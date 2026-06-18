@@ -558,3 +558,71 @@ class TestCausationChainSignatureCountTrustAnchors:
         codes = _codes(assessment)
         assert "ACEF-012" not in codes
         assert "ACEF-073" not in codes
+
+
+# --------------------------------------------------------------------------
+# Expected-producer binding (PhD-review finding 2 / spec Appendix D.3):
+# an ANCHORED signature whose leaf subject does not match a configured
+# expected producer is the "valid signature, wrong signer" case and MUST
+# emit ACEF-012 during normal validate_bundle() — closing the gap where a
+# valid anchored cert from any party was accepted as the producer's.
+# --------------------------------------------------------------------------
+
+
+class TestExpectedProducerBinding:
+    def test_anchored_subject_matches_expected_producer_clean(self, tmp_path: Path) -> None:
+        bundle_dir = _export_bundle(tmp_path)
+        leaf_key, x5c, root = _build_anchored_chain()  # leaf CN == "pipeline-leaf"
+        _sign_bundle_with_x5c(bundle_dir, leaf_key, x5c)
+
+        assessment = validate_bundle(str(bundle_dir), trust_anchors=[root], expected_producer="pipeline-leaf")
+        assert _signature_diags(assessment.structural_errors) == []
+
+    def test_anchored_wrong_subject_emits_acef_012(self, tmp_path: Path) -> None:
+        """RED-first: anchored, but the configured expected producer is NOT the
+        leaf subject — validate_bundle MUST flag it (was silent before)."""
+        bundle_dir = _export_bundle(tmp_path)
+        leaf_key, x5c, root = _build_anchored_chain()
+        _sign_bundle_with_x5c(bundle_dir, leaf_key, x5c)
+
+        assessment = validate_bundle(str(bundle_dir), trust_anchors=[root], expected_producer="evil-corp")
+        diags = _signature_diags(assessment.structural_errors)
+        assert len(diags) == 1, f"expected one wrong-signer diagnostic, got {diags!r}"
+        assert diags[0]["code"] == "ACEF-012"
+        assert "wrong signer" in str(diags[0]["message"])
+
+    def test_match_is_exact_not_substring(self, tmp_path: Path) -> None:
+        """'pipeline' is a substring of the 'pipeline-leaf' subject CN but is NOT
+        an exact match — a substring matcher would wrongly accept it. The exact-CN
+        matcher rejects it, so an ACEF-012 wrong-signer diagnostic fires."""
+        bundle_dir = _export_bundle(tmp_path)
+        leaf_key, x5c, root = _build_anchored_chain()
+        _sign_bundle_with_x5c(bundle_dir, leaf_key, x5c)
+
+        assessment = validate_bundle(str(bundle_dir), trust_anchors=[root], expected_producer="pipeline")
+        diags = _signature_diags(assessment.structural_errors)
+        assert len(diags) == 1 and diags[0]["code"] == "ACEF-012"
+
+    def test_no_expected_producer_is_integrity_only(self, tmp_path: Path) -> None:
+        """Backward compatibility: without expected_producer the anchored bundle
+        validates clean (the binding is reported, not enforced)."""
+        bundle_dir = _export_bundle(tmp_path)
+        leaf_key, x5c, root = _build_anchored_chain()
+        _sign_bundle_with_x5c(bundle_dir, leaf_key, x5c)
+
+        assessment = validate_bundle(str(bundle_dir), trust_anchors=[root])
+        assert _signature_diags(assessment.structural_errors) == []
+
+    def test_self_attested_not_flagged_even_with_expected_producer(self, tmp_path: Path) -> None:
+        """A self-attested (unanchored) signature is integrity-only by definition;
+        the expected-producer check applies only to ANCHORED signatures, so no
+        wrong-signer diagnostic fires (the absence of anchoring is the story, and
+        without trust anchors there is no anchored signature to bind)."""
+        bundle_dir = _export_bundle(tmp_path)
+        leaf_key, x5c = _build_self_issued_chain()
+        _sign_bundle_with_x5c(bundle_dir, leaf_key, x5c)
+
+        # No trust anchors -> the signature is self-attested; expected_producer
+        # has nothing anchored to check, so no wrong-signer ACEF-012.
+        assessment = validate_bundle(str(bundle_dir), expected_producer="anyone")
+        assert _signature_diags(assessment.structural_errors) == []

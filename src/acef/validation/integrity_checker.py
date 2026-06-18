@@ -25,6 +25,7 @@ def check_integrity(
     bundle_dir: Path,
     *,
     trust_anchors: list[Certificate] | None = None,
+    expected_producer: str | None = None,
 ) -> list[ValidationDiagnostic]:
     """Run all integrity checks on a bundle directory.
 
@@ -203,6 +204,7 @@ def check_integrity(
         bundle_dir,
         content_hashes_path.read_bytes(),
         trust_anchors=trust_anchors,
+        expected_producer=expected_producer,
     )
     diagnostics.extend(sig_diagnostics)
 
@@ -214,6 +216,7 @@ def _check_signatures(
     content_hashes_bytes: bytes,
     *,
     trust_anchors: list[Certificate] | None = None,
+    expected_producer: str | None = None,
 ) -> list[ValidationDiagnostic]:
     """Verify all JWS signatures in ``signatures/``.
 
@@ -397,6 +400,31 @@ def _check_signatures(
                     path=f"/signatures/{sig_file.name}",
                 )
             )
+            continue
+
+        # The signature verified. When a deployment configures an EXPECTED
+        # producer binding (spec Appendix D.3), an ANCHORED signature whose leaf
+        # subject does not match that producer is the "valid signature, wrong
+        # signer" case — emit ACEF-012 so attributable validation fails closed.
+        # No expectation configured → no diagnostic (integrity-only, as before).
+        if expected_producer is not None and trust_anchors:
+            binding = classify_signature_binding(
+                jws_str,
+                canonical_input,
+                manifest_timestamp=manifest_timestamp,
+                trust_anchors=trust_anchors,
+                expected_producer=expected_producer,
+            )
+            if binding.binding_level == "anchored" and binding.matches_expected_producer is False:
+                diagnostics.append(
+                    ValidationDiagnostic(
+                        "ACEF-012",
+                        f"Signature {sig_file.name} is anchored but its certificate subject "
+                        f"{binding.signer_subject!r} does not match the expected producer "
+                        f"{expected_producer!r} (valid signature, wrong signer)",
+                        path=f"/signatures/{sig_file.name}",
+                    )
+                )
 
     return diagnostics
 
@@ -576,13 +604,22 @@ def classify_signature_binding(
     alg = alg if isinstance(alg, str) else None
 
     # Surface the leaf certificate subject (the asserted identity) when present.
+    # Keep both the full DN (for reporting) and the Common-Name value(s) (for an
+    # EXACT identity match — never a substring, which would let `acme` match
+    # `CN=not-acme` / `CN=evil-acme-signer`).
+    from cryptography.x509.oid import NameOID
+
     signer_subject: str | None = None
+    signer_cns: list[str] = []
     x5c = header.get("x5c") if isinstance(header, dict) else None
     if isinstance(x5c, list) and x5c:
         try:
-            signer_subject = _parse_x5c_chain(x5c)[0].subject.rfc4514_string()
+            leaf = _parse_x5c_chain(x5c)[0]
+            signer_subject = leaf.subject.rfc4514_string()
+            signer_cns = [str(attr.value) for attr in leaf.subject.get_attributes_for_oid(NameOID.COMMON_NAME)]
         except (ACEFSigningError, ValueError, IndexError):
             signer_subject = None
+            signer_cns = []
 
     # Cryptographic validity is necessary for any non-"unverified" level. This is
     # the SAME check the integrity phase runs; we never accept a binding the
@@ -605,7 +642,9 @@ def classify_signature_binding(
 
     matches: bool | None = None
     if expected_producer is not None and binding_level == "anchored" and signer_subject is not None:
-        matches = expected_producer.casefold() in signer_subject.casefold()
+        # EXACT (case-insensitive) match against a Common-Name value — not substring.
+        want = expected_producer.casefold()
+        matches = any(cn.casefold() == want for cn in signer_cns)
 
     return SignatureBinding(binding_level, alg, signer_subject, matches)
 
