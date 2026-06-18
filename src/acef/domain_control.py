@@ -425,33 +425,55 @@ class _IPPinnedHTTPSConnection(_http_client.HTTPSConnection):
     the pinned IP is re-checked here too, so an internal IP can never be reached.
     """
 
-    def __init__(self, host: str, *, _pinned_ip: str, **kwargs: Any) -> None:
+    def __init__(self, host: str, *, _pinned_ips: list[str], **kwargs: Any) -> None:
         super().__init__(host, **kwargs)
-        self._pinned_ip = _pinned_ip
+        self._pinned_ips = _pinned_ips
 
     def connect(self) -> None:
-        # Defense in depth: never connect to a pinned IP that is internal.
-        if _is_internal_ip(self._pinned_ip):
-            raise OSError(f"refusing to connect to internal pinned IP {self._pinned_ip!r}")
-        sock = _socket.create_connection((self._pinned_ip, self.port or 443), self.timeout)
-        # TLS with the ORIGINAL hostname for SNI + certificate validation — the
-        # cert must still match the domain, only the IP is pinned. ``_context`` is
-        # the SSLContext HTTPSConnection initializes (not in the typeshed stub).
-        ssl_context = self._context  # type: ignore[attr-defined]
-        self.sock = ssl_context.wrap_socket(sock, server_hostname=self.host)
+        # A proxy (e.g. HTTPS_PROXY) is configured: urllib sets host/port to the
+        # PROXY and stores the origin in ``_tunnel_host`` — the proxy resolves the
+        # origin, so origin-IP pinning does not apply. Defer to the standard
+        # proxy-aware connect (roborev Medium on e6d4bd8 — pinning would otherwise
+        # connect to the origin IP on the proxy port and skip CONNECT).
+        if getattr(self, "_tunnel_host", None):
+            super().connect()
+            return
+        # Try EVERY validated address in order (roborev Low on e6d4bd8 — pinning
+        # only the first would fail a valid domain whose first address is
+        # transiently unreachable while another validated one would succeed),
+        # skipping any internal IP (defense in depth).
+        last_exc: OSError | None = None
+        for ip in self._pinned_ips:
+            if _is_internal_ip(ip):
+                continue
+            try:
+                sock = _socket.create_connection((ip, self.port or 443), self.timeout)
+            except OSError as exc:
+                last_exc = exc
+                continue
+            # TLS with the ORIGINAL hostname for SNI + certificate validation —
+            # the cert must still match the domain, only the IP is pinned.
+            # ``_context`` is the SSLContext HTTPSConnection initializes (not in
+            # the typeshed stub).
+            ssl_context = self._context  # type: ignore[attr-defined]
+            self.sock = ssl_context.wrap_socket(sock, server_hostname=self.host)
+            return
+        if last_exc is not None:
+            raise last_exc
+        raise OSError("no usable (non-internal) pinned IP to connect to")
 
 
 class _IPPinnedHTTPSHandler(_urllib_request.HTTPSHandler):
     """urllib HTTPS handler that opens every connection through an
-    :class:`_IPPinnedHTTPSConnection` pinned to a pre-validated IP (F33)."""
+    :class:`_IPPinnedHTTPSConnection` pinned to the pre-validated IP set (F33)."""
 
-    def __init__(self, pinned_ip: str) -> None:
+    def __init__(self, pinned_ips: list[str]) -> None:
         super().__init__()
-        self._pinned_ip = pinned_ip
+        self._pinned_ips = pinned_ips
 
     def https_open(self, req: Any) -> Any:
         def _factory(host: str, **kwargs: Any) -> _IPPinnedHTTPSConnection:
-            return _IPPinnedHTTPSConnection(host, _pinned_ip=self._pinned_ip, **kwargs)
+            return _IPPinnedHTTPSConnection(host, _pinned_ips=self._pinned_ips, **kwargs)
 
         return self.do_open(_factory, req)
 
@@ -576,20 +598,20 @@ def _default_http_fetcher(url: str, *, max_bytes: int = WELL_KNOWN_MAX_BYTES) ->
         addrinfos = _socket.getaddrinfo(parsed.hostname, 443, proto=_socket.IPPROTO_TCP)
     except _socket.gaierror as exc:
         raise DomainControlLookupError(f".well-known DNS resolution failed: {exc}") from exc
-    pinned_ip: str | None = None
+    pinned_ips: list[str] = []
     for info in addrinfos:
         candidate = str(info[4][0])
         if _is_internal_ip(candidate):
             return HttpResponse(status=0, content_type="", body="")
-        if pinned_ip is None:
-            pinned_ip = candidate
-    if pinned_ip is None:
+        pinned_ips.append(candidate)
+    if not pinned_ips:
         # getaddrinfo returned no usable address → no valid proof, no fetch.
         return HttpResponse(status=0, content_type="", body="")
 
     # Build a dedicated opener that NEVER follows redirects (SSRF guard) and PINS
-    # the HTTPS connection to the validated IP (no connect-time re-resolution).
-    opener = _urllib_request.build_opener(_NoFollowRedirectHandler(), _IPPinnedHTTPSHandler(pinned_ip))
+    # the HTTPS connection to the validated IP set (no connect-time re-resolution;
+    # all validated addresses are tried in order).
+    opener = _urllib_request.build_opener(_NoFollowRedirectHandler(), _IPPinnedHTTPSHandler(pinned_ips))
     request = _urllib_request.Request(url, method="GET")  # noqa: S310 — https + host validated above
     try:
         with opener.open(request, timeout=5) as response:  # noqa: S310

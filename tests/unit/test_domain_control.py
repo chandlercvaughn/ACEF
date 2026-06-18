@@ -1027,7 +1027,7 @@ class TestIPPinnedHTTPSConnection:
             raise OSError("sentinel — no real connect in the test")
 
         monkeypatch.setattr(socket, "create_connection", _fake_create_connection)
-        conn = _IPPinnedHTTPSConnection("example.com", _pinned_ip="93.184.216.34")
+        conn = _IPPinnedHTTPSConnection("example.com", _pinned_ips=["93.184.216.34"])
         with pytest.raises(OSError):
             conn.connect()
         # It connected to the PINNED public IP — never re-resolved the hostname.
@@ -1037,6 +1037,50 @@ class TestIPPinnedHTTPSConnection:
         from acef.domain_control import _IPPinnedHTTPSConnection
 
         for internal in ("127.0.0.1", "169.254.169.254", "10.0.0.1"):
-            conn = _IPPinnedHTTPSConnection("example.com", _pinned_ip=internal)
+            conn = _IPPinnedHTTPSConnection("example.com", _pinned_ips=[internal])
             with pytest.raises(OSError):
                 conn.connect()
+
+    def test_connect_tries_all_validated_ips_in_order(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """roborev Low on e6d4bd8: if the first validated IP is transiently
+        unreachable, the next validated one is tried (not a hard failure)."""
+        from acef.domain_control import _IPPinnedHTTPSConnection
+
+        attempts: list[str] = []
+
+        def _fake_create_connection(address: tuple, timeout: object = None) -> object:
+            attempts.append(address[0])
+            if address[0] == "93.184.216.34":
+                raise OSError("first address unreachable")
+            raise OSError("sentinel — reached the second address")
+
+        monkeypatch.setattr(socket, "create_connection", _fake_create_connection)
+        conn = _IPPinnedHTTPSConnection("example.com", _pinned_ips=["93.184.216.34", "93.184.216.35"])
+        with pytest.raises(OSError):
+            conn.connect()
+        assert attempts == ["93.184.216.34", "93.184.216.35"], "should try all validated IPs in order"
+
+    def test_connect_defers_to_super_when_proxy_tunnel_configured(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """roborev Medium on e6d4bd8: with a proxy (_tunnel_host set) the proxy
+        resolves the origin — IP pinning must NOT apply; defer to the standard
+        proxy-aware connect instead of pinning the origin IP on the proxy port."""
+        from acef.domain_control import _IPPinnedHTTPSConnection
+
+        called = {"super": False, "create_connection": False}
+
+        def _fake_super_connect(self: object) -> None:
+            called["super"] = True
+
+        def _fake_create_connection(address: tuple, timeout: object = None) -> object:
+            called["create_connection"] = True
+            raise OSError("pinned path must not run under a proxy")
+
+        monkeypatch.setattr(socket, "create_connection", _fake_create_connection)
+        # Patch the PARENT connect so we can observe the defer without real network.
+        import http.client
+
+        monkeypatch.setattr(http.client.HTTPSConnection, "connect", _fake_super_connect)
+        conn = _IPPinnedHTTPSConnection("example.com", _pinned_ips=["93.184.216.34"])
+        conn._tunnel_host = "example.com"  # simulate a configured proxy
+        conn.connect()
+        assert called["super"] is True and called["create_connection"] is False
