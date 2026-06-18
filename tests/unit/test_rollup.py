@@ -92,6 +92,24 @@ class TestProvisionRollup:
         summary = compute_provision_outcome("prov-1", "test-profile", results, [])
         assert summary.provision_outcome == ProvisionOutcome.SATISFIED
 
+    def test_spec_rollup_algorithm_guards_the_rule_less_case(self):
+        """roborev on 4092a07: the reworded step-6 catch-all must NOT shadow
+        step 7 — a rule-less provision is NOT_ASSESSED, never satisfied/skipped.
+        The spec must state the no-rules guard + require ≥1 rule for the 'ALL
+        rules …' universals (steps 3, 6); the impl checks total==0 FIRST."""
+        from pathlib import Path
+
+        spec = (Path(__file__).resolve().parents[2] / "planning" / "ACEF-Spec-Outline-v0.1.md").read_text(
+            encoding="utf-8"
+        )
+        idx = spec.find("Step 0 (no-rules guard)")
+        assert idx != -1, "spec must state the no-rules guard before the ordered steps"
+        algo = spec[idx : idx + 1600]
+        assert "has ≥1 rule" in algo, "spec step 6 must require ≥1 rule so it does not shadow step 7"
+        # The impl agrees: a rule-less provision is NOT_ASSESSED.
+        summary = compute_provision_outcome("p", "prof", [], [])
+        assert summary.provision_outcome == ProvisionOutcome.NOT_ASSESSED
+
     def test_step6_passed_plus_skipped_mix_gives_satisfied(self):
         """F40: a PASSED + SKIPPED mix (no fails/errors/warnings/gaps) is
         SATISFIED — skipped rules (condition false: out-of-scope / not-yet-
