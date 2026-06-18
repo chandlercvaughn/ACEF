@@ -178,3 +178,63 @@ def print_bundle_info(manifest_data: dict[str, Any]) -> None:
     if profiles:
         profile_ids = ", ".join(str(_as_dict(p).get("profile_id", "")) for p in profiles)
         console.print(f"\nProfiles: {profile_ids}")
+
+
+def bundle_summary_markdown(manifest_data: dict[str, Any]) -> str:
+    """Render the bundle inspection summary as Markdown — the SAME manifest fields as
+    :func:`print_bundle_info` (metadata, subjects, entity counts, record files, profiles) —
+    for ``acef inspect --format markdown``. Tolerant of a malformed-but-JSON-object manifest
+    (coerced via ``_as_dict`` / ``_as_list``), mirroring the console renderer; schema
+    conformance is ``validate``'s job."""
+    metadata = _as_dict(manifest_data.get("metadata"))
+    producer = _as_dict(metadata.get("producer"))
+    lines: list[str] = [
+        "# ACEF Evidence Bundle",
+        "",
+        f"- **Package ID:** {metadata.get('package_id', 'N/A')}",
+        f"- **Timestamp:** {metadata.get('timestamp', 'N/A')}",
+        f"- **Producer:** {producer.get('name', 'N/A')} v{producer.get('version', 'N/A')}",
+    ]
+    core_version = _as_dict(manifest_data.get("versioning")).get("core_version")
+    if core_version:
+        lines.append(f"- **Core version:** {core_version}")
+
+    subjects = _as_list(manifest_data.get("subjects", []))
+    if subjects:
+        lines += ["", "## Subjects", "", "| Name | Type | Risk Classification | Phase |", "| --- | --- | --- | --- |"]
+        for raw_sub in subjects:
+            sub = _as_dict(raw_sub)
+            lines.append(
+                f"| {sub.get('name', '')} | {sub.get('subject_type', '')} | "
+                f"{sub.get('risk_classification', '')} | {sub.get('lifecycle_phase', '')} |"
+            )
+
+    entities = _as_dict(manifest_data.get("entities"))
+    lines += [
+        "",
+        "## Entities",
+        "",
+        f"- {len(_as_list(entities.get('components', [])))} components",
+        f"- {len(_as_list(entities.get('datasets', [])))} datasets",
+        f"- {len(_as_list(entities.get('actors', [])))} actors",
+        f"- {len(_as_list(entities.get('relationships', [])))} relationships",
+    ]
+
+    record_files = _as_list(manifest_data.get("record_files", []))
+    if record_files:
+        lines += ["", "## Record Files", "", "| Type | Path | Count |", "| --- | --- | --- |"]
+        total = 0
+        for raw_rf in record_files:
+            rf = _as_dict(raw_rf)
+            count = rf.get("count", 0)
+            count_int = count if isinstance(count, int) and not isinstance(count, bool) else 0
+            lines.append(f"| {rf.get('record_type', '')} | {rf.get('path', '')} | {count_int} |")
+            total += count_int
+        lines += ["", f"**Total records:** {total}"]
+
+    profiles = _as_list(manifest_data.get("profiles", []))
+    if profiles:
+        profile_ids = ", ".join(str(_as_dict(p).get("profile_id", "")) for p in profiles)
+        lines += ["", f"**Profiles:** {profile_ids}"]
+
+    return "\n".join(lines)

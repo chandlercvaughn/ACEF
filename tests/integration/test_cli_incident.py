@@ -180,6 +180,12 @@ class TestInspectIncidentAware:
         assert f"**Public Incident ID:** `{public_id}`" in result.output
         # Severity band derived by the shipped band() projection (this vector -> major).
         assert "(band: **major**)" in result.output
+        # F16 (roborev on 22ea425): markdown must ALSO surface the full bundle summary (the
+        # same metadata / entity counts / profiles the pretty + json paths show), not only
+        # the incident evidence.
+        assert "# ACEF Evidence Bundle" in result.output
+        assert "**Package ID:**" in result.output
+        assert "## Entities" in result.output
 
     def test_inspect_archive_surfaces_incident_evidence(self, runner: CliRunner, tmp_path: Path) -> None:
         bundle_dir, public_id = _build_public_card_bundle(tmp_path)

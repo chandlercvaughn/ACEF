@@ -32,7 +32,7 @@ from typing import Any
 
 import click
 
-from acef.cli.formatters import print_bundle_info
+from acef.cli.formatters import bundle_summary_markdown, print_bundle_info
 
 # Reuse the shared incident field-resolution helpers from acef.render so the
 # projection-safe summary surfaces exactly what the console/markdown renderers do
@@ -338,13 +338,14 @@ def inspect_cmd(path: str, fmt: str, include_private: bool) -> None:
                 out["incident_records"] = _incident_summaries(incident_records)
         click.echo(json.dumps(out, indent=2))
     elif fmt == "markdown":
-        # Markdown report: a bundle header followed by the incident evidence as Markdown,
-        # REUSING render_incident_evidence_markdown (the same field resolution as the
-        # console path, never a reimplementation). This is the production wiring for that
-        # renderer (F16). Like the console path it surfaces only projection-safe fields —
-        # never the regulator-only card_source / eu_ai_act_facts subtree.
-        pkg_id = _as_dict(manifest_data.get("metadata")).get("package_id", "")
-        click.echo(f"# ACEF Bundle: {pkg_id}" if pkg_id else "# ACEF Bundle")
+        # Markdown report: the FULL bundle summary (the same metadata / subjects / entity
+        # counts / record files / profiles as the pretty + json paths, via
+        # bundle_summary_markdown) followed by the incident evidence as Markdown, REUSING
+        # render_incident_evidence_markdown (the same field resolution as the console path,
+        # never a reimplementation). This is the production wiring for that renderer (F16).
+        # Like the console path it surfaces only projection-safe fields — never the
+        # regulator-only card_source / eu_ai_act_facts subtree.
+        click.echo(bundle_summary_markdown(manifest_data))
         if incident_records:
             rendered = render_incident_evidence_markdown(incident_records)
             if rendered:
