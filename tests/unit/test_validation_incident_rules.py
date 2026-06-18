@@ -2691,3 +2691,28 @@ class TestProjectionMapInstallSafety:
             "the constants (and _CARD_AUTHORED_FIELDS if a new card-authored meta field was "
             "added) to mirror the new schema sets"
         )
+
+
+class TestRecordConfidentialityFailOpenButSchemaGuarded:
+    """F31: _record_confidentiality_of defaults to 'public' (fail-OPEN) when
+    confidentiality is absent — its prior docstring falsely claimed fail-closed.
+    The actual confidentiality guarantee is the UPSTREAM required-enum schema
+    (ACEF-004), so the fail-open fallback is unreachable for a schema-valid
+    record. Pin both the real behavior and the upstream guard."""
+
+    def test_missing_confidentiality_defaults_to_public_fail_open(self) -> None:
+        assert ir._record_confidentiality_of({}) == "public"
+        assert ir._record_confidentiality_of({"confidentiality": ""}) == "public"
+        assert ir._record_confidentiality_of({"confidentiality": 123}) == "public"
+
+    def test_present_confidentiality_is_returned_verbatim(self) -> None:
+        for value in ("hash-committed", "redacted", "regulator-only", "under-nda"):
+            assert ir._record_confidentiality_of({"confidentiality": value}) == value
+
+    def test_upstream_schema_makes_confidentiality_required_with_closed_enum(self) -> None:
+        """The REAL guard the docstring now cites: the fail-open fallback is
+        unreachable because confidentiality is schema-required + closed-enum."""
+        repo = Path(__file__).resolve().parents[2]
+        schema = json.loads((repo / "acef-conventions" / "v1.1" / "record-envelope.schema.json").read_text())
+        assert "confidentiality" in schema.get("required", []), "confidentiality must be schema-required"
+        assert schema["properties"]["confidentiality"].get("enum"), "confidentiality must be a closed enum"

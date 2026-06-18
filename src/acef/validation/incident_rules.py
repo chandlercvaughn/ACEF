@@ -1735,11 +1735,19 @@ def _record_confidentiality_of(rec: dict[str, Any]) -> str:
     """The record-envelope ``confidentiality`` of an on-disk record.
 
     The serialized record carries ``confidentiality`` at the envelope level
-    (sibling of ``payload``); it defaults to ``"public"`` when absent (the
-    envelope default). A record with ANY non-public confidentiality is treated
-    as non-public for the §5.5 emit/omit gate (fail-closed: an unrecognized /
-    missing value is NOT treated as public when it carries a subject-bearing
-    key, so a forged emit-on-non-public cannot slip through)."""
+    (sibling of ``payload``). This accessor returns it verbatim, defaulting to
+    ``"public"`` when absent or non-string.
+
+    Honest behavior note (audit finding F31): this default is fail-OPEN —
+    ``"public"`` is the LEAST restrictive value, NOT a fail-closed posture. The
+    safety does NOT come from this function; it comes from the schema layer
+    UPSTREAM of the §5.5 emit/omit gate: ``record-envelope.schema.json`` makes
+    ``confidentiality`` a REQUIRED field with a closed enum, enforced as ACEF-004
+    by ``schema_validator.py`` BEFORE this gate runs. A record that is missing or
+    mis-values ``confidentiality`` is already rejected there, so the gate never
+    sees one and the ``"public"`` fallback is never reached for a schema-valid
+    record — it is a defensive default for an already-invalid record, not the
+    confidentiality guarantee."""
     conf = rec.get("confidentiality")
     return conf if isinstance(conf, str) and conf else "public"
 
