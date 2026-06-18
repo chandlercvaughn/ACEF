@@ -336,3 +336,39 @@ def test_crypto3_signer_kid_header_binding(rsa_keys):
     payload = _attestation_payload(signer_kid="claimed-kid")
     sig = sign_harness_attestation(payload, private_key=private_key, signer_kid="actual-kid")
     assert verify_harness_attestation(payload, sig, public_key=public_key) is False
+
+
+def test_crypto3_trust_anchors_do_not_rescue_jwk_only_forgery(rsa_keys):
+    """roborev High on da59fe9: passing trust_anchors must NOT make a jwk-only
+    (embedded-key) attestation 'secure'. verify_detached_jws ignores anchors for a
+    jwk-only signature, so an attacker re-signing with their own auto-embedded key
+    must still be rejected when no out-of-band key is supplied."""
+    import datetime
+
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.x509.oid import NameOID
+
+    attacker_key, _ = rsa_keys
+    forged = _attestation_payload(claim="tests-NEVER-faked", signer_kid="official-key")
+    forged_sig = sign_harness_attestation(forged, private_key=attacker_key, signer_kid="official-key")
+
+    # An unrelated CA trust anchor. The harness attestation is jwk-only (no x5c),
+    # so verify_detached_jws ignores this anchor entirely — the point is that
+    # merely CONFIGURING anchors must not be treated as a secure path.
+    ca_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "unrelated-anchor")])
+    ca = (
+        x509.CertificateBuilder()
+        .subject_name(name)
+        .issuer_name(name)
+        .public_key(ca_key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(datetime.datetime(2024, 1, 1, tzinfo=datetime.UTC))
+        .not_valid_after(datetime.datetime(2030, 1, 1, tzinfo=datetime.UTC))
+        .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
+        .sign(ca_key, hashes.SHA256())
+    )
+    with pytest.raises(ACEFSigningError) as exc:
+        verify_harness_attestation(forged, forged_sig, trust_anchors=[ca])
+    assert exc.value.code == "ACEF-012"

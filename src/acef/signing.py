@@ -1136,9 +1136,12 @@ def verify_harness_attestation(
             authoritative — an attacker re-signing with their own key fails.
         key_data: Optional PEM-encoded public key (alternative to
             ``public_key``).
-        trust_anchors: Locally-configured x5c trust anchors. When supplied and
-            the attestation carries an ``x5c`` chain, the chain MUST terminate at
-            an anchor (spec §3.1.3) — the anchored secure path.
+        trust_anchors: Locally-configured x5c trust anchors. This is a secure path
+            ONLY when the attestation actually carries an ``x5c`` chain (which must
+            then terminate at an anchor, spec §3.1.3). For a ``jwk``-only signature
+            ``verify_detached_jws`` ignores anchors, so configuring anchors alone
+            does NOT make a ``jwk``-only attestation forgery-resistant — an
+            out-of-band key or ``allow_self_attested`` is still required.
         allow_self_attested: Opt into the embedded-``jwk``-only path. Default
             ``False``: with NO out-of-band key and NO trust anchors the call
             RAISES (ACEF-012) rather than trusting the signature's own embedded
@@ -1162,25 +1165,7 @@ def verify_harness_attestation(
     subset = _project_harness_attestation_subset(payload)
     canonical = canonicalize(subset)
 
-    # Secure by default. With NO out-of-band key and NO trust anchors, the only
-    # key available to ``verify_detached_jws`` is the signature's OWN embedded
-    # ``jwk``/``x5c`` — so the result proves the payload was signed by SOMEONE
-    # holding the embedded key, NOT by any particular party. An attacker who
-    # controls the payload can re-sign a tampered attestation with their own
-    # auto-embedded key (and set ``signer_kid`` to anything) and it would verify.
-    # That self-attested mode is NOT forgery-resistant, so it must be opted into
-    # explicitly (``allow_self_attested=True``), and is never the silent default
-    # (PhD re-review CRYPTO-3).
     has_out_of_band_key = public_key is not None or key_data is not None
-    if not has_out_of_band_key and not trust_anchors and not allow_self_attested:
-        raise ACEFSigningError(
-            "harness_attestation verification requires an out-of-band public_key/key_data, "
-            "configured trust_anchors (x5c chain termination), or an explicit "
-            "allow_self_attested=True opt-in; an embedded-jwk-only signature is self-attested "
-            "and NOT forgery-resistant (an attacker can re-sign a tampered payload with their "
-            "own auto-embedded key)",
-            code="ACEF-012",
-        )
 
     try:
         header = verify_detached_jws(
@@ -1216,6 +1201,28 @@ def verify_harness_attestation(
         # type for declared alg, etc.) propagates as a real error so
         # callers see the diagnostic.
         raise
+
+    # Trust policy (post-verification). A verified signature alone is NOT proof of
+    # authorship: an embedded-``jwk``-only signature is self-attested — an attacker
+    # can re-sign a tampered payload with their own auto-embedded key and it
+    # verifies. The secure paths are (a) an out-of-band key, (b) an ``x5c`` chain
+    # anchored to a configured trust anchor (``verify_detached_jws`` already
+    # enforced chain termination when ``trust_anchors`` was supplied), or (c) an
+    # explicit ``allow_self_attested`` opt-in. ``trust_anchors`` is IGNORED by
+    # ``verify_detached_jws`` for a ``jwk``-only signature, so it is a secure path
+    # ONLY when the signature actually carries an ``x5c`` chain — checked here on
+    # the returned protected header (PhD re-review CRYPTO-3; a jwk-only attestation
+    # with anchors configured but no out-of-band key is still self-attested).
+    anchored_x5c = bool(header.get("x5c")) and bool(trust_anchors)
+    if not has_out_of_band_key and not anchored_x5c and not allow_self_attested:
+        raise ACEFSigningError(
+            "harness_attestation verification requires an out-of-band public_key/key_data, "
+            "an x5c chain that terminates at a configured trust_anchor, or an explicit "
+            "allow_self_attested=True opt-in; an embedded-jwk-only signature (or an x5c with no "
+            "configured anchors) is self-attested and NOT forgery-resistant (an attacker can "
+            "re-sign a tampered payload with their own auto-embedded key)",
+            code="ACEF-012",
+        )
 
     # Bind the SIGNED ``signer_kid`` field to the JWS header ``kid``: an
     # attestation whose header key identifier disagrees with the signer_kid it
