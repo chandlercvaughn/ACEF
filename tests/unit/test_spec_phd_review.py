@@ -15,6 +15,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import pytest
+
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _SPEC = _REPO_ROOT / "planning" / "ACEF-Spec-Outline-v0.1.md"
 
@@ -129,9 +131,50 @@ class TestFinding15ConformanceClasses:
         text = _spec_text()
         idx = text.find("### 6.6 Conformance Classes")
         assert idx != -1
-        sec = text[idx : idx + 2600]
+        sec = text[idx : idx + 3200]
         assert "MUST" in sec, "the baseline (offline-deterministic) class must be a MUST for conformance"
         assert "OPTIONAL" in sec, "the online-conformance class must be marked OPTIONAL"
+
+    def test_offline_class_inputs_pin_evaluation_instant_and_trust_anchors(self) -> None:
+        """roborev on 1fd3128: the offline class cannot be 'bundle bytes alone' —
+        §3.7 depends on evaluation_instant, and §3.1.3 requires x5c chain validation
+        against trust anchors. Both must be declared explicit inputs of the class."""
+        text = _spec_text()
+        idx = text.find("offline-deterministic (baseline, MUST)")
+        assert idx != -1, "spec lost the offline-deterministic baseline paragraph"
+        para = text[idx : idx + 1600]
+        assert "evaluation_instant" in para, "offline class must pin evaluation_instant as an input"
+        assert "trust anchor" in para.lower(), "offline class must include x5c trust-anchor validation (§3.1.3)"
+        assert "x5c" in para, "offline class must address x5c chain validation, not only JWS self-consistency"
+
+
+class TestForwardCompatibleMinorSelection:
+    """roborev on 4d1f0dd: the header must not declare higher 1.y minors invalid
+    while the validator routes them to v1.1 — the spec must document the
+    forward-compatible fallback and match the implementation."""
+
+    def test_spec_documents_forward_compatible_fallback(self) -> None:
+        text = _spec_text()
+        assert "Forward-compatible minor selection" in text, "§6.2 must define the forward-compatible minor fallback"
+        idx = text.find("Forward-compatible minor selection")
+        para = text[idx : idx + 900]
+        assert "ACEF-001" in para, "non-1 major must be rejected with ACEF-001"
+        assert "additiv" in para.lower(), "the fallback's soundness rests on minor additivity (§3.1.4)"
+
+    def test_implementation_matches_the_documented_fallback(self) -> None:
+        from acef.schemas.registry import schema_version_for_core_version
+
+        # 1.0.x -> v1, 1.1.x -> v1.1, higher 1.y -> v1.1 (forward-compat fallback).
+        assert schema_version_for_core_version("1.0.0") == "v1"
+        assert schema_version_for_core_version("1.1.0") == "v1.1"
+        assert schema_version_for_core_version("1.2.0") == "v1.1", (
+            "higher 1.y must fall back to the highest known minor"
+        )
+        # Non-1 major is rejected (ACEF-001), per the documented contract.
+        from acef.errors import ACEFSchemaError
+
+        with pytest.raises(ACEFSchemaError):
+            schema_version_for_core_version("2.0.0")
 
 
 class TestVersionModelAlignment:
