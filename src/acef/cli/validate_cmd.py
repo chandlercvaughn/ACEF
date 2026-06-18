@@ -30,12 +30,24 @@ from acef.models.enums import ProvisionOutcome, RuleOutcome
         "trust (no anchor enforcement)."
     ),
 )
+@click.option(
+    "--expected-producer",
+    "expected_producer",
+    default=None,
+    help=(
+        "Expected signer identity (spec Appendix D.3). With --trust-anchor, an ANCHORED "
+        "signature whose leaf subject does not match this value (exact full subject DN or "
+        "a CN) surfaces ACEF-012 (valid signature, wrong signer). Omit to report the "
+        "binding without enforcing identity."
+    ),
+)
 def validate_cmd(
     path: str,
     profile: tuple[str, ...],
     output: str | None,
     fmt: str,
     trust_anchor: tuple[str, ...],
+    expected_producer: str | None,
 ) -> None:
     """Validate an ACEF Evidence Bundle at PATH.
 
@@ -85,7 +97,7 @@ def validate_cmd(
     # ``structural_errors`` shape a fatal directory assessment carries) so a
     # ``| jq`` consumer never receives a traceback on stdout.
     try:
-        assessment = validate(path, profiles=profiles, trust_anchors=trust_anchors)
+        assessment = validate(path, profiles=profiles, trust_anchors=trust_anchors, expected_producer=expected_producer)
     except ACEFFormatError as exc:
         code = exc.code or "ACEF-050"
         # ``str(exc)`` is ``"[ACEF-050] <message>"`` (the ``ACEFError.__str__``

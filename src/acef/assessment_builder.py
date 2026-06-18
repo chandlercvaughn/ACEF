@@ -26,6 +26,7 @@ def validate(
     timestamp: str | None = None,
     assessment_id: str | None = None,
     trust_anchors: list[Certificate] | None = None,
+    expected_producer: str | None = None,
 ) -> AssessmentBundle:
     """Validate a package or bundle and produce an Assessment Bundle.
 
@@ -56,6 +57,11 @@ def validate(
             Default ``None`` mints a fresh random URN per run. Pin it alongside
             ``timestamp`` to stabilize the payload; the resulting signed
             assessment is byte-reproducible only under RS256, not ES256.
+        expected_producer: Optional expected producer binding (spec Appendix D.3).
+            When set together with ``trust_anchors``, an ANCHORED signature whose
+            leaf certificate subject does not match it emits ACEF-012 ("valid
+            signature, wrong signer"). Match is exact (full subject DN or a CN);
+            ``None`` (default) reports the binding without enforcing identity.
 
     Returns:
         An AssessmentBundle with all results.
@@ -74,6 +80,7 @@ def validate(
                 timestamp=timestamp,
                 assessment_id=assessment_id,
                 trust_anchors=trust_anchors,
+                expected_producer=expected_producer,
             )
     else:
         path = Path(package_or_path)
@@ -100,6 +107,7 @@ def validate(
                     timestamp=timestamp,
                     assessment_id=assessment_id,
                     trust_anchors=trust_anchors,
+                    expected_producer=expected_producer,
                 )
         else:
             return validate_bundle(
@@ -109,6 +117,7 @@ def validate(
                 timestamp=timestamp,
                 assessment_id=assessment_id,
                 trust_anchors=trust_anchors,
+                expected_producer=expected_producer,
             )
 
 

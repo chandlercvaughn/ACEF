@@ -154,9 +154,15 @@ class TestFindings16And19And37ErrorTaxonomy:
     gap unexplained, and 053/077/079 overlapping. §3.6 must reconcile all of it."""
 
     def test_incident_codes_081_to_088_have_normative_rows(self) -> None:
+        # roborev on 3ba09a2: assert the actual §3.6 TABLE ROWS (code + category +
+        # severity columns), not just the code string anywhere — the governance
+        # paragraph also contains the range, so a code-only check would pass even if
+        # the rows were removed.
         text = _spec_text()
         for n in range(81, 89):
-            assert f"`ACEF-{n:03d}`" in text, f"§3.6 must list ACEF-{n:03d} (was code-only)"
+            code = f"ACEF-{n:03d}"
+            row = re.search(rf"^\| `{code}` \| \w+ \| `?\w+`? \|", text, re.MULTILINE)
+            assert row is not None, f"§3.6 must have a normative TABLE ROW (code|category|severity) for {code}"
 
     def test_registry_governance_note_present(self) -> None:
         text = _spec_text()
@@ -211,8 +217,11 @@ class TestFindings26And30RelatedWork:
 
     def test_related_work_articulates_a_delta(self) -> None:
         text = _spec_text()
-        idx = text.find("Related Work")
-        assert idx != -1, "spec must add a Related Work section/subsection"
+        # Anchor on the §8.1 SECTION, not the front-matter "see §8 (Related Work)"
+        # reference (roborev on d951ce7) — incidental early-document words must not
+        # satisfy the delta/evaluation assertions.
+        idx = text.find("### 8.1 Related Work")
+        assert idx != -1, "spec must add the §8.1 Related Work subsection"
         sec = text[idx : idx + 4000]
         # The section must state what is NEW vs the prior art (the contribution), not
         # merely list analogies.
@@ -300,12 +309,14 @@ class TestFindings25And27And28EvaluationMethodology:
         )
 
     def test_no_fabricated_f1_or_accuracy_numbers_in_appendix_e(self) -> None:
-        # Guard against fabricated metrics: Appendix E must not assert a measured
-        # score for ACEF (e.g. 'f1 = 0.9x', 'NN% coverage') as if performed.
-        e = self._appendix_e()
-        assert not re.search(r"\bf1[ _-]?(score)?\s*[:=]\s*0\.\d", e.lower()), (
-            "Appendix E must not fabricate an F1 score"
-        )
+        # Guard against fabricated metrics (roborev on d951ce7): Appendix E must not
+        # assert a measured score for ACEF — F1/accuracy/precision/recall/coverage/
+        # agreement/kappa as a number (decimal, 1.0, or NN%) presented as a result.
+        e = self._appendix_e().lower()
+        metric = r"(f1|accuracy|precision|recall|coverage|agreement|kappa|κ)"
+        number = r"(\d{1,3}\s*%|0?\.\d+|1\.0+)"
+        m = re.search(rf"\b{metric}[ _-]?(score)?\s*(of|[:=])\s*{number}", e)
+        assert m is None, f"Appendix E must not present a fabricated measured metric: {(m.group(0) if m else '')!r}"
 
 
 class TestForwardCompatibleMinorSelection:

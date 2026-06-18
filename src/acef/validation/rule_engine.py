@@ -255,6 +255,29 @@ def _evaluate_single_rule(
     operator_func = OPERATOR_REGISTRY.get(operator_name)
 
     if operator_func is None:
+        # A vendor-extension operator (`x-…` namespace) is unknown to the Core
+        # validator BY DESIGN and MUST be conformance-neutral (§3.7: `x-*`
+        # extensions cannot change conformance outcomes). Emitting ACEF-046 →
+        # ERROR → not-assessed for such an operator would let a vendor extension
+        # change the outcome, even when its rule_id is not `x-` prefixed (roborev
+        # on 3ba09a2). Treat it as SKIPPED (non-gating), NOT an error.
+        if operator_name.startswith("x-"):
+            return RuleResult(
+                rule_id=rule.rule_id,
+                provision_id=provision_id,
+                profile_id=profile_id,
+                rule_severity=severity,
+                outcome=RuleOutcome.SKIPPED,
+                message=(
+                    f"Vendor-extension operator {operator_name!r} not evaluated by the Core "
+                    "validator (conformance-neutral)"
+                ),
+                subject_scope=[subject_id] if subject_id else [],
+            )
+        # A genuine (non-extension) unknown operator is a malformed template:
+        # ERROR with the machine-detectable ACEF-046 (PhD-review finding 37) —
+        # ACEF-046 covers an unknown top-level rule operator (here) AND an unknown
+        # comparison `op` (operators._validate_comparison_op).
         return RuleResult(
             rule_id=rule.rule_id,
             provision_id=provision_id,
@@ -262,9 +285,6 @@ def _evaluate_single_rule(
             rule_severity=severity,
             outcome=RuleOutcome.ERROR,
             message=f"Unknown operator: {operator_name!r}",
-            # Machine-detectable code (PhD-review finding 37): ACEF-046 covers an
-            # unknown operator in a rule — both an unknown top-level rule operator
-            # (here) and an unknown comparison `op` (operators._validate_comparison_op).
             error_code="ACEF-046",
             subject_scope=[subject_id] if subject_id else [],
         )

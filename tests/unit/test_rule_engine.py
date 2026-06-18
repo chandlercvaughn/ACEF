@@ -484,3 +484,31 @@ class TestUnknownOperatorAttachesACEF046:
         assert results[0].error_code == "ACEF-046", (
             f"unknown-operator error must carry ACEF-046, got {results[0].error_code!r}"
         )
+
+    def test_vendor_extension_operator_is_conformance_neutral_not_acef_046(self) -> None:
+        """roborev on 3ba09a2: a vendor-extension operator (`x-…` namespace) is
+        unknown to Core BY DESIGN and MUST be conformance-neutral (§3.7) — even when
+        its rule_id is NOT x- prefixed. It must be SKIPPED, never ERROR/ACEF-046
+        (which would let a vendor extension change the provision outcome)."""
+        provisions = [
+            Provision(
+                provision_id="test-prov",
+                provision_name="Test",
+                normative_text_ref="Sec 1",
+                description="d",
+                required_evidence_types=[],
+                evaluation=[
+                    EvaluationRule(
+                        rule_id="non-x-rule-id",  # deliberately NOT x- prefixed
+                        rule="x-acme/custom_operator",
+                        params={},
+                        severity="fail",
+                        message="vendor op",
+                    ),
+                ],
+            ),
+        ]
+        results = evaluate_rules_for_subject(provisions, [_make_record()], profile_id="test-profile")
+        assert len(results) == 1
+        assert results[0].outcome == RuleOutcome.SKIPPED, "vendor x- operator must be conformance-neutral (SKIPPED)"
+        assert results[0].error_code != "ACEF-046", "vendor x- operator must NOT emit ACEF-046"

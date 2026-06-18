@@ -595,10 +595,12 @@ def classify_signature_binding(
     from acef.errors import ACEFSigningError
     from acef.signing import _base64url_decode, _parse_x5c_chain, verify_detached_jws
 
-    # Parse the protected header (first dot-separated segment).
+    # Parse the protected header (first dot-separated segment). ``_base64url_decode``
+    # raises ACEFSigningError on a malformed segment — catch it too so a malformed
+    # header returns "unverified" rather than propagating (roborev on 04efe61).
     try:
         header = json.loads(_base64url_decode(jws_str.split(".", 1)[0]))
-    except (ValueError, json.JSONDecodeError, UnicodeDecodeError, IndexError):
+    except (ACEFSigningError, ValueError, json.JSONDecodeError, UnicodeDecodeError, IndexError):
         return SignatureBinding("unverified", None, None, None)
     alg = header.get("alg") if isinstance(header, dict) else None
     alg = alg if isinstance(alg, str) else None
@@ -630,6 +632,10 @@ def classify_signature_binding(
         return SignatureBinding("unverified", alg, signer_subject, None)
 
     # Anchored iff it ALSO verifies under the configured trust anchors with an x5c.
+    # When anchors ARE configured and an x5c does NOT chain to one, that is an
+    # integrity FAILURE per §3.1.3 (ACEF-012), NOT a self-attested pass — so report
+    # it as "unverified", matching the integrity gate (roborev on 04efe61). With NO
+    # anchors configured, an x5c (or jwk) is self-attested.
     binding_level = "self-attested"
     if isinstance(x5c, list) and x5c and trust_anchors:
         try:
@@ -638,13 +644,17 @@ def classify_signature_binding(
             )
             binding_level = "anchored"
         except ACEFSigningError:
-            binding_level = "self-attested"
+            binding_level = "unverified"
 
     matches: bool | None = None
     if expected_producer is not None and binding_level == "anchored" and signer_subject is not None:
-        # EXACT (case-insensitive) match against a Common-Name value — not substring.
+        # EXACT (case-insensitive) identity match. Primary form: the FULL leaf
+        # subject DN (so two certs sharing a CN but differing elsewhere — e.g.
+        # CN=acme,O=Good vs CN=acme,O=Evil — are distinguished). A bare CN is also
+        # accepted as a convenience; security-sensitive deployments SHOULD configure
+        # the full subject DN to get an unambiguous binding (roborev on 04efe61).
         want = expected_producer.casefold()
-        matches = any(cn.casefold() == want for cn in signer_cns)
+        matches = want == signer_subject.casefold() or any(cn.casefold() == want for cn in signer_cns)
 
     return SignatureBinding(binding_level, alg, signer_subject, matches)
 

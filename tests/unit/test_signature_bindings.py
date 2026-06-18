@@ -29,9 +29,12 @@ def _key() -> ec.EllipticCurvePrivateKey:
     return ec.generate_private_key(ec.SECP256R1())
 
 
-def _self_signed(common_name: str, key: ec.EllipticCurvePrivateKey) -> x509.Certificate:
+def _self_signed(common_name: str, key: ec.EllipticCurvePrivateKey, org: str | None = None) -> x509.Certificate:
     """A self-signed CA cert usable as both leaf and trust anchor (test fixture)."""
-    subject = issuer = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, common_name)])
+    attrs = [x509.NameAttribute(NameOID.COMMON_NAME, common_name)]
+    if org is not None:
+        attrs.append(x509.NameAttribute(NameOID.ORGANIZATION_NAME, org))
+    subject = issuer = x509.Name(attrs)
     not_before = datetime.datetime(2025, 1, 1, tzinfo=datetime.UTC)
     not_after = datetime.datetime(2030, 1, 1, tzinfo=datetime.UTC)
     return (
@@ -110,4 +113,39 @@ class TestSignatureBindingClassification:
         jws = create_detached_jws(_CANON, key, kid="k1")
         tampered = canonicalize({"acef-manifest.json": "TAMPERED", "records/r.jsonl": "def456"})
         b = classify_signature_binding(jws, tampered)
+        assert b.binding_level == "unverified"
+
+    def test_unanchored_x5c_with_anchors_configured_is_unverified(self) -> None:
+        """roborev on 04efe61: when trust anchors ARE configured, an x5c that does
+        not chain to one is an integrity FAILURE (ACEF-012), NOT self-attested — so
+        the binding must report 'unverified', matching the integrity gate."""
+        key = _key()
+        cert = _self_signed("acme-corp-signer", key)
+        jws = create_detached_jws(_CANON, key, kid="k1", x5c=[_b64_der(cert)])
+        # A DIFFERENT, unrelated anchor is configured — the self-issued cert cannot chain.
+        unrelated = _self_signed("unrelated-root", _key())
+        b = classify_signature_binding(jws, _CANON, trust_anchors=[unrelated])
+        assert b.binding_level == "unverified"
+
+    def test_exact_full_subject_dn_distinguishes_same_cn(self) -> None:
+        """roborev on 04efe61: CN-only matching let two certs sharing a CN but
+        differing elsewhere both satisfy the binding. The full subject DN gives an
+        unambiguous exact binding."""
+        key = _key()
+        good = _self_signed("acme", key, org="ACME-Good")  # CN=acme,O=ACME-Good
+        jws = create_detached_jws(_CANON, key, kid="k1", x5c=[_b64_der(good)])
+        # Configuring the FULL DN of the good cert matches it...
+        ok = classify_signature_binding(
+            jws, _CANON, trust_anchors=[good], expected_producer=good.subject.rfc4514_string()
+        )
+        assert ok.matches_expected_producer is True
+        # ...while the full DN of a same-CN-but-different-O identity does NOT.
+        evil_dn = "CN=acme,O=ACME-Evil"
+        mismatch = classify_signature_binding(jws, _CANON, trust_anchors=[good], expected_producer=evil_dn)
+        assert mismatch.matches_expected_producer is False
+
+    def test_malformed_header_is_unverified_not_raised(self) -> None:
+        """roborev on 04efe61: _base64url_decode raises ACEFSigningError on a
+        malformed segment; classify must catch it and return 'unverified'."""
+        b = classify_signature_binding("!!!not-base64!!!.payload.sig", _CANON)
         assert b.binding_level == "unverified"

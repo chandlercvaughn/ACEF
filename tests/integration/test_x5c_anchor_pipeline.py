@@ -626,3 +626,19 @@ class TestExpectedProducerBinding:
         # has nothing anchored to check, so no wrong-signer ACEF-012.
         assessment = validate_bundle(str(bundle_dir), expected_producer="anyone")
         assert _signature_diags(assessment.structural_errors) == []
+
+    def test_public_validate_api_threads_expected_producer(self, tmp_path: Path) -> None:
+        """roborev on 04efe61 (High): the binding must be enforceable through the
+        PUBLIC acef.validate() wrapper, not only validate_bundle(). A wrong expected
+        producer through the public API must surface ACEF-012."""
+        import acef
+
+        bundle_dir = _export_bundle(tmp_path)
+        leaf_key, x5c, root = _build_anchored_chain()
+        _sign_bundle_with_x5c(bundle_dir, leaf_key, x5c)
+
+        wrong = acef.validate(str(bundle_dir), trust_anchors=[root], expected_producer="evil-corp")
+        diags = _signature_diags(wrong.structural_errors)
+        assert len(diags) == 1 and diags[0]["code"] == "ACEF-012"
+        right = acef.validate(str(bundle_dir), trust_anchors=[root], expected_producer="pipeline-leaf")
+        assert _signature_diags(right.structural_errors) == []
