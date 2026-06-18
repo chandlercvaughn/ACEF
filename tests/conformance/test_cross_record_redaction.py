@@ -161,6 +161,35 @@ def test_resolvable_redaction_attestation_ref_clean(tmp_path: Path) -> None:
     assert "ACEF-078" not in codes(assessment.structural_errors)
 
 
+def test_external_redaction_attestation_ref_clean(tmp_path: Path) -> None:
+    """F24: a redaction_attestation_ref to a FULLY-QUALIFIED EXTERNAL URN declared in
+    manifest.namespaces['x-external'].bundleReferences MUST validate clean (no ACEF-078).
+
+    The spec (freddy-on-acef requirements) allows the ref to resolve EITHER to an in-bundle
+    record OR a declared external URN — exactly like the sibling causation_chain (ACEF-073)
+    and harness_evidence (ACEF-070) checks. The redaction-attestation check was over-strict:
+    it only accepted in-bundle URNs, false-positiving ACEF-078 on a valid external reference."""
+    bundle = tmp_path / "external-attestation-ref"
+    external_urn = "urn:acef:rec:eeee0000-0000-0000-0000-000000000099"
+    write_bundle(
+        bundle,
+        manifest=base_manifest(
+            namespaces={"x-external": {"bundleReferences": [{"urn": external_urn}]}},
+        ),
+        records=[
+            base_record(
+                record_id="urn:acef:rec:11110000-0000-0000-0000-000000000010",
+                confidentiality="redacted",
+                redaction_policy_version="1.0.0",
+                redaction_attestation_ref=external_urn,
+            ),
+        ],
+    )
+
+    assessment = validate_bundle(bundle)
+    assert "ACEF-078" not in codes(assessment.structural_errors), codes(assessment.structural_errors)
+
+
 def test_no_redaction_attestation_ref_clean(tmp_path: Path) -> None:
     """When the field is absent entirely, no ACEF-078."""
     bundle = tmp_path / "no-attestation-ref"

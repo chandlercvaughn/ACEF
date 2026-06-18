@@ -352,27 +352,35 @@ def enforce_redaction_policy_version(
 def enforce_redaction_attestation_ref(
     records: list[dict[str, Any]],
     in_bundle_record_urns: set[str],
+    manifest: dict[str, Any],
 ) -> list[ValidationDiagnostic]:
-    """Emit ACEF-078 when redaction_attestation_ref points to an unknown URN.
+    """Emit ACEF-078 when redaction_attestation_ref points to an UNRESOLVABLE URN.
 
-    Per VAL-VALIDATION-006: when a record sets `redaction_attestation_ref`
-    and the URN does not resolve to a record in this bundle, fail with
-    ACEF-078 (NOT ACEF-022 — the codex policy carved out ACEF-078 for this
-    specific case so general dangling-entity-ref errors don't subsume it).
+    Per VAL-VALIDATION-006: when a record sets `redaction_attestation_ref` and the URN
+    resolves to NEITHER an in-bundle record NOR a declared external bundle reference, fail
+    with ACEF-078 (NOT ACEF-022 — the codex policy carved out ACEF-078 for this specific
+    case so general dangling-entity-ref errors don't subsume it).
 
-    Records without a `redaction_attestation_ref` are not checked here —
-    the *conditional-required* enforcement (i.e., must be set on non-public
-    records) is a separate question we don't yet enforce because the brief
-    is silent on whether the attestation ref is mandatory or merely
-    strongly recommended. This function only checks resolvability when the
-    field is present.
+    The reference MAY resolve to a FULLY-QUALIFIED EXTERNAL URN declared in
+    ``manifest.namespaces['x-external'].bundleReferences`` (F24): the freddy-on-acef
+    requirement states the URN "MUST exist in the bundle OR be a fully-qualified external
+    URN", exactly like the sibling causation_chain (ACEF-073) and harness_evidence
+    (ACEF-070) checks. The earlier impl only accepted in-bundle URNs, false-positiving
+    ACEF-078 on a valid declared external reference.
+
+    Records without a `redaction_attestation_ref` are not checked here — the
+    *conditional-required* enforcement (i.e., must be set on non-public records) is a
+    separate question we don't yet enforce because the brief is silent on whether the
+    attestation ref is mandatory or merely strongly recommended. This function only checks
+    resolvability when the field is present.
     """
+    declared_external = _declared_external_urns(manifest)
     diags: list[ValidationDiagnostic] = []
     for _idx, rec in _records_iter(records):
         ref = rec.get("redaction_attestation_ref")
         if not isinstance(ref, str) or not ref:
             continue
-        if ref in in_bundle_record_urns:
+        if ref in in_bundle_record_urns or ref in declared_external:
             continue
         rec_id = _record_id_of(rec)
         diags.append(
@@ -381,8 +389,10 @@ def enforce_redaction_attestation_ref(
                 (
                     f"Record {rec_id!r} has redaction_attestation_ref="
                     f"{ref!r} but no record with that URN exists in the "
-                    "bundle. Per spec §6.3, the attestation reference "
-                    "MUST resolve to an in-bundle record."
+                    "bundle and it is not a declared external URN. Per spec §6.3, the "
+                    "attestation reference MUST resolve to an in-bundle record or a "
+                    "fully-qualified external URN declared in "
+                    "manifest.namespaces['x-external'].bundleReferences."
                 ),
             )
         )
@@ -982,8 +992,8 @@ def run_cross_record_validation(
     # 4. Redaction policy version (conditional-required)
     diags.extend(enforce_redaction_policy_version(records))
 
-    # 5. Redaction attestation ref (URN resolvability)
-    diags.extend(enforce_redaction_attestation_ref(records, in_bundle_urns))
+    # 5. Redaction attestation ref (URN resolvability: in-bundle OR declared external, F24)
+    diags.extend(enforce_redaction_attestation_ref(records, in_bundle_urns, manifest))
 
     # 6. Mode-gated required record types
     diags.extend(enforce_mode_gates(manifest, records))
