@@ -55,7 +55,7 @@ def test_spec_documents_evaluation_instant_producer_control_caveat() -> None:
     spec = (Path(__file__).resolve().parents[2] / "planning" / "ACEF-Spec-Outline-v0.1.md").read_text(encoding="utf-8")
     idx = spec.find("Default when the caller omits `evaluation_instant`")
     assert idx != -1, "spec must document the omitted-caller evaluation_instant default"
-    section = spec[idx : idx + 2600]
+    section = spec[idx : idx + 3400]
     assert "producer-controlled" in section, "must flag metadata.timestamp as producer-controlled"
     assert "pass an explicit `evaluation_instant`" in section, "must direct consumers to pass an explicit instant"
     assert "D.4" in section, "must cross-reference the Appendix D.4 freshness non-goal"
@@ -67,16 +67,26 @@ def test_spec_documents_evaluation_instant_producer_control_caveat() -> None:
     # schema-invalid timestamp — so the spec must not claim "runs no date-sensitive
     # rules".
     assert "NON-AUTHORITATIVE" in section, "spec must mark fallback-instant diagnostics as non-authoritative"
-    assert "no accepted (non-fatal) assessment ever depends on a wall-clock instant" in section, (
+    assert "no accepted (non-fatal) assessment ever depends on a wall-clock" in section, (
         "spec must scope the no-wall-clock guarantee to the accepted/evaluated path"
+    )
+    # The spec must distinguish the two fallback shapes precisely (roborev on
+    # ee40372/d037f5c): absent/non-string -> wall-clock; non-ISO string -> verbatim.
+    assert "recorded **verbatim**" in section or "recorded verbatim" in section, (
+        "spec must note a present-but-non-ISO metadata.timestamp is recorded verbatim, not wall-clock"
     )
 
 
 def test_non_iso_metadata_timestamp_is_fatal_and_rejected(tmp_path: Path) -> None:
-    """The carve-out's load-bearing fact: a bundle whose metadata.timestamp is
-    absent or not ISO-8601 is structurally invalid (FATAL) and rejected, so any
-    date-sensitive diagnostics computed against the wall-clock fallback are
-    non-authoritative (they appear only inside an already-rejected assessment)."""
+    """The carve-out's load-bearing fact: a bundle whose metadata.timestamp is not
+    ISO-8601 is structurally invalid (FATAL) and rejected, so any date-sensitive
+    diagnostics computed against the (verbatim, non-deterministic) instant are
+    non-authoritative (they appear only inside an already-rejected assessment).
+
+    Asserts the SPECIFIC timestamp schema diagnostic (ACEF-002 at
+    /metadata/timestamp) rather than merely 'some fatal' — the manifest mutation
+    also breaks integrity (an ACEF-010 fatal), which must NOT be what makes this
+    pass (else a timestamp-validation regression would slip through)."""
     import json
 
     pkg = Package(producer={"name": "ts-bad", "version": "1.0.0"})
@@ -89,7 +99,16 @@ def test_non_iso_metadata_timestamp_is_fatal_and_rejected(tmp_path: Path) -> Non
     manifest["metadata"]["timestamp"] = "not-a-real-date"
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
 
-    assessment = validate_bundle(bundle_dir)  # no evaluation_instant -> wall-clock fallback path
-    assert any(e.get("severity") == "fatal" for e in assessment.structural_errors), (
-        "a non-ISO metadata.timestamp must produce a FATAL (rejected) assessment"
+    assessment = validate_bundle(bundle_dir)  # no evaluation_instant supplied
+    ts_fatal = [
+        e
+        for e in assessment.structural_errors
+        if e.get("severity") == "fatal"
+        and e.get("code") == "ACEF-002"
+        and "/metadata/timestamp" in str(e.get("path", ""))
+    ]
+    assert ts_fatal, (
+        "a non-ISO metadata.timestamp must produce a FATAL ACEF-002 at /metadata/timestamp "
+        f"(not merely some integrity fatal); structural_errors="
+        f"{[(e.get('code'), e.get('path')) for e in assessment.structural_errors]}"
     )
