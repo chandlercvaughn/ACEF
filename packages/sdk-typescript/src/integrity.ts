@@ -19,6 +19,39 @@
 import { createHash } from "node:crypto";
 
 /**
+ * Return a reason string if `path` violates the hash-domain path text contract
+ * (spec §3.1.1), else `null`. Ports `acef.integrity.path_nfc_utf8_problem` so
+ * the TypeScript exporter rejects the SAME paths the Python validator does —
+ * otherwise TS could emit a `content-hashes.json` / Merkle tree Python rejects
+ * (cross-language divergence). Three checks, in order:
+ *   1. Strict UTF-8 — no lone (unpaired) UTF-16 surrogate.
+ *   2. No Unicode control characters (general category Cc: U+0000–U+001F,
+ *      U+007F–U+009F, including NUL). This is the Appendix D.5 premise.
+ *   3. NFC normalization.
+ */
+export function pathTextProblem(path: string): string | null {
+    for (let i = 0; i < path.length; i++) {
+        const c = path.charCodeAt(i);
+        if (c >= 0xd800 && c <= 0xdbff) {
+            const next = i + 1 < path.length ? path.charCodeAt(i + 1) : 0;
+            if (next < 0xdc00 || next > 0xdfff) {
+                return "path is not valid UTF-8 (contains a lone surrogate)";
+            }
+            i++; // valid surrogate pair
+        } else if (c >= 0xdc00 && c <= 0xdfff) {
+            return "path is not valid UTF-8 (contains a lone surrogate)";
+        }
+    }
+    if (/\p{Cc}/u.test(path)) {
+        return "path contains a Unicode control character (general category Cc)";
+    }
+    if (path.normalize("NFC") !== path) {
+        return "path is not UTF-8 NFC normalized";
+    }
+    return null;
+}
+
+/**
  * RFC 8785 (JCS) canonicalize a JSON-serializable value to UTF-8 bytes.
  *
  * Rules implemented:
@@ -205,6 +238,19 @@ export function buildMerkleTree(contentHashes: Record<string, string>): MerkleTr
     if (entries.length === 0) {
         const emptyRoot = sha256Hex(new Uint8Array(0));
         return { leaves: [], root: emptyRoot };
+    }
+
+    // Reject any key violating the §3.1.1 path text contract BEFORE encoding —
+    // mirrors `acef.integrity.build_merkle_tree`, so TS and Python agree on which
+    // bundles are well-formed (no control/NUL/non-NFC/surrogate keys enter the
+    // hash domain).
+    for (const [path] of entries) {
+        const problem = pathTextProblem(path);
+        if (problem !== null) {
+            throw new Error(
+                `content-hashes.json key violates spec §3.1.1 (${problem}): ${JSON.stringify(path)}`,
+            );
+        }
     }
 
     const leaves: MerkleLeaf[] = [];

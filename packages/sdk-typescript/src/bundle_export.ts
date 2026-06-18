@@ -27,7 +27,7 @@
  */
 
 import { createHash } from "node:crypto";
-import { canonicalize, sha256Hex, buildMerkleTree } from "./integrity.js";
+import { canonicalize, sha256Hex, buildMerkleTree, pathTextProblem } from "./integrity.js";
 import { deterministicGzip } from "./exporter.js";
 import type { LoadedBundle, RawRecord } from "./loader.js";
 
@@ -604,6 +604,15 @@ function computeContentHashes(files: Map<string, Buffer>): Record<string, string
             path.startsWith("records/") ||
             path.startsWith("artifacts/");
         if (!inDomain) continue;
+        // Reject a hash-domain key violating the §3.1.1 path text contract
+        // (no control/NUL, NFC, strict UTF-8) before it enters content-hashes —
+        // parity with `acef.integrity.compute_content_hashes`.
+        const problem = pathTextProblem(path);
+        if (problem !== null) {
+            throw new Error(
+                `content-hashes.json key violates spec §3.1.1 (${problem}): ${JSON.stringify(path)}`,
+            );
+        }
         hashes[path] = hashFile(path, content);
     }
     // Sort keys.

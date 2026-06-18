@@ -16,6 +16,7 @@ export {
     sha256Hex,
     computeBundleDigest,
     buildMerkleTree,
+    pathTextProblem,
     type MerkleLeaf,
     type MerkleTree,
 } from "./integrity.js";
