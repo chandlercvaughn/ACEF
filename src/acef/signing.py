@@ -1102,6 +1102,8 @@ def verify_harness_attestation(
     *,
     public_key: PublicKeyTypes | None = None,
     key_data: bytes | None = None,
+    trust_anchors: list[Certificate] | None = None,
+    allow_self_attested: bool = False,
 ) -> bool:
     """Verify a harness_attestation JWS detached signature.
 
@@ -1129,15 +1131,26 @@ def verify_harness_attestation(
             fields are ignored.
         signature: JWS compact serialization
             ``"<header_b64>..<signature_b64>"``.
-        public_key: Verification key. If omitted, the JWS header's
-            embedded ``jwk`` or ``x5c`` is used by
-            :func:`verify_detached_jws`.
+        public_key: Out-of-band verification key (the SECURE path). When
+            supplied, the embedded ``jwk``/``x5c`` is not trusted as
+            authoritative — an attacker re-signing with their own key fails.
         key_data: Optional PEM-encoded public key (alternative to
             ``public_key``).
+        trust_anchors: Locally-configured x5c trust anchors. When supplied and
+            the attestation carries an ``x5c`` chain, the chain MUST terminate at
+            an anchor (spec §3.1.3) — the anchored secure path.
+        allow_self_attested: Opt into the embedded-``jwk``-only path. Default
+            ``False``: with NO out-of-band key and NO trust anchors the call
+            RAISES (ACEF-012) rather than trusting the signature's own embedded
+            key, because that mode is self-attested and NOT forgery-resistant
+            (CRYPTO-3). Set ``True`` to accept a self-attested signature, by which
+            the caller acknowledges it proves possession of the embedded key only,
+            not authorship by any named party.
 
     Returns:
-        ``True`` on successful verification; ``False`` on
-        cryptographic failure (signature does not match payload subset).
+        ``True`` on successful verification; ``False`` on cryptographic failure
+        (signature does not match the payload subset) or a ``signer_kid``/header
+        ``kid`` mismatch.
 
     Raises:
         ACEFSigningError: With code ``ACEF-013`` for non-whitelisted
@@ -1149,12 +1162,33 @@ def verify_harness_attestation(
     subset = _project_harness_attestation_subset(payload)
     canonical = canonicalize(subset)
 
+    # Secure by default. With NO out-of-band key and NO trust anchors, the only
+    # key available to ``verify_detached_jws`` is the signature's OWN embedded
+    # ``jwk``/``x5c`` — so the result proves the payload was signed by SOMEONE
+    # holding the embedded key, NOT by any particular party. An attacker who
+    # controls the payload can re-sign a tampered attestation with their own
+    # auto-embedded key (and set ``signer_kid`` to anything) and it would verify.
+    # That self-attested mode is NOT forgery-resistant, so it must be opted into
+    # explicitly (``allow_self_attested=True``), and is never the silent default
+    # (PhD re-review CRYPTO-3).
+    has_out_of_band_key = public_key is not None or key_data is not None
+    if not has_out_of_band_key and not trust_anchors and not allow_self_attested:
+        raise ACEFSigningError(
+            "harness_attestation verification requires an out-of-band public_key/key_data, "
+            "configured trust_anchors (x5c chain termination), or an explicit "
+            "allow_self_attested=True opt-in; an embedded-jwk-only signature is self-attested "
+            "and NOT forgery-resistant (an attacker can re-sign a tampered payload with their "
+            "own auto-embedded key)",
+            code="ACEF-012",
+        )
+
     try:
-        verify_detached_jws(
+        header = verify_detached_jws(
             signature,
             canonical,
             public_key,
             key_data=key_data,
+            trust_anchors=trust_anchors,
         )
     except ACEFSigningError as exc:
         # ACEF-013 (unsupported alg, missing kid, key-type mismatch) and
@@ -1182,6 +1216,14 @@ def verify_harness_attestation(
         # type for declared alg, etc.) propagates as a real error so
         # callers see the diagnostic.
         raise
+
+    # Bind the SIGNED ``signer_kid`` field to the JWS header ``kid``: an
+    # attestation whose header key identifier disagrees with the signer_kid it
+    # signed over is rejected (defense in depth — a signature MUST NOT claim one
+    # key identifier in its protected header and a different one in its evidence).
+    signed_kid = subset.get("signer_kid")
+    if signed_kid is not None and header.get("kid") != signed_kid:
+        return False
     return True
 
 

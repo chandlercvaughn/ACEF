@@ -286,3 +286,53 @@ def test_missing_inside_field_is_signed_as_absent(rsa_keys):
     # that wasn't covered by the original signature).
     payload["signer_kid"] = "harness-kid-1"
     assert verify_harness_attestation(payload, sig, public_key=public_key) is False
+
+
+# ---------- PhD re-review CRYPTO-3: insecure-by-default keyless verification ----------
+#
+# verify_harness_attestation resolved the verification key from the JWS's OWN
+# embedded jwk when no out-of-band key was supplied, with no signer_kid<->header
+# kid binding and no trust-anchor path. An attacker who controls the payload can
+# flip claim/state_class, re-sign with their own auto-embedded key, set the signed
+# signer_kid to any value, and a KEYLESS verify returned True. The embedded-jwk-
+# only path is self-attested, NOT forgery-resistant, so it must not be the
+# silent default.
+
+
+def test_crypto3_keyless_embedded_jwk_resign_attack_rejected(rsa_keys):
+    """The committee's exact attack: re-sign a tampered payload with the
+    attacker's own (auto-embedded) key. A KEYLESS verify MUST NOT return True."""
+    attacker_key, _ = rsa_keys
+    forged = _attestation_payload(claim="tests-NEVER-faked", state_class="passed", signer_kid="official-key")
+    forged_sig = sign_harness_attestation(forged, private_key=attacker_key, signer_kid="official-key")
+    with pytest.raises(ACEFSigningError) as exc:
+        verify_harness_attestation(forged, forged_sig)
+    assert exc.value.code == "ACEF-012"
+
+
+def test_crypto3_out_of_band_key_still_verifies(rsa_keys):
+    """An out-of-band public_key remains the secure path and still verifies a
+    legitimate attestation (unchanged)."""
+    private_key, public_key = rsa_keys
+    payload = _attestation_payload()
+    sig = sign_harness_attestation(payload, private_key=private_key, signer_kid="harness-kid-1")
+    assert verify_harness_attestation(payload, sig, public_key=public_key) is True
+
+
+def test_crypto3_self_attested_opt_in_verifies_legit(rsa_keys):
+    """The embedded-jwk (self-attested) path is available only via an EXPLICIT
+    allow_self_attested=True opt-in, by which the caller acknowledges it is not
+    forgery-resistant."""
+    private_key, _ = rsa_keys
+    payload = _attestation_payload()
+    sig = sign_harness_attestation(payload, private_key=private_key, signer_kid="harness-kid-1")
+    assert verify_harness_attestation(payload, sig, allow_self_attested=True) is True
+
+
+def test_crypto3_signer_kid_header_binding(rsa_keys):
+    """With an out-of-band key, a JWS header kid that disagrees with the SIGNED
+    signer_kid field is rejected (binding)."""
+    private_key, public_key = rsa_keys
+    payload = _attestation_payload(signer_kid="claimed-kid")
+    sig = sign_harness_attestation(payload, private_key=private_key, signer_kid="actual-kid")
+    assert verify_harness_attestation(payload, sig, public_key=public_key) is False
