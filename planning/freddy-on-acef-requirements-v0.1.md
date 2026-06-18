@@ -954,7 +954,7 @@ The four-field canonical recipe (`class`, `subject_ref`, `expected_behavior`, `r
 
 ### D6 — Regulation mappings for `finding_record` ship in the per-regulation templates in this same release
 
-`acef-conventions/v1/templates/eu-ai-act-high-risk-v1.json` gains a `findings_evidence_class` rule accepting `finding_record` as evidence for Article 9 (risk management) and Article 15 (accuracy / robustness / cybersecurity). `acef-conventions/v1/templates/nist-rmf-v1.json` gains the same acceptance for MEASURE 2.x and MANAGE 4.x. These mappings ship in v0.4, not as a follow-on; otherwise `finding_record` exists in Core but the regulations cannot consume it.
+`finding_record` is accepted as evidence for Article 9 (risk management) and Article 15 (accuracy / robustness / cybersecurity) — and MEASURE 2.x / MANAGE 4.x in NIST — via the §4 alignment matrix mappings and the v1.1 validation rules (`src/acef/validation/v1_1_rules.py`, conformance corpus `test-vectors/freddy/`), NOT by editing the general per-regulation templates (`src/acef/templates/eu-ai-act-2024.json`, `src/acef/templates/nist-ai-rmf-1.0.json`), which are unchanged. The binding ships in v0.4, not as a follow-on; otherwise `finding_record` exists in Core but the regulations cannot consume it.
 
 ### D7 — The subscriber-mode full-loop golden bundle is mandatory in the conformance suite
 

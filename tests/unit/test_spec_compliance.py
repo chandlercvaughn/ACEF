@@ -221,3 +221,25 @@ class TestACEF032Emission:
         # Should have ACEF-032 info diagnostics
         acef032_errors = [e for e in assessment.structural_errors if e.get("code") == "ACEF-032"]
         assert len(acef032_errors) > 0
+
+
+class TestSpecTemplateCitationsResolve:
+    """F26: the spec + RFC-0001 + freddy-requirements cited a non-existent
+    ``acef-conventions/v1/templates/`` directory and template IDs (``eu-ai-act-high-risk-v1``,
+    ``nist-rmf-v1``) that do not exist, and falsely claimed those templates were extended to
+    consume the v1.1 record types (which they do NOT contain). The docs now cite the real
+    on-disk templates and describe the actual v1.1 validation-rule binding mechanism."""
+
+    _REPO_ROOT = Path(__file__).resolve().parents[2]
+
+    def test_no_planning_doc_cites_a_nonexistent_template_path_or_id(self) -> None:
+        dead_refs = ["acef-conventions/v1/templates/", "eu-ai-act-high-risk-v1", "nist-rmf-v1"]
+        for doc in sorted((self._REPO_ROOT / "planning").glob("*.md")):
+            text = doc.read_text(encoding="utf-8")
+            for token in dead_refs:
+                assert token not in text, f"{doc.name} still cites the dead template ref {token!r}"
+
+    def test_real_regulation_templates_exist_on_disk(self) -> None:
+        templates_dir = self._REPO_ROOT / "src" / "acef" / "templates"
+        for name in ("eu-ai-act-2024.json", "nist-ai-rmf-1.0.json"):
+            assert (templates_dir / name).exists(), f"cited regulation template missing: {name}"

@@ -88,13 +88,13 @@ Without that mapping, the record type would belong in `x-freddy/*`, not Core.
 | `harness_attestation` | Art. 9, Art. 12, Art. 13, Art. 15, Art. 17 (cross-cutting) | GOVERN-1.3, MEASURE-2.x, MANAGE-1 | GPAI Art. 55 attestation | Per-state-transition signed attestation generalizing the Prove-It Doctrine. The cross-cutting integrity primitive that binds every other new record type to its evidence chain. Foundational to verifiable-evidence claims across all frameworks. |
 
 The §4 cross-regulation alignment matrix in the spec is amended to add one row
-per new record type, with at minimum one regulation mapping per row. Per
-brief D6, the regulation mapping templates in
-`acef-conventions/v1/templates/eu-ai-act-high-risk-v1.json` and
-`acef-conventions/v1/templates/nist-rmf-v1.json` are extended in the same v0.4
-release to consume these record types as binding evidence for the cited
-provisions. The Freddy team owns the template-extension work; ACEF working
-groups review and approve before v0.4 freeze.
+per new record type, with at minimum one regulation mapping per row. The
+matrix documents the provision mappings; the binding for these record types is
+enforced by the v1.1 validation rules (`src/acef/validation/v1_1_rules.py`, with
+the conformance corpus under `test-vectors/freddy/`), NOT by editing the general
+per-regulation mapping templates (`src/acef/templates/eu-ai-act-2024.json`,
+`src/acef/templates/nist-ai-rmf-1.0.json`), which are unchanged in v0.4. ACEF
+working groups review and approve the matrix mappings before v0.4 freeze.
 
 ## Version-Gating Design
 
@@ -168,7 +168,7 @@ each in turn.
 | **Q3** — Seven state classes hard-coded or extensible registry? | **Hard-coded enum for v1.1.** The seven values from brief §24.5 (`step`, `finding`, `coverage_cell`, `regression`, `delivery`, `badge`, `attestation`) are the only state classes any currently-known consumer needs. Premature abstraction to a registry pattern, without a second consumer's state classes in hand, locks in design choices that may turn out wrong. Open registry deferred to v1.2+ when a second vendor's classes are known. Backward compatibility is straightforward — existing values remain valid. |
 | **Q4** — ACEF reference signer? | **No.** Verifier and JWS sign/verify helpers stay in ACEF; signing identity (JWKS URL, key, `kid`) stays with consumers. `src/acef/signing.py` already provides RS256/ES256 sign and verify operating on JCS-canonicalized input. That primitive surface is sufficient for both `harness_attestation` and `delivery_verdict`. Identity management is operational and customer-specific. |
 | **Q5** — `dedupe_key` normative? | **Recipe normative, hash algorithm fixed at SHA-256 for v1.1.** The four-field canonical recipe (`class`, `subject_ref`, `expected_behavior`, `reproduction_steps_ref_content_hash`) under RFC 8785 (JCS), hashed with SHA-256, prefix `sha256:`. No hash agility in v1.1 — SHA-256 matches every other content-addressed identifier in ACEF v0.3 (`^sha256:[0-9a-f]{64}$`), and cross-vendor dedupe determinism matters more than future hash flexibility. Hash migration, when cryptographic events demand it, will be a separate spec bump. |
-| **Q6** — Regulation mappings for `finding_record`? | **Per-regulation templates extended by Freddy team, reviewed by ACEF working groups, in the same v0.4 release.** Required acceptance item per FRD-ACEF-071 (verified by VAL-SPEC-004 against the §4 alignment matrix). `acef-conventions/v1/templates/eu-ai-act-high-risk-v1.json` gains a `findings_evidence_class` rule accepting `finding_record` as evidence for Art. 9 and Art. 15. `acef-conventions/v1/templates/nist-rmf-v1.json` gains the same acceptance for MEASURE-2.x and MANAGE-4.x. These mappings ship in v0.4 — `finding_record` cannot exist in Core without the regulations being able to consume it. |
+| **Q6** — Regulation mappings for `finding_record`? | **Documented in the §4 alignment matrix and enforced by the v1.1 validation rules, reviewed by ACEF working groups, in the same v0.4 release.** Required acceptance item per FRD-ACEF-071 (verified by VAL-SPEC-004 against the §4 alignment matrix). `finding_record` is accepted as evidence for Art. 9 and Art. 15 (and MEASURE-2.x / MANAGE-4.x in NIST) via the matrix mappings + the v1.1 validation surface (`src/acef/validation/v1_1_rules.py`, conformance corpus `test-vectors/freddy/`); the general per-regulation templates (`src/acef/templates/eu-ai-act-2024.json`, `src/acef/templates/nist-ai-rmf-1.0.json`) are unchanged. The binding ships in v0.4 — `finding_record` cannot exist in Core without the regulations being able to consume it. |
 | **Q7** — Subscriber-mode full-loop golden bundle? | **Yes — mandatory.** `test-vectors/freddy/pass/subscriber-mode-full-loop.acef/` is the canonical reference for "what a complete agent-reliability run looks like in ACEF" and is required, not optional. Every new ACEF consumer reads it first to understand how the new record types compose. Required by FRD-ACEF-050 and VAL-CONFORMANCE-004. |
 
 ## Conformance Impact
