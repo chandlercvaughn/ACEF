@@ -37,15 +37,21 @@ def test_rfc0002_frames_widespread_as_independent_art73_trigger_citing_3_61() ->
 
 
 def test_no_assertive_widespread_modifier_wording_anywhere() -> None:
-    """roborev Medium on 586138c: no line in the RFC or template may call
+    """roborev on 586138c/eaacd4d: no line in the RFC or template may call
     'widespread' a 'modifier' AS AN ASSERTION. The only permitted co-occurrence of
-    'widespread' and 'modifier' on one line is an explicit NEGATION ('... not a
-    modifier ...'). This guard makes the mischaracterization unable to recur."""
+    'widespread' and 'modifier' on one line is a negation that binds DIRECTLY to
+    'modifier' — so a sneaky 'widespread is a modifier, not a separate trigger'
+    (a 'not a' elsewhere on the line) is still caught. This guard makes the
+    mischaracterization unable to recur."""
+    # The negation must attach to the word 'modifier' itself. Strip markdown
+    # emphasis markers first so '**not** a modifier' normalizes to 'not a modifier'.
+    allowed_negations = ("not a modifier", "not a sub-type or modifier", "and not a modifier")
     for path in (_RFC, _TEMPLATE):
         for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
             low = line.lower()
             if "widespread" in low and "modifier" in low:
-                assert "not a" in low or "not one of" in low or "not a sub-type" in low, (
+                norm = low.replace("*", "").replace("_", "")
+                assert any(neg in norm for neg in allowed_negations), (
                     f"{path.name}:{lineno} asserts 'widespread' is a 'modifier' — it is an "
                     f"INDEPENDENT Art. 73(3) trigger (Art. 3(61)): {line.strip()[:140]!r}"
                 )
