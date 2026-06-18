@@ -28,6 +28,8 @@
 import { readFileSync, readdirSync, existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 
+import { assertNoDuplicateMemberNames } from "./integrity.js";
+
 /** A raw record object as parsed from a `records/*.jsonl` line. */
 export type RawRecord = Record<string, unknown>;
 
@@ -47,6 +49,10 @@ function readJsonl(path: string): RawRecord[] {
     for (const rawLine of text.split("\n")) {
         const line = rawLine.trim();
         if (line.length === 0) continue;
+        // I-JSON (RFC 7493 §2.3): reject a duplicate member name BEFORE JSON.parse
+        // de-dups it (last-wins), so a hash-domain duplicate is not silently
+        // collapsed before re-export hashes the rebuilt JSON.
+        assertNoDuplicateMemberNames(line);
         out.push(JSON.parse(line) as RawRecord);
     }
     return out;
@@ -61,7 +67,9 @@ export function loadBundle(dirPath: string): LoadedBundle {
     if (!existsSync(manifestPath)) {
         throw new Error(`No acef-manifest.json found in ${dirPath}`);
     }
-    const manifestRaw = JSON.parse(readFileSync(manifestPath, "utf-8")) as Record<string, unknown>;
+    const manifestText = readFileSync(manifestPath, "utf-8");
+    assertNoDuplicateMemberNames(manifestText); // I-JSON (RFC 7493 §2.3), before last-wins JSON.parse
+    const manifestRaw = JSON.parse(manifestText) as Record<string, unknown>;
 
     // Read records by following manifest.record_files (matches Python loader,
     // which reads exactly the files listed in record_files, in list order).

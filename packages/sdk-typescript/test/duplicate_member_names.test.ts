@@ -8,8 +8,12 @@
 
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
+import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
-import { assertNoDuplicateMemberNames } from "../src/integrity.js";
+import { assertNoDuplicateMemberNames, canonicalizeJsonString } from "../src/integrity.js";
+import { loadBundle } from "../src/loader.js";
 
 test("rejects a top-level duplicate member name", () => {
     assert.throws(() => assertNoDuplicateMemberNames('{"a":1,"a":2}'), /duplicate object member name/);
@@ -39,4 +43,31 @@ test("accepts a value string that equals a key name (not a duplicate key)", () =
 
 test("accepts a key whose VALUE string contains braces and colons", () => {
     assert.doesNotThrow(() => assertNoDuplicateMemberNames('{"a":"{\\"x\\":1,\\"x\\":2}","b":2}'));
+});
+
+test("canonicalizeJsonString rejects a duplicate member name", () => {
+    assert.throws(() => canonicalizeJsonString('{"a":1,"a":2}'), /duplicate object member name/);
+});
+
+test("loadBundle rejects a duplicate member name in acef-manifest.json", () => {
+    const dir = mkdtempSync(join(tmpdir(), "acef-dupkey-"));
+    // Duplicate "version" member; record_files empty so the loader needs nothing else.
+    writeFileSync(
+        join(dir, "acef-manifest.json"),
+        '{"version":"1","version":"2","record_files":[]}',
+        "utf-8",
+    );
+    assert.throws(() => loadBundle(dir), /duplicate object member name/);
+});
+
+test("loadBundle rejects a duplicate member name in a records JSONL line", () => {
+    const dir = mkdtempSync(join(tmpdir(), "acef-dupkey-rec-"));
+    mkdirSync(join(dir, "records"));
+    writeFileSync(join(dir, "records", "r.jsonl"), '{"record_id":"a","record_id":"b"}\n', "utf-8");
+    writeFileSync(
+        join(dir, "acef-manifest.json"),
+        '{"version":"1","record_files":[{"path":"records/r.jsonl"}]}',
+        "utf-8",
+    );
+    assert.throws(() => loadBundle(dir), /duplicate object member name/);
 });

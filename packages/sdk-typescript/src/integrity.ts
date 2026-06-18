@@ -271,9 +271,12 @@ function encodeString(s: string): string {
 }
 
 /**
- * Parse a JSON string and re-canonicalize via RFC 8785.
+ * Parse a JSON string and re-canonicalize via RFC 8785. Rejects duplicate object
+ * member names (I-JSON / RFC 7493 §2.3) — parity with Python
+ * ``acef.integrity.canonicalize_json_str``.
  */
 export function canonicalizeJsonString(jsonStr: string): Uint8Array {
+    assertNoDuplicateMemberNames(jsonStr);
     return canonicalize(JSON.parse(jsonStr));
 }
 
