@@ -966,12 +966,31 @@ def enforce_delivery_verdict_integrity(
 
 def enforce_harness_attestation_signature(
     records: list[dict[str, Any]],
+    trust_anchors: list[Any] | None = None,
 ) -> list[ValidationDiagnostic]:
     """Emit ACEF-012/ACEF-013 when a harness_attestation's ``attestation_signature``
-    does not cryptographically verify over its 9 signed fields (brief §3.6 / TC9)."""
+    does not cryptographically verify over its 9 signed fields (brief §3.6 / TC9).
+
+    Trust posture mirrors the bundle-signature model (RFC-0001 Q4 keeps JWKS
+    *identity* with the consumer, so an offline validator cannot do party
+    attribution):
+
+    - When ``trust_anchors`` are configured, verification is ANCHORED — the
+      attestation MUST carry an ``x5c`` chain terminating at a configured anchor;
+      a ``jwk``-only (self-attested) signature does NOT satisfy it (ACEF-012).
+    - With no anchors (the offline default), verification is SELF-ATTESTED:
+      tamper-evidence against the JWS-embedded key (catches the TC9 case — a
+      signed field altered AFTER signing — and a structurally-invalid/forged
+      value), but NOT party attribution and NOT a *re-signing* attacker who
+      controls the whole payload and signs it with their own key. Closing that
+      requires caller-supplied trust material (``trust_anchors`` here, or
+      consumer-side JWKS), exactly as for bundle signatures.
+    """
     from acef.errors import ACEFSigningError
     from acef.signing import HARNESS_ATTESTATION_SIGNED_FIELDS, verify_harness_attestation
 
+    # Anchored when the caller configured trust anchors; otherwise self-attested.
+    anchored = bool(trust_anchors)
     diags: list[ValidationDiagnostic] = []
     for _idx, rec in _records_iter(records):
         if _record_type_of(rec) != "harness_attestation":
@@ -985,9 +1004,12 @@ def enforce_harness_attestation_signature(
             continue  # schema layer flags missing/malformed attestation_signature
         value = sig.get("value")
         signed_fields = sig.get("signed_fields")
-        # VAL-SIGNATURE-001: when signed_fields is declared it MUST equal the
-        # exact 9-field scope — a narrower scope attests less than the record claims.
-        if signed_fields is not None and list(signed_fields) != list(HARNESS_ATTESTATION_SIGNED_FIELDS):
+        # VAL-SIGNATURE-001: when signed_fields is declared it MUST be a list equal
+        # to the exact 9-field scope — a narrower scope attests less than the record
+        # claims. A non-list value is a structural error (flag, don't crash on list()).
+        if signed_fields is not None and (
+            not isinstance(signed_fields, list) or list(signed_fields) != list(HARNESS_ATTESTATION_SIGNED_FIELDS)
+        ):
             diags.append(
                 ValidationDiagnostic(
                     "ACEF-012",
@@ -1008,7 +1030,12 @@ def enforce_harness_attestation_signature(
             )
             continue
         try:
-            verified = verify_harness_attestation(payload, value, allow_self_attested=True)
+            verified = verify_harness_attestation(
+                payload,
+                value,
+                trust_anchors=trust_anchors,
+                allow_self_attested=not anchored,
+            )
         except ACEFSigningError as exc:
             diags.append(
                 ValidationDiagnostic(
@@ -1036,6 +1063,7 @@ def run_cross_record_validation(
     records: list[dict[str, Any]],
     *,
     signature_count: int,
+    trust_anchors: list[Any] | None = None,
 ) -> list[ValidationDiagnostic]:
     """Run all v1.1 cross-record checks and return diagnostics.
 
@@ -1112,8 +1140,9 @@ def run_cross_record_validation(
 
     # 12. Brief §3.6 / TC9 harness_attestation cryptographic signature
     #     verification — emits ACEF-012 (tampered/forged/structurally-invalid) or
-    #     ACEF-013 (non-whitelisted alg). Self-attested (JWS-embedded key) mode:
-    #     offline tamper-evidence, not JWKS identity (RFC-0001 Q4).
-    diags.extend(enforce_harness_attestation_signature(records))
+    #     ACEF-013 (non-whitelisted alg). ANCHORED when trust_anchors are
+    #     configured; else self-attested JWS-embedded-key tamper-evidence (offline,
+    #     not JWKS identity — RFC-0001 Q4).
+    diags.extend(enforce_harness_attestation_signature(records, trust_anchors))
 
     return diags

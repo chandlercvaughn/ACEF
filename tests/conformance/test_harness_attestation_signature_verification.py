@@ -102,3 +102,47 @@ def test_wrong_signed_fields_scope_rejected(rsa_key: Any) -> None:
     rec["payload"]["attestation_signature"]["signed_fields"] = ["attestation_id"]
     diags = run_cross_record_validation(_MANIFEST, [rec], signature_count=0)
     assert any(d.code == "ACEF-012" for d in diags), [d.code for d in diags]
+
+
+def test_signed_fields_non_list_is_structured_not_typeerror(rsa_key: Any) -> None:
+    """roborev Medium on d33d239: a non-list signed_fields (e.g. 5) must produce a
+    structured ACEF-012, not a TypeError that the ACEF-001 backstop swallows."""
+    rec = _signed_harness_record(rsa_key)
+    rec["payload"]["attestation_signature"]["signed_fields"] = 5  # malformed JSON value
+    diags = run_cross_record_validation(_MANIFEST, [rec], signature_count=0)  # must not raise
+    assert any(d.code == "ACEF-012" for d in diags), [d.code for d in diags]
+
+
+def test_anchored_mode_rejects_jwk_only_attestation(rsa_key: Any) -> None:
+    """roborev High on d33d239: when trust_anchors are configured the validate path
+    must NOT silently self-attest — a jwk-only attestation (no x5c chain to an
+    anchor) does NOT verify, closing the re-signing-attacker bypass for callers who
+    supply trust material. Without anchors it is self-attested (tamper-evidence
+    only) and passes; with anchors it requires an anchored x5c chain."""
+    import datetime
+
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.x509.oid import NameOID
+
+    rec = _signed_harness_record(rsa_key)
+    # No anchors -> self-attested -> passes (the offline default).
+    assert not any(
+        d.code in ("ACEF-012", "ACEF-013") for d in run_cross_record_validation(_MANIFEST, [rec], signature_count=0)
+    )
+    # Anchors configured -> jwk-only attestation is not anchored -> ACEF-012.
+    ca_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "harness-anchor")])
+    ca = (
+        x509.CertificateBuilder()
+        .subject_name(name)
+        .issuer_name(name)
+        .public_key(ca_key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(datetime.datetime(2024, 1, 1, tzinfo=datetime.UTC))
+        .not_valid_after(datetime.datetime(2030, 1, 1, tzinfo=datetime.UTC))
+        .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
+        .sign(ca_key, hashes.SHA256())
+    )
+    diags = run_cross_record_validation(_MANIFEST, [rec], signature_count=0, trust_anchors=[ca])
+    assert any(d.code in ("ACEF-012", "ACEF-013") for d in diags), [d.code for d in diags]

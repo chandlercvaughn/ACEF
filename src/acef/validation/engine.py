@@ -563,6 +563,7 @@ def _run_validation_phases(
             manifest_data,
             all_records_data,
             signature_count=_xr_sig_count,
+            trust_anchors=trust_anchors,
         )
         _flush(cross_record_diagnostics)
 
