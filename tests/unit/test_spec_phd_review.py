@@ -232,6 +232,37 @@ class TestFindings26And30RelatedWork:
         assert "evaluat" in sec.lower(), "Related Work must honestly gate the research claim on evaluation"
 
 
+class TestFinding29InteropHonesty:
+    """The spec asserted shipped interop it does not implement: 'W3C PROV-compatible
+    entity model', 'wraps C2PA manifests'. No PROV/C2PA/SBOM serializer exists. The
+    claims must be downgraded to honest 'designed-for / carry-as-artifact' status."""
+
+    def test_no_unqualified_wraps_c2pa_claim(self) -> None:
+        text = _spec_text()
+        assert "wraps C2PA manifests" not in text, (
+            "spec must not claim it 'wraps C2PA manifests' (no C2PA integration is shipped)"
+        )
+
+    def test_prov_claim_is_qualified_as_mappable_not_shipped(self) -> None:
+        text = _spec_text()
+        # The design-principle row must not present an unqualified 'PROV-compatible
+        # entity model' as a shipped capability.
+        assert "**W3C PROV-compatible entity model**" not in text, (
+            "the PROV design-principle claim must be qualified (mappable-by-design, not shipped)"
+        )
+
+    def test_interoperability_status_note_present(self) -> None:
+        text = _spec_text()
+        # Anchor on the NOTE heading, not the §1.1 cross-reference to it.
+        idx = text.find("Interoperability status (normative honesty)")
+        assert idx != -1, "spec must add an Interoperability status note (implemented vs designed-but-not-shipped)"
+        note = text[idx : idx + 1200].lower()
+        assert "artifact" in note, "the note must state that external formats can be carried as artifacts"
+        assert "not" in note and ("serializ" in note or "export" in note or "shipped" in note), (
+            "the note must state that PROV/C2PA/SBOM serialization/export is NOT shipped in v1"
+        )
+
+
 class TestFindings1And4And5SecurityConsiderations:
     """The spec had no threat model / Security Considerations section (finding 1,
     critical). Appendix D must state an adversary model, the guarantees, the

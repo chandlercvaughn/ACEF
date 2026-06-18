@@ -66,7 +66,7 @@ This separation ensures AI Commons owns the open evidence substrate and open rul
 | **Privacy-aware** | Confidential evidence (trade secrets, PII in training data) can be attested without disclosure, using hash commitments or zero-knowledge proofs |
 | **Dual-track: model-level + system-level** | GPAI model evidence (training, evaluation, copyright) and deployed system evidence (logs, oversight, incidents) are distinct but linkable tracks — reflecting the EU AI Act's provider/deployer split |
 | **Content-addressable bundle** | Package is a directory (or archive) with manifest + records + artifacts + hashes + signatures, not a single monolithic JSON — enabling selective disclosure, large log handling, and partial verification |
-| **W3C PROV-compatible entity model** | Core entities (Subject, Component, Dataset, Actor, Control) form a relationship graph compatible with W3C PROV's Agent/Entity/Activity model, enabling interoperability with provenance ecosystems |
+| **W3C PROV-mappable entity model** | Core entities (Subject, Component, Dataset, Actor, Control) form a relationship graph *designed to map onto* W3C PROV's Agent/Entity/Activity model. NOTE: a PROV serialization/export is **not shipped in v1** — the model is PROV-mappable by design, not a realized PROV exporter (see the Interoperability status note in §8). |
 | **Evidence and assessment are separate artifacts** | Evidence Bundles contain raw proof; Assessment Bundles contain evaluation results. This prevents compliance knowledge from being hidden inside proprietary evaluators. |
 | **Open boundary enforcement** | AI Commons-managed schemas, templates, and rule semantics are publicly versioned, signed, and licensed under permissive terms (Apache 2.0 for code, CC-BY 4.0 for templates and schemas). Vendor extensions MUST use namespaced prefixes and be safely ignorable by standard validators. |
 
@@ -381,7 +381,7 @@ ACEFPackage
 │       ├── start_date          # ISO 8601
 │       └── end_date            # ISO 8601 (null if current)
 │
-├── entities                    # First-class entity graph (W3C PROV-compatible)
+├── entities                    # First-class entity graph (W3C PROV-mappable)
 │   ├── components[]            # Subsystems, model versions, deployment components
 │   │   ├── component_id        # URN identifier (urn:acef:cmp:<uuid>)
 │   │   ├── name                # Component name
@@ -405,7 +405,7 @@ ACEFPackage
 │   │   ├── name                # Name or pseudonym (redactable)
 │   │   └── organization        # Organization affiliation
 │   │
-│   └── relationships[]         # Entity graph edges (W3C PROV-compatible)
+│   └── relationships[]         # Entity graph edges (W3C PROV-mappable)
 │       ├── source_ref          # URN of source entity
 │       ├── target_ref          # URN of target entity
 │       ├── relationship_type   # wraps | calls | fine_tunes | deploys | trains_on | evaluates_with | oversees
@@ -1799,7 +1799,7 @@ Each golden bundle includes:
 
 | Initiative | Relationship to ACEF |
 |---|---|
-| **C2PA / Content Authenticity Initiative** | ACEF's `transparency_marking` record type wraps C2PA manifests; complementary, not competing. C2PA provides the cryptographic content credential; ACEF provides the compliance context. |
+| **C2PA / Content Authenticity Initiative** | ACEF's `transparency_marking` record type *can reference or carry* a C2PA manifest as an attached artifact; complementary, not competing. C2PA provides the cryptographic content credential; ACEF provides the compliance context. (No C2PA parser/embedder is shipped in v1 — see the Interoperability status note below.) |
 | **W3C TDM Reservation Protocol (TDMRep)** | TDMRep signals (rights reservation for text/data mining) feed into `copyright_rights_reservation` records. ACEF treats TDMRep as the canonical protocol for expressing EU DSM Directive Art. 4(3) reservations. |
 | **W3C PROV Data Model** | ACEF's entity graph (`subjects[]`, `entities`, `relationships[]`) is designed for compatibility with PROV's Agent/Entity/Activity model, enabling interoperability with provenance ecosystems. |
 | **Creative Commons CC Signals** | Rights preference signals could be imported as `copyright_rights_reservation` evidence |
@@ -1809,6 +1809,8 @@ Each golden bundle includes:
 | **CEN/CENELEC Harmonised Standards** | Once published, these define compliance benchmarks that mapping templates reference via `normative_text_ref` |
 | **ISO/IEC 42001** | ACEF can serve as the evidence layer for 42001's documentation requirements; mapping template planned for v1.0 |
 | **OECD AI System Cards** | System card fields map to ACEF's `subjects[]` metadata and `transparency_disclosure` records |
+
+**Interoperability status (normative honesty).** This table describes *design relationships*, not all of which are realized as code in v1. To avoid overclaiming, the v1 reference implementation's interop surface is exactly: **(implemented)** any external artifact — a C2PA manifest, an SPDX/CycloneDX SBOM, an in-toto/SLSA attestation, a PDF — can be carried in `artifacts/` and referenced by a record (it is hashed into the integrity domain like any artifact); **(designed, NOT shipped in v1)** a native PROV serialization/export, a C2PA manifest parser/embedder, and an SBOM importer that lifts component data into ACEF entities. The entity model is **PROV-mappable by design** but the SDK ships **no `to_prov()` / PROV-O exporter**, no C2PA codec, and no SBOM importer; claims of "PROV-compatible", "wraps C2PA", or "imports SBOM" elsewhere are to be read as *design intent / carry-as-artifact*, not realized converters. §8.1 states the delta against the systems whose *core mechanism* ACEF shares.
 
 ### 8.1 Related Work: Attestation and Policy-as-Data Systems
 
