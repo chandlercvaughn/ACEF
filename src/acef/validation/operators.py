@@ -418,7 +418,10 @@ def _validate_comparison_op(op: str) -> None:
     FALSE-FAILs the rule (non-empty set) or passes VACUOUSLY (zero records),
     turning a compliance check into a misleading verdict with no error code.
     """
-    if op not in _VALID_COMPARISON_OPS:
+    # ``op`` is checked for str-ness FIRST so a non-string op (e.g. a list/dict
+    # from malformed JSON ``params``) raises a structured ACEF-046 rather than a
+    # raw ``TypeError`` from set membership on an unhashable value.
+    if not isinstance(op, str) or op not in _VALID_COMPARISON_OPS:
         raise ACEFEvaluationError(
             f"Unknown comparison operator {op!r} in rule. Valid operators: "
             f"{', '.join(sorted(_VALID_COMPARISON_OPS))}.",
@@ -433,9 +436,13 @@ def _compare(actual: Any, op: str, expected: Any) -> bool:
     (e.g., dict vs int) return False instead of raising TypeError (m6 Scout R2).
 
     Callers (``op_field_value`` / ``op_exists_where``) validate ``op`` upfront via
-    ``_validate_comparison_op`` (ACEF-046), so ``op`` is always one of
-    ``_VALID_COMPARISON_OPS`` here; the final fallthrough is a defensive backstop.
+    ``_validate_comparison_op`` (ACEF-046). ``_compare`` re-validates at the TOP
+    too — BEFORE the missing-path branch — so it is self-consistent for any
+    caller: an unknown op never silently returns False, even when ``actual`` is
+    None (the missing-path ``op == "ne"`` branch would otherwise mask it).
     """
+    _validate_comparison_op(op)
+
     if actual is None:
         # Missing path: all comparisons false except ne
         return op == "ne"

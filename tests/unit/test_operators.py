@@ -250,6 +250,30 @@ class TestFieldValue:
         assert exc_info.value.severity == Severity.ERROR
         assert exc_info.value.category == ErrorCategory.EVALUATION
 
+    def test_non_string_op_raises_acef_046_not_typeerror(self):
+        """roborev Medium on 9deeb28: a non-string op (list/dict from malformed
+        JSON params) must raise ACEF-046, not a raw TypeError from set membership
+        on an unhashable value."""
+        records = [_make_record("risk_register", payload={"severity": "high"})]
+        for bad_op in ([["eq"]], [{"op": "eq"}]):  # unhashable op values
+            with pytest.raises(ACEFEvaluationError) as exc_info:
+                op_field_value(
+                    {"record_type": "risk_register", "field": "/payload/severity", "op": bad_op[0], "value": "high"},
+                    records,
+                )
+            assert exc_info.value.code == "ACEF-046"
+
+    def test_unknown_op_with_missing_path_raises_acef_046(self):
+        """roborev Low on 9deeb28: _compare's missing-path branch (actual is None
+        -> op == 'ne') must NOT silently swallow an unknown op. With the op
+        absent from the record, the unknown op must still raise ACEF-046."""
+        records = [_make_record("risk_register", payload={})]  # /payload/missing is None
+        with pytest.raises(ACEFEvaluationError) as exc_info:
+            op_field_value(
+                {"record_type": "risk_register", "field": "/payload/missing", "op": "equals", "value": "x"}, records
+            )
+        assert exc_info.value.code == "ACEF-046"
+
     def test_unknown_op_raises_acef_046_even_on_empty_record_set(self):
         """The op is structurally invalid regardless of data presence — like the
         ACEF-043 pointer check, it must raise even when zero records match

@@ -86,6 +86,26 @@ class TestCoverageCellDocsNoRemovedModel:
             for sym in ("import CoverageCellPayload", "CoverageDimensions("):
                 assert sym not in text, f"{rel} still references removed coverage_cell model usage: {sym!r}"
 
+    def test_documented_banned_token_example_is_actually_rejected(self) -> None:
+        """roborev Low on 113490e: the USER_GUIDE claimed a hyphenated compound
+        ('AI Act-compliant') fails ACEF-079, but the hyphen-aware matcher accepts
+        it. Pin the doc's claim to the ACTUAL matcher: the standalone example is
+        rejected, the hyphenated compound is not."""
+        from acef.validation.v1_1_rules import lint_coverage_cell_claim_language
+
+        def _rejected(claim: str) -> bool:
+            bundle = {
+                "coverage_cells": [
+                    {"cell_id": "urn:acef:cell:00000000-0000-0000-0000-000000000000", "claim_language": claim}
+                ]
+            }
+            return bool(lint_coverage_cell_claim_language(bundle))
+
+        guide = (_REPO_ROOT / "docs" / "USER_GUIDE.md").read_text(encoding="utf-8")
+        assert "This system is compliant." in guide, "USER_GUIDE lost the corrected rejected example"
+        assert _rejected("This system is compliant."), "documented 'rejected' example is not actually rejected"
+        assert not _rejected("AI Act-compliant"), "documented hyphen-aware 'accepted' compound is actually rejected"
+
     def test_redact_record_is_publicly_exported(self) -> None:
         assert hasattr(acef, "redact_record")
 

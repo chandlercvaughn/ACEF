@@ -1237,8 +1237,10 @@ print(assessment_with_coverage["coverage_cells"][0]["coverage_outcome"])  # → 
   model-level invariant.
 - The banned-token check is enforced by the validator (ACEF-079) — it is
   NOT a JSON-schema constraint and there is no Pydantic model to enforce it
-  at construction time (coverage_cell is a raw dict). A `claim_language`
-  containing `"AI Act-compliant"` builds cleanly but fails validation.
+  at construction time (coverage_cell is a raw dict). A `claim_language` of
+  `"This system is compliant."` builds cleanly but fails validation. (The
+  matcher is hyphen-aware: a standalone banned token like `compliant` fires,
+  but a hyphenated compound such as `AI Act-compliant` does NOT.)
 - The assessment-bundle builder API for attaching coverage_cell entries is
   outside the scope of this section; see
   `src/acef/assessment.py` for the assessment-side API.
