@@ -1380,8 +1380,8 @@ Validation results are captured in an **ACEF Assessment Bundle** — a separate,
   3. **Any** rule has `outcome: error` → **`not-assessed`**.
   4. The provision has ≥1 rule and **ALL** rules have `outcome: skipped` → **`skipped`**.
   5. An `evidence_gap` record exists for this provision (step 2 did not fire, so no fail-severity rule failed) → **`gap-acknowledged`**.
-  6. **ALL** fail-severity rules passed but **ANY** warning-severity rule has `outcome: failed` → **`partially-satisfied`**.
-  7. Otherwise (≥1 rule; every applicable fail- and warning-severity rule passed) → **`satisfied`**. `skipped` rules (their `condition` evaluated false — out-of-scope or not-yet-effective) and a failed `info`-severity rule are NON-GATING and do NOT block satisfaction. The narrower literal "ALL rules have `outcome: passed`" is a strict special case of this step; a passed+skipped mix is `satisfied`, and `not-assessed` is reserved exclusively for an ERRORED provision (step 3) or a rule-less one (step 1).
+  6. **ANY** warning-severity rule has `outcome: failed` → **`partially-satisfied`**. (Reached only after steps 1–5, so no fail-severity rule failed (step 2) and none errored (step 3); a *skipped* fail-severity rule does **not** block this step — a skipped gating rule is non-applicable, not a failure.)
+  7. Otherwise (≥1 rule; after steps 1–6, no fail- or warning-severity rule failed or errored) → **`satisfied`** — every gating rule that ran passed. `skipped` rules (their `condition` evaluated false — out-of-scope or not-yet-effective) and a failed `info`-severity rule are NON-GATING and do NOT block satisfaction. The narrower literal "ALL rules have `outcome: passed`" is a strict special case of this step; a passed+skipped mix is `satisfied`, and `not-assessed` is reserved exclusively for an ERRORED provision (step 3) or a rule-less one (step 1).
 
   Because step 2 precedes step 5, `not-satisfied` always takes precedence over `gap-acknowledged`: an evidence-gap acknowledgment does not override a failed mandatory rule. Provision-not-yet-effective is handled by the **engine BEFORE rule evaluation**: a provision whose `effective_date` is after `evaluation_instant` is EXCLUDED from evaluation, its rules produce `skipped` outcomes, and an `ACEF-032` info diagnostic is emitted (§3.6) — NOT by structural errors. The `if_provision_effective` DSL `condition` (defined in `template.schema.json`) is a REDUNDANT rule-level expression of the same gate: it remains a valid, schema-supported authoring mechanism (and is exercised directly in unit tests), but the engine-level exclusion already skips such provisions, so a shipped template never needs to set it.
 
@@ -1915,7 +1915,7 @@ The alignment matrix in Section 4 now covers 16 ACEF record types mapped across 
 
 ### B.4 Document Change Log
 
-The **Format version** (ACEF Core v1; `core_version` 1.0.0 / 1.1.0) is independent of this **document revision**. Revisions below are editorial/normative-clarification revisions of the specification text; a `1.0.0` bundle validates identically across all of them.
+The **Format version** (ACEF Core v1; `core_version` in the `1.0.x` / `1.1.x` ranges, reference bundles `1.0.0` / `1.1.0`) is independent of this **document revision**. Revisions below are editorial/normative-clarification revisions of the specification text; a `1.0.0` bundle validates identically across all of them.
 
 | Doc revision | Date | Summary |
 |---|---|---|

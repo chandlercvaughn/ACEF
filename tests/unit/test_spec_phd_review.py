@@ -215,6 +215,23 @@ class TestFinding18RollupPrecedence:
             f"step 1 must be the no-rules → not-assessed guard, got: {m.group(1)!r}"
         )
 
+    def test_step6_matches_appendix_c_p6_no_all_fail_passed_conjunct(self) -> None:
+        """roborev on f4d58a3: §3.7 step 6 must match the corrected Appendix C P6
+        (skipped fail-severity rule is non-blocking). It must NOT require 'ALL
+        fail-severity rules passed' as the partial-satisfaction condition."""
+        text = _spec_text()
+        idx = text.find("precedence algorithm")
+        window = text[idx : idx + 1700]
+        m = re.search(r"\n\s*6\.\s+(.{0,200})", window)
+        assert m, "precedence algorithm lost step 6"
+        step6 = m.group(1)
+        assert (
+            "ALL** fail-severity rules passed but" not in step6 and "ALL fail-severity rules passed but" not in step6
+        ), f"step 6 still carries the contradictory 'ALL fail passed but' conjunct: {step6!r}"
+        assert "warning" in step6.lower() and "failed" in step6.lower(), (
+            "step 6 must key on a failed warning-severity rule"
+        )
+
     def test_conformance_row_order_matches_algorithm(self) -> None:
         rows = [ln for ln in _spec_text().splitlines() if "**Provision roll-up**" in ln]
         assert rows, "spec lost the Provision roll-up conformance row"
