@@ -36,6 +36,21 @@ def test_rfc0002_frames_widespread_as_independent_art73_trigger_citing_3_61() ->
     assert "independent" in rfc.lower()
 
 
+def test_no_assertive_widespread_modifier_wording_anywhere() -> None:
+    """roborev Medium on 586138c: no line in the RFC or template may call
+    'widespread' a 'modifier' AS AN ASSERTION. The only permitted co-occurrence of
+    'widespread' and 'modifier' on one line is an explicit NEGATION ('... not a
+    modifier ...'). This guard makes the mischaracterization unable to recur."""
+    for path in (_RFC, _TEMPLATE):
+        for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+            low = line.lower()
+            if "widespread" in low and "modifier" in low:
+                assert "not a" in low or "not one of" in low or "not a sub-type" in low, (
+                    f"{path.name}:{lineno} asserts 'widespread' is a 'modifier' — it is an "
+                    f"INDEPENDENT Art. 73(3) trigger (Art. 3(61)): {line.strip()[:140]!r}"
+                )
+
+
 def test_template_cites_art_3_61_for_widespread() -> None:
     """REG-2: the template's source_legislation and widespread paraphrase cite
     Art. 3(61) by point number (it pins every other sub-point precisely)."""

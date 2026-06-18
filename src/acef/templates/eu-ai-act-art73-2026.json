@@ -75,7 +75,7 @@
       "provision_id": "article-73",
       "provision_name": "Reporting of Serious Incidents",
       "normative_text_ref": "EU AI Act Art. 73(1)-(11)",
-      "description": "Providers of high-risk AI systems placed on the Union market shall report any serious incident to the market-surveillance authorities of the Member States where the incident occurred, immediately after establishing a causal link (or its reasonable likelihood) between the AI system and the incident, and in any event no later than the period set by Art. 73(2)-(4). The reporting clock is the SHORTEST applicable clock over the Art. 3(49) trigger array plus the 'widespread' modifier and the 'death_involved' fact: death_involved -> 10 days; 3.49.b (critical infrastructure) OR widespread -> 2 days; otherwise (including non-fatal 3.49.a serious-health-harm) -> 15 days. Per-provision effective dates carry the Digital-Omnibus 'pending-final-adoption' deferral (Annex III 2027-12-02, Annex I 2028-08-02) while the as-enacted in-force date remains 2026-08-02.",
+      "description": "Providers of high-risk AI systems placed on the Union market shall report any serious incident to the market-surveillance authorities of the Member States where the incident occurred, immediately after establishing a causal link (or its reasonable likelihood) between the AI system and the incident, and in any event no later than the period set by Art. 73(2)-(4). The reporting clock is the SHORTEST applicable clock over the Art. 3(49) trigger array plus the independent 'widespread' (Art. 3(61)) trigger and the 'death_involved' fact: death_involved -> 10 days; 3.49.b (critical infrastructure) OR widespread -> 2 days; otherwise (including non-fatal 3.49.a serious-health-harm) -> 15 days. Per-provision effective dates carry the Digital-Omnibus 'pending-final-adoption' deferral (Annex III 2027-12-02, Annex I 2028-08-02) while the as-enacted in-force date remains 2026-08-02.",
       "effective_date": "2026-08-02",
       "applicable_to": ["high-risk"],
       "sub_provisions": [
@@ -131,7 +131,7 @@
             "enforced_by": "F-M3-VALIDATOR-RULES",
             "dsl_expressible": false,
             "requirement": "The matching eu-ai-act-art73 entry's stated deadline equals the shortest applicable clock computed over the trigger facts: death_involved -> 10 days; 3.49.b (critical infrastructure) OR widespread -> 2 days; else 15 days. The trigger facts are read from card_source.eu_ai_act_facts in confidential/source-backed validation and from taxonomy_crosswalk.eu_ai_act in public-card validation (§5.7). A mismatch raises ACEF-084.",
-            "reason": "No DSL operator can COMPUTE a derived deadline from the trigger array + modifiers and compare it to a stated deadline."
+            "reason": "No DSL operator can COMPUTE a derived deadline from the trigger array + the widespread/death_involved facts and compare it to a stated deadline."
           }
         ]
       },
