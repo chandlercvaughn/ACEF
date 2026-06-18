@@ -284,6 +284,9 @@ class TestFieldValue:
             r"(a?)*b",
             r"((a?)){28}",  # nullable body hidden one group deep
             r"(a*){12}",  # nested unbounded body, counted
+            r"(?:a?){28}a{28}",  # NON-CAPTURING prefix must be stripped (roborev High on 468db1c)
+            r"(?:a?)+",  # non-capturing nullable, unbounded
+            r"(?:.?){24}x",
         ):
             t0 = time.monotonic()
             with pytest.raises(ACEFEvaluationError) as exc_info:

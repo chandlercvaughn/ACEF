@@ -871,7 +871,12 @@ def _has_catastrophic_group_repetition(pattern: str) -> bool:
                 hi = _group_repetition_hi(pattern, i + 1)
                 repeats_multiply = hi is not None and hi >= 2  # _REP_INF >= 2
                 if repeats_multiply:
-                    body = pattern[start + 1 : i]
+                    # Strip a group prefix (``?:``, ``?<name>``, lookaround) so a
+                    # non-capturing nullable group ``(?:a?){28}`` / ``(?:a?)+`` is
+                    # normalized to its body ``a?`` before the ambiguity checks —
+                    # otherwise the raw ``?:a?`` reads as non-nullable and evades
+                    # the rule (roborev High on 468db1c).
+                    body, _zw = _strip_group_prefix(pattern[start + 1 : i])
                     if (
                         _segment_is_nullable(body)
                         or _segment_has_alternation(body)
