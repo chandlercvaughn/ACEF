@@ -510,12 +510,6 @@ def resolve_variant(artifact_name: str, version: str = "v1") -> dict[str, str] |
     return None
 
 
-def resolve_record_type_for_variant(artifact_name: str, version: str = "v1") -> str | None:
-    """Get the parent record type for a variant artifact name."""
-    entry = resolve_variant(artifact_name, version)
-    return entry["record_type"] if entry else None
-
-
 def list_record_type_schemas(version: str = "v1") -> list[str]:
     """List all available record type schemas.
 

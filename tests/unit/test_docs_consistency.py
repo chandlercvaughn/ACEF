@@ -132,6 +132,26 @@ class TestF47RecordTypesInventory:
         assert len(RECORD_TYPES) == 23, f"RECORD_TYPES count drifted: {len(RECORD_TYPES)}"
 
 
+class TestF30DeadSymbolsRemoved:
+    """F30: three orphaned symbols (zero production callers) removed — no dead
+    public surface that 'doesn't make sense' to a reader of the SDK."""
+
+    def test_subject_modality_enum_removed(self) -> None:
+        import acef.models.enums as enums_mod
+
+        assert not hasattr(enums_mod, "SubjectModality"), "vestigial SubjectModality enum must be removed"
+
+    def test_resolve_record_type_for_variant_removed(self) -> None:
+        import acef.schemas.registry as reg_mod
+
+        assert not hasattr(reg_mod, "resolve_record_type_for_variant"), "orphaned helper must be removed"
+
+    def test_get_template_provisions_removed(self) -> None:
+        import acef.templates.registry as treg_mod
+
+        assert not hasattr(treg_mod, "get_template_provisions"), "test-only helper must be removed"
+
+
 class TestF45PriorPackageRefDocstring:
     def test_init_docstring_describes_bundle_digest_not_urn(self) -> None:
         """F45: Package.__init__ called prior_package_ref a 'URN'; spec + schema +

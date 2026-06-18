@@ -130,14 +130,3 @@ def list_templates() -> list[str]:
     return result
 
 
-def get_template_provisions(template_id: str) -> list[str]:
-    """Get all provision IDs from a template.
-
-    Args:
-        template_id: The template identifier.
-
-    Returns:
-        List of provision IDs.
-    """
-    template = load_template(template_id)
-    return [p.provision_id for p in template.provisions]

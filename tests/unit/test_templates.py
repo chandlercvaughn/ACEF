@@ -25,7 +25,6 @@ from acef.templates.models import (
 )
 from acef.templates.registry import (
     compute_template_digest,
-    get_template_provisions,
     list_templates,
     load_template,
 )
@@ -93,14 +92,6 @@ class TestTemplateLoading:
     def test_template_has_test_vectors(self, template_id: str) -> None:
         template = load_template(template_id)
         assert len(template.test_vectors) > 0
-
-    @pytest.mark.parametrize("template_id", TEMPLATE_IDS)
-    def test_get_template_provisions(self, template_id: str) -> None:
-        provision_ids = get_template_provisions(template_id)
-        assert len(provision_ids) > 0
-        template = load_template(template_id)
-        expected = [p.provision_id for p in template.provisions]
-        assert provision_ids == expected
 
     @pytest.mark.parametrize("template_id", TEMPLATE_IDS)
     def test_compute_template_digest(self, template_id: str) -> None:
