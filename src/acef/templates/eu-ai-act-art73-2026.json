@@ -3,7 +3,7 @@
   "template_name": "EU AI Act Article 73 — Serious Incident Reporting",
   "version": "1.0.0",
   "jurisdiction": "EU",
-  "source_legislation": "Regulation (EU) 2024/1689, Article 73; Article 3(49)",
+  "source_legislation": "Regulation (EU) 2024/1689, Article 73; Article 3(49); Article 3(61) (widespread infringement)",
   "instrument_type": "law",
   "legal_force": "binding",
   "instrument_status": "final",
@@ -15,7 +15,7 @@
       "provision_id": "article-3-49",
       "provision_name": "Serious Incident Definition (Triggers)",
       "normative_text_ref": "EU AI Act Art. 3(49)(a)-(d)",
-      "description": "A 'serious incident' is an incident or malfunctioning of an AI system that directly or indirectly leads to (a) the death of a person or serious harm to a person's health; (b) a serious and irreversible disruption of the management or operation of critical infrastructure; (c) the infringement of obligations under Union law intended to protect fundamental rights; or (d) serious harm to property or the environment. 'Widespread infringement' is a SEPARATE Art. 73(3) trigger — defined in Article 3 as an act or omission contrary to Union law protecting individuals' interests that harms, or is likely to harm, the collective interests of individuals residing in at least two Member States — NOT a sub-type or modifier of the 3(49)(c) fundamental-rights trigger. Art. 73(3) sets the 2-day clock for 'a widespread infringement OR a serious incident as defined in Article 3, point (49)(b)' (two independent triggers). The 3(49) triggers form an array because one incident can satisfy several at once (e.g. death and critical-infrastructure disruption).",
+      "description": "A 'serious incident' is an incident or malfunctioning of an AI system that directly or indirectly leads to (a) the death of a person or serious harm to a person's health; (b) a serious and irreversible disruption of the management or operation of critical infrastructure; (c) the infringement of obligations under Union law intended to protect fundamental rights; or (d) serious harm to property or the environment. 'Widespread infringement' is a SEPARATE Art. 73(3) trigger — defined in Article 3, point (61), as an act or omission contrary to Union law protecting individuals' interests that harms, or is likely to harm, the collective interests of individuals residing in at least two Member States — NOT a sub-type or modifier of the 3(49)(c) fundamental-rights trigger. Art. 73(3) sets the 2-day clock for 'a widespread infringement OR a serious incident as defined in Article 3, point (49)(b)' (two independent triggers). The 3(49) triggers form an array because one incident can satisfy several at once (e.g. death and critical-infrastructure disruption).",
       "effective_date": "2026-08-02",
       "applicable_to": ["high-risk"],
       "sub_provisions": [
@@ -32,7 +32,7 @@
         {
           "provision_id": "article-3-49.c",
           "normative_text_ref": "EU AI Act Art. 3(49)(c)",
-          "description": "Infringement of Union-law obligations protecting fundamental rights (Art. 3(49)(c)). NOTE: 'widespread infringement' (Art. 73(3)) is an INDEPENDENT trigger, NOT a modifier of this one — a 3(49)(c) incident alone takes the general 15-day clock, whereas a widespread infringement (whether or not it is also a 3(49)(c) case) takes 2 days under Art. 73(3)."
+          "description": "Infringement of Union-law obligations protecting fundamental rights (Art. 3(49)(c)). NOTE: 'widespread infringement' (Art. 73(3); defined in Art. 3, point (61)) is an INDEPENDENT trigger, NOT a modifier of this one — a 3(49)(c) incident alone takes the general 15-day clock, whereas a widespread infringement (whether or not it is also a 3(49)(c) case) takes 2 days under Art. 73(3)."
         },
         {
           "provision_id": "article-3-49.d",
