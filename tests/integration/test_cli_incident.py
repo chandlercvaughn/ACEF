@@ -166,6 +166,21 @@ class TestInspectIncidentAware:
         assert "physical_health" in result.output
         assert "Crosswalk:" in result.output
 
+    def test_inspect_markdown_surfaces_incident_evidence(self, runner: CliRunner, tmp_path: Path) -> None:
+        """F16: ``inspect --format markdown`` emits the incident evidence as Markdown — wiring
+        render_incident_evidence_markdown into a production path. Before this it was built +
+        14-test-covered but had ZERO production wiring (dead code); ``--format`` had no
+        ``markdown`` choice."""
+        bundle_dir, public_id = _build_public_card_bundle(tmp_path)
+
+        result = runner.invoke(cli, ["inspect", str(bundle_dir), "--format", "markdown"])
+
+        assert result.exit_code == 0, result.output
+        assert "## Incident Evidence" in result.output
+        assert f"**Public Incident ID:** `{public_id}`" in result.output
+        # Severity band derived by the shipped band() projection (this vector -> major).
+        assert "(band: **major**)" in result.output
+
     def test_inspect_archive_surfaces_incident_evidence(self, runner: CliRunner, tmp_path: Path) -> None:
         bundle_dir, public_id = _build_public_card_bundle(tmp_path)
         archive = tmp_path / "card.acef.tar.gz"

@@ -48,6 +48,7 @@ from acef.render import (
     _resolve_incident_crosswalk,
     _resolve_incident_field,
     render_incident_evidence_console,
+    render_incident_evidence_markdown,
 )
 
 # band() lives in acef.validation.incident_rules; import it from its source (not
@@ -283,7 +284,7 @@ def _read_archive_inputs(path: str) -> tuple[dict[str, Any], list[dict[str, Any]
 
 @click.command("inspect")
 @click.argument("path")
-@click.option("--format", "fmt", default="pretty", type=click.Choice(["pretty", "json"]))
+@click.option("--format", "fmt", default="pretty", type=click.Choice(["pretty", "json", "markdown"]))
 @click.option(
     "--include-private",
     "include_private",
@@ -302,7 +303,9 @@ def inspect_cmd(path: str, fmt: str, include_private: bool) -> None:
     carries ``incident_card`` / ``incident_report`` records, the RFC-0002 incident
     evidence (public_incident_id, severity band, harm class, taxonomy crosswalk)
     is surfaced too — reusing :func:`acef.render.render_incident_evidence_console`
-    in ``pretty`` mode.
+    in ``pretty`` mode and :func:`acef.render.render_incident_evidence_markdown` in
+    ``markdown`` mode (a copy-pasteable Markdown incident report; same projection-safe
+    fields as the console).
 
     ``--format json`` emits a PROJECTION-SAFE incident summary by default (the same
     fields the console surfaces), NOT the raw record envelopes. Pass
@@ -334,6 +337,19 @@ def inspect_cmd(path: str, fmt: str, include_private: bool) -> None:
                 # card_source / eu_ai_act_facts subtree.
                 out["incident_records"] = _incident_summaries(incident_records)
         click.echo(json.dumps(out, indent=2))
+    elif fmt == "markdown":
+        # Markdown report: a bundle header followed by the incident evidence as Markdown,
+        # REUSING render_incident_evidence_markdown (the same field resolution as the
+        # console path, never a reimplementation). This is the production wiring for that
+        # renderer (F16). Like the console path it surfaces only projection-safe fields —
+        # never the regulator-only card_source / eu_ai_act_facts subtree.
+        pkg_id = _as_dict(manifest_data.get("metadata")).get("package_id", "")
+        click.echo(f"# ACEF Bundle: {pkg_id}" if pkg_id else "# ACEF Bundle")
+        if incident_records:
+            rendered = render_incident_evidence_markdown(incident_records)
+            if rendered:
+                click.echo()
+                click.echo(rendered)
     else:
         print_bundle_info(manifest_data)
         if incident_records:
