@@ -7,22 +7,21 @@
  *  - SubjectType        — enums.py:8-12
  *  - RiskClassification — enums.py:15-22
  *  - LifecyclePhase     — enums.py:25-33
- *  - ComponentType      — enums.py:36-44
+ *  - ComponentType      — enums.py:36-45
  *  - DatasetSourceType  — enums.py:48-55
  *  - DatasetModality    — enums.py:58-66
- *  - SubjectModality    — enums.py:69-83
- *  - ActorRole          — enums.py:86-95
- *  - AuthorityClass     — enums.py:98-111  (brief §14.5)
- *  - RelationshipType   — enums.py:114-122
- *  - ObligationRole     — enums.py:126-134
- *  - Confidentiality    — enums.py:138-145
- *  - TrustLevel         — enums.py:148-153
- *  - EventType          — enums.py:157-168
- *  - AuditEventType     — enums.py:172-178
- *  - RuleSeverity       — enums.py:182-186
- *  - RuleOutcome        — enums.py:190-196
- *  - ProvisionOutcome   — enums.py:199-207
- *  - RECORD_TYPES       — enums.py:216-243 (16 v1.0 + 6 v1.1)
+ *  - ActorRole          — enums.py:69-78
+ *  - AuthorityClass     — enums.py:81-94  (brief §14.5)
+ *  - RelationshipType   — enums.py:97-122
+ *  - ObligationRole     — enums.py:125-134
+ *  - Confidentiality    — enums.py:137-144
+ *  - TrustLevel         — enums.py:147-153
+ *  - EventType          — enums.py:156-168
+ *  - AuditEventType     — enums.py:171-178
+ *  - RuleSeverity       — enums.py:181-186
+ *  - RuleOutcome        — enums.py:189-195
+ *  - ProvisionOutcome   — enums.py:198-215
+ *  - RECORD_TYPES       — enums.py:216-262 (16 v1.0 + 7 v1.1)
  */
 
 export const SubjectType = {

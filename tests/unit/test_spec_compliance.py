@@ -339,24 +339,41 @@ class TestF28TransparencyMarkingVocabulary:
         assert "/payload/marking_technique" not in spec, "spec still uses the obsolete /payload/marking_technique"
         assert '"marking_technique": "secure_metadata"' not in spec, "spec §5.1 still uses the obsolete payload key"
 
+    @staticmethod
+    def _extract_balanced_dict(text: str, start: int) -> str:
+        """Return the balanced ``{...}`` literal beginning at/after ``start``."""
+        open_idx = text.index("{", start)
+        depth = 0
+        for i in range(open_idx, len(text)):
+            if text[i] == "{":
+                depth += 1
+            elif text[i] == "}":
+                depth -= 1
+                if depth == 0:
+                    return text[open_idx : i + 1]
+        raise AssertionError("unbalanced braces in extracted payload")
+
     def test_section_5_1_example_payload_conforms_to_schema(self) -> None:
+        """Extract the ACTUAL §5.1 transparency_marking payload from the spec
+        Markdown (not a hardcoded copy — roborev on fda1a0e) and validate it
+        against the shipped schema, so the documented example cannot drift out
+        of conformance while this test still passes."""
+        import ast
+
         from jsonschema import Draft202012Validator
 
-        # The §5.1 transparency_marking payload, as documented (kept in sync with
-        # the spec example) — must validate against the shipped schema.
-        documented_payload = {
-            "modality": "image",
-            "marking_scheme_id": "c2pa-content-credentials",
-            "scheme_version": "2.3",
-            "metadata_container": "c2pa-manifest-store",
-            "watermark_applied": True,
-            "watermark_method": "spectral_embedding",
-            "robustness_parameters": {"compression": "jpeg_q30", "cropping": "25%", "screenshot": True},
-            "detection_api_endpoint": "https://api.acme.ai/v1/detect",
-        }
         spec = self._SPEC.read_text(encoding="utf-8")
+        # The §5.1 transparency_marking payload is the ``payload={...}`` block
+        # that contains the marking_scheme_id key — locate it and parse the
+        # balanced Python dict literal (inline comments + ``True`` are fine for
+        # ast.literal_eval, which parses real Python source).
+        anchor = spec.index('"marking_scheme_id": "c2pa-content-credentials"')
+        payload_kw = spec.rindex("payload=", 0, anchor)
+        payload_src = self._extract_balanced_dict(spec, payload_kw)
+        documented_payload = ast.literal_eval(payload_src)
+
         for key in self._REQUIRED:
-            assert f'"{key}"' in spec, f"§5.1 example missing required transparency_marking field {key!r}"
+            assert key in documented_payload, f"§5.1 example missing required transparency_marking field {key!r}"
         schema = json.loads((self._REPO / "acef-conventions" / "v1" / "transparency_marking.schema.json").read_text())
         errors = list(Draft202012Validator(schema).iter_errors(documented_payload))
         assert not errors, f"documented §5.1 payload fails the schema: {[e.message for e in errors]}"

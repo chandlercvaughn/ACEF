@@ -1083,11 +1083,11 @@ Each template is a separate JSON file that declares what evidence is required fo
           "message": "At least one transparency_marking record required for Art. 50(2)"
         },
         {
-          "rule_id": "art50-marking-scheme",
+          "rule_id": "art50-marking-scheme-id",
           "rule": "field_present",
           "params": {"record_type": "transparency_marking", "field": "/payload/marking_scheme_id"},
           "severity": "fail",
-          "message": "Marking scheme must be specified"
+          "message": "Marking scheme must be specified (the marking standard must be identifiable for interoperability)"
         }
       ],
       "tiered_requirements": null
