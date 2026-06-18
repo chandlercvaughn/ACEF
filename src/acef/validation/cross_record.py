@@ -737,11 +737,11 @@ def enforce_disposition_internal_state(
     evidence state; :samp:`internal_state_unchanged: false` is the
     forbidden condition.
 
-    ACEF-076's registry text reads "state_class record lacks fake-green
-    test reference" but the same code is reused here per ops plan WS3.4:
-    both conditions are "discipline failures around state mutation" and
-    sharing a code keeps the error taxonomy compact. The diagnostic
-    message disambiguates by naming the specific violation.
+    ACEF-076 is INTENTIONALLY shared by two state-mutation discipline failures
+    (ops plan WS3.4): the state_class fake-green case AND this
+    disposition_record internal_state_unchanged=false case. Both are named in the
+    registry description AND the spec §3.6 row (F36); the diagnostic message
+    disambiguates which fired. Sharing one code keeps the taxonomy compact.
     """
     diags: list[ValidationDiagnostic] = []
     for _idx, rec in _records_iter(records):

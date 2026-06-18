@@ -332,12 +332,13 @@ def enforce_state_class_taxonomy(
 ) -> list[ValidationDiagnostic]:
     """Emit ACEF-076 when a record's state_class violates the taxonomy.
 
-    Two failure modes both emit ACEF-076 (per the ACEF-076 description:
-    "state_class record lacks fake-green test reference" — the validator
-    treats both "unknown state_class" and "known state_class missing the
-    required fake_green_test_ref" as the same code, because the latter is
-    semantically a fake-green binding failure and the former cannot have a
-    valid fake-green binding by construction).
+    Two state_class failure modes both emit ACEF-076 — the validator treats both
+    "unknown state_class" and "known state_class missing the required
+    fake_green_test_ref" as the same code, because the latter is semantically a
+    fake-green binding failure and the former cannot have a valid fake-green
+    binding by construction. (ACEF-076 ALSO covers the disposition_record
+    internal_state_unchanged=false case in cross_record.py; the broadened
+    registry description + spec §3.6 row name both, F36.)
 
     1. ``state_class`` is not in the 7-entry taxonomy.
     2. ``state_class`` is in the taxonomy, the entry's

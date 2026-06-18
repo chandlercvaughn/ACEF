@@ -632,3 +632,46 @@ class TestIncidentBuilderAtomicity:
             )
         assert pkg._versioning.core_version == "1.0.0", "core_version mutated despite a failed incident_card"
         assert not any(p.profile_id == _ART73_PROFILE_ID for p in pkg._profiles), "Art.73 profile declared on failure"
+
+    def test_report_incident_redaction_policy_mismatch_leaves_package_unmutated(self) -> None:
+        """roborev on c10eca1: a fallible step AFTER the v1.1/Art.73 mutations
+        (the X1/X2 redaction-policy-version mismatch) must also roll back. The
+        awareness_date here is VALID — the failure is the later mismatch — proving
+        the atomicity covers post-mutation validation, not just the early parse."""
+        from acef.package import _ART73_PROFILE_ID
+        from acef.redaction import RedactionPolicy
+
+        pkg = _pkg_no_policy()
+        assert pkg._versioning.core_version == "1.0.0"
+        with pytest.raises(ValueError):
+            pkg.report_incident(
+                public_incident_id=_PUBLIC_ID,
+                harm_core=dict(_HARM_CORE),
+                incident_type="operational_failure",
+                description="redaction policy version mismatch",
+                awareness_date=_AWARENESS,
+                eu_ai_act_facts={"serious_incident_triggers": ["3.49.a"], "widespread": False, "death_involved": True},
+                redaction_policy=RedactionPolicy(version="1.0.0"),
+                redaction_policy_version="9.9.9",  # disagrees with the policy -> ValueError after the mutations
+            )
+        assert pkg._versioning.core_version == "1.0.0", "core_version mutated despite a failed report_incident"
+        assert not any(p.profile_id == _ART73_PROFILE_ID for p in pkg._profiles), "Art.73 profile declared on failure"
+
+    def test_incident_card_bad_commitment_field_leaves_package_unmutated(self) -> None:
+        """roborev on c10eca1: the incident_card commitment-field validation runs
+        AFTER the v1.1/Art.73 mutations; a bad field name must roll them back."""
+        from acef.package import _ART73_PROFILE_ID
+
+        pkg = _pkg_no_policy()
+        assert pkg._versioning.core_version == "1.0.0"
+        with pytest.raises(ValueError):
+            pkg.incident_card(
+                public_incident_id=_PUBLIC_ID,
+                harm_core=dict(_HARM_CORE),
+                severity_vector="ACEF-SEV:1.0/HT:P/HG:H/RV:A/SC:U/BR:I",
+                awareness_date="2026-08-01T00:00:00Z",
+                eu_ai_act_facts={"serious_incident_triggers": ["3.49.a"], "widespread": False, "death_involved": False},
+                commitments={"Bad Field Name": "x"},  # not ^[a-z0-9_]+$ -> ValueError after the mutations
+            )
+        assert pkg._versioning.core_version == "1.0.0", "core_version mutated despite a failed incident_card"
+        assert not any(p.profile_id == _ART73_PROFILE_ID for p in pkg._profiles), "Art.73 profile declared on failure"

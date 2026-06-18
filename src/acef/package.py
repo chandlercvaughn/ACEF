@@ -16,7 +16,8 @@ from copy import deepcopy
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from functools import lru_cache
-from typing import TYPE_CHECKING, Any
+from functools import wraps as _wraps
+from typing import TYPE_CHECKING, Any, Concatenate, ParamSpec, TypeVar, cast
 
 from pydantic import ValidationError
 
@@ -1147,6 +1148,45 @@ def mint_incident_id(
         well_known_url=well_known_url,
         id_grade="self-asserted",
     )
+
+
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
+
+
+def _atomic_package_mutation(
+    method: Callable[Concatenate[Package, _P], _R],
+) -> Callable[Concatenate[Package, _P], _R]:
+    """Make a Package builder method ATOMIC w.r.t. package state (audit finding F37).
+
+    Snapshots the mutable package state a builder touches — ``core_version`` and
+    the declared ``profiles`` — before the call, and restores it if the method
+    raises for ANY reason. So ``report_incident`` / ``incident_card`` can call
+    ``_ensure_v1_1()`` / ``_declare_art73_profile()`` mid-body without violating
+    the "a failed call leaves the package unmutated" contract: a later
+    validation failure (bad awareness_date, commitment-field, redaction-policy
+    version mismatch) — OR a failure inside ``record()`` itself — rolls the
+    bump + profile declaration back. Records appended on the success path are
+    NOT rolled back (the method returned normally); a record left half-appended
+    by a raising ``record()`` is restored too.
+    """
+
+    @_wraps(method)
+    def _wrapper(self: Package, *args: _P.args, **kwargs: _P.kwargs) -> _R:
+        saved_core = self._versioning.core_version
+        saved_profiles = list(self._profiles)
+        saved_records = list(self._records)
+        try:
+            return method(self, *args, **kwargs)
+        except BaseException:
+            self._versioning.core_version = saved_core
+            self._profiles[:] = saved_profiles
+            self._records[:] = saved_records
+            raise
+
+    # ``functools.wraps`` returns a ``_Wrapped`` type mypy does not unify with the
+    # declared Concatenate Callable; the wrapper IS that signature, so cast.
+    return cast("Callable[Concatenate[Package, _P], _R]", _wrapper)
 
 
 class Package:
@@ -3043,6 +3083,7 @@ class Package:
             "deadline": _format_iso_instant(deadline),
         }
 
+    @_atomic_package_mutation
     def report_incident(
         self,
         *,
@@ -3354,6 +3395,7 @@ class Package:
         finally:
             self._redaction_policy = original_redaction_policy
 
+    @_atomic_package_mutation
     def incident_card(
         self,
         *,
