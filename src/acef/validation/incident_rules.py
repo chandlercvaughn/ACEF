@@ -1740,14 +1740,21 @@ def _record_confidentiality_of(rec: dict[str, Any]) -> str:
 
     Honest behavior note (audit finding F31): this default is fail-OPEN —
     ``"public"`` is the LEAST restrictive value, NOT a fail-closed posture. The
-    safety does NOT come from this function; it comes from the schema layer
-    UPSTREAM of the §5.5 emit/omit gate: ``record-envelope.schema.json`` makes
-    ``confidentiality`` a REQUIRED field with a closed enum, enforced as ACEF-004
-    by ``schema_validator.py`` BEFORE this gate runs. A record that is missing or
-    mis-values ``confidentiality`` is already rejected there, so the gate never
-    sees one and the ``"public"`` fallback is never reached for a schema-valid
-    record — it is a defensive default for an already-invalid record, not the
-    confidentiality guarantee."""
+    confidentiality guarantee does NOT come from this function.
+
+    For a SCHEMA-VALID record the fallback is unreachable: ``record-envelope``
+    makes ``confidentiality`` a REQUIRED field with a closed enum, so every valid
+    record carries a valid non-empty value and ``_record_confidentiality_of``
+    returns it verbatim. For a SCHEMA-INVALID record the fallback IS reachable —
+    the engine flushes the ``ACEF-004`` schema diagnostic but does NOT
+    short-circuit, so ``run_incident_rules`` still inspects the same records
+    (engine.py Phase-1 schema → Phase-3b incident rules, no early return). The
+    fail-open default therefore cannot cause an INVALID bundle to be ACCEPTED:
+    a record that is missing or mis-values ``confidentiality`` independently
+    triggers a failing ``ACEF-004`` in the SAME assessment, so even if this gate
+    mis-classifies it as public the bundle is still rejected. The schema layer is
+    the safety net; this fallback is only a defensive default for a record the
+    assessment is already failing."""
     conf = rec.get("confidentiality")
     return conf if isinstance(conf, str) and conf else "public"
 
