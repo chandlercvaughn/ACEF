@@ -153,6 +153,12 @@ class AssessmentBundle(ACEFBaseModel):
         """
         if method != "jws":
             raise ValueError(f"Unsupported signing method {method!r}; only 'jws' is supported in v1")
+        # Reject an empty / whitespace-only key path (roborev on 5fe8759):
+        # ``export_assessment`` treats ``key_path=""`` as UNSIGNED, so an explicit
+        # ``sign(key="")`` (e.g. an unset env var) would SILENTLY drop integrity.
+        # Signing was requested — fail loudly rather than emit an unsigned bundle.
+        if not key or not key.strip():
+            raise ValueError("sign() requires a non-empty private key path; refusing to silently export unsigned")
         self._sign_key = key
         self._sign_method = method
 

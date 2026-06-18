@@ -60,8 +60,8 @@ describe("Manifest (X5/X6 v1.1 extensions)", () => {
 });
 
 describe("RECORD_TYPES enum (VAL-TS-004 coverage)", () => {
-    it("includes 16 v1.0 + 6 v1.1 record types", () => {
-        // From src/acef/models/enums.py:210-243.
+    it("includes 16 v1.0 + 7 v1.1 record types", () => {
+        // From src/acef/models/enums.py:216-262 (mirrors Python RECORD_TYPES).
         assert.ok(RECORD_TYPES.has("risk_register"));
         assert.ok(RECORD_TYPES.has("authorized_test_scope"));
         assert.ok(RECORD_TYPES.has("scope_boundary_event"));
@@ -69,7 +69,8 @@ describe("RECORD_TYPES enum (VAL-TS-004 coverage)", () => {
         assert.ok(RECORD_TYPES.has("delivery_verdict"));
         assert.ok(RECORD_TYPES.has("coverage_cell"));
         assert.ok(RECORD_TYPES.has("harness_attestation"));
-        assert.equal(RECORD_TYPES.size, 22);
+        assert.ok(RECORD_TYPES.has("incident_card"));
+        assert.equal(RECORD_TYPES.size, 23);
     });
 
     it("exports AuthorityClass + ObligationRole + LifecyclePhase enums", () => {

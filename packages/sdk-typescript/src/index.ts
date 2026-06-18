@@ -86,6 +86,7 @@ export {
     DELIVERY_VERDICT,
     COVERAGE_CELL,
     HARNESS_ATTESTATION,
+    INCIDENT_CARD,
 } from "./models/enums.js";
 
 // RecordEnvelope + supporting types

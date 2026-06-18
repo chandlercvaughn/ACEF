@@ -52,6 +52,14 @@ class TestAssessmentBundleSignExport:
         with pytest.raises(ValueError):
             assessment.sign(key="ignored.pem", method="cms")
 
+    def test_sign_rejects_empty_key_no_silent_unsigned(self, minimal_package: Package) -> None:
+        """roborev on 5fe8759: sign(key="") must fail, not silently produce an
+        unsigned export (export_assessment treats key_path="" as unsigned)."""
+        assessment = acef.validate(minimal_package)
+        for empty in ("", "   ", "\t"):
+            with pytest.raises(ValueError):
+                assessment.sign(key=empty)
+
     def test_method_export_matches_free_function_bytes(self, minimal_package: Package, tmp_path: Path) -> None:
         """The method delegates to the free function — unsigned export of the
         SAME instance is byte-identical via either path."""

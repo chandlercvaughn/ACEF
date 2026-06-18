@@ -161,10 +161,12 @@ export const FINDING_RECORD = "finding_record";
 export const DELIVERY_VERDICT = "delivery_verdict";
 export const COVERAGE_CELL = "coverage_cell";
 export const HARNESS_ATTESTATION = "harness_attestation";
+// v1.1 RFC-0002 incident-reporting record type.
+export const INCIDENT_CARD = "incident_card";
 
 /**
- * RECORD_TYPES — mirror of `enums.py:216-243` `RECORD_TYPES` frozenset.
- * 22 entries total: 16 v1.0 + 6 v1.1.
+ * RECORD_TYPES — mirror of `enums.py:216-262` `RECORD_TYPES` frozenset.
+ * 23 entries total: 16 v1.0 + 7 v1.1 (6 agent-reliability + RFC-0002 incident_card).
  */
 export const RECORD_TYPES: ReadonlySet<string> = new Set([
     RISK_REGISTER,
@@ -189,6 +191,7 @@ export const RECORD_TYPES: ReadonlySet<string> = new Set([
     DELIVERY_VERDICT,
     COVERAGE_CELL,
     HARNESS_ATTESTATION,
+    INCIDENT_CARD,
 ]);
 
 /** Mirror of `enums.py:245-253` MANDATORY_RECORD_TYPES. */
