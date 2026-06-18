@@ -53,7 +53,7 @@ _COMMITMENT_CONFIDENTIALITY = frozenset({"hash-committed", "redacted"})
 # imports the Package builder). A drift-guard test asserts the two sets stay
 # equal: tests/integration/test_commitment_payload_validation.py::
 # test_supported_method_sets_do_not_drift.
-_SUPPORTED_COMMITMENT_METHODS = frozenset({"sha256-hash-commitment"})
+_SUPPORTED_COMMITMENT_METHODS = frozenset({"sha256-hash-commitment", "hmac-sha256-commitment"})
 
 # ``acef.integrity.sha256_hex`` mints BARE lowercase hex (no "sha256:"
 # prefix) — that is the producer shape ``apply_redaction`` stores.

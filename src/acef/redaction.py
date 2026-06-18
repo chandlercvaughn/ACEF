@@ -15,6 +15,8 @@ Supports:
 from __future__ import annotations
 
 import copy
+import hashlib
+import hmac as _hmac
 import re
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -34,7 +36,7 @@ from acef.package import Package
 # (e.g., zero-knowledge proofs per spec §7 Q6) require an explicit
 # whitelist update so untested methods cannot silently produce records
 # that downstream tooling will not understand.
-_SUPPORTED_REDACTION_METHODS = frozenset({"sha256-hash-commitment"})
+_SUPPORTED_REDACTION_METHODS = frozenset({"sha256-hash-commitment", "hmac-sha256-commitment"})
 
 # Semver shape per https://semver.org — MAJOR.MINOR.PATCH plus optional
 # pre-release / build metadata segment introduced by '-' or '+'. We do not
@@ -56,10 +58,12 @@ class RedactionPolicy(ACEFBaseModel):
             shape is validated via the
             :data:`_SEMVER_PATTERN` regex; non-semver strings raise.
         method: Redaction method used by :func:`apply_redaction` when
-            building the redacted payload. Currently only
-            ``"sha256-hash-commitment"`` is implemented; the field is
-            here so future policies (e.g., zero-knowledge proofs per
-            spec §7 Q6) can be declared without a model change.
+            building the redacted payload. Two methods are implemented:
+            ``"sha256-hash-commitment"`` (binding, NOT hiding — see spec
+            Appendix D.6) and ``"hmac-sha256-commitment"`` (hiding when the
+            ``hmac_key`` is withheld out-of-band). Further methods (e.g.,
+            zero-knowledge proofs per spec §7 Q6) can be added to
+            :data:`_SUPPORTED_REDACTION_METHODS` without a model change.
         description: Free-form human-readable description of the policy
             (what fields are redacted, what guarantees the method
             provides).
@@ -104,6 +108,7 @@ def apply_redaction(
     clock: Any | None = None,
     urn_generator: Any | None = None,
     access_policy: dict[str, Any] | None = None,
+    hmac_key: bytes | None = None,
 ) -> tuple[dict[str, Any], RecordEnvelope]:
     """Apply a redaction policy to a payload (VAL-REDACTION-002).
 
@@ -143,6 +148,12 @@ def apply_redaction(
             :func:`acef.models.urns.generate_urn`.
         access_policy: Optional access policy carried into the redacted
             payload's ``access_policy`` field.
+        hmac_key: Required ONLY for ``policy.method == "hmac-sha256-commitment"``.
+            The out-of-band HMAC key; the commitment becomes
+            ``HMAC-SHA-256(hmac_key, JCS(payload))`` and the key is **never**
+            written into the bundle, so a low-entropy preimage is no longer
+            enumerable (spec Appendix D.6). Ignored by the (binding-only)
+            ``sha256-hash-commitment`` method.
 
     Returns:
         ``(redacted_payload, attestation_record)``.
@@ -168,14 +179,29 @@ def apply_redaction(
             code="ACEF-004",
         )
 
-    # 1. Hash the original payload (RFC 8785 canonicalized).
+    # 1. Commit to the original payload (RFC 8785 canonicalized). Two methods:
+    #   - sha256-hash-commitment: BINDING but NOT hiding — an attacker holding the
+    #     bundle can brute-force/dictionary a low-entropy preimage and confirm it
+    #     against the published hash (spec Appendix D.6).
+    #   - hmac-sha256-commitment: HIDING when the key is withheld out-of-band. The
+    #     key is supplied by the caller and is NEVER written into the bundle, so the
+    #     preimage space is no longer enumerable without it.
     original_canonical = canonicalize(payload)
-    original_hash = sha256_hex(original_canonical)
+    if policy.method == "hmac-sha256-commitment":
+        if not hmac_key:
+            raise ACEFFormatError(
+                "redaction method 'hmac-sha256-commitment' requires an hmac_key, withheld "
+                "out-of-band and NEVER stored in the bundle (spec Appendix D.6)",
+                code="ACEF-004",
+            )
+        original_hash = _hmac.new(hmac_key, original_canonical, hashlib.sha256).hexdigest()
+    else:
+        original_hash = sha256_hex(original_canonical)
 
-    # 2. Build the redacted payload per method. Only one method is
-    # supported today (sha256-hash-commitment).
+    # 2. Build the redacted payload. The method tag reflects the policy method; the
+    # commitment is stored, the hmac_key (if any) is NOT.
     redacted_payload: dict[str, Any] = {
-        "redaction_method": "sha256-hash-commitment",
+        "redaction_method": policy.method,
         "redacted_payload_hash": original_hash,
         "redaction_policy_version": policy.version,
     }

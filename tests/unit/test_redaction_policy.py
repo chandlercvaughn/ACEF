@@ -175,3 +175,64 @@ class TestApplyRedactionClockDiscipline:
         assert canonicalize(r1) == canonicalize(r2)
         assert canonicalize(a1.to_jsonl_dict()) == canonicalize(a2.to_jsonl_dict())
         assert a1.timestamp == "2026-01-02T03:04:05Z"
+
+
+class TestHmacHidingCommitment:
+    """PhD-review finding 3: the default sha256-hash-commitment is BINDING but not
+    HIDING for low-entropy/enumerable inputs (an attacker brute-forces the preimage
+    and confirms it against the published hash). The hmac-sha256-commitment method
+    is HIDING when the key is withheld out-of-band (never stored in the bundle)."""
+
+    @staticmethod
+    def _clock():
+        import datetime as _dt
+
+        return lambda: _dt.datetime(2026, 1, 1, tzinfo=_dt.UTC)
+
+    def test_hmac_commitment_uses_the_key_and_never_stores_it(self) -> None:
+        import hashlib
+        import hmac as _hmac
+
+        from acef.integrity import canonicalize
+        from acef.redaction import RedactionPolicy, apply_redaction
+
+        payload = {"diagnosis": "yes"}  # a low-entropy, enumerable secret
+        key = b"out-of-band-secret-key-32-bytes!!"
+        policy = RedactionPolicy(version="1.0.0", method="hmac-sha256-commitment")
+        redacted, _att = apply_redaction(payload, policy, hmac_key=key, clock=self._clock())
+
+        expected = _hmac.new(key, canonicalize(payload), hashlib.sha256).hexdigest()
+        assert redacted["redacted_payload_hash"] == expected
+        assert redacted["redaction_method"] == "hmac-sha256-commitment"
+        # The key MUST NOT appear anywhere in the stored redacted payload.
+        assert key.decode("latin-1") not in str(redacted)
+        assert "hmac_key" not in redacted and "key" not in redacted
+
+    def test_hiding_a_brute_force_without_the_key_fails(self) -> None:
+        import hashlib
+
+        from acef.integrity import canonicalize
+        from acef.redaction import RedactionPolicy, apply_redaction
+
+        payload = {"diagnosis": "yes"}
+        key = b"out-of-band-secret-key-32-bytes!!"
+        policy = RedactionPolicy(version="1.0.0", method="hmac-sha256-commitment")
+        redacted, _att = apply_redaction(payload, policy, hmac_key=key, clock=self._clock())
+        # An attacker enumerating the small input space WITHOUT the key computes the
+        # plain sha256 of each candidate — which does NOT match the HMAC commitment.
+        plain = hashlib.sha256(canonicalize(payload)).hexdigest()
+        assert redacted["redacted_payload_hash"] != plain, (
+            "HMAC commitment must not equal the (brute-forceable) plain hash"
+        )
+
+    def test_hmac_method_requires_a_key(self) -> None:
+        from acef.errors import ACEFFormatError
+        from acef.redaction import RedactionPolicy, apply_redaction
+
+        policy = RedactionPolicy(version="1.0.0", method="hmac-sha256-commitment")
+        try:
+            apply_redaction({"x": 1}, policy, clock=self._clock())  # no hmac_key
+        except ACEFFormatError as exc:
+            assert exc.code == "ACEF-004"
+        else:
+            raise AssertionError("hmac-sha256-commitment without a key must raise ACEF-004")
