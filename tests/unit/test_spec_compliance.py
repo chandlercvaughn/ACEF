@@ -274,3 +274,30 @@ class TestSpecTemplateCitationsResolve:
         note = spec[note_idx : note_idx + 1200]
         assert "acef-conventions/v1.1/" in note, "v1.1 note must cite the v1.1 schemas for structural validity"
         assert "cross_record.py" in note, "v1.1 note must cite cross_record.py for evidence-binding"
+
+    def test_no_planning_doc_cites_v1_1_rules_as_the_sole_enforcement_surface(self) -> None:
+        """F26 follow-up (roborev Medium on d2e84bf): wherever a planning doc cites
+        ``v1_1_rules.py`` as a v1.1 enforcement surface, the SAME neighborhood MUST
+        also cite the rest of the split surface — the v1.1 JSON Schemas
+        (``acef-conventions/v1.1/``) for structural validity and ``cross_record.py``
+        for harness/delivery/causation evidence-binding. ``v1_1_rules.py`` alone
+        enforces only coverage-cell banned-language, state-class taxonomy, and
+        analysis-mode gates, so a ``v1_1_rules.py``-only enforcement claim is the
+        stale mischaracterization this class of fixes removes. Window-scoped so a
+        localized claim cannot hide behind unrelated mentions elsewhere in the doc."""
+        needle = "v1_1_rules.py"
+        window = 800
+        for doc in sorted((self._REPO_ROOT / "planning").glob("*.md")):
+            text = doc.read_text(encoding="utf-8")
+            start = 0
+            while (idx := text.find(needle, start)) != -1:
+                ctx = text[max(0, idx - window) : idx + window]
+                assert "cross_record.py" in ctx, (
+                    f"{doc.name}: {needle} at offset {idx} cited without cross_record.py nearby "
+                    f"(v1_1_rules.py-only enforcement claim)"
+                )
+                assert "acef-conventions/v1.1/" in ctx, (
+                    f"{doc.name}: {needle} at offset {idx} cited without the v1.1 schemas "
+                    f"(acef-conventions/v1.1/) nearby"
+                )
+                start = idx + len(needle)
