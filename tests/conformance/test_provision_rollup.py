@@ -559,3 +559,134 @@ class TestPackageScopedEvaluation:
             if template_path.exists():
                 template_path.unlink()
             load_template.cache_clear()
+
+
+class TestRulelessProvisionEndToEnd:
+    """PhD re-review FM-2: §3.7 step 1 / Appendix C P1 (a provision with NO rules
+    -> not-assessed) was unreachable end-to-end. The engine rolled up only
+    provisions that emitted RuleResults (seen_provisions), so a rule-less provision
+    (empty evaluation, no required_evidence_types) silently vanished from the
+    Assessment Bundle instead of surfacing NOT_ASSESSED. Shipped templates all have
+    rules on every provision, so the gap was reachable only via custom/third-party
+    templates, which the models permit."""
+
+    def test_ruleless_package_provision_surfaces_not_assessed(self, tmp_dir: Path) -> None:
+        """A rule-less PACKAGE-scoped provision surfaces exactly one NOT_ASSESSED
+        summary; a normal sibling provision is unaffected."""
+        from acef.models.enums import ProvisionOutcome
+        from acef.package import Package as Pkg
+        from acef.templates.models import EvaluationRule, Provision, Template
+        from acef.templates.registry import load_template
+        from acef.validation.engine import validate_bundle
+
+        tid = "conformance-ruleless-package"
+        template = Template(
+            template_id=tid,
+            template_name="Conformance Rule-less Package Provision Test",
+            version="1.0.0",
+            provisions=[
+                Provision(
+                    provision_id="ruleless-pkg-01",
+                    provision_name="Rule-less Package Provision",
+                    evaluation_scope="package",
+                    # no evaluation rules and no required_evidence_types -> zero RuleResults
+                ),
+                Provision(
+                    provision_id="normal-pkg-01",
+                    provision_name="Normal Package Provision",
+                    evaluation_scope="package",
+                    evaluation=[
+                        EvaluationRule(
+                            rule_id="normal-pkg-01-check",
+                            rule="has_record_type",
+                            params={"type": "risk_register", "min_count": 1},
+                            severity="fail",
+                            message="Need a risk register",
+                        ),
+                    ],
+                ),
+            ],
+        )
+        template_path = Path(__file__).parent.parent.parent / "src" / "acef" / "templates" / f"{tid}.json"
+        template_path.write_text(template.model_dump_json(indent=2), encoding="utf-8")
+        try:
+            load_template.cache_clear()
+            pkg = Pkg(producer={"name": "ruleless", "version": "1.0.0"})
+            sys1 = pkg.add_subject("ai_system", name="System A", risk_classification="high-risk", modalities=["text"])
+            pkg.add_profile(tid, provisions=["ruleless-pkg-01", "normal-pkg-01"])
+            pkg.record(
+                "risk_register",
+                provisions=["normal-pkg-01"],
+                payload={"description": "R", "likelihood": "low", "severity": "low"},
+                obligation_role="provider",
+                entity_refs={"subject_refs": [sys1.id]},
+            )
+            bundle_dir = tmp_dir / "ruleless_pkg"
+            pkg.export(str(bundle_dir))
+            assessment = validate_bundle(bundle_dir, profiles=[tid], evaluation_instant="2026-01-01T00:00:00Z")
+
+            ruleless = [s for s in assessment.provision_summary if s.provision_id == "ruleless-pkg-01"]
+            assert len(ruleless) == 1, (
+                f"Rule-less provision must surface exactly one NOT_ASSESSED summary, got {len(ruleless)} "
+                f"(provision_ids: {[s.provision_id for s in assessment.provision_summary]})"
+            )
+            assert ruleless[0].provision_outcome == ProvisionOutcome.NOT_ASSESSED
+            assert any(s.provision_id == "normal-pkg-01" for s in assessment.provision_summary)
+        finally:
+            if template_path.exists():
+                template_path.unlink()
+            load_template.cache_clear()
+
+    def test_ruleless_per_subject_provision_surfaces_not_assessed_per_subject(self, tmp_dir: Path) -> None:
+        """A rule-less PER-SUBJECT provision surfaces one NOT_ASSESSED per applicable
+        subject (mirroring the per-subject split), each scoped to that subject."""
+        from acef.models.enums import ProvisionOutcome
+        from acef.package import Package as Pkg
+        from acef.templates.models import Provision, Template
+        from acef.templates.registry import load_template
+        from acef.validation.engine import validate_bundle
+
+        tid = "conformance-ruleless-per-subject"
+        template = Template(
+            template_id=tid,
+            template_name="Conformance Rule-less Per-Subject Provision Test",
+            version="1.0.0",
+            provisions=[
+                Provision(
+                    provision_id="ruleless-subj-01",
+                    provision_name="Rule-less Per-Subject Provision",
+                    # default per-subject scope, no rules
+                ),
+            ],
+        )
+        template_path = Path(__file__).parent.parent.parent / "src" / "acef" / "templates" / f"{tid}.json"
+        template_path.write_text(template.model_dump_json(indent=2), encoding="utf-8")
+        try:
+            load_template.cache_clear()
+            pkg = Pkg(producer={"name": "ruleless-subj", "version": "1.0.0"})
+            s1 = pkg.add_subject("ai_system", name="System A", risk_classification="high-risk", modalities=["text"])
+            s2 = pkg.add_subject("ai_system", name="System B", risk_classification="high-risk", modalities=["text"])
+            pkg.add_profile(tid, provisions=["ruleless-subj-01"])
+            pkg.record(
+                "risk_register",
+                provisions=["ruleless-subj-01"],
+                payload={"description": "R", "likelihood": "low", "severity": "low"},
+                obligation_role="provider",
+                entity_refs={"subject_refs": [s1.id]},
+            )
+            bundle_dir = tmp_dir / "ruleless_subj"
+            pkg.export(str(bundle_dir))
+            assessment = validate_bundle(bundle_dir, profiles=[tid], evaluation_instant="2026-01-01T00:00:00Z")
+
+            summaries = [s for s in assessment.provision_summary if s.provision_id == "ruleless-subj-01"]
+            assert len(summaries) == 2, (
+                f"Rule-less per-subject provision must surface one summary per subject; got {len(summaries)}"
+            )
+            for s in summaries:
+                assert s.provision_outcome == ProvisionOutcome.NOT_ASSESSED
+                assert len(s.subject_scope) == 1
+            assert {s.subject_scope[0] for s in summaries} == {s1.id, s2.id}
+        finally:
+            if template_path.exists():
+                template_path.unlink()
+            load_template.cache_clear()

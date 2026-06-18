@@ -732,6 +732,7 @@ def _collect_results(
     records: list[RecordEnvelope],
     *,
     subject_scope: list[str] | None = None,
+    provisions: list[Any] | None = None,
 ) -> None:
     """Collect rule results and compute provision summaries.
 
@@ -741,12 +742,25 @@ def _collect_results(
     ``set`` iteration would order entries by PYTHONHASHSEED-salted hashes,
     producing byte-different Assessment Bundles for the same input —
     violating the spec §3.7 reproducibility contract.
+
+    ``provisions`` (when given) is the set of provisions EVALUATED for this
+    scope/subject, already applicable-filtered by the caller. It lets the §3.7
+    step 1 / Appendix C P1 no-rules guard run end-to-end: a provision with NO
+    rules (empty ``evaluation`` AND no ``required_evidence_types``) emits zero
+    ``RuleResult``s, so it is absent from the result-derived ``seen_provisions``
+    and would silently vanish from the Assessment Bundle. Including it here makes
+    the rollup compute NOT_ASSESSED (``|R| = 0``) for it instead. A provision not
+    applicable to this subject is excluded by the caller and so is NOT backfilled.
     """
     assessment.results.extend(results)
     seen_provisions: set[str] = set()
     for r in results:
         seen_provisions.add(r.provision_id)
-    for prov_id in sorted(seen_provisions):
+    ruleless_provisions: set[str] = set()
+    for prov in provisions or []:
+        if not prov.evaluation and not prov.required_evidence_types:
+            ruleless_provisions.add(prov.provision_id)
+    for prov_id in sorted(seen_provisions | ruleless_provisions):
         prov_results = [r for r in results if r.provision_id == prov_id]
         summary = compute_provision_outcome(
             prov_id,
@@ -1110,7 +1124,11 @@ def _evaluate_profiles(
                 signature_count=sig_count,
                 signature_algorithms=sig_algs,
             )
-            _collect_results(assessment, pkg_results, profile_id, records)
+            # Pass ``provisions=package_scoped`` so a rule-less package provision
+            # surfaces NOT_ASSESSED (§3.7 step 1) instead of vanishing. Package
+            # provisions are evaluated with no risk_class filter, so all are
+            # applicable.
+            _collect_results(assessment, pkg_results, profile_id, records, provisions=package_scoped)
 
         # Evaluate per-subject provisions. Entries in ``subjects`` are
         # untrusted external JSON; skip any non-dict subject so the
@@ -1138,12 +1156,21 @@ def _evaluate_profiles(
                     signature_count=sig_count,
                     signature_algorithms=sig_algs,
                 )
+                # Backfill rule-less provisions for THIS subject as NOT_ASSESSED
+                # (§3.7 step 1). Mirror the ``applicable_to`` filter that
+                # ``evaluate_rules_for_subject`` applies (rule_engine.py) so a
+                # provision not applicable to this subject's risk_classification is
+                # NOT backfilled here.
+                applicable_per_subject = [
+                    p for p in per_subject if not (p.applicable_to and risk_class and risk_class not in p.applicable_to)
+                ]
                 _collect_results(
                     assessment,
                     results,
                     profile_id,
                     records,
                     subject_scope=[subject_id],
+                    provisions=applicable_per_subject,
                 )
         elif per_subject:
             # No subjects — evaluate at package level
@@ -1156,4 +1183,4 @@ def _evaluate_profiles(
                 signature_count=sig_count,
                 signature_algorithms=sig_algs,
             )
-            _collect_results(assessment, results, profile_id, records)
+            _collect_results(assessment, results, profile_id, records, provisions=per_subject)
