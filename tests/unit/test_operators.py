@@ -233,6 +233,33 @@ class TestFieldValue:
             )
         assert exc_info.value.code == "ACEF-045"
 
+    def test_unknown_op_raises_acef_046(self):
+        """F13: a typo'd comparison operator must raise ACEF-046, not silently
+        FALSE-FAIL the rule. Before the fix _compare's fallthrough returned False."""
+        records = [_make_record("risk_register", payload={"severity": "high"})]
+        with pytest.raises(ACEFEvaluationError) as exc_info:
+            op_field_value(
+                {"record_type": "risk_register", "field": "/payload/severity", "op": "equals", "value": "high"}, records
+            )
+        assert exc_info.value.code == "ACEF-046"
+        # ACEF-046 resolves through EXTENDED_ERROR_DETAILS (kept OUT of the frozen
+        # ERROR_REGISTRY) to error/evaluation, not the conservative error/schema
+        # default that an unregistered code would get.
+        from acef.errors import ErrorCategory, Severity
+
+        assert exc_info.value.severity == Severity.ERROR
+        assert exc_info.value.category == ErrorCategory.EVALUATION
+
+    def test_unknown_op_raises_acef_046_even_on_empty_record_set(self):
+        """The op is structurally invalid regardless of data presence — like the
+        ACEF-043 pointer check, it must raise even when zero records match
+        (otherwise a typo'd op on an absent record-type passes vacuously)."""
+        with pytest.raises(ACEFEvaluationError) as exc_info:
+            op_field_value(
+                {"record_type": "risk_register", "field": "/payload/x", "op": "gtr", "value": 1}, []
+            )
+        assert exc_info.value.code == "ACEF-046"
+
     def test_vacuous_truth_empty(self):
         passed, _ = op_field_value({"record_type": "risk_register", "field": "/payload/x", "op": "eq", "value": 1}, [])
         assert passed
@@ -353,6 +380,15 @@ class TestExistsWhere:
         )
         assert passed
         assert len(refs) == 1
+
+    def test_unknown_op_raises_acef_046(self):
+        """F13: exists_where must also reject an unknown comparison operator with
+        ACEF-046 (symmetric with field_value), upfront — even on zero records."""
+        with pytest.raises(ACEFEvaluationError) as exc_info:
+            op_exists_where(
+                {"record_type": "risk_register", "field": "/payload/severity", "op": "contains", "value": "x"}, []
+            )
+        assert exc_info.value.code == "ACEF-046"
 
     def test_fail(self):
         records = [_make_record("risk_register", payload={"severity": "low"})]

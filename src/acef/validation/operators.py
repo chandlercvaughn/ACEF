@@ -402,11 +402,39 @@ def _resolve_pointer(record_data: dict[str, Any], pointer: str) -> Any:
         return None
 
 
+# The complete set of comparison operators ``_compare`` recognizes (spec §3.4).
+# An ``op`` outside this set is a MALFORMED RULE, not a silent FALSE — see
+# ``_validate_comparison_op`` (ACEF-046, audit finding F13).
+_VALID_COMPARISON_OPS: frozenset[str] = frozenset({"eq", "ne", "gt", "gte", "lt", "lte", "in", "regex"})
+
+
+def _validate_comparison_op(op: str) -> None:
+    """Raise ACEF-046 when a rule's comparison ``op`` is not a recognized operator.
+
+    Called UPFRONT by ``op_field_value`` / ``op_exists_where`` — before the
+    empty-set short-circuit — so a typo'd ``op`` (e.g. ``"equals"``) is a LOUD
+    malformed-rule error regardless of whether any record matches, mirroring the
+    upfront ACEF-043 pointer-syntax check. Without it a typo'd op silently
+    FALSE-FAILs the rule (non-empty set) or passes VACUOUSLY (zero records),
+    turning a compliance check into a misleading verdict with no error code.
+    """
+    if op not in _VALID_COMPARISON_OPS:
+        raise ACEFEvaluationError(
+            f"Unknown comparison operator {op!r} in rule. Valid operators: "
+            f"{', '.join(sorted(_VALID_COMPARISON_OPS))}.",
+            code="ACEF-046",
+        )
+
+
 def _compare(actual: Any, op: str, expected: Any) -> bool:
     """Apply a comparison operator.
 
     For ordering operators (gt, gte, lt, lte), incompatible types
     (e.g., dict vs int) return False instead of raising TypeError (m6 Scout R2).
+
+    Callers (``op_field_value`` / ``op_exists_where``) validate ``op`` upfront via
+    ``_validate_comparison_op`` (ACEF-046), so ``op`` is always one of
+    ``_VALID_COMPARISON_OPS`` here; the final fallthrough is a defensive backstop.
     """
     if actual is None:
         # Missing path: all comparisons false except ne
@@ -452,7 +480,14 @@ def _compare(actual: Any, op: str, expected: Any) -> bool:
                 f"Invalid regex pattern: {expected!r}: {e}",
                 code="ACEF-045",
             ) from e
-    return False
+    # Defensive backstop: unreachable when callers validate ``op`` upfront, but
+    # _compare must never SILENTLY return False for an unrecognized operator
+    # (audit finding F13 — the prior ``return False`` masked typo'd ops).
+    raise ACEFEvaluationError(
+        f"Unknown comparison operator {op!r} in rule. Valid operators: "
+        f"{', '.join(sorted(_VALID_COMPARISON_OPS))}.",
+        code="ACEF-046",
+    )
 
 
 def _filter_by_type(records: list[RecordEnvelope], record_type: str) -> list[RecordEnvelope]:
@@ -526,6 +561,10 @@ def op_field_value(
     # Validate the pointer ONCE before the empty-set short-circuit
     # (validation-engine-dsl-3/-7); ACEF-043 is not contingent on data presence.
     _validate_pointer_syntax(field)
+    # Likewise validate the comparison op upfront (ACEF-046, F13): a typo'd op is
+    # a malformed rule regardless of data presence — it must NOT pass vacuously
+    # on zero records nor silently FALSE-FAIL on a non-empty set.
+    _validate_comparison_op(op)
     matching = _filter_by_type(records, record_type)
 
     if not matching:
@@ -720,6 +759,9 @@ def op_exists_where(
     # ACEF-043 even when zero records match and the per-record loop below never
     # runs (validation-engine-dsl-3/-7).
     _validate_pointer_syntax(field)
+    # And the comparison op upfront (ACEF-046, F13): an unknown op on an
+    # existential rule must raise, not pass/fail silently.
+    _validate_comparison_op(op)
     matching = _filter_by_type(records, record_type)
 
     evidence_refs: list[str] = []

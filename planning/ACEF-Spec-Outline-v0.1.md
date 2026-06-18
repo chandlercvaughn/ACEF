@@ -1264,6 +1264,7 @@ ACEF defines a normative error taxonomy so that all validators and SDK implement
 | `ACEF-042` | Evaluation | `info` | `evidence_gap` acknowledged for provision |
 | `ACEF-043` | Evaluation | `error` | Invalid JSON Pointer in rule `field` parameter |
 | `ACEF-045` | Evaluation | `error` | Invalid ECMA-262 regex pattern in rule `value` parameter |
+| `ACEF-046` | Evaluation | `error` | Unknown comparison operator in rule `op` parameter — must be one of `eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `in`, `regex` |
 | `ACEF-044` | Evaluation | `error` | Duplicate `rule_id` in template — rule IDs must be unique for Assessment Bundle result keys |
 | `ACEF-050` | Format | `fatal` | Malformed JSONL line (not valid JSON) |
 | `ACEF-051` | Format | `fatal` | JSON not canonicalized per RFC 8785 (during integrity verification) |

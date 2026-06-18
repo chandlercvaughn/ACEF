@@ -196,16 +196,20 @@ ERROR_REGISTRY: dict[str, tuple[Severity, ErrorCategory, str]] = {
 
 @dataclass(frozen=True)
 class IncidentErrorDetail:
-    """Structured detail for an ACEF RFC-0002 incident error (ACEF-081..088).
+    """Structured detail for a post-v1.0 ACEF error code (``problem`` + ``cause``
+    + ``fix`` hint).
 
-    The v0.4 codes in :data:`ERROR_REGISTRY` carry a single problem-text
-    description. The incident band extends that pattern: each code carries a
-    **problem** (the failing condition), a **cause** (the RFC section / source
-    path it derives from), and a **fix** hint (the implementation-facing
-    remediation sentence RFC-0002 §7 fixes verbatim). ``severity`` and
-    ``category`` reuse the existing :class:`Severity` / :class:`ErrorCategory`
-    enums so downstream consumers (rendering, Assessment Bundle roll-up) treat
-    an incident code uniformly with the v0.4 surface.
+    Introduced by the RFC-0002 incident band (ACEF-081..088), this is the GENERIC
+    structured-detail carrier for any error code added AFTER the frozen v1.0
+    surface — the name is historical. The v0.4 codes in :data:`ERROR_REGISTRY`
+    carry a single problem-text description; a structured-detail code instead
+    carries a **problem** (the failing condition), a **cause** (the spec / RFC
+    section it derives from), and a **fix** hint (the implementation-facing
+    remediation sentence). ``severity`` and ``category`` reuse the existing
+    :class:`Severity` / :class:`ErrorCategory` enums so downstream consumers
+    (rendering, Assessment Bundle roll-up) treat such a code uniformly with the
+    v0.4 surface. Used by :data:`INCIDENT_ERROR_DETAILS` (incident band) and
+    :data:`EXTENDED_ERROR_DETAILS` (other post-v1.0 additions, e.g. ACEF-046).
     """
 
     severity: Severity
@@ -327,6 +331,26 @@ INCIDENT_ERROR_DETAILS: dict[str, IncidentErrorDetail] = {
 }
 
 
+# Other post-v1.0 error codes that, like the incident band, are kept OUT of the
+# frozen ERROR_REGISTRY (so the v1.0 snapshot + the "post-snapshot ERROR_REGISTRY
+# additions live only in 070-080" invariant stay intact) but still need an
+# authoritative severity/category + a fix hint. ACEF-046 fills the unused
+# evaluation-band ordinal (040-049, spec §3.6) reserved for "unknown comparison
+# operator in a rule" (audit finding F13).
+EXTENDED_ERROR_DETAILS: dict[str, IncidentErrorDetail] = {
+    "ACEF-046": IncidentErrorDetail(
+        severity=Severity.ERROR,
+        category=ErrorCategory.EVALUATION,
+        problem="a DSL rule's comparison `op` is not a recognized operator",
+        cause="spec §3.4 (the eight comparison operators: eq, ne, gt, gte, lt, lte, in, regex)",
+        fix=(
+            "correct the rule's `op` to one of eq, ne, gt, gte, lt, lte, in, regex; a typo'd op is a "
+            "malformed rule, not a silent false-fail"
+        ),
+    ),
+}
+
+
 def incident_error_detail(code: str) -> IncidentErrorDetail | None:
     """Return the :class:`IncidentErrorDetail` for an ACEF-081..088 incident
     code, or ``None`` if ``code`` is not an incident code.
@@ -377,6 +401,9 @@ def resolve_error_meta(code: str) -> tuple[Severity, ErrorCategory]:
     incident = INCIDENT_ERROR_DETAILS.get(code)
     if incident is not None:
         return incident.severity, incident.category
+    extended = EXTENDED_ERROR_DETAILS.get(code)
+    if extended is not None:
+        return extended.severity, extended.category
     return _DEFAULT_ERROR_META
 
 
