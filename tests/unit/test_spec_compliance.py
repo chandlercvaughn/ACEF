@@ -433,13 +433,9 @@ class TestF38ACEF040Realization:
             # fail-rule fails → ACEF-040.
             pkg.record("governance_policy", payload={"policy_type": "ai_governance"})
 
-            assessment = acef.validate(
-                pkg, profiles=["test-req-evidence"], evaluation_instant="2026-01-01T00:00:00Z"
-            )
+            assessment = acef.validate(pkg, profiles=["test-req-evidence"], evaluation_instant="2026-01-01T00:00:00Z")
             # Realization 1: the auto-generated required-evidence rule FAILED at fail severity.
-            exists_rule = next(
-                (r for r in assessment.results if r.rule_id.endswith("-risk_register-exists")), None
-            )
+            exists_rule = next((r for r in assessment.results if r.rule_id.endswith("-risk_register-exists")), None)
             assert exists_rule is not None, "the required-evidence existence rule was not evaluated"
             assert exists_rule.outcome == RuleOutcome.FAILED
             assert exists_rule.rule_severity == RuleSeverity.FAIL

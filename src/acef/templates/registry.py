@@ -128,5 +128,3 @@ def list_templates() -> list[str]:
     for f in sorted(template_dir.glob("*.json")):
         result.append(f.stem)
     return result
-
-

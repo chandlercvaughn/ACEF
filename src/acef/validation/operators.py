@@ -423,8 +423,7 @@ def _validate_comparison_op(op: str) -> None:
     # raw ``TypeError`` from set membership on an unhashable value.
     if not isinstance(op, str) or op not in _VALID_COMPARISON_OPS:
         raise ACEFEvaluationError(
-            f"Unknown comparison operator {op!r} in rule. Valid operators: "
-            f"{', '.join(sorted(_VALID_COMPARISON_OPS))}.",
+            f"Unknown comparison operator {op!r} in rule. Valid operators: {', '.join(sorted(_VALID_COMPARISON_OPS))}.",
             code="ACEF-046",
         )
 
@@ -491,8 +490,7 @@ def _compare(actual: Any, op: str, expected: Any) -> bool:
     # _compare must never SILENTLY return False for an unrecognized operator
     # (audit finding F13 — the prior ``return False`` masked typo'd ops).
     raise ACEFEvaluationError(
-        f"Unknown comparison operator {op!r} in rule. Valid operators: "
-        f"{', '.join(sorted(_VALID_COMPARISON_OPS))}.",
+        f"Unknown comparison operator {op!r} in rule. Valid operators: {', '.join(sorted(_VALID_COMPARISON_OPS))}.",
         code="ACEF-046",
     )
 

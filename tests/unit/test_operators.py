@@ -279,9 +279,7 @@ class TestFieldValue:
         ACEF-043 pointer check, it must raise even when zero records match
         (otherwise a typo'd op on an absent record-type passes vacuously)."""
         with pytest.raises(ACEFEvaluationError) as exc_info:
-            op_field_value(
-                {"record_type": "risk_register", "field": "/payload/x", "op": "gtr", "value": 1}, []
-            )
+            op_field_value({"record_type": "risk_register", "field": "/payload/x", "op": "gtr", "value": 1}, [])
         assert exc_info.value.code == "ACEF-046"
 
     def test_vacuous_truth_empty(self):

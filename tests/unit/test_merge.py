@@ -99,9 +99,7 @@ class TestKeepLatestSubjectIntegrity:
                 f"dangling relationship endpoint to dropped subject: {rel.source_ref} -> {rel.target_ref}"
             )
         # the subject endpoint (was sub_a) is repointed to the winner sub_b
-        assert any(rel.source_ref == sub_b.id for rel in ents.relationships), (
-            [r.source_ref for r in ents.relationships]
-        )
+        assert any(rel.source_ref == sub_b.id for rel in ents.relationships), [r.source_ref for r in ents.relationships]
 
 
 class TestMergeBasic:
