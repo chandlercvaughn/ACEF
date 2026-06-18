@@ -1047,13 +1047,21 @@ def _evaluate_profiles(
             from acef.models.enums import RuleOutcome, RuleSeverity
 
             def _synthesize_skipped(prov: Any, scope: list[str]) -> list[RuleResult]:
-                """One SKIPPED RuleResult per rule for a not-yet-effective provision."""
-                return [
-                    RuleResult(
-                        rule_id=rule.rule_id,
+                """One SKIPPED RuleResult per rule for a not-yet-effective provision.
+
+                Includes the implicit ``has_record_type`` existence rules expanded
+                from ``required_evidence_types`` (mirroring
+                ``evaluate_rules_for_subject``'s expansion + same-type dedup), so a
+                future-effective provision whose ONLY rules come from required-
+                evidence declarations does not vanish from the Assessment Bundle.
+                """
+
+                def _mk(rule_id: str, severity: str) -> RuleResult:
+                    return RuleResult(
+                        rule_id=rule_id,
                         provision_id=prov.provision_id,
                         profile_id=profile_id,
-                        rule_severity=RuleSeverity(rule.severity),
+                        rule_severity=RuleSeverity(severity),
                         outcome=RuleOutcome.SKIPPED,
                         message=(
                             f"Provision not yet effective "
@@ -1063,8 +1071,19 @@ def _evaluate_profiles(
                         evidence_refs=[],
                         subject_scope=list(scope),
                     )
-                    for rule in prov.evaluation
+
+                explicit_has_record_types = {
+                    str(r.params.get("type"))
+                    for r in prov.evaluation
+                    if r.rule == "has_record_type" and isinstance(r.params, dict) and r.params.get("type")
+                }
+                results: list[RuleResult] = [
+                    _mk(f"{prov.provision_id}-{rt}-exists", "fail")
+                    for rt in prov.required_evidence_types
+                    if rt not in explicit_has_record_types
                 ]
+                results.extend(_mk(rule.rule_id, rule.severity) for rule in prov.evaluation)
+                return results
 
             nye_provisions = [p for p in provisions_to_evaluate if p.provision_id in not_yet_effective]
             nye_package = [p for p in nye_provisions if p.evaluation_scope == "package"]

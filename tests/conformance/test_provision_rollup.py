@@ -747,3 +747,58 @@ class TestRulelessProvisionEndToEnd:
             if template_path.exists():
                 template_path.unlink()
             load_template.cache_clear()
+
+    def test_required_evidence_only_not_yet_effective_provision_surfaces_skipped(self, tmp_dir: Path) -> None:
+        """roborev Medium on ba878d6: a future-effective provision whose ONLY rules
+        come from required_evidence_types (no explicit evaluation) must still surface
+        (SKIPPED), not vanish. _synthesize_skipped now expands required_evidence_types
+        into synthetic SKIPPED has_record_type results."""
+        from acef.models.enums import ProvisionOutcome
+        from acef.package import Package as Pkg
+        from acef.templates.models import Provision, Template
+        from acef.templates.registry import load_template
+        from acef.validation.engine import validate_bundle
+
+        tid = "conformance-reqevidence-future-effective"
+        template = Template(
+            template_id=tid,
+            template_name="Conformance Required-Evidence Future-Effective Provision Test",
+            version="1.0.0",
+            provisions=[
+                Provision(
+                    provision_id="reqevidence-future-01",
+                    provision_name="Required-Evidence-Only Future-Effective Package Provision",
+                    evaluation_scope="package",
+                    effective_date="2099-01-01",
+                    required_evidence_types=["risk_register"],  # implicit rule, no explicit evaluation
+                ),
+            ],
+        )
+        template_path = Path(__file__).parent.parent.parent / "src" / "acef" / "templates" / f"{tid}.json"
+        template_path.write_text(template.model_dump_json(indent=2), encoding="utf-8")
+        try:
+            load_template.cache_clear()
+            pkg = Pkg(producer={"name": "reqevidence-future", "version": "1.0.0"})
+            sys1 = pkg.add_subject("ai_system", name="System A", risk_classification="high-risk", modalities=["text"])
+            pkg.add_profile(tid, provisions=["reqevidence-future-01"])
+            pkg.record(
+                "risk_register",
+                provisions=["reqevidence-future-01"],
+                payload={"description": "R", "likelihood": "low", "severity": "low"},
+                obligation_role="provider",
+                entity_refs={"subject_refs": [sys1.id]},
+            )
+            bundle_dir = tmp_dir / "reqevidence_future"
+            pkg.export(str(bundle_dir))
+            assessment = validate_bundle(bundle_dir, profiles=[tid], evaluation_instant="2026-01-01T00:00:00Z")
+
+            summaries = [s for s in assessment.provision_summary if s.provision_id == "reqevidence-future-01"]
+            assert len(summaries) == 1, (
+                f"Required-evidence-only not-yet-effective provision must surface exactly one summary, "
+                f"got {len(summaries)} (provision_ids: {[s.provision_id for s in assessment.provision_summary]})"
+            )
+            assert summaries[0].provision_outcome == ProvisionOutcome.SKIPPED
+        finally:
+            if template_path.exists():
+                template_path.unlink()
+            load_template.cache_clear()
