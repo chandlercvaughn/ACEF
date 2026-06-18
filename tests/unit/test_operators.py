@@ -352,6 +352,27 @@ class TestFieldValue:
         for good in (r"\x61+-\x61+", r"\x61+\x62*z"):
             assert has_adjacent(good) is False, f"{good!r} resolves to disjoint/separated atoms and is safe"
 
+    def test_adjacent_quantifier_escape_class_and_control_bypasses(self):
+        """roborev HIGH x3 on 192082f: the escape/class tokenizer must match what the
+        engine compiles. (1) An escaped range upper bound `[\\x61-\\x7a]+b+$` is
+        `[a-z]+b+$` (overlap on b). (2) C-escapes `\\t \\n \\r \\f \\v` are the
+        control chars, not letters, so `^\\s+\\t+$` overlaps on TAB. (3) `\\s` is the
+        ECMA-262 whitespace set the validator compiles (incl. NBSP), so `^\\s+\\u00a0+$`
+        overlaps."""
+        from acef.validation.operators import _has_adjacent_unbounded_quantifiers as has_adjacent
+
+        for bad in (
+            r"[\x61-\x7a]+b+$",  # escaped range -> [a-z]+b+ (b in a-z)
+            r"^\s+\t+$",  # \t is TAB, in the \s set
+            r"^\s+ +$",  # NBSP is in the ECMA-262 \s set
+            r"\t+\t+",  # \t resolves to one char -> adjacent
+            r"\n+\n+x",
+        ):
+            assert has_adjacent(bad) is True, f"{bad!r} compiles to an adjacent-quantifier ReDoS and must be detected"
+        # Disjoint resolved escapes stay safe.
+        for good in (r"\t+x+", r"[\x61-\x66]+[g-z]+"):
+            assert has_adjacent(good) is False, f"{good!r} resolves to disjoint atoms and is safe"
+
     def test_adjacent_quantifier_escape_bypass_end_to_end(self):
         """The escape bypass rejected through the real operator path as ACEF-045."""
         records = [_make_record("risk_register", payload={"name": "aaaa"})]

@@ -391,7 +391,11 @@ def _has_nested_unbounded_quantifier(pattern: str) -> bool:
 
 _RE_DIGITS: frozenset[str] = frozenset("0123456789")
 _RE_WORD: frozenset[str] = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_")
-_RE_SPACE: frozenset[str] = frozenset(" \t\n\r\f\v")
+# ``\s`` for the adjacency scanner MUST be the SAME set ``_safe_regex_search``
+# compiles (``_translate_ecma262_char_classes`` -> ECMA-262 whitespace, which
+# includes non-ASCII members like NBSP U+00A0). Modelling ``\s`` as bare ASCII
+# whitespace would miss ``^\s+ +$``-style adjacency (roborev HIGH on 192082f).
+_RE_SPACE: frozenset[str] = frozenset(chr(cp) for cp in _ECMA262_WHITESPACE_CODEPOINTS)
 
 
 class _Atom(NamedTuple):
@@ -497,6 +501,9 @@ def _split_top_level_alternation(segment: str) -> list[str]:
 
 _HEX = frozenset("0123456789abcdefABCDEF")
 
+# ECMA-262 ControlEscape letters -> the control character each compiles to.
+_CONTROL_ESCAPE_CHARS: dict[str, str] = {"t": "\t", "n": "\n", "r": "\r", "f": "\f", "v": "\v"}
+
 
 def _consume_escape(segment: str, i: int) -> tuple[bool, frozenset[str], bool, int]:
     """Consume the escape sequence at ``segment[i] == '\\'`` exactly as the regex
@@ -524,6 +531,11 @@ def _consume_escape(segment: str, i: int) -> tuple[bool, frozenset[str], bool, i
         return False, _RE_SPACE, False, i + 2
     if esc in ("D", "W", "S"):
         return True, frozenset(), False, i + 2
+    if esc in _CONTROL_ESCAPE_CHARS:
+        # ECMA-262 ControlEscape \t \n \r \f \v -> the actual control character the
+        # engine matches (NOT the literal letter t/n/r/f/v). Missing these left
+        # bypasses like ^\s+\t+$ (TAB is in the \s set) — roborev HIGH on 192082f.
+        return False, frozenset({_CONTROL_ESCAPE_CHARS[esc]}), False, i + 2
     if esc == "x":
         h = segment[i + 2 : i + 4]
         if len(h) == 2 and all(ch in _HEX for ch in h):
@@ -586,13 +598,27 @@ def _parse_char_class(pattern: str, i: int) -> tuple[bool, frozenset[str], int]:
                 prev = ch
             continue
         if c == "-" and prev is not None and j + 1 < n and pattern[j + 1] != "]":
-            hi = pattern[j + 1]
+            # The range's UPPER endpoint may itself be an escape (``[\x61-\x7a]`` is
+            # ``[a-z]``). Resolve it the same way the engine compiles it; an
+            # unresolved escape upper bound makes the whole class wildcard (roborev
+            # HIGH on 192082f).
+            if pattern[j + 1] == "\\":
+                hw, hcset, _hzw, j_after = _consume_escape(pattern, j + 1)
+                if hw or len(hcset) != 1:
+                    shorthand = True
+                    prev = None
+                    j = j_after
+                    continue
+                hi = next(iter(hcset))
+            else:
+                hi = pattern[j + 1]
+                j_after = j + 2
             lo_o, hi_o = ord(prev), ord(hi)
             if lo_o <= hi_o:
                 for o in range(lo_o, hi_o + 1):
                     members.add(chr(o))
             prev = None
-            j += 2
+            j = j_after
             continue
         members.add(c)
         prev = c
