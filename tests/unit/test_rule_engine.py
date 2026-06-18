@@ -451,3 +451,36 @@ class TestEvaluateRulesForSubject:
         )
         assert len(results) == 1
         assert results[0].outcome == RuleOutcome.SKIPPED
+
+
+class TestUnknownOperatorAttachesACEF046:
+    """PhD-review finding 37: an unknown rule operator returned RuleOutcome.ERROR
+    with free-text but NO error_code, so a consumer could not machine-detect it.
+    The unknown-operator error now carries ACEF-046 (unified with the unknown
+    comparison-`op` case), routing to NOT_ASSESSED via the §3.7 P3 error step."""
+
+    def test_unknown_rule_operator_error_carries_acef_046(self) -> None:
+        provisions = [
+            Provision(
+                provision_id="test-prov",
+                provision_name="Test",
+                normative_text_ref="Sec 1",
+                description="d",
+                required_evidence_types=[],
+                evaluation=[
+                    EvaluationRule(
+                        rule_id="bad-op-rule",
+                        rule="frobnicate",  # not in OPERATOR_REGISTRY
+                        params={},
+                        severity="fail",
+                        message="unknown operator",
+                    ),
+                ],
+            ),
+        ]
+        results = evaluate_rules_for_subject(provisions, [_make_record()], profile_id="test-profile")
+        assert len(results) == 1
+        assert results[0].outcome == RuleOutcome.ERROR
+        assert results[0].error_code == "ACEF-046", (
+            f"unknown-operator error must carry ACEF-046, got {results[0].error_code!r}"
+        )

@@ -1276,7 +1276,7 @@ ACEF defines a normative error taxonomy so that all validators and SDK implement
 | `ACEF-042` | Evaluation | `info` | `evidence_gap` acknowledged for provision |
 | `ACEF-043` | Evaluation | `error` | Invalid JSON Pointer in rule `field` parameter |
 | `ACEF-045` | Evaluation | `error` | Invalid ECMA-262 regex pattern in rule `value` parameter |
-| `ACEF-046` | Evaluation | `error` | Unknown comparison operator in rule `op` parameter — must be one of `eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `in`, `regex` |
+| `ACEF-046` | Evaluation | `error` | Unknown operator in a rule — EITHER an unknown top-level rule operator (not one of the §3.5 built-ins) OR an unknown comparison `op` (must be one of `eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `in`, `regex`). Both attach this machine-detectable code; the diagnostic message disambiguates. |
 | `ACEF-044` | Evaluation | `error` | Duplicate `rule_id` in template — rule IDs must be unique for Assessment Bundle result keys |
 | `ACEF-050` | Format | `fatal` | Malformed JSONL line (not valid JSON) |
 | `ACEF-051` | Format | `fatal` | JSON not canonicalized per RFC 8785 (during integrity verification) |
@@ -1294,6 +1294,16 @@ ACEF defines a normative error taxonomy so that all validators and SDK implement
 | `ACEF-078` | Reference | `error` | `redaction_attestation_ref` points to unresolvable URN (distinct from ACEF-022; the attestation reference is on the record envelope, not in `record_files`) |
 | `ACEF-079` | Schema | `error` | `coverage_cell.claim_language` contains a banned claim-lexicon token (`compliant`, `certified`, `AI Act-approved`, `guaranteed`); distinct from ACEF-053 (which covers vendor-extension outcome effects) |
 | `ACEF-080` | Reference | `error` | Bundle declares `analysis_mode` but lacks required envelope/manifest fields for that mode, or contains forbidden record types for that mode (mode-gated rule violation) |
+| `ACEF-081` | Profile | `error` | Incident profile declared but `taxonomy_crosswalk` is missing a mandatory member (error carries the `profile_id`); see RFC-0002 §5. |
+| `ACEF-082` | Format | `error` | `severity_vector` present but not parseable against `ACEF-SEV:1.0`. |
+| `ACEF-083` | Integrity | `error` | `public_incident_id` id-trust failure, raised in one of two class-tagged branches (`class: offline-deterministic` — pattern / JWS self-consistency / bundled-snapshot membership; `class: online-conformance` — a presented-but-invalid live domain-control proof). ONE code, class-tagged (§6.6). |
+| `ACEF-084` | Evaluation | `error` | `eu-ai-act-art73-2026` declared and the stated `regulatory_timeline` deadline is inconsistent with the shortest applicable Art. 73 clock (death→10d; `3.49.b`/widespread→2d; else 15d). |
+| `ACEF-085` | Evaluation | `error` | A present `taxonomy_crosswalk` member contradicts the value derived from `harm_core`. |
+| `ACEF-086` | Profile | `error` | Public disclosure of a special-category/identifying field without satisfying the §5.11 publishability map / `declared_publication_basis`. |
+| `ACEF-087` | Profile | `info` | `realization: near_miss` — informational marker, never a failure. |
+| `ACEF-088` | Evaluation | `error` | A record carries both `severity` and `severity_vector` and the coarse `severity` disagrees with `band()`. |
+
+**Error-registry governance (normative).** The codes above are the **normative taxonomy**. Their *machine* representation is split across three layers for governance, not because any code is unreal: (1) `ACEF-001`…`ACEF-060` are the **frozen v1.0 registry** snapshot (byte-pinned; new codes are never inserted into this range); (2) `ACEF-070`…`ACEF-080` are the **v1.1 additive registry** entries; (3) `ACEF-081`…`ACEF-088` are the **incident-profile** codes, and a small number of post-snapshot Core additions (e.g. `ACEF-046`) live in an **extended-details** table — both are resolved through the single `resolve_error_meta()` source of truth, so every code in this table emits its declared severity/category regardless of which layer holds its metadata. A validator MUST treat all rows here as normative; the layer split is an internal registry-freezing mechanism, not a conformance distinction. **Reserved gaps:** `ACEF-024` is intentionally unallocated (reserved); the band leaves additive gaps rather than renumbering. **Overlap discipline:** `ACEF-053` (a vendor `x-*` field changing a conformance outcome), `ACEF-077` (a registered-namespace lint, §3.7), and `ACEF-079` (a banned claim-lexicon token in `coverage_cell.claim_language`) police *distinct* surfaces and MUST NOT be substituted for one another; the partition is by *where* the violation occurs (extension-outcome effect vs namespace-lint emission vs claim-language field), stated normatively here so two validators emit the same code.
 
 ### 3.7 Validation Result Schema (Assessment Bundle)
 
@@ -1889,7 +1899,7 @@ The following gaps have been addressed:
 | **Entity-record separation** | Entities defined once in entity graph, referenced by URN from records. See Section 3.1. | v0.2 |
 | **Circular integrity model** | Hash domain explicitly defined; `hashes/` and `signatures/` are outside the hash domain. RFC 8785 canonicalization. See Section 3.1.3. | v0.3 |
 | **Evidence vs. assessment separation** | Evidence Bundle and Assessment Bundle are separate artifacts. `provision_status` moved to Assessment Bundle. See Sections 1.0.2, 3.6. | v0.3 |
-| **Error taxonomy** | Normative error codes (ACEF-001 through ACEF-060) with severity levels and categories. See Section 3.6. | v0.3 |
+| **Error taxonomy** | Normative error codes with severity levels and categories. See Section 3.6. ACEF-001…060 were introduced in v0.3 (frozen registry); v0.4 adds 070…088 + the extended-details codes (e.g. ACEF-046), all resolved via `resolve_error_meta()`. | v0.3 (extended in v0.4) |
 | **Legal force model** | Templates now include `instrument_type`, `legal_force`, `instrument_status`, and per-provision `effective_date`. See Section 3.4. | v0.3 |
 | **Conformance program** | Conformance test suite, licensing, namespace governance, trademark rules. See Sections 6.3–6.5. | v0.3 |
 | **Assessment result schema** | Machine-readable validation output with rule IDs, severity, JSON paths, template digests. See Section 3.7. | v0.3 |

@@ -262,6 +262,10 @@ def _evaluate_single_rule(
             rule_severity=severity,
             outcome=RuleOutcome.ERROR,
             message=f"Unknown operator: {operator_name!r}",
+            # Machine-detectable code (PhD-review finding 37): ACEF-046 covers an
+            # unknown operator in a rule — both an unknown top-level rule operator
+            # (here) and an unknown comparison `op` (operators._validate_comparison_op).
+            error_code="ACEF-046",
             subject_scope=[subject_id] if subject_id else [],
         )
 

@@ -116,7 +116,7 @@ ACEF/
 |   |   |-- assessment.py      # Assessment Bundle builder
 |   |   |-- export.py          # Bundle serialization (directory + .acef.tar.gz)
 |   |   |-- loader.py          # Bundle deserialization and round-trip
-|   |   |-- errors.py          # ACEF error taxonomy (ACEF-001 through ACEF-060)
+|   |   |-- errors.py          # ACEF error taxonomy (ACEF-001 through ACEF-088)
 |   |   |-- redaction.py       # Privacy-preserving redaction with hash commitments
 |   |   |-- render.py          # Human-readable compliance report generation
 |   |   |-- merge.py           # Multi-source evidence merging
@@ -148,7 +148,7 @@ ACEF/
 - SHA-256 content hashing and Merkle tree construction
 - JWS (RFC 7515) detached signatures (RS256, ES256 only)
 - JSONL record format with deterministic ordering and sharding
-- Error taxonomy (ACEF-001 through ACEF-060)
+- Error taxonomy (ACEF-001 through ACEF-088)
 
 **ACEF Profiles (record types, templates, rule DSL):**
 - 16 core record types (risk_register, dataset_card, event_log, transparency_marking, etc.)
@@ -217,7 +217,7 @@ ACEF bundles MUST be deterministic. Two exporters producing a bundle from the sa
 8. Produce Assessment Bundle
 
 ### Error Handling Pattern
-- Use ACEF error taxonomy codes (ACEF-001 through ACEF-060) consistently
+- Use ACEF error taxonomy codes (ACEF-001 through ACEF-088) consistently
 - Fatal errors: package structurally invalid, cannot proceed
 - Errors: evidence fails binding regulatory requirements
 - Warnings: evidence fails voluntary/advisory requirements

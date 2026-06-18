@@ -342,11 +342,17 @@ EXTENDED_ERROR_DETAILS: dict[str, IncidentErrorDetail] = {
     "ACEF-046": IncidentErrorDetail(
         severity=Severity.ERROR,
         category=ErrorCategory.EVALUATION,
-        problem="a DSL rule's comparison `op` is not a recognized operator",
-        cause="spec §3.4 (the eight comparison operators: eq, ne, gt, gte, lt, lte, in, regex)",
+        problem=(
+            "a rule names an unknown operator — either an unknown top-level rule operator "
+            "(not a §3.5 built-in) or an unknown comparison `op`"
+        ),
+        cause=(
+            "spec §3.5 (built-in rule operators) / §3.4 (the eight comparison operators: "
+            "eq, ne, gt, gte, lt, lte, in, regex)"
+        ),
         fix=(
-            "correct the rule's `op` to one of eq, ne, gt, gte, lt, lte, in, regex; a typo'd op is a "
-            "malformed rule, not a silent false-fail"
+            "correct the rule operator to a §3.5 built-in, or the comparison `op` to one of "
+            "eq, ne, gt, gte, lt, lte, in, regex; a typo'd operator is a malformed rule, not a silent false-fail"
         ),
     ),
 }

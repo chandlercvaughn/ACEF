@@ -148,6 +148,55 @@ class TestFinding15ConformanceClasses:
         assert "x5c" in para, "offline class must address x5c chain validation, not only JWS self-consistency"
 
 
+class TestFindings16And19And37ErrorTaxonomy:
+    """The error taxonomy was split-brained: ACEF-046 in §3.6 but out of the frozen
+    registry, 081-088 only in code, Appendix B saying '001 through 060', the 024
+    gap unexplained, and 053/077/079 overlapping. §3.6 must reconcile all of it."""
+
+    def test_incident_codes_081_to_088_have_normative_rows(self) -> None:
+        text = _spec_text()
+        for n in range(81, 89):
+            assert f"`ACEF-{n:03d}`" in text, f"§3.6 must list ACEF-{n:03d} (was code-only)"
+
+    def test_registry_governance_note_present(self) -> None:
+        text = _spec_text()
+        idx = text.find("Error-registry governance")
+        assert idx != -1, "§3.6 must add the registry-governance note (frozen / additive / extended layers)"
+        note = text[idx : idx + 1600]
+        assert "resolve_error_meta" in note, "governance note must cite the single source of truth"
+        assert "ACEF-024" in note and "reserved" in note.lower(), (
+            "governance note must explain the ACEF-024 reserved gap"
+        )
+        for code in ("ACEF-053", "ACEF-077", "ACEF-079"):
+            assert code in note, f"governance note must state the {code} overlap partition"
+
+    def test_appendix_b_no_longer_claims_001_to_060_as_the_whole_taxonomy(self) -> None:
+        text = _spec_text()
+        # The Appendix B error-taxonomy row must not present 001-060 as the full range.
+        assert "(ACEF-001 through ACEF-060) with severity" not in text, (
+            "Appendix B still presents ACEF-001..060 as the complete taxonomy"
+        )
+
+    def test_acef_046_attached_to_unknown_operator(self) -> None:
+        # The code side of finding 37 (also pinned in test_rule_engine): an unknown
+        # rule operator yields a machine-detectable ACEF-046.
+        from acef.models.enums import RuleOutcome
+        from acef.templates.models import EvaluationRule, Provision
+        from acef.validation.rule_engine import evaluate_rules_for_subject
+
+        prov = Provision(
+            provision_id="p",
+            provision_name="p",
+            normative_text_ref="x",
+            description="d",
+            required_evidence_types=[],
+            evaluation=[EvaluationRule(rule_id="r", rule="frobnicate", params={}, severity="fail", message="m")],
+        )
+        results = evaluate_rules_for_subject([prov], [], profile_id="prof")
+        assert results[0].outcome == RuleOutcome.ERROR
+        assert results[0].error_code == "ACEF-046"
+
+
 class TestFindings26And30RelatedWork:
     """The nearest prior art (in-toto/SLSA/Sigstore/W3C VC/NIST OSCAL/OPA-Rego/XBRL)
     appeared ZERO times, so the novelty delta was unstated — a desk-reject trigger.
