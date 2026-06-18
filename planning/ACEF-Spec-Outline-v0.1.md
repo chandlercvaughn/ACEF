@@ -1932,7 +1932,7 @@ This appendix gives a semi-formal proof that the §3.7 `provision_outcome` roll-
 
 Fix a provision *p*. Its evaluation state is the pair **(R, g)** where:
 
-- **R** is the finite multiset of *rule results* for *p*. Each `r ∈ R` carries `sev(r) ∈ {fail, warning, info}` and `out(r) ∈ {passed, failed, skipped, error}`. R is derived purely from the bundle, the template, and the scalar `evaluation_instant` (provisions whose `effective_date > evaluation_instant` are excluded before R is formed, so "not-yet-effective" never enters this function — §3.7).
+- **R** is the finite multiset of *rule results* for *p*. Each `r ∈ R` carries `sev(r) ∈ {fail, warning, info}` and `out(r) ∈ {passed, failed, skipped, error}`. R is derived purely from the bundle, the template, and the scalar `evaluation_instant`. A provision whose `effective_date > evaluation_instant` is excluded from rule **evaluation**, but its rules still contribute **synthesized `skipped` outcomes** to R (plus an `ACEF-032` info diagnostic); such a provision therefore rolls up through `P₄` to `skipped`, not by bypassing this function (§3.7). The function below is total over every R that arises, including these all-`skipped` multisets.
 - **g ∈ {true, false}** indicates whether an `evidence_gap` record exists for *p*.
 
 The codomain is **O = {not-assessed, not-satisfied, skipped, gap-acknowledged, partially-satisfied, satisfied}**.
@@ -1944,7 +1944,7 @@ Define the six guard predicates over (R, g), exactly as §3.7 steps 1–6:
 - `P₃(R,g) ≜ ∃ r∈R. out(r)=error`
 - `P₄(R,g) ≜ |R| ≥ 1 ∧ ∀ r∈R. out(r)=skipped`
 - `P₅(R,g) ≜ g = true`
-- `P₆(R,g) ≜ (∀ r∈R. sev(r)=fail ⇒ out(r)=passed) ∧ (∃ r∈R. sev(r)=warning ∧ out(r)=failed)`
+- `P₆(R,g) ≜ ∃ r∈R. sev(r)=warning ∧ out(r)=failed`  — evaluated only after `¬P₂` (no fail-severity rule failed) and `¬P₃` (no errored rule), so a *skipped* fail-severity rule does **not** block this step; a failed warning with the gating fail-rules passed-or-skipped is `partially-satisfied`.
 
 The roll-up is the first-match selector:
 
@@ -1958,7 +1958,7 @@ with the step→outcome map ⟨not-assessed, not-satisfied, not-assessed, skippe
 
 **Proof.** The selector returns step *i* when `Pᵢ` is the least satisfied guard, and otherwise returns step 7 unconditionally. Step 7 has no precondition (it is the logical complement `¬P₁∧…∧¬P₆`), so the domain is partitioned into seven exhaustive cases with no gap. Hence ρ is defined everywhere. ∎
 
-We further show step 7's value (`satisfied`) is *meaningful*, not merely a default. Reaching step 7 means `¬P₁` (≥1 rule), `¬P₂` (no fail-rule failed), `¬P₃` (no errored rule), `¬P₄` (not every rule skipped), `¬P₅` (no gap), `¬P₆`. From `¬P₂` every fail-severity rule has `out ∈ {passed, skipped, error}`; with `¬P₃` no rule errored, so every fail-severity rule passed or was skipped. With `¬P₆`'s second conjunct negated under "all fail passed", no warning-severity rule failed either. With `¬P₄`, at least one rule is non-skipped. Thus every *gating* (fail/warning) rule that ran passed, and at least one gating-or-info rule ran — exactly the informal meaning of `satisfied`. Failed `info`-severity rules and `skipped` rules are non-gating by construction and do not appear in any `Pᵢ` that could pre-empt step 7. ∎
+We further show step 7's value (`satisfied`) is *meaningful*, not merely a default. Reaching step 7 means `¬P₁` (≥1 rule), `¬P₂` (no fail-rule failed), `¬P₃` (no errored rule), `¬P₄` (not every rule skipped), `¬P₅` (no gap), `¬P₆` (no warning-rule failed). From `¬P₂` every fail-severity rule has `out ∈ {passed, skipped, error}`; with `¬P₃` no rule errored, so every fail-severity rule passed or was skipped. From `¬P₆` no warning-severity rule failed (any warning that ran passed or was skipped). With `¬P₄`, at least one rule is non-skipped. Thus every *gating* (fail/warning) rule that ran passed (skipped gating rules are non-applicable, not failures), and at least one rule is non-skipped — exactly the informal meaning of `satisfied`. Failed `info`-severity rules and `skipped` rules are non-gating by construction and do not appear in any `Pᵢ` that could pre-empt step 7. ∎
 
 ### C.3 Determinism (single-valuedness)
 
@@ -1978,7 +1978,7 @@ This is the structural fix for the two historical "reinterpretations" the review
 
 The roll-up consumes rule outcomes; each outcome is the denotation of a DSL operator over the record set *S* selected by the rule's `scope`. Operators partition into **existential** (∃) and **universal** (∀), which fixes their behavior on `S = ∅`:
 
-- **Existential** — `has_record_type`, `attachment_exists`, `attachment_kind_exists`, `entity_linked`, `record_attested`, `bundle_signed`, `exists_where`: denote `⊤` iff at least one witness exists. On `S = ∅`, **FALSE** (no witness).
-- **Universal** — `field_present`, `field_value`, `evidence_freshness`: denote `∀ s∈S. φ(s)`. On `S = ∅`, **TRUE** (vacuous truth).
+- **Existential** — `has_record_type`, `attachment_exists`, `attachment_kind_exists`, `record_attested`, `bundle_signed`, `exists_where`: denote `⊤` iff at least one witness exists. On `S = ∅`, **FALSE** (no witness).
+- **Universal** — `field_present`, `field_value`, `evidence_freshness`, `entity_linked`: denote `∀ s∈S. φ(s)`. On `S = ∅`, **TRUE** (vacuous truth). (`entity_linked` is universal — "every record of the type has the entity ref" — passing vacuously on zero matching records, per §3.5 and `op_entity_linked`.)
 
 These are the standard first-order semantics; pinning them removes the classic "empty-set false-pass/false-fail" ambiguity, and the assignment of each built-in operator to ∃ or ∀ is normative (§3.5). An invalid JSON Pointer or non-ECMA-262 pattern is a rule **error** (`out = error`, codes ACEF-043/ACEF-045/ACEF-046), which routes to `P₃ → not-assessed`, never to a silent pass/fail.

@@ -95,6 +95,15 @@ class TestRollupTotalityAndAgreement:
         cells = ((RuleOutcome.PASSED, RuleSeverity.FAIL), (RuleOutcome.FAILED, RuleSeverity.INFO))
         assert _impl(cells, gap=False) == ProvisionOutcome.SATISFIED
 
+    def test_skipped_fail_plus_failed_warning_is_partially_satisfied(self) -> None:
+        """roborev on 21e3349: a SKIPPED fail-severity rule does NOT block step 6 —
+        a failed warning with the fail-rules passed-or-skipped is partially-satisfied
+        (P6 is 'any warning failed' after the no-failed-fail/no-error guards, NOT
+        'all fail passed'). Pins the Appendix C P6 definition to the implementation."""
+        cells = ((RuleOutcome.SKIPPED, RuleSeverity.FAIL), (RuleOutcome.FAILED, RuleSeverity.WARNING))
+        assert _impl(cells, gap=False) == ProvisionOutcome.PARTIALLY_SATISFIED
+        assert _rho(cells, gap=False) == ProvisionOutcome.PARTIALLY_SATISFIED
+
     @pytest.mark.parametrize(
         "cells",
         [

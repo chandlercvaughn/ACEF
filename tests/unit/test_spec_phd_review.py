@@ -201,6 +201,12 @@ class TestFinding10FormalProof:
         c = c[c.find("## Appendix C") :].lower()
         assert "existential" in c and "universal" in c, "Appendix C must classify operators existential vs universal"
         assert "vacuous" in c, "Appendix C must state vacuous truth for universal operators on the empty set"
+        # roborev on 21e3349: entity_linked is UNIVERSAL (vacuous-pass), matching
+        # §3.5 + op_entity_linked — it must appear in the universal line, not existential.
+        universal_line = next((ln for ln in c.split("\n") if "universal" in ln and "—" in ln), "")
+        existential_line = next((ln for ln in c.split("\n") if "existential" in ln and "—" in ln), "")
+        assert "entity_linked" in universal_line, "Appendix C must list entity_linked as universal"
+        assert "entity_linked" not in existential_line, "Appendix C must NOT list entity_linked as existential"
 
 
 class TestFinding17VersionIdentity:
