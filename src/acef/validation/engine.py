@@ -1123,6 +1123,7 @@ def _evaluate_profiles(
                 package_timestamp=package_timestamp,
                 signature_count=sig_count,
                 signature_algorithms=sig_algs,
+                trust_anchors=trust_anchors,
             )
             # Pass ``provisions=package_scoped`` so a rule-less package provision
             # surfaces NOT_ASSESSED (§3.7 step 1) instead of vanishing. Package
@@ -1155,6 +1156,7 @@ def _evaluate_profiles(
                     package_timestamp=package_timestamp,
                     signature_count=sig_count,
                     signature_algorithms=sig_algs,
+                    trust_anchors=trust_anchors,
                 )
                 # Backfill rule-less provisions for THIS subject as NOT_ASSESSED
                 # (§3.7 step 1). Mirror the ``applicable_to`` filter that
@@ -1182,5 +1184,6 @@ def _evaluate_profiles(
                 package_timestamp=package_timestamp,
                 signature_count=sig_count,
                 signature_algorithms=sig_algs,
+                trust_anchors=trust_anchors,
             )
             _collect_results(assessment, results, profile_id, records, provisions=per_subject)

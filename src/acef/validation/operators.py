@@ -11,7 +11,10 @@ from __future__ import annotations
 import re
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
-from typing import Any, NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple
+
+if TYPE_CHECKING:
+    from cryptography.x509 import Certificate
 
 import jsonpointer  # type: ignore[import-untyped]  # no published stubs / py.typed (no types-jsonpointer on PyPI)
 
@@ -1358,6 +1361,7 @@ def _attestation_verifies(
     rec: RecordEnvelope,
     *,
     manifest_timestamp: str | None = None,
+    trust_anchors: list[Certificate] | None = None,
 ) -> bool:
     """Return True iff the record's attestation block cryptographically verifies.
 
@@ -1397,7 +1401,9 @@ def _attestation_verifies(
         record_dict = rec.to_jsonl_dict()
         subset = {pointer: jsonpointer.resolve_pointer(record_dict, pointer) for pointer in att.signed_fields}
         canonical = canonicalize(subset)
-        verify_detached_jws(att.signature, canonical, manifest_timestamp=manifest_timestamp)
+        verify_detached_jws(
+            att.signature, canonical, manifest_timestamp=manifest_timestamp, trust_anchors=trust_anchors
+        )
     except Exception:
         # Intentionally broad: a record carrying ANY unverifiable attestation
         # (ACEFSigningError, JsonPointerException, rfc8785 domain errors, …)
@@ -1411,6 +1417,7 @@ def op_record_attested(
     records: list[RecordEnvelope],
     *,
     manifest_timestamp: str | None = None,
+    trust_anchors: list[Certificate] | None = None,
 ) -> tuple[bool, list[str]]:
     """record_attested: At least min_count records have VERIFIED attestation blocks.
 
@@ -1426,6 +1433,14 @@ def op_record_attested(
     in by the rule engine the same way ``bundle_signed`` receives signature
     context. It anchors x5c certificate-validity checks (spec §3.1.3: cert
     expiry is checked against the manifest timestamp, NOT wall-clock).
+
+    ``trust_anchors`` is the SAME locally-configured x5c trust-anchor set the
+    Phase-2 integrity check ran under (spec §3.5 record_attested trust-anchoring
+    consistency clause). When non-empty and an attestation carries an ``x5c``
+    chain, that chain MUST terminate at a configured anchor to count — so a
+    self-issued x5c rejected as a bundle signature (ACEF-012) does NOT satisfy
+    ``record_attested`` in the same anchored run. ``None`` (default) preserves
+    the historical ``self-attested`` behavior exactly (no anchoring enforced).
     """
     record_type = params["record_type"]
     min_count = params.get("min_count", 1)
@@ -1434,7 +1449,7 @@ def op_record_attested(
 
     evidence_refs: list[str] = []
     for rec in matching:
-        if _attestation_verifies(rec, manifest_timestamp=manifest_timestamp):
+        if _attestation_verifies(rec, manifest_timestamp=manifest_timestamp, trust_anchors=trust_anchors):
             evidence_refs.append(rec.record_id)
 
     return len(evidence_refs) >= min_count, evidence_refs

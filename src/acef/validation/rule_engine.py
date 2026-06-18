@@ -5,7 +5,10 @@ Evaluates template rules against evidence records per subject.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from cryptography.x509 import Certificate
 
 from acef.errors import ACEFEvaluationError
 from acef.models.assessment import RuleResult
@@ -97,6 +100,7 @@ def evaluate_rules_for_subject(
     package_timestamp: str = "",
     signature_count: int = 0,
     signature_algorithms: list[str] | None = None,
+    trust_anchors: list[Certificate] | None = None,
 ) -> list[RuleResult]:
     """Evaluate all rules from provisions against records for a single subject.
 
@@ -178,6 +182,7 @@ def evaluate_rules_for_subject(
                 provision_effective_date=provision.effective_date or "",
                 signature_count=signature_count,
                 signature_algorithms=signature_algorithms,
+                trust_anchors=trust_anchors,
             )
             results.append(result)
 
@@ -199,6 +204,7 @@ def _evaluate_single_rule(
     provision_effective_date: str = "",
     signature_count: int = 0,
     signature_algorithms: list[str] | None = None,
+    trust_anchors: list[Certificate] | None = None,
 ) -> RuleResult:
     """Evaluate a single DSL rule."""
     severity = RuleSeverity(rule.severity)
@@ -319,6 +325,14 @@ def _evaluate_single_rule(
                 rule.params,
                 filtered_records,
                 manifest_timestamp=package_timestamp or None,
+                # Thread the SAME locally-configured trust anchors Phase-2 integrity
+                # used, so an x5c-backed attestation that does NOT chain to a
+                # configured anchor does not satisfy record_attested either —
+                # closing the trust-posture drift where a self-issued x5c rejected
+                # as a bundle signature (ACEF-012) still counted here (PhD
+                # re-review adversarial-impl W1). None preserves the historical
+                # self-attested behavior exactly (no anchoring enforced).
+                trust_anchors=trust_anchors,
             )
         else:
             passed, evidence_refs = operator_func(rule.params, filtered_records)

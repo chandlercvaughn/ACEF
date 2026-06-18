@@ -465,3 +465,130 @@ class TestRuleEngineThreadsManifestTimestamp:
         )
         assert len(results) == 1
         assert results[0].outcome == RuleOutcome.PASSED
+
+
+# --- PhD re-review (adversarial-impl W1): record_attested x5c attestation
+# anchoring. trust_anchors was absent from the whole rule-evaluation path, so a
+# self-issued x5c that FAILS as a bundle signature (ACEF-012 under configured
+# anchors) still satisfied record_attested — a trust-posture drift within one
+# anchored run. Threading trust_anchors closes it. ---
+
+
+def _ca_cert_and_key(
+    cn: str,
+    nvb: datetime.datetime,
+    nva: datetime.datetime,
+) -> tuple[x509.Certificate, ec.EllipticCurvePrivateKey]:
+    """A self-signed CA cert (BasicConstraints ca=True + keyCertSign), usable as a
+    trust anchor — verify_x5c_chain enforces RFC 5280 issuer path constraints."""
+    key = ec.generate_private_key(ec.SECP256R1())
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, cn)])
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(name)
+        .issuer_name(name)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(nvb)
+        .not_valid_after(nva)
+        .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
+        .add_extension(
+            x509.KeyUsage(
+                digital_signature=False,
+                content_commitment=False,
+                key_encipherment=False,
+                data_encipherment=False,
+                key_agreement=False,
+                key_cert_sign=True,
+                crl_sign=True,
+                encipher_only=False,
+                decipher_only=False,
+            ),
+            critical=True,
+        )
+        .sign(key, hashes.SHA256())
+    )
+    return cert, key
+
+
+def _anchored_x5c_attested_record(
+    nvb: datetime.datetime,
+    nva: datetime.datetime,
+) -> tuple[RecordEnvelope, x509.Certificate]:
+    """A record whose attestation x5c is a proper root->leaf chain; returns
+    ``(rec, root_cert)`` so the test can configure the root as the trust anchor."""
+    root_cert, root_key = _ca_cert_and_key("att-root", nvb, nva)
+    leaf_key = ec.generate_private_key(ec.SECP256R1())
+    leaf_cert = (
+        x509.CertificateBuilder()
+        .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "att-leaf")]))
+        .issuer_name(root_cert.subject)
+        .public_key(leaf_key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(nvb)
+        .not_valid_after(nva)
+        .sign(root_key, hashes.SHA256())
+    )
+    leaf_b64 = base64.b64encode(leaf_cert.public_bytes(serialization.Encoding.DER)).decode("ascii")
+    root_b64 = base64.b64encode(root_cert.public_bytes(serialization.Encoding.DER)).decode("ascii")
+    rec = _make_record()
+    subset = {"/payload": jsonpointer.resolve_pointer(rec.to_jsonl_dict(), "/payload")}
+    signature = create_detached_jws(canonicalize(subset), leaf_key, kid="att-leaf-key", x5c=[leaf_b64, root_b64])
+    rec.attestation = Attestation(method="jws", signer="provider", signature=signature)
+    return rec, root_cert
+
+
+class TestX5cAttestationTrustAnchoring:
+    def test_self_issued_x5c_attestation_not_counted_when_anchors_configured(self) -> None:
+        """A self-issued x5c attestation does NOT chain to a configured anchor, so
+        it must NOT count — consistent with the bundle-signature trust posture."""
+        rec = _x5c_attested_record(_WINDOW_START, _WINDOW_END)
+        unrelated, _ = _ca_cert_and_key("unrelated-anchor", _WINDOW_START, _WINDOW_END)
+        passed, refs = op_record_attested(
+            {"record_type": "risk_register", "min_count": 1},
+            [rec],
+            manifest_timestamp=_TS_INSIDE_WINDOW,
+            trust_anchors=[unrelated],
+        )
+        assert passed is False
+        assert refs == []
+
+    def test_self_issued_x5c_attestation_counted_without_anchors(self) -> None:
+        """Backward compatibility: WITHOUT anchors a self-issued x5c attestation is
+        self-attested and still counts (unchanged behavior)."""
+        rec = _x5c_attested_record(_WINDOW_START, _WINDOW_END)
+        passed, refs = op_record_attested(
+            {"record_type": "risk_register", "min_count": 1},
+            [rec],
+            manifest_timestamp=_TS_INSIDE_WINDOW,
+        )
+        assert passed is True
+        assert refs == [rec.record_id]
+
+    def test_anchored_x5c_attestation_counted_when_chains_to_anchor(self) -> None:
+        """An x5c attestation whose chain terminates at a configured anchor counts."""
+        rec, root = _anchored_x5c_attested_record(_WINDOW_START, _WINDOW_END)
+        passed, refs = op_record_attested(
+            {"record_type": "risk_register", "min_count": 1},
+            [rec],
+            manifest_timestamp=_TS_INSIDE_WINDOW,
+            trust_anchors=[root],
+        )
+        assert passed is True
+        assert refs == [rec.record_id]
+
+    def test_trust_anchors_threaded_through_rule_engine(self) -> None:
+        """The whole eval path threads trust_anchors (evaluate_rules_for_subject ->
+        operator): a self-issued x5c attestation FAILS record_attested under
+        configured anchors."""
+        rec = _x5c_attested_record(_WINDOW_START, _WINDOW_END)
+        unrelated, _ = _ca_cert_and_key("unrelated-anchor", _WINDOW_START, _WINDOW_END)
+        results = evaluate_rules_for_subject(
+            [_attestation_provision()],
+            [rec],
+            profile_id="eu-ai-act",
+            package_timestamp=_TS_INSIDE_WINDOW,
+            trust_anchors=[unrelated],
+        )
+        assert len(results) == 1
+        assert results[0].outcome == RuleOutcome.FAILED
