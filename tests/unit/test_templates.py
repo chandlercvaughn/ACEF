@@ -58,10 +58,40 @@ TEMPLATE_IDS = ["eu-ai-act-2024", "nist-ai-rmf-1.0", "china-cac-labeling-2025"]
 # templates above, leaving 10 of the 13 shipped templates unvalidated — a
 # malformed operator / param / duplicate rule_id in any of them would not be
 # caught. Run the structural invariants against EVERY shipped template.
-ALL_TEMPLATE_IDS = sorted(list_templates())
-# test_vectors are OPTIONAL per the template schema; assert non-emptiness only for
-# the templates that actually ship them (the others are conformant without).
-TEMPLATES_WITH_TEST_VECTORS = [tid for tid in ALL_TEMPLATE_IDS if load_template(tid).test_vectors]
+#
+# These lists are EXPLICIT (not derived from list_templates(), roborev on 303431d):
+# deriving them would be circular — a registry regression that drops a template
+# would also drop it from the parametrization and pass silently. With explicit
+# lists, a removed/renamed template fails the structural tests AND the discovery
+# test (sorted(list_templates()) == ALL_TEMPLATE_IDS catches add/remove/rename),
+# and a template that loses its test_vectors fails the test-vectors check.
+ALL_TEMPLATE_IDS = [
+    "china-cac-labeling-2025",
+    "eu-ai-act-2024",
+    "eu-ai-act-art73-2026",
+    "eu-gpai-code-of-practice-2025",
+    "eu-labelling-code-of-practice-2026",
+    "iso-iec-23894-2023",
+    "iso-iec-42001-2023",
+    "nist-ai-600-1-gai-profile",
+    "nist-ai-rmf-1.0",
+    "oecd-ai-incidents-2025",
+    "uk-ai-copyright-guidance-2026",
+    "us-copyright-office-part3-2025",
+    "us-omb-m-24-10",
+]
+# test_vectors are OPTIONAL per the template schema; these 7 templates DO ship
+# vectors and MUST keep them (explicit — a template silently losing its vectors
+# must FAIL test_template_has_test_vectors, not quietly drop out).
+TEMPLATES_WITH_TEST_VECTORS = [
+    "china-cac-labeling-2025",
+    "eu-ai-act-2024",
+    "eu-gpai-code-of-practice-2025",
+    "eu-labelling-code-of-practice-2026",
+    "nist-ai-600-1-gai-profile",
+    "nist-ai-rmf-1.0",
+    "us-omb-m-24-10",
+]
 
 
 # ── Discovery Tests ──
