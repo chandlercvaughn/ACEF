@@ -304,3 +304,24 @@ class TestHmacFootgunsClosed:
         )
         assert verify_redaction(rec, payload, hmac_key=key) is True
         assert verify_redaction(rec, {"diagnosis": "no"}, hmac_key=key) is False
+
+
+def test_verify_redaction_rejects_unknown_method_label() -> None:
+    """roborev on 4bd7970: an UNKNOWN method label with a valid SHA-256 digest must
+    NOT fall back to plain SHA-256 and verify true (e.g. rot13:<sha256>,
+    hmac-sha256-commitment-v2:<sha256>)."""
+    from acef.integrity import canonicalize, sha256_hex
+    from acef.models.records import EntityRefs, RecordEnvelope
+    from acef.redaction import verify_redaction
+
+    payload = {"x": 1}
+    valid_sha = sha256_hex(canonicalize(payload))
+    for label in ("rot13", "hmac-sha256-commitment-v2", "sha512-hash-commitment"):
+        rec = RecordEnvelope(
+            record_type="risk_register",
+            payload={"_redacted": True},
+            entity_refs=EntityRefs(),
+            timestamp="2026-01-01T00:00:00Z",
+            redaction_method=f"{label}:{valid_sha}",
+        )
+        assert verify_redaction(rec, payload) is False, f"unknown method {label!r} must NOT verify true"

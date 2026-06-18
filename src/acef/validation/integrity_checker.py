@@ -562,9 +562,10 @@ class SignatureBinding:
             is present; ``None`` for jwk-only signatures (no asserted identity).
         matches_expected_producer: ``True``/``False`` when an ``expected_producer``
             was supplied AND the signature is ``anchored`` with a subject — whether
-            the configured expected producer string occurs in the subject DN
-            (case-insensitive). ``None`` when no expectation was configured or the
-            signature is not an anchored, subject-bearing signature.
+            ``expected_producer`` equals the leaf's FULL subject DN exactly
+            (case-insensitive RFC 4514; a bare CN is NOT accepted). ``None`` when no
+            expectation was configured or the signature is not an anchored,
+            subject-bearing signature.
         signature_file: the ``signatures/*.jws`` filename (empty for the pure
             ``classify_signature_binding`` helper).
     """

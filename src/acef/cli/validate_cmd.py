@@ -35,10 +35,10 @@ from acef.models.enums import ProvisionOutcome, RuleOutcome
     "expected_producer",
     default=None,
     help=(
-        "Expected signer identity (spec Appendix D.3). With --trust-anchor, an ANCHORED "
-        "signature whose leaf subject does not match this value (exact full subject DN or "
-        "a CN) surfaces ACEF-012 (valid signature, wrong signer). Omit to report the "
-        "binding without enforcing identity."
+        "Expected signer identity (spec Appendix D.3): the EXACT full leaf certificate "
+        "subject DN (RFC 4514), e.g. 'CN=acme,O=ACME Corp'. With --trust-anchor, an ANCHORED "
+        "signature whose subject does not match surfaces ACEF-012 (valid signature, wrong "
+        "signer). A bare CN is NOT accepted. Omit to report the binding without enforcing identity."
     ),
 )
 def validate_cmd(

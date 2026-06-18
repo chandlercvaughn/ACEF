@@ -115,7 +115,16 @@ def _export_bundle(tmp_path: Path) -> Path:
     pkg.record(
         "risk_register",
         provisions=["article-9"],
-        payload={"description": "Test risk", "likelihood": "medium", "severity": "high"},
+        # Schema-VALID risk_register payload (required risk_id/category + enum-valid
+        # likelihood/severity) so the bundle's only diagnostics come from the path
+        # under test, not unrelated ACEF-004 schema fatals.
+        payload={
+            "risk_id": "risk-1",
+            "category": "safety",
+            "description": "Test risk",
+            "likelihood": "possible",
+            "severity": "major",
+        },
         obligation_role="provider",
         entity_refs={"subject_refs": [system.id]},
     )
@@ -642,3 +651,50 @@ class TestExpectedProducerBinding:
         assert len(diags) == 1 and diags[0]["code"] == "ACEF-012"
         right = acef.validate(str(bundle_dir), trust_anchors=[root], expected_producer="CN=pipeline-leaf")
         assert _signature_diags(right.structural_errors) == []
+
+
+class TestVerifyCliExpectedProducer:
+    """roborev on 4bd7970: the `acef verify --expected-producer` path needs direct
+    CLI coverage — wrong-signer rejection and exact full-DN success through the
+    Click command (not just validate_bundle / acef.validate)."""
+
+    @staticmethod
+    def _write_pem(tmp_path: Path, cert: x509.Certificate) -> str:
+        p = tmp_path / "root.pem"
+        p.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
+        return str(p)
+
+    def test_verify_cli_rejects_wrong_producer(self, tmp_path: Path) -> None:
+        from click.testing import CliRunner
+
+        from acef.cli.verify_cmd import verify_cmd
+
+        bundle_dir = _export_bundle(tmp_path)
+        leaf_key, x5c, root = _build_anchored_chain()  # leaf DN == "CN=pipeline-leaf"
+        _sign_bundle_with_x5c(bundle_dir, leaf_key, x5c)
+        anchor_pem = self._write_pem(tmp_path, root)
+
+        result = CliRunner().invoke(
+            verify_cmd,
+            [str(bundle_dir), "--trust-anchor", anchor_pem, "--expected-producer", "CN=evil-corp"],
+        )
+        assert result.exit_code != 0, f"wrong producer must fail verify; output:\n{result.output}"
+        assert "ACEF-012" in result.output
+        assert "wrong signer" in result.output
+
+    def test_verify_cli_accepts_exact_full_dn(self, tmp_path: Path) -> None:
+        from click.testing import CliRunner
+
+        from acef.cli.verify_cmd import verify_cmd
+
+        bundle_dir = _export_bundle(tmp_path)
+        leaf_key, x5c, root = _build_anchored_chain()
+        _sign_bundle_with_x5c(bundle_dir, leaf_key, x5c)
+        anchor_pem = self._write_pem(tmp_path, root)
+
+        result = CliRunner().invoke(
+            verify_cmd,
+            [str(bundle_dir), "--trust-anchor", anchor_pem, "--expected-producer", "CN=pipeline-leaf"],
+        )
+        assert result.exit_code == 0, f"exact full-DN match must pass verify; output:\n{result.output}"
+        assert "ACEF-012" not in result.output

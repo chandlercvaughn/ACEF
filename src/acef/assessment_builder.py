@@ -60,8 +60,9 @@ def validate(
         expected_producer: Optional expected producer binding (spec Appendix D.3).
             When set together with ``trust_anchors``, an ANCHORED signature whose
             leaf certificate subject does not match it emits ACEF-012 ("valid
-            signature, wrong signer"). Match is exact (full subject DN or a CN);
-            ``None`` (default) reports the binding without enforcing identity.
+            signature, wrong signer"). Match is the EXACT full subject DN (RFC 4514,
+            e.g. ``"CN=acme,O=ACME Corp"``) — a bare CN is NOT accepted; ``None``
+            (default) reports the binding without enforcing identity.
 
     Returns:
         An AssessmentBundle with all results.
