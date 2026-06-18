@@ -31,6 +31,22 @@ def _clean(result) -> bool:
     )
 
 
+class TestInspectArchiveDetectionIsFileGuard:
+    """F44: ``inspect`` detected archives by suffix ALONE
+    (``suffix == ".gz" or endswith(".tar.gz")``), unlike ``verify`` / ``doctor``
+    which gate on ``is_file()`` too. A DIRECTORY bundle whose name happens to end
+    in ``.tar.gz`` was therefore misrouted to the archive reader and failed."""
+
+    def test_directory_named_tar_gz_is_inspected_as_a_directory(self, tmp_path: Path) -> None:
+        dst = tmp_path / "bundle.tar.gz"  # a DIRECTORY with an archive-shaped name
+        shutil.copytree(_GOLDEN, dst)
+        result = CliRunner().invoke(cli, ["inspect", str(dst)])
+        assert _clean(result), f"inspect raised on a .tar.gz-named directory: {result.output!r}"
+        assert result.exit_code == 0, result.output
+        # Rendered the directory bundle summary, not an archive-extraction error.
+        assert "ACEF Evidence Bundle" in result.output or "Package" in result.output
+
+
 class TestInspectPrettyMalformedManifest:
     @pytest.mark.parametrize(
         "manifest",
@@ -75,6 +91,16 @@ class TestRecordBadArgsCleanError:
         assert "Error" in result.output
         # An unknown record_type IS ACEF-003.
         assert "ACEF-003" in result.output
+
+    def test_bad_record_type_error_code_not_double_stamped(self, tmp_path: Path) -> None:
+        """F44: the code must appear ONCE. record_cmd stamped a ` [ACEF-003]`
+        suffix onto ``str(exc)``, which already carries the ``[ACEF-003]``
+        prefix, so the message read ``[ACEF-003] ... [ACEF-003]``."""
+        result = CliRunner().invoke(
+            cli,
+            ["record", str(self._bundle(tmp_path)), "--type", "not_a_real_type", "--payload", "{}"],
+        )
+        assert result.output.count("ACEF-003") == 1, f"code double-stamped: {result.output!r}"
 
     def test_bad_role_clean_error(self, tmp_path: Path) -> None:
         result = CliRunner().invoke(

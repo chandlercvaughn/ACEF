@@ -319,7 +319,11 @@ def inspect_cmd(path: str, fmt: str, include_private: bool) -> None:
         click.echo(f"Error: Path does not exist: {path}", err=True)
         raise SystemExit(1)
 
-    is_archive = bundle_path.suffix == ".gz" or str(bundle_path).endswith(".tar.gz")
+    # Gate archive detection on is_file() too (F44) — a DIRECTORY bundle whose
+    # name happens to end in .tar.gz must be read as a directory, matching the
+    # verify / doctor commands. Without the guard such a directory was misrouted
+    # to the archive reader and failed with "Is a directory".
+    is_archive = bundle_path.is_file() and (bundle_path.suffix == ".gz" or str(bundle_path).endswith(".tar.gz"))
     if is_archive:
         manifest_data, incident_records = _read_archive_inputs(path)
     else:

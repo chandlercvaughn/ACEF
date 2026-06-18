@@ -84,9 +84,10 @@ def record_cmd(
             obligation_role=role,
         )
     except ACEFError as exc:
-        code = getattr(exc, "code", None)
-        suffix = f" [{code}]" if code else ""
-        click.echo(f"Error: {exc}{suffix}", err=True)
+        # ``str(exc)`` already prefixes the code (``[ACEF-003] ...``) via
+        # ``ACEFError.__str__``; the previous ` [{code}]` suffix double-stamped it
+        # (F44). Emit the code exactly once, matching ``validate``'s human path.
+        click.echo(f"Error: {exc}", err=True)
         raise SystemExit(1) from exc
     except ValueError as exc:
         # A non-ACEFError ValueError (e.g. an invalid --role rejected by the
