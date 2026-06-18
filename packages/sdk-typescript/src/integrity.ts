@@ -52,6 +52,96 @@ export function pathTextProblem(path: string): string | null {
 }
 
 /**
+ * Reject DUPLICATE object member names anywhere in a JSON document — full I-JSON
+ * (RFC 7493 §2.3) conformance, mirroring Python's
+ * ``acef.integrity._reject_duplicate_keys``. JS ``JSON.parse`` has no
+ * ``object_pairs_hook`` and is last-wins, so a duplicate is otherwise silently
+ * collapsed (``{"a":1,"a":2}`` hashes identically to ``{"a":2}``) — a
+ * cross-implementation determinism/integrity break. This is a minimal scanner that
+ * tracks object nesting and compares DECODED key strings (so ``"a"`` and
+ * ``"a"`` collide). Throws on the first duplicate.
+ */
+export function assertNoDuplicateMemberNames(text: string): void {
+    interface Frame {
+        isObject: boolean;
+        keys: Set<string>;
+        awaitingKey: boolean;
+    }
+    const stack: Frame[] = [];
+    const n = text.length;
+    let i = 0;
+
+    const readStringRaw = (): string => {
+        // text[i] === '"'; return the raw token including quotes, advancing i past it.
+        const start = i;
+        i++; // opening quote
+        while (i < n) {
+            const c = text[i];
+            if (c === "\\") {
+                i += 2;
+                continue;
+            }
+            if (c === '"') {
+                i++;
+                return text.slice(start, i);
+            }
+            i++;
+        }
+        throw new Error("acef: malformed JSON (unterminated string) while scanning for duplicate member names");
+    };
+
+    while (i < n) {
+        const c = text[i];
+        if (c === " " || c === "\t" || c === "\n" || c === "\r") {
+            i++;
+            continue;
+        }
+        if (c === "{") {
+            stack.push({ isObject: true, keys: new Set(), awaitingKey: true });
+            i++;
+            continue;
+        }
+        if (c === "[") {
+            stack.push({ isObject: false, keys: new Set(), awaitingKey: false });
+            i++;
+            continue;
+        }
+        if (c === "}" || c === "]") {
+            stack.pop();
+            i++;
+            continue;
+        }
+        if (c === ",") {
+            const top = stack[stack.length - 1];
+            if (top && top.isObject) top.awaitingKey = true;
+            i++;
+            continue;
+        }
+        if (c === ":") {
+            i++;
+            continue;
+        }
+        if (c === '"') {
+            const raw = readStringRaw();
+            const top = stack[stack.length - 1];
+            if (top && top.isObject && top.awaitingKey) {
+                const key = JSON.parse(raw) as string; // decode escapes correctly
+                if (top.keys.has(key)) {
+                    throw new Error(
+                        `acef: duplicate object member name ${JSON.stringify(key)} (I-JSON / RFC 7493 §2.3)`,
+                    );
+                }
+                top.keys.add(key);
+                top.awaitingKey = false;
+            }
+            continue;
+        }
+        // number / true / false / null literal — skip its run of non-structural chars.
+        i++;
+    }
+}
+
+/**
  * RFC 8785 (JCS) canonicalize a JSON-serializable value to UTF-8 bytes.
  *
  * Rules implemented:

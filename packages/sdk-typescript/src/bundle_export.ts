@@ -27,7 +27,13 @@
  */
 
 import { createHash } from "node:crypto";
-import { canonicalize, sha256Hex, buildMerkleTree, pathTextProblem } from "./integrity.js";
+import {
+    canonicalize,
+    sha256Hex,
+    buildMerkleTree,
+    pathTextProblem,
+    assertNoDuplicateMemberNames,
+} from "./integrity.js";
 import { deterministicGzip } from "./exporter.js";
 import type { LoadedBundle, RawRecord } from "./loader.js";
 
@@ -624,7 +630,11 @@ function computeContentHashes(files: Map<string, Buffer>): Record<string, string
 /** Hash a file's content per `sha256_file` rules based on suffix. */
 function hashFile(path: string, content: Buffer): string {
     if (path.endsWith(".json")) {
-        const obj = JSON.parse(content.toString("utf-8")) as unknown;
+        const text = content.toString("utf-8");
+        // I-JSON (RFC 7493 §2.3): reject duplicate member names in the hash domain,
+        // parity with Python (else JSON.parse silently de-dups last-wins).
+        assertNoDuplicateMemberNames(text);
+        const obj = JSON.parse(text) as unknown;
         return sha256Hex(canonicalize(obj));
     }
     if (path.endsWith(".jsonl")) {
@@ -634,6 +644,7 @@ function hashFile(path: string, content: Buffer): string {
         let lines = text.split("\n");
         if (lines.length > 0 && lines[lines.length - 1] === "") lines = lines.slice(0, -1);
         for (const line of lines) {
+            assertNoDuplicateMemberNames(line);
             const obj = JSON.parse(line) as unknown;
             h.update(Buffer.from(canonicalize(obj)));
             h.update(Buffer.from("\n", "utf-8"));

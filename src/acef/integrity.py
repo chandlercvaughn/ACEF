@@ -206,6 +206,24 @@ def _canonicalize_hash_domain(data: Any, *, path: Path | None = None) -> bytes:
         ) from exc
 
 
+def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    """``object_pairs_hook`` that rejects DUPLICATE object member names — full
+    I-JSON (RFC 7493 §2.3) conformance, which the spec adopts (§3.1.3 #1).
+
+    ``json.loads``/``JSON.parse`` are last-wins: ``{"a":1,"a":2}`` silently
+    collapses to ``{"a":2}``, so a hash-domain file with a duplicate member hashes
+    identically to its de-duplicated form while a first-wins or I-JSON-strict
+    verifier reads a different value — a cross-implementation determinism/integrity
+    break (a signed manifest could smuggle a member the verifier never resolves).
+    Raising here makes every hash-domain parse reject it."""
+    seen: set[str] = set()
+    for key, _ in pairs:
+        if key in seen:
+            raise ValueError(f"duplicate object member name {key!r} (RFC 7493 §2.3 / I-JSON)")
+        seen.add(key)
+    return dict(pairs)
+
+
 def canonicalize_json_str(json_str: str, *, path: Path | None = None) -> bytes:
     """Parse a JSON string and re-canonicalize via RFC 8785.
 
@@ -232,10 +250,15 @@ def canonicalize_json_str(json_str: str, *, path: Path | None = None) -> bytes:
     # integrity check) crashes with a raw traceback — the same availability /
     # "report ALL errors" defect the domain-fault wrapper below already guards.
     try:
-        data = json.loads(json_str)
+        data = json.loads(json_str, object_pairs_hook=_reject_duplicate_keys)
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
         raise ACEFCanonicalizationError(
             f"JSON not canonicalizable per RFC 8785 (file is not well-formed JSON): {exc}",
+            path=path,
+        ) from exc
+    except ValueError as exc:  # duplicate object member name from _reject_duplicate_keys
+        raise ACEFCanonicalizationError(
+            f"JSON not canonicalizable per RFC 8785 / I-JSON (RFC 7493 §2.3): {exc}",
             path=path,
         ) from exc
     return _canonicalize_hash_domain(data, path=path)
@@ -392,10 +415,15 @@ def sha256_jsonl_file(path: Path) -> str:
                 path=path,
             )
         try:
-            data = json.loads(line)
+            data = json.loads(line, object_pairs_hook=_reject_duplicate_keys)
         except json.JSONDecodeError as exc:
             raise ACEFCanonicalizationError(
                 f"JSONL line {line_number} is not valid JSON (spec §3.1.3 #2): {path}: {exc}",
+                path=path,
+            ) from exc
+        except ValueError as exc:  # duplicate object member name (RFC 7493 §2.3)
+            raise ACEFCanonicalizationError(
+                f"JSONL line {line_number} has a duplicate object member name (I-JSON / RFC 7493 §2.3): {path}: {exc}",
                 path=path,
             ) from exc
         canonical = _canonicalize_hash_domain(data, path=path)

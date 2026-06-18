@@ -17,6 +17,7 @@ export {
     computeBundleDigest,
     buildMerkleTree,
     pathTextProblem,
+    assertNoDuplicateMemberNames,
     type MerkleLeaf,
     type MerkleTree,
 } from "./integrity.js";
