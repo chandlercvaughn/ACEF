@@ -180,7 +180,19 @@ def _compute_exit_code(tallies: dict[str, int]) -> int:
     is_flag=True,
     help="Suppress non-diagnostic output (banner, summary).",
 )
-def verify_cmd(path: str, fmt: str, quiet: bool) -> None:
+@click.option(
+    "--trust-anchor",
+    "trust_anchor",
+    multiple=True,
+    type=click.Path(exists=True, dir_okay=False),
+    help=(
+        "Path to a PEM- or DER-encoded X.509 trust-anchor certificate (repeatable). "
+        "When supplied, an x5c signature chain MUST terminate at one of these anchors "
+        "per spec §3.1.3; chains that do not surface ACEF-012. Omit for self-attested "
+        "trust (no anchor enforcement)."
+    ),
+)
+def verify_cmd(path: str, fmt: str, quiet: bool, trust_anchor: tuple[str, ...]) -> None:
     """Verify an ACEF Evidence Bundle at PATH.
 
     Accepts a directory bundle or an ``.acef.tar.gz`` archive. Runs schema
@@ -217,6 +229,21 @@ def verify_cmd(path: str, fmt: str, quiet: bool) -> None:
         )
         sys.exit(2)
 
+    # Load operator-supplied trust anchors (spec §3.1.3). ``click.Path(exists=True)``
+    # already rejected a nonexistent path; ``load_trust_anchors`` rejects a file
+    # whose bytes are not a PEM/DER certificate with a structured ACEF-012 error,
+    # surfaced here as a clean message + exit 2 rather than a raw traceback.
+    trust_anchors = None
+    if trust_anchor:
+        from acef.errors import ACEFSigningError
+        from acef.signing import load_trust_anchors
+
+        try:
+            trust_anchors = load_trust_anchors(trust_anchor)
+        except ACEFSigningError as exc:
+            click.echo(f"ERROR: {exc}", err=True)
+            sys.exit(2)
+
     with ExitStack() as stack:
         if is_archive:
             # Resolve the archive to a RAW-extracted directory and verify that.
@@ -236,8 +263,10 @@ def verify_cmd(path: str, fmt: str, quiet: bool) -> None:
             report_path = str(bundle_path)
 
         # ``profiles=None`` skips Phase 4 (rule evaluation). The other phases
-        # still run and populate ``structural_errors``.
-        assessment = validate_bundle(str(target), profiles=None)
+        # still run and populate ``structural_errors``. ``trust_anchors`` (None
+        # unless ``--trust-anchor`` was supplied) enforces x5c chain termination
+        # in the Phase-2 integrity check.
+        assessment = validate_bundle(str(target), profiles=None, trust_anchors=trust_anchors)
         diagnostics: list[dict[str, Any]] = list(assessment.structural_errors)
 
         # Tally by classification.

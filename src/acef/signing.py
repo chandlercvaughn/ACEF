@@ -15,6 +15,7 @@ import base64
 import binascii
 import json
 import re
+from collections.abc import Iterable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -480,6 +481,52 @@ def verify_x5c_chain(
             )
 
     return chain[0].public_key()
+
+
+def load_trust_anchors(paths: Iterable[str]) -> list[Certificate]:
+    """Load locally-configured trust-anchor certificates from disk.
+
+    Each path is read as bytes and parsed as an X.509 certificate, trying PEM
+    first then DER. The returned list is the ``trust_anchors`` argument the
+    validation pipeline (``validate`` / ``validate_bundle`` / ``check_integrity``)
+    threads into ``verify_x5c_chain`` to enforce x5c chain termination per spec
+    §3.1.3 ("verifiers MUST validate the full certificate chain against a locally
+    configured set of trust anchors"). This is the loader the ``acef validate`` /
+    ``acef verify`` CLI ``--trust-anchor`` option uses to make anchor enforcement
+    reachable from the command line (audit finding F4): the engine had the
+    parameter, but no shipped public surface populated it from operator-supplied
+    cert files.
+
+    Args:
+        paths: Filesystem paths to PEM- or DER-encoded X.509 certificates.
+
+    Returns:
+        The parsed certificates, in the order given. An empty iterable yields an
+        empty list (no anchors → no x5c enforcement, the pipeline default).
+
+    Raises:
+        ACEFSigningError: a path is unreadable (ACEF-012) or its bytes parse as
+            neither a PEM nor a DER certificate (ACEF-012). Surfacing a single
+            structured code keeps the CLI failure mode identical to the rest of
+            the signing-trust surface rather than leaking a raw OSError/ValueError.
+    """
+    anchors: list[Certificate] = []
+    for path in paths:
+        try:
+            data = Path(path).read_bytes()
+        except OSError as e:
+            raise ACEFSigningError(f"Cannot read trust anchor {path!r}: {e}", code="ACEF-012") from e
+        try:
+            anchors.append(load_pem_x509_certificate(data))
+        except ValueError:
+            try:
+                anchors.append(load_der_x509_certificate(data))
+            except ValueError as e:
+                raise ACEFSigningError(
+                    f"Trust anchor {path!r} is not a valid PEM or DER X.509 certificate: {e}",
+                    code="ACEF-012",
+                ) from e
+    return anchors
 
 
 def _load_private_key(key_path: str) -> PrivateKeyTypes:

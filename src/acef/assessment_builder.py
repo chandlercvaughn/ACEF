@@ -7,11 +7,15 @@ with models/assessment.py.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from acef.integrity import canonicalize
 from acef.models.assessment import AssessmentBundle
 from acef.package import Package
 from acef.validation.engine import validate_bundle
+
+if TYPE_CHECKING:
+    from cryptography.x509 import Certificate
 
 
 def validate(
@@ -21,6 +25,7 @@ def validate(
     evaluation_instant: str | None = None,
     timestamp: str | None = None,
     assessment_id: str | None = None,
+    trust_anchors: list[Certificate] | None = None,
 ) -> AssessmentBundle:
     """Validate a package or bundle and produce an Assessment Bundle.
 
@@ -29,6 +34,12 @@ def validate(
     Args:
         package_or_path: A Package object or path to a bundle directory/archive.
         profiles: List of profile IDs to evaluate.
+        trust_anchors: Locally-configured trust-anchor certificates
+            (``cryptography.x509.Certificate``) for x5c chain termination during
+            signature/integrity verification (spec §3.1.3). Forwarded to
+            ``validate_bundle``; ``None`` (default) means no x5c chain anchoring is
+            attempted. This is the PUBLIC surface for the reachability the lower-level
+            ``validate_bundle`` added — without it x5c anchoring was unreachable (F4).
         evaluation_instant: Override evaluation timestamp (ISO 8601) — pins the
             evaluation results per spec §3.7.
         timestamp: Override the Assessment Bundle's creation ``timestamp``.
@@ -62,6 +73,7 @@ def validate(
                 evaluation_instant=evaluation_instant,
                 timestamp=timestamp,
                 assessment_id=assessment_id,
+                trust_anchors=trust_anchors,
             )
     else:
         path = Path(package_or_path)
@@ -87,6 +99,7 @@ def validate(
                     evaluation_instant=evaluation_instant,
                     timestamp=timestamp,
                     assessment_id=assessment_id,
+                    trust_anchors=trust_anchors,
                 )
         else:
             return validate_bundle(
@@ -95,6 +108,7 @@ def validate(
                 evaluation_instant=evaluation_instant,
                 timestamp=timestamp,
                 assessment_id=assessment_id,
+                trust_anchors=trust_anchors,
             )
 
 

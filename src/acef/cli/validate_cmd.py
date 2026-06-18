@@ -18,7 +18,25 @@ from acef.models.enums import ProvisionOutcome, RuleOutcome
 @click.option("--profile", "-p", multiple=True, help="Profile IDs to validate against")
 @click.option("--output", "-o", default=None, help="Write assessment JSON to file")
 @click.option("--format", "fmt", default="pretty", type=click.Choice(["pretty", "json", "markdown"]))
-def validate_cmd(path: str, profile: tuple[str, ...], output: str | None, fmt: str) -> None:
+@click.option(
+    "--trust-anchor",
+    "trust_anchor",
+    multiple=True,
+    type=click.Path(exists=True, dir_okay=False),
+    help=(
+        "Path to a PEM- or DER-encoded X.509 trust-anchor certificate (repeatable). "
+        "When supplied, an x5c signature chain MUST terminate at one of these anchors "
+        "per spec §3.1.3; chains that do not surface ACEF-012. Omit for self-attested "
+        "trust (no anchor enforcement)."
+    ),
+)
+def validate_cmd(
+    path: str,
+    profile: tuple[str, ...],
+    output: str | None,
+    fmt: str,
+    trust_anchor: tuple[str, ...],
+) -> None:
     """Validate an ACEF Evidence Bundle at PATH.
 
     Accepts a directory bundle or an ``.acef.tar.gz`` archive. Optionally specify
@@ -33,6 +51,22 @@ def validate_cmd(path: str, profile: tuple[str, ...], output: str | None, fmt: s
     load→export, which would heal the tampering before validation.
     """
     profiles = list(profile) if profile else None
+
+    # Load operator-supplied trust anchors (spec §3.1.3). ``click.Path(exists=True)``
+    # already rejected a nonexistent path; ``load_trust_anchors`` rejects a file
+    # whose bytes are not a PEM/DER certificate with a structured ACEF-012 error,
+    # which we surface as a clean message + exit 2 rather than a raw traceback
+    # (the same failure contract the rest of this command honors).
+    trust_anchors = None
+    if trust_anchor:
+        from acef.errors import ACEFSigningError
+        from acef.signing import load_trust_anchors
+
+        try:
+            trust_anchors = load_trust_anchors(trust_anchor)
+        except ACEFSigningError as exc:
+            click.echo(f"Error: {exc}", err=True)
+            sys.exit(2)
 
     # Delegate directly to the public ``validate`` API. Its archive branch now
     # performs the raw safe-extraction (no load→export healing), so the CLI no
@@ -51,7 +85,7 @@ def validate_cmd(path: str, profile: tuple[str, ...], output: str | None, fmt: s
     # ``structural_errors`` shape a fatal directory assessment carries) so a
     # ``| jq`` consumer never receives a traceback on stdout.
     try:
-        assessment = validate(path, profiles=profiles)
+        assessment = validate(path, profiles=profiles, trust_anchors=trust_anchors)
     except ACEFFormatError as exc:
         code = exc.code or "ACEF-050"
         # ``str(exc)`` is ``"[ACEF-050] <message>"`` (the ``ACEFError.__str__``

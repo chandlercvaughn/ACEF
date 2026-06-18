@@ -588,7 +588,10 @@ class TestCLIValidateArchiveErrorSymmetry:
         from acef.cli import validate_cmd as vc
         from acef.errors import ACEFFormatError, resolve_error_meta
 
-        def _raise_acef052(path: str, profiles: list[str] | None = None) -> None:
+        def _raise_acef052(path: str, profiles: list[str] | None = None, **kwargs: object) -> None:
+            # ``**kwargs`` absorbs the ``trust_anchors=`` keyword the CLI now
+            # forwards to ``validate`` (F4); the stub still raises before it
+            # would be used.
             raise ACEFFormatError("Synthetic non-fatal format error", code="ACEF-052")
 
         monkeypatch.setattr(vc, "validate", _raise_acef052)
