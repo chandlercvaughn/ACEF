@@ -12,6 +12,7 @@ same limitation Appendix D.4 discloses as a non-goal.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 from acef.package import Package
@@ -72,11 +73,16 @@ def test_spec_documents_evaluation_instant_producer_control_caveat() -> None:
     )
     # The spec must distinguish the two fallback shapes precisely (roborev on
     # ee40372/d037f5c): absent/non-string -> wall-clock; non-ISO string -> verbatim.
-    assert "recorded **verbatim**" in section or "recorded verbatim" in section, (
-        "spec must note a present-but-non-ISO metadata.timestamp is recorded verbatim, not wall-clock"
+    # Pin the two fallback shapes as ONE span each (not just the words appearing
+    # somewhere in the slice): absent/non-string -> falls back -> wall-clock; and
+    # non-ISO string -> recorded verbatim. Normalize markdown emphasis/backticks
+    # first so '**absent or non-string**' etc. match.
+    norm_section = section.replace("*", "").replace("`", "")
+    assert re.search(r"absent or non-string.{0,80}falls back.{0,40}wall-clock", norm_section, re.DOTALL), (
+        "spec must state, in one span, that an absent/non-string metadata.timestamp falls back to wall-clock"
     )
-    assert "wall-clock" in section and ("absent or non-string" in section or "absent/non-string" in section), (
-        "spec must note an absent/non-string metadata.timestamp falls back to wall-clock"
+    assert re.search(r"present-but-non-ISO string.{0,40}recorded verbatim", norm_section, re.DOTALL), (
+        "spec must state, in one span, that a present-but-non-ISO metadata.timestamp is recorded verbatim"
     )
 
 
