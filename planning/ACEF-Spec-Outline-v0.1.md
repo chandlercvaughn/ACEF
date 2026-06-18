@@ -1649,9 +1649,9 @@ assessment.export("acme-rag-assessment-2026-q1.acef-assessment.json")
 | Integration | How |
 |---|---|
 | **OpenTelemetry** | OTLP exporter that converts ACEF `event_log` records to/from OTel spans; bidirectional |
-| **C2PA** | Read/write C2PA manifests as `transparency_marking` evidence records; bridge for content provenance |
+| **C2PA** | *Designed* to bridge content provenance: a C2PA manifest can be carried as an artifact and referenced from a `transparency_marking` record. (No C2PA parser/embedder ships in v1 — see the Interoperability status note; "read/write C2PA" is design intent, not a realized codec.) |
 | **W3C TDMRep** | Import TDM reservation signals as `copyright_rights_reservation` records |
-| **CycloneDX / SPDX** | Import SBOM data as supply chain evidence linked to `entities.components[]` |
+| **CycloneDX / SPDX** | *Designed* to bridge supply-chain evidence: an SBOM can be carried as an artifact and referenced from records linked to `entities.components[]`. (No SBOM importer that lifts component data into ACEF entities ships in v1 — see the Interoperability status note; "import SBOM data" is design intent.) |
 | **MLflow / Weights & Biases** | Auto-capture training run metadata as evidence records linked to `entities.datasets[]` |
 | **Hugging Face** | Ingest model cards as `dataset_card` + `evaluation_report` records linked to model subjects |
 | **LangSmith / LangFuse** | Capture LLM trace data as `event_log` records (JSON Lines for high volume) |

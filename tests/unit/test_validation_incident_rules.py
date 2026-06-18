@@ -133,9 +133,12 @@ class TestArt73Clock:
         #    widespread (independently), not because widespread modifies 3.49.c;
         c_and_widespread = {"death_involved": False, "widespread": True, "serious_incident_triggers": ["3.49.c"]}
         assert ir.shortest_art73_clock_days(c_and_widespread) == 2
-        #  - widespread ALONE (no 3.49 trigger at all) is still 2 days.
-        widespread_only = {"death_involved": False, "widespread": True, "serious_incident_triggers": []}
-        assert ir.shortest_art73_clock_days(widespread_only) == 2
+        #  - widespread drives 2 days REGARDLESS of which 3.49 trigger is present:
+        #    a 3.49.a incident (general 15-day base) that is also widespread is 2 days.
+        #    (A schema-valid bundle always carries >=1 trigger — card_source requires
+        #    serious_incident_triggers minItems:1 — so this uses a non-empty set.)
+        a_and_widespread = {"death_involved": False, "widespread": True, "serious_incident_triggers": ["3.49.a"]}
+        assert ir.shortest_art73_clock_days(a_and_widespread) == 2
 
     def test_general_fifteen_days(self) -> None:
         # Non-fatal 3.49.a serious-health-harm takes the general 15-day clock.
@@ -2728,3 +2731,19 @@ class TestRecordConfidentialityFailOpenButSchemaGuarded:
         schema = json.loads((repo / "acef-conventions" / "v1.1" / "record-envelope.schema.json").read_text())
         assert "confidentiality" in schema.get("required", []), "confidentiality must be schema-required"
         assert schema["properties"]["confidentiality"].get("enum"), "confidentiality must be a closed enum"
+
+
+def test_retention_years_basis_survives_load_template() -> None:
+    """roborev on 2b82e0d: the inferred-default qualification on the Art. 73
+    10-year retention must be accessible to SDK consumers, not dropped by
+    load_template() as an unmodeled Provision extra (PhD-review finding 22)."""
+    from acef.templates.registry import load_template
+
+    tpl = load_template("eu-ai-act-art73-2026")
+    with_retention = [p for p in tpl.provisions if p.retention_years == 10]
+    assert with_retention, "expected Art. 73 provisions with retention_years=10"
+    for prov in with_retention:
+        assert prov.retention_years_basis, (
+            f"provision {prov.provision_id} has bare retention_years=10 with no inferred-default basis"
+        )
+        assert "Art. 18" in prov.retention_years_basis or "inferred" in prov.retention_years_basis.lower()

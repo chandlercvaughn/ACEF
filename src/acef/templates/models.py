@@ -57,6 +57,11 @@ class Provision(BaseModel):
     minimum_evidence_count: dict[str, int] = Field(default_factory=dict)
     evidence_freshness_max_days: int | None = None
     retention_years: int | None = None
+    # Optional provenance for retention_years when it is an INFERRED default rather
+    # than a cited figure (e.g. Art. 73 sets no incident-report retention, so the
+    # 10-year value is inferred from Art. 18). Modeled so the qualification survives
+    # load_template() and is accessible to SDK consumers (PhD-review finding 22).
+    retention_years_basis: str | None = None
     evaluation: list[EvaluationRule] = Field(default_factory=list)
     tiered_requirements: dict[str, Any] | None = None
     evaluation_scope: str | None = None  # "package" or None (per-subject default)
