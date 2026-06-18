@@ -3147,9 +3147,6 @@ class Package:
         Raises:
             ValueError: if ``awareness_date`` is not a parseable ISO-8601 instant.
         """
-        self._ensure_v1_1()
-        self._declare_art73_profile()
-
         # §5.5 — the computed dedupe fields are RESERVED; a caller MUST NOT inject
         # them via extra_card_source (which merges below). Reject before any work.
         _reject_reserved_dedupe_fields(extra_card_source, block_name="extra_card_source")
@@ -3169,6 +3166,17 @@ class Package:
         facts = self._merged_eu_facts(harm_core, eu_ai_act_facts)
 
         timeline_entry = self._art73_timeline_entry(awareness_date, facts)
+
+        # Atomicity (F37): mutate package state ONLY after every fail-fast
+        # validation/derivation above has succeeded (reserved-field rejection,
+        # pepper strength, _merged_eu_facts trigger derivation, awareness_date
+        # parse in _art73_timeline_entry). Previously these ran AFTER
+        # _ensure_v1_1()/_declare_art73_profile(), so e.g. an unparseable
+        # awareness_date left the package bumped to 1.1.0 with the Art.73 profile
+        # half-declared — contradicting the "a failed call leaves the package
+        # unmutated" contract.
+        self._ensure_v1_1()
+        self._declare_art73_profile()
 
         disclosure: dict[str, Any] = {
             "status": disclosure_status,
@@ -3428,9 +3436,6 @@ class Package:
                 VAL-FIX-INCBUILD-001). The field name is the committed identity and is
                 never normalized — it is rejected, not lowercased.
         """
-        self._ensure_v1_1()
-        self._declare_art73_profile()
-
         # §5.5 — the computed dedupe fields are RESERVED; a caller MUST NOT inject
         # them via extra_payload (which merges below, AFTER the public-only gate).
         # Reject before any work so a forged key cannot reach a non-public card.
@@ -3454,6 +3459,17 @@ class Package:
         crosswalk = self._derive_taxonomy_crosswalk(harm_core, eu_ai_act_facts, stix_object_refs)
         timeline_entry = self._art73_timeline_entry(awareness_date, facts)
         band_value = band(severity_vector)
+
+        # Atomicity (F37): mutate package state ONLY after every fail-fast
+        # validation/derivation above has succeeded (reserved-field rejection,
+        # pepper strength, _merged_eu_facts, _derive_taxonomy_crosswalk, and the
+        # awareness_date parse in _art73_timeline_entry). Previously these ran
+        # AFTER _ensure_v1_1()/_declare_art73_profile(), so e.g. an unparseable
+        # awareness_date left the package bumped to 1.1.0 with the Art.73 profile
+        # half-declared — contradicting the "a failed call leaves the package
+        # unmutated" contract.
+        self._ensure_v1_1()
+        self._declare_art73_profile()
 
         disclosure: dict[str, Any] = {
             "status": disclosure_status,

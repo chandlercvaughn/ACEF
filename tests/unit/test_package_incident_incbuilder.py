@@ -589,3 +589,46 @@ def _write_ec_key(tmp_path: Path) -> tuple[str, ec.EllipticCurvePrivateKey]:
     key_path = tmp_path / "signing-key.pem"
     key_path.write_bytes(pem)
     return str(key_path), key
+
+
+class TestIncidentBuilderAtomicity:
+    """F37: a failed report_incident() / incident_card() must leave the package
+    UNMUTATED. Previously _ensure_v1_1() (bump core_version → 1.1.0) and
+    _declare_art73_profile() ran BEFORE the awareness_date parse, so an
+    unparseable date raised AFTER the package was half-mutated — contradicting
+    the documented "a failed call leaves the package unmutated" contract."""
+
+    def test_report_incident_bad_awareness_date_leaves_package_unmutated(self) -> None:
+        from acef.package import _ART73_PROFILE_ID
+
+        pkg = _pkg_no_policy()
+        assert pkg._versioning.core_version == "1.0.0"
+        assert not any(p.profile_id == _ART73_PROFILE_ID for p in pkg._profiles)
+        with pytest.raises(ValueError):
+            pkg.report_incident(
+                public_incident_id=_PUBLIC_ID,
+                harm_core=dict(_HARM_CORE),
+                incident_type="operational_failure",
+                description="unparseable awareness_date",
+                awareness_date="not-an-iso-date",
+                eu_ai_act_facts={"serious_incident_triggers": ["3.49.a"], "widespread": False, "death_involved": True},
+            )
+        assert pkg._versioning.core_version == "1.0.0", "core_version mutated despite a failed report_incident"
+        assert not any(p.profile_id == _ART73_PROFILE_ID for p in pkg._profiles), "Art.73 profile declared on failure"
+
+    def test_incident_card_bad_awareness_date_leaves_package_unmutated(self) -> None:
+        from acef.package import _ART73_PROFILE_ID
+
+        pkg = _pkg_no_policy()
+        assert pkg._versioning.core_version == "1.0.0"
+        assert not any(p.profile_id == _ART73_PROFILE_ID for p in pkg._profiles)
+        with pytest.raises(ValueError):
+            pkg.incident_card(
+                public_incident_id=_PUBLIC_ID,
+                harm_core=dict(_HARM_CORE),
+                severity_vector="ACEF-SEV:1.0/HT:P/HG:H/RV:A/SC:U/BR:I",
+                awareness_date="not-an-iso-date",
+                eu_ai_act_facts={"serious_incident_triggers": ["3.49.a"], "widespread": False, "death_involved": False},
+            )
+        assert pkg._versioning.core_version == "1.0.0", "core_version mutated despite a failed incident_card"
+        assert not any(p.profile_id == _ART73_PROFILE_ID for p in pkg._profiles), "Art.73 profile declared on failure"
