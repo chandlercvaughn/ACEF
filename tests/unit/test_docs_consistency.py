@@ -91,3 +91,28 @@ class TestF25SixVsFiveRecordTypes:
             "delivery_verdict",
         ):
             assert (v1_1 / f"{name}.schema.json").exists(), f"missing v1.1 Evidence schema: {name}"
+
+
+class TestF47RecordTypesInventory:
+    def test_record_types_count_and_incident_card_registered(self) -> None:
+        """F47: the RECORD_TYPES inventory comment ('16 v1.0 + 6 v1.1') omitted
+        incident_card (the 7th v1.1 addition listed below it). Pin the true count
+        (16 + 6 + 1 = 23) and incident_card's presence so the comment stays honest."""
+        from acef.models.enums import RECORD_TYPES
+
+        assert "incident_card" in RECORD_TYPES
+        assert len(RECORD_TYPES) == 23, f"RECORD_TYPES count drifted: {len(RECORD_TYPES)}"
+
+
+class TestF45PriorPackageRefDocstring:
+    def test_init_docstring_describes_bundle_digest_not_urn(self) -> None:
+        """F45: Package.__init__ called prior_package_ref a 'URN'; spec + schema +
+        the from_prior_bundle helper mandate the bundle digest (sha256:)."""
+        from acef.package import Package
+
+        doc = (Package.__init__.__doc__ or "").lower()
+        idx = doc.find("prior_package_ref:")
+        assert idx != -1, "Package.__init__ lost its prior_package_ref doc entry"
+        entry = doc[idx : idx + 400]
+        assert "bundle digest" in entry or "sha256" in entry, "prior_package_ref doc must cite the bundle digest"
+        assert "urn of a prior" not in entry, "prior_package_ref doc still calls it a URN"

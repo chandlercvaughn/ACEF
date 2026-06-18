@@ -225,7 +225,8 @@ class ProvisionOutcome(str, Enum):
 
 # Record types — 16 v1.0 record types + 6 v1.1 agent-reliability primitives
 # (authorized_test_scope, scope_boundary_event, finding_record,
-#  delivery_verdict, coverage_cell, harness_attestation) per brief §3.1-§3.6.
+#  delivery_verdict, coverage_cell, harness_attestation) per brief §3.1-§3.6
+# + 1 v1.1 RFC-0002 incident-reporting type (incident_card) = 23 registered.
 # coverage_cell lives in Assessment Bundles, not records/, but is registered
 # here so cross-cutting type-name checks (e.g., VAL-CONFORMANCE-004 inventory)
 # treat it uniformly with the other v1.1 additions.
