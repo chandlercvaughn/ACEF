@@ -148,6 +148,50 @@ class TestFinding15ConformanceClasses:
         assert "x5c" in para, "offline class must address x5c chain validation, not only JWS self-consistency"
 
 
+class TestFindings1And4And5SecurityConsiderations:
+    """The spec had no threat model / Security Considerations section (finding 1,
+    critical). Appendix D must state an adversary model, the guarantees, the
+    explicit non-goals (replay/freshness, x5c revocation, DNS-01 default, key-to-
+    identity binding), and the Merkle second-preimage argument (finding 4/44)."""
+
+    def _appendix_d(self) -> str:
+        text = _spec_text()
+        idx = text.find("## Appendix D")
+        assert idx != -1, "spec must add Appendix D: Security Considerations"
+        return text[idx:]
+
+    def test_appendix_d_has_adversary_model_and_guarantees_and_nongoals(self) -> None:
+        d = self._appendix_d().lower()
+        assert "adversary model" in d or "threat model" in d, "Appendix D must state an adversary/threat model"
+        assert "guarantee" in d, "Appendix D must state the guarantees"
+        assert "non-goal" in d or "out of scope" in d or "out-of-scope" in d, "Appendix D must state explicit non-goals"
+
+    def test_appendix_d_covers_the_named_security_findings(self) -> None:
+        d = self._appendix_d().lower()
+        # finding 5 (replay/freshness, no trusted timestamp) + finding 7 (revocation).
+        assert "replay" in d or "freshness" in d, (
+            "Appendix D must address replay/freshness (signing time self-asserted)"
+        )
+        assert "revocation" in d or "crl" in d or "ocsp" in d, (
+            "Appendix D must address x5c revocation being out of scope"
+        )
+        # finding 2 (key-to-identity binding) framed as a security property.
+        assert "producer" in d and ("self-attested" in d or "binding" in d), (
+            "Appendix D must address signing-identity-to-producer binding"
+        )
+
+    def test_appendix_d_merkle_second_preimage_argument(self) -> None:
+        d = self._appendix_d()
+        dl = d.lower()
+        assert "second-preimage" in dl or "second preimage" in dl, (
+            "Appendix D must give the Merkle second-preimage argument"
+        )
+        # The argument hinges on leaf domain-separation (0x00) and that a path cannot
+        # contain arbitrary digest bytes, so leaf/inner-node preimages cannot collide.
+        assert "0x00" in d, "the Merkle argument must reference the 0x00 leaf domain-separator"
+        assert "path" in dl, "the Merkle argument must rest on path-byte constraints"
+
+
 class TestForwardCompatibleMinorSelection:
     """roborev on 4d1f0dd: the header must not declare higher 1.y minors invalid
     while the validator routes them to v1.1 — the spec must document the

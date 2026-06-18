@@ -1984,3 +1984,54 @@ The roll-up consumes rule outcomes; each outcome is the denotation of a DSL oper
 - **Universal** — `field_present`, `field_value`, `evidence_freshness`, `entity_linked`: denote `∀ s∈S. φ(s)`. On `S = ∅`, **TRUE** (vacuous truth). (`entity_linked` is universal — "every record of the type has the entity ref" — passing vacuously on zero matching records, per §3.5 and `op_entity_linked`.)
 
 These are the standard first-order semantics; pinning them removes the classic "empty-set false-pass/false-fail" ambiguity, and the assignment of each built-in operator to ∃ or ∀ is normative (§3.5). An invalid JSON Pointer or non-ECMA-262 pattern is a rule **error** (`out = error`, codes ACEF-043/ACEF-045/ACEF-046), which routes to `P₃ → not-assessed`, never to a silent pass/fail.
+
+---
+
+## Appendix D: Security Considerations
+
+This appendix states the **adversary model**, the **guarantees** ACEF provides against it, and the **explicit non-goals**. Every security property the implementation enforces is stated here as a claim a reviewer can falsify; a property not listed here is **not** claimed. This section is normative for the meaning of "verified" and for what a consumer may infer from a validated bundle.
+
+### D.1 Adversary model
+
+The adversary is an active party who can **read, copy, modify, reorder, replay, and re-sign** any bundle in transit or at rest, mint their own keys and self-signed certificates, stand up network services (DNS, HTTP) for any domain they control, and submit crafted bundles to a validator. The adversary does **not** control the consumer's locally configured trust anchors, does **not** possess private keys they have not generated, and cannot find SHA-256 collisions/second-preimages or forge RS256/ES256 signatures (standard cryptographic assumptions). Two adversary goals are in scope: (G1) **undetected tampering** — alter evidence yet have a validator report success; (G2) **misattribution** — have evidence accepted as authored by a party who did not author it.
+
+### D.2 Guarantees
+
+Against G1 (tampering), for a bundle whose integrity verification (steps a–f of §3.1.3) passes:
+
+- **Tamper-evidence.** Every byte of every hash-domain file (`acef-manifest.json`, `records/`, `artifacts/`) is committed by `content-hashes.json`; any post-hash modification changes a SHA-256 value and is FATAL (ACEF-010/014). The Merkle root (D.5) commits to the whole `content-hashes.json` key/value set; a single altered entry changes the root (ACEF-011).
+- **Cryptographic integrity (when signed).** A detached JWS over the canonical `content-hashes.json` bytes binds the signer's key to the entire hash domain. Only RS256/ES256 are accepted (RSA ≥ 2048); `alg`/`crit` confusion and weak keys are rejected (§3.1.3, ACEF-013). A modified bundle re-presented under the original signature fails verification.
+- **Determinism as integrity.** Because canonicalization, collation (UTF-16), and the hash/Merkle construction are fully pinned (§3.1.3, Appendix C), an independent verifier recomputes the identical bundle digest — there is no "validator-specific" acceptance.
+
+### D.3 Signing identity ↔ producer binding (in scope for G2)
+
+A valid signature proves the holder of *some* key signed *these* `content-hashes.json` bytes. It does **not**, by itself, prove the signer is the `metadata.producer`/subject named in the manifest. Two binding levels are defined and a validator **MUST** report which one a signature achieves:
+
+- **`self-attested`** — the signature carries a `jwk` (or an `x5c` that does not chain to a configured trust anchor). Integrity holds, but **identity does not**: an adversary who obtains any bundle can re-sign tampered content with a freshly minted key and the signature verifies. A `self-attested` signature MUST NOT be presented to a consumer as proof that the named producer authored the bundle.
+- **`anchored`** — the signature carries an `x5c` chain that validates to a locally configured trust anchor (RFC 5280 path validation, §3.1.3). Identity is established **to the extent the trust anchor vouches for the certificate subject**. A validator **MUST** additionally check that the certificate subject (or a configured mapping) corresponds to the manifest's declared `producer`/subject identity, and **MUST** emit a diagnostic (ACEF-012 family) when an anchored signature's subject does not match the claimed producer — otherwise an attacker with any anchored cert could sign for another party ("valid signature, wrong signer").
+
+**Default posture (normative).** `trust_anchors` defaults to none → signatures are evaluated as `self-attested`. A profile or deployment that needs **attributable** evidence (e.g. a regulator-facing claim that "Provider X signed this") **MUST** configure trust anchors and require the `anchored` + subject-match condition; absent that configuration, a consumer MUST treat the signature as integrity-only, not attribution.
+
+### D.4 Non-goals (explicitly OUT OF SCOPE for v1)
+
+The following are deliberately **not** provided; a consumer MUST NOT assume them:
+
+- **Replay / freshness / trusted timestamp.** A bundle carries no cryptographic proof of *when* it was signed: certificate expiry is checked against the producer-controlled `metadata.timestamp` (for reproducibility), not wall-clock, and there is no RFC 3161-style timestamp authority or signing-time nonce. An old, validly-signed bundle can be replayed as current; freshness is governed only by the producer-controlled record timestamps and the `evidence_freshness` DSL rule. A trusted-timestamp profile is future work.
+- **Certificate revocation.** No CRL/OCSP checking is performed (§3.1.3 makes it RECOMMENDED, not REQUIRED). A compromised-but-unexpired key signs bundles that validate until expiry. Deployments needing revocation MUST layer it externally.
+- **DNS-01 domain control out of the box.** The OPTIONAL online-conformance class (§6.6) requires an injected DNS resolver; the stdlib default cannot perform TXT lookups and returns the explicit non-result `unverified`. The `.well-known` HTTP channel works by default. The online class never establishes durable/offline attribution (it is at-check-time only).
+- **Confidentiality of low-entropy committed values** — see D.6.
+- **Availability / DoS of validators** beyond the bounded-input guards already specified (regex resource bounds §3.5, bounded `.well-known` reads, archive member caps).
+
+### D.5 Merkle construction: second-preimage / leaf–node confusion
+
+The Merkle tree (§3.1.3) uses **leaf** = `SHA-256(path_bytes ‖ 0x00 ‖ hexhash_bytes)` and **inner node** = `SHA-256(left_digest ‖ right_digest)` (two raw 32-byte digests). A classic attack on unsalted Merkle trees is **leaf/inner-node confusion** (presenting a leaf preimage that is also a valid internal-node preimage, enabling a second pre-image for the root). ACEF resists this by construction:
+
+1. **Leaf domain separation.** Every leaf preimage contains a `0x00` byte at offset `len(path_bytes)`. Inner-node preimages are the concatenation of two SHA-256 *digests* (raw bytes).
+2. **Paths cannot impersonate digests.** For a leaf preimage to equal an inner-node preimage `left_digest ‖ right_digest`, the leaf's `path_bytes ‖ 0x00` prefix would have to equal `left_digest` (32 bytes). But §3.1.1/§3.1.3 constrain `path` to forward-slash-separated, relative, **UTF-8 NFC** path segments with **no NUL bytes** and no control characters — whereas a SHA-256 digest is 32 uniformly-random bytes that, with overwhelming probability, contains NUL/control bytes and is not valid NFC. A path therefore cannot equal an arbitrary 32-byte digest, so a leaf preimage cannot coincide with an inner-node preimage. The `0x00` separator (which cannot occur in a path) makes this explicit rather than probabilistic.
+3. **Odd-leaf promotion, not duplication.** A lone node is promoted unchanged, never duplicated, avoiding the CVE-2012-2459 duplicate-leaf root-ambiguity.
+
+Consequently a second-preimage of the root reduces to a SHA-256 second-preimage (assumed infeasible). This argument is structural; ACEF does not add an inner-node type tag (which would change the frozen v1.0 wire format), because the path-byte constraint already forecloses the confusion. A future major MAY adopt RFC 6962-style `0x01` inner-node tagging.
+
+### D.6 Redaction commitments: binding, not hiding
+
+`hash-committed`/redacted fields commit a value as `SHA-256(JCS(value))` (§3.1.5, `redaction.py`). This commitment is **binding** (the producer cannot later claim a different value) but is **NOT hiding for low-entropy or enumerable inputs**: an adversary holding the bundle can dictionary/brute-force the preimage of any value drawn from a small space — booleans, closed enums (`event_type`, `modality`), actor URNs, or a yes/no inference input — and confirm it against the published hash. The spec therefore **MUST NOT** be read as claiming confidentiality for such fields by hashing alone. To obtain a hiding commitment, a producer SHOULD use a **salted/HMAC** commitment for low-entropy fields — `SHA-256(salt ‖ JCS(value))` with a per-record random salt, or `HMAC-SHA-256(key, JCS(value))` with a key retained out-of-band — so the preimage space is no longer enumerable; a bare `SHA-256(JCS(value))` provides integrity-of-commitment only, not hiding. The "avoids storing raw PII" language elsewhere in this document refers to *not embedding the cleartext*, not to computational hiding of a low-entropy preimage; GDPR adequacy of any redaction is a legal determination outside schema validation.
