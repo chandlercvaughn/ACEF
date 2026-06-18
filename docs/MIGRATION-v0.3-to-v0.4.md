@@ -78,8 +78,10 @@ Changes" → "SDK" below). The corresponding Pydantic payload models live in
   subject, across this scenario set, within this time window, the bound
   evidence is fresh and covers the cell". Lives inside
   `acef-conventions/v1.1/assessment-bundle.schema.json` as an optional
-  array field, **not** as a standalone record type. Constructed via the
-  `acef.models.agent_reliability.CoverageCellPayload` Pydantic model.
+  array field, **not** as a standalone record type. Constructed as a raw
+  object in the Assessment Bundle's `coverage_cells` array — there is no typed
+  builder or Pydantic model for it in v0.4 (the former `CoverageCellPayload`
+  was orphaned and removed); the validator reads it as a raw dict.
 
 - **`harness_attestation`** — A per-state-transition signed attestation
   generalizing the bundle-level JWS already in `src/acef/signing.py`. Carries

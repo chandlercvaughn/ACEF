@@ -54,9 +54,32 @@ class TestF11RedactRecordReturnsTuple:
         # not the earlier quick-reference one-liner.
         idx = doc.find("### `acef.redact_record(")
         assert idx != -1, "API_REFERENCE lost the redact_record section"
+        header_end = doc.find("\n", idx)
+        header = doc[idx:header_end]
         section = doc[idx : idx + 1400]
         assert "tuple[RecordEnvelope" in section, "redact_record section must document the tuple return"
         assert "attestation" in section.lower(), "redact_record section must describe the attestation element"
+        # roborev Low on 4b387cd: the documented signature must show defaults so
+        # policy/method/access_policy/urn_generator do not look required.
+        assert "policy=None" in header, f"redact_record signature must show defaults: {header!r}"
+
+
+class TestCoverageCellDocsNoRemovedModel:
+    """roborev Medium on 4b387cd: USER_GUIDE/MIGRATION referenced the removed
+    CoverageCellPayload / CoverageDimensions models. coverage_cell is a raw dict
+    in the Assessment Bundle's coverage_cells array (no typed model in v0.4)."""
+
+    def test_removed_models_are_actually_absent_from_src(self) -> None:
+        import acef.models.agent_reliability as ar
+
+        assert not hasattr(ar, "CoverageCellPayload")
+        assert not hasattr(ar, "CoverageDimensions")
+
+    def test_docs_do_not_import_removed_coverage_cell_models(self) -> None:
+        for rel in ("docs/USER_GUIDE.md", "docs/MIGRATION-v0.3-to-v0.4.md"):
+            text = (_REPO_ROOT / rel).read_text(encoding="utf-8")
+            for sym in ("import CoverageCellPayload", "CoverageDimensions("):
+                assert sym not in text, f"{rel} still references removed coverage_cell model usage: {sym!r}"
 
     def test_redact_record_is_publicly_exported(self) -> None:
         assert hasattr(acef, "redact_record")

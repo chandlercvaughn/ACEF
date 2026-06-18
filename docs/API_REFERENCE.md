@@ -45,7 +45,7 @@ acef.export_assessment(assessment, path, *, key_path)  # Export Assessment Bundl
 
 # Privacy
 acef.redact(pkg, *, record_filter, method, access_policy)  # Redact a package
-acef.redact_record(record, *, method, access_policy)        # Redact a single record
+acef.redact_record(record, *, policy, method, access_policy, urn_generator)  # Redact a single record -> (redacted, attestation|None)
 
 # Multi-source
 acef.merge(packages, *, producer, conflict_strategy)  # Merge packages
@@ -514,7 +514,7 @@ Create a redacted copy of a package. Alias for `redact_package()`.
 
 **Returns:** `Package` -- a new package with selected records redacted.
 
-### `acef.redact_record(record, *, policy, method, access_policy, urn_generator) -> tuple[RecordEnvelope, RecordEnvelope | None]`
+### `acef.redact_record(record, *, policy=None, method="sha256-hash-commitment", access_policy=None, urn_generator=None) -> tuple[RecordEnvelope, RecordEnvelope | None]`
 
 Create a redacted copy of a single record.
 

@@ -1195,33 +1195,39 @@ print(verdict.payload["delivery_state"])  # → verified_delivered
 
 An Assessment Bundle field, NOT a standalone record type. Lives inside
 `acef-conventions/v1.1/assessment-bundle.schema.json` under the
-`coverage_cells` optional array. ACEF v0.4 does not expose a `Package`
-builder for it (because it does not belong in an Evidence Bundle); instead
-callers construct it directly via the Pydantic model in
-`acef.models.agent_reliability`, then attach it to an Assessment Bundle
-via the assessment-builder API.
+`coverage_cells` optional array. ACEF v0.4 ships NO `Package` builder and NO
+typed payload model for it: the former
+`acef.models.agent_reliability.CoverageCellPayload` / `CoverageDimensions`
+models were orphaned (never constructed anywhere) and were removed. A coverage
+cell is a **plain object** placed in the Assessment Bundle's `coverage_cells`
+array; the validator reads it as a raw dict and enforces the
+banned-claim-language rule (ACEF-079).
 
 ```python
-from acef.models.agent_reliability import CoverageCellPayload, CoverageDimensions
-
-cell = CoverageCellPayload(
-    cell_id="urn:acef:cell:99999999-9999-9999-9999-999999999999",
-    subject_ref=system.subject_id,
-    dimensions=CoverageDimensions(
-        scenario_class="factuality",
-        surface_class="chat_endpoint",
-        time_window_start="2026-05-20T00:00:00Z",
-        time_window_end="2026-05-27T00:00:00Z",
-    ),
-    bound_evidence_refs=[finding.record_id],
-    freshness_state="fresh",
-    freshness_policy_ref="urn:acef:rec:aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+# A coverage_cell is a raw object in the Assessment Bundle's `coverage_cells`
+# array (assessment-bundle.schema.json#/properties/coverage_cells) — there is no
+# typed builder or Pydantic model for it in v0.4.
+coverage_cell = {
+    "cell_id": "urn:acef:cell:99999999-9999-9999-9999-999999999999",
+    "subject_ref": system.subject_id,
+    "dimensions": {
+        "scenario_class": "factuality",
+        "surface_class": "chat_endpoint",
+        "time_window_start": "2026-05-20T00:00:00Z",
+        "time_window_end": "2026-05-27T00:00:00Z",
+    },
+    "bound_evidence_refs": [finding.record_id],
+    # freshness_state: fresh | stale_within_grace | stale_outside_grace | unverified
+    "freshness_state": "fresh",
+    "freshness_policy_ref": "urn:acef:rec:aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
     # claim_language MUST NOT contain banned tokens (compliant, certified,
     # AI Act-approved, guaranteed) — banned tokens emit ACEF-079.
-    claim_language="Coverage measured for factuality scenarios over the past 7 days.",
-    coverage_outcome="covered",
-)
-print(cell.model_dump(mode="json", exclude_none=True)["coverage_outcome"])  # → covered
+    "claim_language": "Coverage measured for factuality scenarios over the past 7 days.",
+    "coverage_outcome": "covered",  # covered | gap | blocked
+}
+# Place it under the Assessment Bundle's top-level `coverage_cells` array.
+assessment_with_coverage = {"coverage_cells": [coverage_cell]}
+print(assessment_with_coverage["coverage_cells"][0]["coverage_outcome"])  # → covered
 ```
 
 **Notes:**
