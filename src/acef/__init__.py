@@ -26,10 +26,13 @@ from acef.package import Package
 from acef.redaction import redact_package, redact_record
 from acef.render import render_console, render_markdown
 from acef.signing import (
+    HARNESS_ATTESTATION_SIGNED_FIELDS,
     create_detached_jws,
     sign_assessment,
     sign_bundle,
+    sign_harness_attestation,
     verify_detached_jws,
+    verify_harness_attestation,
 )
 
 
@@ -107,10 +110,13 @@ __all__ = [
     "render",
     "render_console",
     "render_markdown",
+    "HARNESS_ATTESTATION_SIGNED_FIELDS",
     "sign",
     "sign_assessment",
     "sign_bundle",
+    "sign_harness_attestation",
     "validate",
     "verify",
     "verify_detached_jws",
+    "verify_harness_attestation",
 ]

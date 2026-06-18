@@ -20,10 +20,29 @@ Writing raw JSON keeps both concerns straightforward.
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 from pathlib import Path
 from typing import Any
+
+from cryptography.hazmat.primitives import serialization
+
+from acef.signing import sign_harness_attestation
+
+# Fixed, test-only RSA-2048 signing key for the freddy harness_attestation
+# vectors. RS256 (PKCS1v15) is deterministic, so signing the fixed 9-field
+# payloads with this fixed key yields byte-stable attestation_signature.value
+# values — the vectors stay content-addressable/reproducible. NOT a production
+# key; it exists only so the pass vectors carry a signature that
+# verify_harness_attestation actually accepts (brief §3.6 / TC9).
+_FREDDY_TEST_KEY_PEM = (Path(__file__).parent / "freddy_test_signing_key.pem").read_bytes()
+
+
+@functools.lru_cache(maxsize=1)
+def _freddy_signing_key() -> Any:
+    return serialization.load_pem_private_key(_FREDDY_TEST_KEY_PEM, password=None)
+
 
 # ---------------------------------------------------------------------------
 # Fixed clock + URN pools — change ONLY if you want every bundle's
@@ -479,7 +498,8 @@ def harness_attestation_payload(
 ) -> dict[str, Any]:
     """Return a valid harness_attestation payload."""
     refs = bound_evidence_refs if bound_evidence_refs is not None else [urn("rec", 600)]
-    return {
+    # The 9 normative signed fields (HARNESS_ATTESTATION_SIGNED_FIELDS order).
+    signed = {
         "attestation_id": urn("att", attestation_idx),
         "state_class": state_class,
         "state_transition": {
@@ -495,9 +515,18 @@ def harness_attestation_payload(
         },
         "claim": f"{state_class}.pending.verified:{claim_suffix}",
         "fake_green_test_ref": fake_green_test_ref or urn("fg", 1),
+        "signed_at": FIXED_LATER_TIMESTAMP,
+        "signer_kid": signer_kid,
+    }
+    # Real RS256 detached JWS over the JCS-canonical 9-field subset (deterministic
+    # for the fixed key + fixed payload), so the bundle actually passes the
+    # validator's harness_attestation signature check (brief §3.6 / TC9).
+    jws = sign_harness_attestation(signed, private_key=_freddy_signing_key(), signer_kid=signer_kid)
+    return {
+        **signed,
         "attestation_signature": {
             "alg": "RS256",
-            "value": "eyJhbGciOiJSUzI1NiJ9..stub-signature-value",
+            "value": jws,
             "signed_fields": [
                 "attestation_id",
                 "state_class",
@@ -510,8 +539,6 @@ def harness_attestation_payload(
                 "signer_kid",
             ],
         },
-        "signed_at": FIXED_LATER_TIMESTAMP,
-        "signer_kid": signer_kid,
     }
 
 

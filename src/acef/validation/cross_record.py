@@ -943,6 +943,94 @@ def enforce_delivery_verdict_integrity(
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# ACEF-012 / ACEF-013: harness_attestation cryptographic signature verification.
+#
+# The harness_attestation.attestation_signature is the Prove-It Doctrine's only
+# cryptographic proof that a state transition was earned by the bound evidence
+# (brief §3.6, requirement line 459: "attestation_signature MUST verify ... using
+# [the 9 signed fields] JCS canonicalized"; TC9, line 591: altering a
+# bound_evidence_ref post-signature MUST cause signature verification failure).
+# Previously the validate path checked only verifier_class + evidence-binding
+# URN resolution and NEVER verified the signature, so a forged/tampered
+# attestation_signature validated clean.
+#
+# RFC-0001 Q4 keeps JWKS *identity* resolution with the consumer, so the offline
+# validator verifies in SELF-ATTESTED mode (against the JWS-embedded key) —
+# tamper-evidence (TC9), not party attribution. A signature that does not verify
+# over the 9 canonical fields (tampered/forged), is structurally not a JWS, uses
+# a non-whitelisted alg, or whose signed_fields scope is wrong, emits ACEF-012
+# (ACEF-013 for the algorithm case).
+# ---------------------------------------------------------------------------
+
+
+def enforce_harness_attestation_signature(
+    records: list[dict[str, Any]],
+) -> list[ValidationDiagnostic]:
+    """Emit ACEF-012/ACEF-013 when a harness_attestation's ``attestation_signature``
+    does not cryptographically verify over its 9 signed fields (brief §3.6 / TC9)."""
+    from acef.errors import ACEFSigningError
+    from acef.signing import HARNESS_ATTESTATION_SIGNED_FIELDS, verify_harness_attestation
+
+    diags: list[ValidationDiagnostic] = []
+    for _idx, rec in _records_iter(records):
+        if _record_type_of(rec) != "harness_attestation":
+            continue
+        payload = rec.get("payload")
+        if not isinstance(payload, dict):
+            continue  # schema layer flags a malformed payload
+        rec_id = _record_id_of(rec)
+        sig = payload.get("attestation_signature")
+        if not isinstance(sig, dict):
+            continue  # schema layer flags missing/malformed attestation_signature
+        value = sig.get("value")
+        signed_fields = sig.get("signed_fields")
+        # VAL-SIGNATURE-001: when signed_fields is declared it MUST equal the
+        # exact 9-field scope — a narrower scope attests less than the record claims.
+        if signed_fields is not None and list(signed_fields) != list(HARNESS_ATTESTATION_SIGNED_FIELDS):
+            diags.append(
+                ValidationDiagnostic(
+                    "ACEF-012",
+                    (
+                        f"harness_attestation {rec_id!r} attestation_signature.signed_fields "
+                        f"does not equal the required scope {list(HARNESS_ATTESTATION_SIGNED_FIELDS)!r} "
+                        "(VAL-SIGNATURE-001, brief §3.6)."
+                    ),
+                )
+            )
+            continue
+        if not isinstance(value, str) or not value:
+            diags.append(
+                ValidationDiagnostic(
+                    "ACEF-012",
+                    f"harness_attestation {rec_id!r} has a missing/empty attestation_signature.value (brief §3.6).",
+                )
+            )
+            continue
+        try:
+            verified = verify_harness_attestation(payload, value, allow_self_attested=True)
+        except ACEFSigningError as exc:
+            diags.append(
+                ValidationDiagnostic(
+                    exc.code or "ACEF-012",
+                    f"harness_attestation {rec_id!r} attestation_signature failed verification: {exc.message}",
+                )
+            )
+            continue
+        if not verified:
+            diags.append(
+                ValidationDiagnostic(
+                    "ACEF-012",
+                    (
+                        f"harness_attestation {rec_id!r} attestation_signature does not verify over its "
+                        "9 canonical signed fields — the record was tampered or the signature is forged "
+                        "(brief §3.6 / TC9)."
+                    ),
+                )
+            )
+    return diags
+
+
 def run_cross_record_validation(
     manifest: dict[str, Any],
     records: list[dict[str, Any]],
@@ -1021,5 +1109,11 @@ def run_cross_record_validation(
     #     verified_delivered without the read-back triple, and ACEF-072
     #     for a read_back whose digest does not match the write digest.
     diags.extend(enforce_delivery_verdict_integrity(records))
+
+    # 12. Brief §3.6 / TC9 harness_attestation cryptographic signature
+    #     verification — emits ACEF-012 (tampered/forged/structurally-invalid) or
+    #     ACEF-013 (non-whitelisted alg). Self-attested (JWS-embedded key) mode:
+    #     offline tamper-evidence, not JWKS identity (RFC-0001 Q4).
+    diags.extend(enforce_harness_attestation_signature(records))
 
     return diags
