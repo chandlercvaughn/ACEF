@@ -296,18 +296,52 @@ def _segment_has_unbounded_quantifier(segment: str) -> bool:
     return False
 
 
+def _segment_has_top_level_alternation(segment: str) -> bool:
+    """True if ``segment`` contains a ``|`` at its TOP level — i.e. not inside a
+    nested ``(...)`` group and not inside a ``[...]`` class, and not escaped. An
+    unbounded-quantified group with a top-level alternation is the second classic
+    catastrophic-backtracking class (overlapping branches, e.g. ``(a|aa)+``,
+    ``(a|a)*``)."""
+    depth = 0
+    i, n = 0, len(segment)
+    while i < n:
+        c = segment[i]
+        if c == "\\":
+            i += 2
+            continue
+        if c == "[":
+            i += 1
+            while i < n and segment[i] != "]":
+                if segment[i] == "\\":
+                    i += 1
+                i += 1
+            i += 1
+            continue
+        if c == "(":
+            depth += 1
+        elif c == ")":
+            depth = max(0, depth - 1)
+        elif c == "|" and depth == 0:
+            return True
+        i += 1
+    return False
+
+
 def _has_nested_unbounded_quantifier(pattern: str) -> bool:
-    """Detect the classic catastrophic-backtracking signature DETERMINISTICALLY:
-    an UNBOUNDED-quantified group whose body itself contains an unbounded
-    quantifier — e.g. ``(a+)+``, ``(a*)*``, ``(.*)+``, ``(\\d+){2,}``.
+    """Detect catastrophic-backtracking signatures DETERMINISTICALLY: an
+    UNBOUNDED-quantified group (`(…)*`, `(…)+`, `(…){n,}`) whose body either
+    contains an unbounded quantifier (the **nested-quantifier** class — `(a+)+`,
+    `(a*)*`, `(.*)+`, `(\\d+){2,}`) OR a top-level alternation (the
+    **alternation-overlap** class — `(a|aa)+`, `(a|a)*`).
 
     This is a conservative, platform-independent static check (no wall clock):
-    it rejects the nested-quantifier ReDoS class so two validators on ANY
-    platform reach the SAME verdict, replacing the old Unix-main-thread-only
-    SIGALRM timeout whose outcome was platform-dependent (finding 11). It does
-    NOT claim to catch every ReDoS form (e.g. alternation overlap), which the
-    length caps + peer-reviewed templates mitigate; a future linear-time engine
-    would close the residue.
+    it rejects the two main ReDoS classes so two validators on ANY platform
+    reach the SAME verdict, replacing the old Unix-main-thread-only SIGALRM
+    timeout whose outcome was platform-dependent (finding 11; roborev on
+    6147931 added the alternation-overlap class). It over-rejects some safe
+    quantified alternations (e.g. `(a|b)+`) — acceptable for the short
+    rule-level matchers the DSL uses, and a future linear-time engine would
+    accept them precisely.
     """
     stack: list[int] = []  # indices of '(' opens
     i, n = 0, len(pattern)
@@ -333,8 +367,10 @@ def _has_nested_unbounded_quantifier(pattern: str) -> bool:
                 start = stack.pop()
                 q = pattern[i + 1] if i + 1 < n else ""
                 group_unbounded = q in ("*", "+") or (q == "{" and _brace_is_unbounded(pattern, i + 1))
-                if group_unbounded and _segment_has_unbounded_quantifier(pattern[start + 1 : i]):
-                    return True
+                if group_unbounded:
+                    body = pattern[start + 1 : i]
+                    if _segment_has_unbounded_quantifier(body) or _segment_has_top_level_alternation(body):
+                        return True
             i += 1
             continue
         i += 1

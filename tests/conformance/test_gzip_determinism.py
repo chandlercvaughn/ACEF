@@ -30,6 +30,7 @@ from pathlib import Path
 import pytest
 
 from acef.exporter_gzip import deterministic_gzip
+from tests.conformance._crosslang import require_ts_cli
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 FIXTURE = REPO_ROOT / "tests" / "conformance" / "fixtures" / "gzip-test-vector.bin"
@@ -38,10 +39,9 @@ TS_GZIP_CLI = REPO_ROOT / "packages" / "sdk-typescript" / "dist-test" / "test" /
 
 def _node_gzip(fixture_path: Path) -> bytes:
     """Invoke the TS gzip-cli subprocess on `fixture_path` and capture raw bytes."""
-    if not TS_GZIP_CLI.exists():
-        pytest.skip(
-            f"TS gzip-cli not built (run `cd packages/sdk-typescript && npm run build:test`). Looked for {TS_GZIP_CLI}",
-        )
+    # FAIL (not silently skip) when the TS driver is absent, unless opted out
+    # (ACEF_SKIP_CROSSLANG=1) — gzip parity is a reference-SDK guarantee (finding 32).
+    require_ts_cli(TS_GZIP_CLI, what="TS gzip-cli")
     result = subprocess.run(
         ["node", str(TS_GZIP_CLI), str(fixture_path)],
         capture_output=True,
