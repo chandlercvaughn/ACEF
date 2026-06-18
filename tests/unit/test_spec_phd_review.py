@@ -148,6 +148,32 @@ class TestFinding15ConformanceClasses:
         assert "x5c" in para, "offline class must address x5c chain validation, not only JWS self-consistency"
 
 
+class TestFindings26And30RelatedWork:
+    """The nearest prior art (in-toto/SLSA/Sigstore/W3C VC/NIST OSCAL/OPA-Rego/XBRL)
+    appeared ZERO times, so the novelty delta was unstated — a desk-reject trigger.
+    §8 must name them and articulate ACEF's delta."""
+
+    def test_adjacent_prior_art_is_named(self) -> None:
+        text = _spec_text()
+        for system in ("in-toto", "SLSA", "OSCAL", "Verifiable Credential", "Sigstore"):
+            assert system in text, f"Related Work must name the adjacent prior-art system {system!r}"
+        # OSCAL is the closest analog and must be discussed, not just listed.
+        assert text.count("OSCAL") >= 1
+
+    def test_related_work_articulates_a_delta(self) -> None:
+        text = _spec_text()
+        idx = text.find("Related Work")
+        assert idx != -1, "spec must add a Related Work section/subsection"
+        sec = text[idx : idx + 4000]
+        # The section must state what is NEW vs the prior art (the contribution), not
+        # merely list analogies.
+        assert "delta" in sec.lower() or "novel" in sec.lower() or "differ" in sec.lower(), (
+            "Related Work must articulate ACEF's delta vs the prior art, not just list it"
+        )
+        # And must honestly scope the research-contribution claim (evaluation-gated).
+        assert "evaluat" in sec.lower(), "Related Work must honestly gate the research claim on evaluation"
+
+
 class TestFindings1And4And5SecurityConsiderations:
     """The spec had no threat model / Security Considerations section (finding 1,
     critical). Appendix D must state an adversary model, the guarantees, the
@@ -190,6 +216,47 @@ class TestFindings1And4And5SecurityConsiderations:
         # contain arbitrary digest bytes, so leaf/inner-node preimages cannot collide.
         assert "0x00" in d, "the Merkle argument must reference the 0x00 leaf domain-separator"
         assert "path" in dl, "the Merkle argument must rest on path-byte constraints"
+
+
+class TestFindings25And27And28EvaluationMethodology:
+    """There is no empirical evaluation (coverage study, inter-annotator agreement,
+    measured cross-regulation reuse, soundness-vs-obligation-semantics). Appendix E
+    must specify the methodology and HONESTLY mark it not-yet-performed — without
+    fabricating any result."""
+
+    def _appendix_e(self) -> str:
+        text = _spec_text()
+        idx = text.find("## Appendix E")
+        assert idx != -1, "spec must add Appendix E: Evaluation Methodology"
+        return text[idx:]
+
+    def test_appendix_e_specifies_the_measures(self) -> None:
+        e = self._appendix_e().lower()
+        assert "coverage" in e, "Appendix E must specify a coverage study vs a human-audit baseline"
+        assert "inter-annotator" in e or "inter-rater" in e, "Appendix E must specify inter-annotator agreement"
+        assert "reuse" in e, "Appendix E must specify measured cross-regulation evidence reuse"
+
+    def test_appendix_e_marks_evaluation_not_yet_performed(self) -> None:
+        e = self._appendix_e().lower()
+        assert "not yet" in e or "not-yet" in e or "not been performed" in e or "future work" in e, (
+            "Appendix E must explicitly mark the evaluation as not yet performed (honesty)"
+        )
+
+    def test_appendix_e_distinguishes_engineering_from_research(self) -> None:
+        e = self._appendix_e().lower()
+        # The conformance suite / determinism proof is engineering verification, not
+        # an evaluation of the contribution (self-referential) — this must be stated.
+        assert "self-referential" in e or "regression suite" in e or "not an evaluation" in e, (
+            "Appendix E must explain why self-conformance is not an evaluation of the contribution"
+        )
+
+    def test_no_fabricated_f1_or_accuracy_numbers_in_appendix_e(self) -> None:
+        # Guard against fabricated metrics: Appendix E must not assert a measured
+        # score for ACEF (e.g. 'f1 = 0.9x', 'NN% coverage') as if performed.
+        e = self._appendix_e()
+        assert not re.search(r"\bf1[ _-]?(score)?\s*[:=]\s*0\.\d", e.lower()), (
+            "Appendix E must not fabricate an F1 score"
+        )
 
 
 class TestForwardCompatibleMinorSelection:

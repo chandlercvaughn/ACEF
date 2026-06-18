@@ -1800,6 +1800,23 @@ Each golden bundle includes:
 | **ISO/IEC 42001** | ACEF can serve as the evidence layer for 42001's documentation requirements; mapping template planned for v1.0 |
 | **OECD AI System Cards** | System card fields map to ACEF's `subjects[]` metadata and `transparency_disclosure` records |
 
+### 8.1 Related Work: Attestation and Policy-as-Data Systems
+
+The systems above are *content/rights/governance* initiatives ACEF consumes. A separate body of prior art shares ACEF's **core mechanism** — cryptographically signed, content-addressed, machine-verifiable attestations relating an artifact to a policy — and a reviewer rightly asks "why a new format rather than one of these?" This subsection names that prior art and states ACEF's **delta**.
+
+| Prior art | What it does | Why ACEF is not simply that (the delta) |
+|---|---|---|
+| **in-toto / SLSA** | Attest software **supply-chain** steps (build provenance, materials → products), signed predicates over a build DAG. | ACEF attests **regulatory-obligation coverage** of an AI system, not build steps. in-toto/SLSA have no notion of a legal *provision*, an *obligation role* (provider/deployer), or a deterministic obligation roll-up. An in-toto/SLSA attestation can be carried as an ACEF `artifact`; the crosswalk-to-regulation layer is the part they do not provide. |
+| **Sigstore / cosign / Rekor** | Keyless signing + a public **transparency log** for artifact signatures. | ACEF's signing is detached JWS (RFC 7515) and is signing-*infrastructure-agnostic* — Sigstore could be a signing backend. ACEF deliberately does **not** mandate a transparency log in v1 (that is the deferred registry, §11/RFC-0002); the contribution is the evidence **format + obligation semantics**, not the signing transport. |
+| **W3C Verifiable Credentials / DIDs** | A general signed-claim container with an issuer-identity (DID) model. | The closest *container* analog. ACEF specializes: a content-addressed **multi-file bundle** (records + artifacts + Merkle integrity), a non-Turing-complete **rule DSL**, and a **deterministic provision roll-up** (Appendix C) — none of which VC defines. ACEF records *could* be projected as VCs; the value-add is the regulation crosswalk + reproducible evaluation, not the credential envelope. |
+| **NIST OSCAL** | **The closest analog.** Machine-readable control catalogs, profiles, system security plans, and **assessment results** (control-as-data + assessment-as-data), used mainly for infosec compliance (e.g. FedRAMP). | ACEF is, in effect, **"OSCAL for AI regulation"**: mapping templates ≈ OSCAL profiles/catalogs, the rule DSL ≈ OSCAL assessment objectives, the Assessment Bundle ≈ OSCAL assessment-results. The delta is (a) AI-specific evidence **record types** (datasets, GPAI model docs, transparency marking, incidents) OSCAL has no vocabulary for; (b) a **content-addressed evidence-bundle substrate** with Merkle integrity and selective/redacted disclosure, where OSCAL is document-centric; and (c) a **proven-deterministic** obligation roll-up for cross-validator agreement. A v1.x OSCAL interop profile is plausible future work. |
+| **OPA / Rego, XBRL** | Rego: a general (Turing-incomplete but expressive) policy-as-code language. XBRL: a structured **regulatory-reporting** taxonomy (finance). | ACEF's rule DSL is deliberately a *small, declarative, 10-operator* language with pinned empty-set/error semantics (§3.5, Appendix C) so two validators provably agree — a narrower, more auditable target than general Rego. XBRL is the financial-disclosure counterpart of what ACEF is for AI compliance; the analogy is positioning, not reuse. |
+| **SPDX / CycloneDX (SBOM)** | Software/AI **bill-of-materials** — component inventories, increasingly with ML-BOM extensions. | ACEF borrows the BOM *envelope* idea and can carry an SBOM as an `artifact`; an SBOM enumerates components, whereas ACEF maps **evidence to legal obligations** and evaluates them. |
+
+**Stated delta (the claimed contribution).** ACEF's novel core is the **composition**, not any single borrowed mechanism: a content-addressed, byte-deterministic evidence-bundle format **+** a non-Turing-complete rule DSL with a *proven*-deterministic provision roll-up (Appendix C) **+** regulation-mapping templates that crosswalk one evidence set across multiple **AI** regulations (EU AI Act, GPAI, NIST AI RMF, …). No adjacent system provides the AI-regulation crosswalk **and** the reproducible obligation-evaluation layer together; OSCAL is the nearest, and ACEF's delta over it is the AI evidence vocabulary, the content-addressed substrate, and the determinism proof.
+
+**Honesty on the research bar.** "Useful standard" and "PhD-defensible research contribution" are different claims. The composition above is a *design* contribution; whether it is a *research* contribution depends on **evaluation** — coverage against a human-audit baseline, inter-annotator agreement on the mapping templates, and measured cross-regulation evidence reuse — which is specified, and explicitly marked as not-yet-performed, in Appendix E (Evaluation Methodology). This document does not claim an empirical result it has not measured.
+
 ---
 
 ## 9. Implementation Roadmap
@@ -2035,3 +2052,34 @@ Consequently a second-preimage of the root reduces to a SHA-256 second-preimage 
 ### D.6 Redaction commitments: binding, not hiding
 
 `hash-committed`/redacted fields commit a value as `SHA-256(JCS(value))` (§3.1.5, `redaction.py`). This commitment is **binding** (the producer cannot later claim a different value) but is **NOT hiding for low-entropy or enumerable inputs**: an adversary holding the bundle can dictionary/brute-force the preimage of any value drawn from a small space — booleans, closed enums (`event_type`, `modality`), actor URNs, or a yes/no inference input — and confirm it against the published hash. The spec therefore **MUST NOT** be read as claiming confidentiality for such fields by hashing alone. To obtain a hiding commitment, a producer SHOULD use a **salted/HMAC** commitment for low-entropy fields — `SHA-256(salt ‖ JCS(value))` with a per-record random salt, or `HMAC-SHA-256(key, JCS(value))` with a key retained out-of-band — so the preimage space is no longer enumerable; a bare `SHA-256(JCS(value))` provides integrity-of-commitment only, not hiding. The "avoids storing raw PII" language elsewhere in this document refers to *not embedding the cleartext*, not to computational hiding of a low-entropy preimage; GDPR adequacy of any redaction is a legal determination outside schema validation.
+
+---
+
+## Appendix E: Evaluation Methodology (Specified; NOT YET PERFORMED)
+
+This appendix is **honest scaffolding, not results**. ACEF is engineering-complete on the surfaces this revision hardens, but it has **not** been *empirically evaluated* as a contribution. This appendix specifies what such an evaluation MUST measure and how, so the gap between "engineering-complete" and "research-validated" is explicit. **No metric below has been computed; this document asserts no F1, accuracy, coverage, or agreement number for ACEF.** Any future claim of a result MUST cite a study performed under this methodology.
+
+### E.1 What is already verified (engineering, not evaluation)
+
+The following are **verified** and are NOT in question: byte-determinism and the integrity model (the conformance suite + Appendix C totality proof + cross-language parity), schema conformance, and the error taxonomy. These establish that the *implementation matches the specification* — but they are **self-referential**: the golden bundles are produced and validated by the same SDK, so a passing conformance run is a **regression suite**, not an evaluation of whether ACEF *correctly and usefully captures regulatory obligations*. That question is empirical and open.
+
+### E.2 Open evaluation questions and methodology
+
+| # | Question | Method | Metric |
+|---|---|---|---|
+| EV-1 | **Coverage.** Does ACEF capture the obligations of EU AI Act Art. 9–17/50 (and GPAI Art. 53/55) that a human auditor would record? | Build an expert-annotated reference obligation set per article; have independent compliance experts produce evidence for a fixed set of real/realistic AI systems; measure what fraction the ACEF record-type + template surface can represent. | Recall of obligations vs the human baseline; gap list of unrepresentable obligations. |
+| EV-2 | **Mapping-template fidelity (inter-annotator agreement).** Do independent legal experts agree that a template's rules faithfully encode a provision? | ≥3 qualified annotators independently author/score the mapping for the same provisions; compare. | Inter-annotator agreement (Cohen's/Fleiss' κ) on provision→rule mappings; adjudicated disagreement log. |
+| EV-3 | **"Collect once, prove many."** Is evidence actually reused across regulations, and how much? | On a corpus of multi-regulation systems, measure the fraction of evidence records that satisfy provisions in more than one framework under the shipped templates. | Measured cross-regulation reuse ratio; per-record reuse distribution; cases where jurisdiction-specific interpretation breaks reuse. |
+| EV-4 | **Obligation-soundness.** Does a `satisfied` `provision_outcome` actually mean the legal obligation is met? | Formalize an obligation semantics for a bounded provision set; prove (or expert-validate) that the rule DSL + roll-up is sound w.r.t. it. (Distinct from Appendix C, which proves the roll-up is a deterministic *function*, not that it is *sound* against the law.) | Soundness result or a catalog of validated/refuted provisions. |
+| EV-5 | **Usability.** Can a compliance officer/auditor produce and consume a valid bundle, and how reliably? | Task-based user study with the reference SDK + renderer. | Time-to-first-valid-bundle, error rate, task success, qualitative friction log. |
+
+### E.3 Threats to validity (to be reported with any result)
+
+- **Construction validity** — the "human-audit baseline" is itself an expert judgment; EV-1/EV-2 must report annotator qualifications and adjudication.
+- **External validity** — results on a sampled corpus may not generalize across sectors/jurisdictions; the corpus composition MUST be disclosed.
+- **Self-selection / Sybil** — any future registry-derived analytic (e.g. an incident "danger score", RFC-0002 §11) is a poisoning/Sybil target and is explicitly out of scope until governed.
+- **Legal drift** — templates encode law at a point in time; coverage results are valid only against the cited instrument versions.
+
+### E.4 Status
+
+EV-1…EV-5 are **future work**; none has been performed. Until they are, ACEF's defensible claims are exactly: a correct, byte-deterministic, conformance-tested *standard and reference implementation* with a proven-deterministic evaluation core and an articulated novelty delta (§8.1) — **not** an empirically validated measurement of regulatory coverage, mapping fidelity, or reuse. This separation is deliberate and is the honest boundary between this document's engineering claims and the research claims it does not yet make.
