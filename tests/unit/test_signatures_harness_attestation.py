@@ -372,3 +372,88 @@ def test_crypto3_trust_anchors_do_not_rescue_jwk_only_forgery(rsa_keys):
     with pytest.raises(ACEFSigningError) as exc:
         verify_harness_attestation(forged, forged_sig, trust_anchors=[ca])
     assert exc.value.code == "ACEF-012"
+
+
+def _x5c_harness_attestation(payload: dict, leaf_key, x5c_chain: list[str]) -> str:
+    """Sign the 9-field harness subset with an x5c chain in the JWS header."""
+    from acef.integrity import canonicalize
+    from acef.signing import HARNESS_ATTESTATION_SIGNED_FIELDS, create_detached_jws
+
+    subset = {f: payload[f] for f in HARNESS_ATTESTATION_SIGNED_FIELDS if f in payload}
+    return create_detached_jws(canonicalize(subset), leaf_key, kid=payload["signer_kid"], x5c=x5c_chain)
+
+
+def _ca_and_leaf(nvb, nva):
+    import base64
+    import datetime  # noqa: F401  (nvb/nva are datetimes supplied by caller)
+
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.x509.oid import NameOID
+
+    root_key = ec.generate_private_key(ec.SECP256R1())
+    root = (
+        x509.CertificateBuilder()
+        .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "harness-root")]))
+        .issuer_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "harness-root")]))
+        .public_key(root_key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(nvb)
+        .not_valid_after(nva)
+        .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
+        .add_extension(
+            x509.KeyUsage(
+                digital_signature=False,
+                content_commitment=False,
+                key_encipherment=False,
+                data_encipherment=False,
+                key_agreement=False,
+                key_cert_sign=True,
+                crl_sign=True,
+                encipher_only=False,
+                decipher_only=False,
+            ),
+            critical=True,
+        )
+        .sign(root_key, hashes.SHA256())
+    )
+    leaf_key = ec.generate_private_key(ec.SECP256R1())
+    leaf = (
+        x509.CertificateBuilder()
+        .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "harness-leaf")]))
+        .issuer_name(root.subject)
+        .public_key(leaf_key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(nvb)
+        .not_valid_after(nva)
+        .sign(root_key, hashes.SHA256())
+    )
+    b64 = lambda c: base64.b64encode(c.public_bytes(serialization.Encoding.DER)).decode("ascii")  # noqa: E731
+    return root, leaf_key, [b64(leaf), b64(root)]
+
+
+def test_anchored_x5c_harness_cert_validity_anchored_to_manifest_timestamp(rsa_keys):
+    """roborev High on e7827f4: anchored harness verification MUST anchor x5c cert
+    validity to the manifest timestamp (§3.1.3, NOT wall-clock). An x5c chain whose
+    certs are EXPIRED at the manifest timestamp must NOT verify even though it
+    chains to the configured anchor."""
+    import datetime
+
+    window_start = datetime.datetime(2024, 1, 1, tzinfo=datetime.UTC)
+    window_end = datetime.datetime(2026, 1, 1, tzinfo=datetime.UTC)
+    payload = _attestation_payload(signer_kid="harness-x5c-kid")
+    root, leaf_key, x5c = _ca_and_leaf(window_start, window_end)
+    jws = _x5c_harness_attestation(payload, leaf_key, x5c)
+
+    # Inside the validity window + chains to anchor -> verifies.
+    assert (
+        verify_harness_attestation(payload, jws, trust_anchors=[root], manifest_timestamp="2025-06-01T00:00:00Z")
+        is True
+    )
+    # AFTER expiry at the manifest timestamp -> cert validity fails -> ACEF-012
+    # (the chain itself is rejected; a cross-record caller turns this into an
+    # ACEF-012 diagnostic).
+    with pytest.raises(ACEFSigningError) as exc:
+        verify_harness_attestation(payload, jws, trust_anchors=[root], manifest_timestamp="2027-06-01T00:00:00Z")
+    assert exc.value.code == "ACEF-012"

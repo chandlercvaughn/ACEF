@@ -561,7 +561,14 @@ class TestFinding10FormalProof:
         block = c[start : start + 1200].lower()
         existential_line = next((ln for ln in block.split("\n") if "existential operators" in ln), "")
         universal_line = next((ln for ln in block.split("\n") if "universal operators" in ln), "")
-        for op in ("has_record_type", "exists_where", "attachment_exists", "record_attested", "bundle_signed"):
+        for op in (
+            "has_record_type",
+            "exists_where",
+            "attachment_exists",
+            "attachment_kind_exists",
+            "record_attested",
+            "bundle_signed",
+        ):
             assert op in existential_line, f"§3.5 empty-set existential list must include {op}"
         for op in ("field_present", "field_value", "entity_linked", "evidence_freshness"):
             assert op in universal_line, f"§3.5 empty-set universal list must include {op}"

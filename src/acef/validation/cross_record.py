@@ -967,6 +967,7 @@ def enforce_delivery_verdict_integrity(
 def enforce_harness_attestation_signature(
     records: list[dict[str, Any]],
     trust_anchors: list[Any] | None = None,
+    manifest_timestamp: str | None = None,
 ) -> list[ValidationDiagnostic]:
     """Emit ACEF-012/ACEF-013 when a harness_attestation's ``attestation_signature``
     does not cryptographically verify over its 9 signed fields (brief §3.6 / TC9).
@@ -989,8 +990,11 @@ def enforce_harness_attestation_signature(
     from acef.errors import ACEFSigningError
     from acef.signing import HARNESS_ATTESTATION_SIGNED_FIELDS, verify_harness_attestation
 
-    # Anchored when the caller configured trust anchors; otherwise self-attested.
-    anchored = bool(trust_anchors)
+    # Anchored when the caller CONFIGURED trust anchors. A non-None EMPTY list is
+    # an explicit anchoring request that no chain can satisfy (fail-closed) — use
+    # ``is not None``, not truthiness, so trust_anchors=[] is not silently
+    # downgraded to self-attested.
+    anchored = trust_anchors is not None
     diags: list[ValidationDiagnostic] = []
     for _idx, rec in _records_iter(records):
         if _record_type_of(rec) != "harness_attestation":
@@ -1034,6 +1038,7 @@ def enforce_harness_attestation_signature(
                 payload,
                 value,
                 trust_anchors=trust_anchors,
+                manifest_timestamp=manifest_timestamp,
                 allow_self_attested=not anchored,
             )
         except ACEFSigningError as exc:
@@ -1143,6 +1148,10 @@ def run_cross_record_validation(
     #     ACEF-013 (non-whitelisted alg). ANCHORED when trust_anchors are
     #     configured; else self-attested JWS-embedded-key tamper-evidence (offline,
     #     not JWKS identity — RFC-0001 Q4).
-    diags.extend(enforce_harness_attestation_signature(records, trust_anchors))
+    _meta = manifest.get("metadata")
+    _manifest_ts = _meta.get("timestamp") if isinstance(_meta, dict) else None
+    if not isinstance(_manifest_ts, str):
+        _manifest_ts = None
+    diags.extend(enforce_harness_attestation_signature(records, trust_anchors, _manifest_ts))
 
     return diags

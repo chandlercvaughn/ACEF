@@ -634,3 +634,17 @@ class TestRecordAttestedJwkOnlyTrustPosture:
         )
         assert passed is True
         assert refs == [rec.record_id]
+
+    def test_jwk_only_attestation_not_counted_with_empty_anchor_list(self) -> None:
+        """roborev Medium on d510740: an EMPTY trust-anchor list (non-None) is an
+        explicit anchoring request no chain can satisfy — it must fail closed, so a
+        jwk-only attestation does NOT count (`is not None`, not truthiness)."""
+        rec = _jwk_only_attested_record()
+        passed, refs = op_record_attested(
+            {"record_type": "risk_register", "min_count": 1},
+            [rec],
+            manifest_timestamp=_TS_INSIDE_WINDOW,
+            trust_anchors=[],
+        )
+        assert passed is False
+        assert refs == []

@@ -1549,9 +1549,11 @@ def _attestation_verifies(
         # record with their own auto-embedded key — so it does NOT satisfy
         # record_attested under configured anchors (verify_detached_jws ignores
         # anchors for a jwk-only signature, so an anchor set alone is not a secure
-        # path). With NO anchors, a jwk-only attestation is self-attested and counts
-        # (spec §3.5 record_attested row).
-        if trust_anchors and not header.get("x5c"):
+        # path). With NO anchors (trust_anchors is None), a jwk-only attestation is
+        # self-attested and counts (spec §3.5 record_attested row). A non-None EMPTY
+        # anchor list is an explicit anchoring request no chain can satisfy, so use
+        # ``is not None`` (not truthiness) — trust_anchors=[] fails closed.
+        if trust_anchors is not None and not header.get("x5c"):
             return False
     except Exception:
         # Intentionally broad: a record carrying ANY unverifiable attestation

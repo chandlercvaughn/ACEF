@@ -1103,6 +1103,7 @@ def verify_harness_attestation(
     public_key: PublicKeyTypes | None = None,
     key_data: bytes | None = None,
     trust_anchors: list[Certificate] | None = None,
+    manifest_timestamp: str | None = None,
     allow_self_attested: bool = False,
 ) -> bool:
     """Verify a harness_attestation JWS detached signature.
@@ -1174,6 +1175,7 @@ def verify_harness_attestation(
             public_key,
             key_data=key_data,
             trust_anchors=trust_anchors,
+            manifest_timestamp=manifest_timestamp,
         )
     except ACEFSigningError as exc:
         # ACEF-013 (unsupported alg, missing kid, key-type mismatch) and
