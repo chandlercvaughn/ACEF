@@ -38,6 +38,15 @@
       },
       "evidence_freshness_max_days": null,
       "retention_years": null,
+      "retention": {
+        "kind": "not_assessed",
+        "duty_holder": "any",
+        "period": null,
+        "anchor_event": "not_specified",
+        "source": "not_assessed",
+        "normative_text_ref": "",
+        "basis": "NOT ASSESSED. This profile has established no retention basis for US Copyright Office, Copyright and Artificial Intelligence Part 3: Generative AI Training (2025) (USCO Part 3 — Lawful Acquisition of Training Data). No retention determination has been made for this provision: the instrument was not assessed for records-retention duties and no period is asserted here. This is a Copyright Office report and is advisory; it enacts no records-retention duty, and evidence-preservation duties in copyright litigation arise from the Federal Rules of Civil Procedure and case law, which this profile does not model. Absence of a figure is NOT a finding that no retention period applies: a retention duty may arise from this instrument, from an implementing instrument, or from generally applicable records law that this profile does not model. Establishing a cited basis requires a separate research pass against the primary text of the instrument."
+      },
       "evaluation": [
         {
           "rule_id": "usco-acq-data-provenance",
@@ -86,6 +95,15 @@
       },
       "evidence_freshness_max_days": null,
       "retention_years": null,
+      "retention": {
+        "kind": "not_assessed",
+        "duty_holder": "any",
+        "period": null,
+        "anchor_event": "not_specified",
+        "source": "not_assessed",
+        "normative_text_ref": "",
+        "basis": "NOT ASSESSED. This profile has established no retention basis for US Copyright Office, Copyright and Artificial Intelligence Part 3: Generative AI Training (2025) (USCO Part 3 — Licensing Pathway). No retention determination has been made for this provision: the instrument was not assessed for records-retention duties and no period is asserted here. This is a Copyright Office report and is advisory; it enacts no records-retention duty, and evidence-preservation duties in copyright litigation arise from the Federal Rules of Civil Procedure and case law, which this profile does not model. Absence of a figure is NOT a finding that no retention period applies: a retention duty may arise from this instrument, from an implementing instrument, or from generally applicable records law that this profile does not model. Establishing a cited basis requires a separate research pass against the primary text of the instrument."
+      },
       "evaluation": [
         {
           "rule_id": "usco-lic-license-record",
@@ -127,6 +145,15 @@
       },
       "evidence_freshness_max_days": null,
       "retention_years": null,
+      "retention": {
+        "kind": "not_assessed",
+        "duty_holder": "any",
+        "period": null,
+        "anchor_event": "not_specified",
+        "source": "not_assessed",
+        "normative_text_ref": "",
+        "basis": "NOT ASSESSED. This profile has established no retention basis for US Copyright Office, Copyright and Artificial Intelligence Part 3: Generative AI Training (2025) (USCO Part 3 — Curation and Filtering Processes). No retention determination has been made for this provision: the instrument was not assessed for records-retention duties and no period is asserted here. This is a Copyright Office report and is advisory; it enacts no records-retention duty, and evidence-preservation duties in copyright litigation arise from the Federal Rules of Civil Procedure and case law, which this profile does not model. Absence of a figure is NOT a finding that no retention period applies: a retention duty may arise from this instrument, from an implementing instrument, or from generally applicable records law that this profile does not model. Establishing a cited basis requires a separate research pass against the primary text of the instrument."
+      },
       "evaluation": [
         {
           "rule_id": "usco-cur-data-provenance",
@@ -161,6 +188,15 @@
       },
       "evidence_freshness_max_days": null,
       "retention_years": null,
+      "retention": {
+        "kind": "not_assessed",
+        "duty_holder": "any",
+        "period": null,
+        "anchor_event": "not_specified",
+        "source": "not_assessed",
+        "normative_text_ref": "",
+        "basis": "NOT ASSESSED. This profile has established no retention basis for US Copyright Office, Copyright and Artificial Intelligence Part 3: Generative AI Training (2025) (USCO Part 3 — Memorization and Regurgitation Risk). No retention determination has been made for this provision: the instrument was not assessed for records-retention duties and no period is asserted here. This is a Copyright Office report and is advisory; it enacts no records-retention duty, and evidence-preservation duties in copyright litigation arise from the Federal Rules of Civil Procedure and case law, which this profile does not model. Absence of a figure is NOT a finding that no retention period applies: a retention duty may arise from this instrument, from an implementing instrument, or from generally applicable records law that this profile does not model. Establishing a cited basis requires a separate research pass against the primary text of the instrument."
+      },
       "evaluation": [
         {
           "rule_id": "usco-mem-evaluation-report",
@@ -195,6 +231,15 @@
       },
       "evidence_freshness_max_days": null,
       "retention_years": null,
+      "retention": {
+        "kind": "not_assessed",
+        "duty_holder": "any",
+        "period": null,
+        "anchor_event": "not_specified",
+        "source": "not_assessed",
+        "normative_text_ref": "",
+        "basis": "NOT ASSESSED. This profile has established no retention basis for US Copyright Office, Copyright and Artificial Intelligence Part 3: Generative AI Training (2025) (USCO Part 3 — Technical Guardrails Against Infringing Output). No retention determination has been made for this provision: the instrument was not assessed for records-retention duties and no period is asserted here. This is a Copyright Office report and is advisory; it enacts no records-retention duty, and evidence-preservation duties in copyright litigation arise from the Federal Rules of Civil Procedure and case law, which this profile does not model. Absence of a figure is NOT a finding that no retention period applies: a retention duty may arise from this instrument, from an implementing instrument, or from generally applicable records law that this profile does not model. Establishing a cited basis requires a separate research pass against the primary text of the instrument."
+      },
       "evaluation": [
         {
           "rule_id": "usco-guard-eval-or-copyright",

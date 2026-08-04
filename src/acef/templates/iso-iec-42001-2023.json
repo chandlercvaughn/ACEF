@@ -38,6 +38,15 @@
       },
       "evidence_freshness_max_days": null,
       "retention_years": null,
+      "retention": {
+        "kind": "not_assessed",
+        "duty_holder": "any",
+        "period": null,
+        "anchor_event": "not_specified",
+        "source": "not_assessed",
+        "normative_text_ref": "",
+        "basis": "NOT ASSESSED. This profile has established no retention basis for ISO/IEC 42001:2023 (AI management system requirements) (ISO/IEC 42001:2023 Clauses 5.1, 5.2). No retention determination has been made for this provision: the instrument was not assessed for records-retention duties and no period is asserted here. ISO/IEC 42001 Clause 7.5 requires control of documented information but leaves the retention period to the organisation; no clause-specific period has been verified for this provision. Absence of a figure is NOT a finding that no retention period applies: a retention duty may arise from this instrument, from an implementing instrument, or from generally applicable records law that this profile does not model. Establishing a cited basis requires a separate research pass against the primary text of the instrument."
+      },
       "evaluation": [
         {
           "rule_id": "iso42001-lead-governance-policy",
@@ -97,6 +106,15 @@
       },
       "evidence_freshness_max_days": null,
       "retention_years": null,
+      "retention": {
+        "kind": "not_assessed",
+        "duty_holder": "any",
+        "period": null,
+        "anchor_event": "not_specified",
+        "source": "not_assessed",
+        "normative_text_ref": "",
+        "basis": "NOT ASSESSED. This profile has established no retention basis for ISO/IEC 42001:2023 (AI management system requirements) (ISO/IEC 42001:2023 Clause 6.1). No retention determination has been made for this provision: the instrument was not assessed for records-retention duties and no period is asserted here. ISO/IEC 42001 Clause 7.5 requires control of documented information but leaves the retention period to the organisation; no clause-specific period has been verified for this provision. Absence of a figure is NOT a finding that no retention period applies: a retention duty may arise from this instrument, from an implementing instrument, or from generally applicable records law that this profile does not model. Establishing a cited basis requires a separate research pass against the primary text of the instrument."
+      },
       "evaluation": [
         {
           "rule_id": "iso42001-risk-register",
@@ -140,6 +158,15 @@
       },
       "evidence_freshness_max_days": null,
       "retention_years": null,
+      "retention": {
+        "kind": "not_assessed",
+        "duty_holder": "any",
+        "period": null,
+        "anchor_event": "not_specified",
+        "source": "not_assessed",
+        "normative_text_ref": "",
+        "basis": "NOT ASSESSED. This profile has established no retention basis for ISO/IEC 42001:2023 (AI management system requirements) (ISO/IEC 42001:2023 Annex A.7.4). No retention determination has been made for this provision: the instrument was not assessed for records-retention duties and no period is asserted here. ISO/IEC 42001 Clause 7.5 requires control of documented information but leaves the retention period to the organisation; no clause-specific period has been verified for this provision. Absence of a figure is NOT a finding that no retention period applies: a retention duty may arise from this instrument, from an implementing instrument, or from generally applicable records law that this profile does not model. Establishing a cited basis requires a separate research pass against the primary text of the instrument."
+      },
       "evaluation": [
         {
           "rule_id": "iso42001-data-dataset-card",
@@ -181,6 +208,15 @@
       },
       "evidence_freshness_max_days": null,
       "retention_years": null,
+      "retention": {
+        "kind": "not_assessed",
+        "duty_holder": "any",
+        "period": null,
+        "anchor_event": "not_specified",
+        "source": "not_assessed",
+        "normative_text_ref": "",
+        "basis": "NOT ASSESSED. This profile has established no retention basis for ISO/IEC 42001:2023 (AI management system requirements) (ISO/IEC 42001:2023 Clause 9.1). No retention determination has been made for this provision: the instrument was not assessed for records-retention duties and no period is asserted here. ISO/IEC 42001 Clause 7.5 requires control of documented information but leaves the retention period to the organisation; no clause-specific period has been verified for this provision. Absence of a figure is NOT a finding that no retention period applies: a retention duty may arise from this instrument, from an implementing instrument, or from generally applicable records law that this profile does not model. Establishing a cited basis requires a separate research pass against the primary text of the instrument."
+      },
       "evaluation": [
         {
           "rule_id": "iso42001-perf-evaluation-report",
@@ -222,6 +258,15 @@
       },
       "evidence_freshness_max_days": null,
       "retention_years": null,
+      "retention": {
+        "kind": "not_assessed",
+        "duty_holder": "any",
+        "period": null,
+        "anchor_event": "not_specified",
+        "source": "not_assessed",
+        "normative_text_ref": "",
+        "basis": "NOT ASSESSED. This profile has established no retention basis for ISO/IEC 42001:2023 (AI management system requirements) (ISO/IEC 42001:2023 Clause 10.2). No retention determination has been made for this provision: the instrument was not assessed for records-retention duties and no period is asserted here. ISO/IEC 42001 Clause 7.5 requires control of documented information but leaves the retention period to the organisation; no clause-specific period has been verified for this provision. Absence of a figure is NOT a finding that no retention period applies: a retention duty may arise from this instrument, from an implementing instrument, or from generally applicable records law that this profile does not model. Establishing a cited basis requires a separate research pass against the primary text of the instrument."
+      },
       "evaluation": [
         {
           "rule_id": "iso42001-inc-incident-report",
@@ -263,6 +308,15 @@
       },
       "evidence_freshness_max_days": null,
       "retention_years": null,
+      "retention": {
+        "kind": "not_assessed",
+        "duty_holder": "any",
+        "period": null,
+        "anchor_event": "not_specified",
+        "source": "not_assessed",
+        "normative_text_ref": "",
+        "basis": "NOT ASSESSED. This profile has established no retention basis for ISO/IEC 42001:2023 (AI management system requirements) (ISO/IEC 42001:2023 Annex A.8.4). No retention determination has been made for this provision: the instrument was not assessed for records-retention duties and no period is asserted here. ISO/IEC 42001 Clause 7.5 requires control of documented information but leaves the retention period to the organisation; no clause-specific period has been verified for this provision. Absence of a figure is NOT a finding that no retention period applies: a retention duty may arise from this instrument, from an implementing instrument, or from generally applicable records law that this profile does not model. Establishing a cited basis requires a separate research pass against the primary text of the instrument."
+      },
       "evaluation": [
         {
           "rule_id": "iso42001-oversight-action",

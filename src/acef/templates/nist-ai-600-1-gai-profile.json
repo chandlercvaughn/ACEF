@@ -38,6 +38,15 @@
       },
       "evidence_freshness_max_days": null,
       "retention_years": null,
+      "retention": {
+        "kind": "not_assessed",
+        "duty_holder": "any",
+        "period": null,
+        "anchor_event": "not_specified",
+        "source": "not_assessed",
+        "normative_text_ref": "",
+        "basis": "NOT ASSESSED. This profile has established no retention basis for NIST AI 600-1 (Generative AI Profile) (NIST AI 600-1 Section 2.1 (GAI Risks)). No retention determination has been made for this provision: the instrument was not assessed for records-retention duties and no period is asserted here. NIST AI 600-1 is a voluntary companion profile to the AI RMF and imposes no legal duty; US federal records retention derives from an agency records schedule this profile does not model. Absence of a figure is NOT a finding that no retention period applies: a retention duty may arise from this instrument, from an implementing instrument, or from generally applicable records law that this profile does not model. Establishing a cited basis requires a separate research pass against the primary text of the instrument."
+      },
       "evaluation": [
         {
           "rule_id": "gai-r1-risk-register",
@@ -97,6 +106,15 @@
       },
       "evidence_freshness_max_days": null,
       "retention_years": null,
+      "retention": {
+        "kind": "not_assessed",
+        "duty_holder": "any",
+        "period": null,
+        "anchor_event": "not_specified",
+        "source": "not_assessed",
+        "normative_text_ref": "",
+        "basis": "NOT ASSESSED. This profile has established no retention basis for NIST AI 600-1 (Generative AI Profile) (NIST AI 600-1 Section 2.6 (Dual-Use)). No retention determination has been made for this provision: the instrument was not assessed for records-retention duties and no period is asserted here. NIST AI 600-1 is a voluntary companion profile to the AI RMF and imposes no legal duty; US federal records retention derives from an agency records schedule this profile does not model. Absence of a figure is NOT a finding that no retention period applies: a retention duty may arise from this instrument, from an implementing instrument, or from generally applicable records law that this profile does not model. Establishing a cited basis requires a separate research pass against the primary text of the instrument."
+      },
       "evaluation": [
         {
           "rule_id": "gai-du-risk-register",
@@ -155,6 +173,15 @@
       },
       "evidence_freshness_max_days": null,
       "retention_years": null,
+      "retention": {
+        "kind": "not_assessed",
+        "duty_holder": "any",
+        "period": null,
+        "anchor_event": "not_specified",
+        "source": "not_assessed",
+        "normative_text_ref": "",
+        "basis": "NOT ASSESSED. This profile has established no retention basis for NIST AI 600-1 (Generative AI Profile) (NIST AI 600-1 Section 2.7 (Foundation Models)). No retention determination has been made for this provision: the instrument was not assessed for records-retention duties and no period is asserted here. NIST AI 600-1 is a voluntary companion profile to the AI RMF and imposes no legal duty; US federal records retention derives from an agency records schedule this profile does not model. Absence of a figure is NOT a finding that no retention period applies: a retention duty may arise from this instrument, from an implementing instrument, or from generally applicable records law that this profile does not model. Establishing a cited basis requires a separate research pass against the primary text of the instrument."
+      },
       "evaluation": [
         {
           "rule_id": "gai-fm-evaluation-report",
@@ -220,6 +247,15 @@
       },
       "evidence_freshness_max_days": null,
       "retention_years": null,
+      "retention": {
+        "kind": "not_assessed",
+        "duty_holder": "any",
+        "period": null,
+        "anchor_event": "not_specified",
+        "source": "not_assessed",
+        "normative_text_ref": "",
+        "basis": "NOT ASSESSED. This profile has established no retention basis for NIST AI 600-1 (Generative AI Profile) (NIST AI 600-1 Section 2.4 (Transparency)). No retention determination has been made for this provision: the instrument was not assessed for records-retention duties and no period is asserted here. NIST AI 600-1 is a voluntary companion profile to the AI RMF and imposes no legal duty; US federal records retention derives from an agency records schedule this profile does not model. Absence of a figure is NOT a finding that no retention period applies: a retention duty may arise from this instrument, from an implementing instrument, or from generally applicable records law that this profile does not model. Establishing a cited basis requires a separate research pass against the primary text of the instrument."
+      },
       "evaluation": [
         {
           "rule_id": "gai-tr-transparency-disclosure",
@@ -279,6 +315,15 @@
       },
       "evidence_freshness_max_days": null,
       "retention_years": null,
+      "retention": {
+        "kind": "not_assessed",
+        "duty_holder": "any",
+        "period": null,
+        "anchor_event": "not_specified",
+        "source": "not_assessed",
+        "normative_text_ref": "",
+        "basis": "NOT ASSESSED. This profile has established no retention basis for NIST AI 600-1 (Generative AI Profile) (NIST AI 600-1 Section 2.5 (Fairness)). No retention determination has been made for this provision: the instrument was not assessed for records-retention duties and no period is asserted here. NIST AI 600-1 is a voluntary companion profile to the AI RMF and imposes no legal duty; US federal records retention derives from an agency records schedule this profile does not model. Absence of a figure is NOT a finding that no retention period applies: a retention duty may arise from this instrument, from an implementing instrument, or from generally applicable records law that this profile does not model. Establishing a cited basis requires a separate research pass against the primary text of the instrument."
+      },
       "evaluation": [
         {
           "rule_id": "gai-fa-evaluation-report",

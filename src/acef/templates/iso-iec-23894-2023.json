@@ -38,6 +38,15 @@
       },
       "evidence_freshness_max_days": null,
       "retention_years": null,
+      "retention": {
+        "kind": "not_assessed",
+        "duty_holder": "any",
+        "period": null,
+        "anchor_event": "not_specified",
+        "source": "not_assessed",
+        "normative_text_ref": "",
+        "basis": "NOT ASSESSED. This profile has established no retention basis for ISO/IEC 23894:2023 (Guidance on AI risk management) (ISO/IEC 23894:2023 Clause 6.3). No retention determination has been made for this provision: the instrument was not assessed for records-retention duties and no period is asserted here. ISO/IEC 23894 is guidance, not a certifiable requirements standard, and states retention duties nowhere this profile has verified; documented-information retention in the ISO management-system family is set by the organisation, not by the standard. Absence of a figure is NOT a finding that no retention period applies: a retention duty may arise from this instrument, from an implementing instrument, or from generally applicable records law that this profile does not model. Establishing a cited basis requires a separate research pass against the primary text of the instrument."
+      },
       "evaluation": [
         {
           "rule_id": "iso23894-ctx-risk-register",
@@ -88,6 +97,15 @@
       },
       "evidence_freshness_max_days": null,
       "retention_years": null,
+      "retention": {
+        "kind": "not_assessed",
+        "duty_holder": "any",
+        "period": null,
+        "anchor_event": "not_specified",
+        "source": "not_assessed",
+        "normative_text_ref": "",
+        "basis": "NOT ASSESSED. This profile has established no retention basis for ISO/IEC 23894:2023 (Guidance on AI risk management) (ISO/IEC 23894:2023 Clause 6.4). No retention determination has been made for this provision: the instrument was not assessed for records-retention duties and no period is asserted here. ISO/IEC 23894 is guidance, not a certifiable requirements standard, and states retention duties nowhere this profile has verified; documented-information retention in the ISO management-system family is set by the organisation, not by the standard. Absence of a figure is NOT a finding that no retention period applies: a retention duty may arise from this instrument, from an implementing instrument, or from generally applicable records law that this profile does not model. Establishing a cited basis requires a separate research pass against the primary text of the instrument."
+      },
       "evaluation": [
         {
           "rule_id": "iso23894-assess-risk-register",
@@ -136,6 +154,15 @@
       },
       "evidence_freshness_max_days": null,
       "retention_years": null,
+      "retention": {
+        "kind": "not_assessed",
+        "duty_holder": "any",
+        "period": null,
+        "anchor_event": "not_specified",
+        "source": "not_assessed",
+        "normative_text_ref": "",
+        "basis": "NOT ASSESSED. This profile has established no retention basis for ISO/IEC 23894:2023 (Guidance on AI risk management) (ISO/IEC 23894:2023 Clause 6.5). No retention determination has been made for this provision: the instrument was not assessed for records-retention duties and no period is asserted here. ISO/IEC 23894 is guidance, not a certifiable requirements standard, and states retention duties nowhere this profile has verified; documented-information retention in the ISO management-system family is set by the organisation, not by the standard. Absence of a figure is NOT a finding that no retention period applies: a retention duty may arise from this instrument, from an implementing instrument, or from generally applicable records law that this profile does not model. Establishing a cited basis requires a separate research pass against the primary text of the instrument."
+      },
       "evaluation": [
         {
           "rule_id": "iso23894-treat-risk-treatment",
@@ -177,6 +204,15 @@
       },
       "evidence_freshness_max_days": 365,
       "retention_years": null,
+      "retention": {
+        "kind": "not_assessed",
+        "duty_holder": "any",
+        "period": null,
+        "anchor_event": "not_specified",
+        "source": "not_assessed",
+        "normative_text_ref": "",
+        "basis": "NOT ASSESSED. This profile has established no retention basis for ISO/IEC 23894:2023 (Guidance on AI risk management) (ISO/IEC 23894:2023 Clause 6.6). No retention determination has been made for this provision: the instrument was not assessed for records-retention duties and no period is asserted here. ISO/IEC 23894 is guidance, not a certifiable requirements standard, and states retention duties nowhere this profile has verified; documented-information retention in the ISO management-system family is set by the organisation, not by the standard. Absence of a figure is NOT a finding that no retention period applies: a retention duty may arise from this instrument, from an implementing instrument, or from generally applicable records law that this profile does not model. Establishing a cited basis requires a separate research pass against the primary text of the instrument."
+      },
       "evaluation": [
         {
           "rule_id": "iso23894-mon-evaluation-report",

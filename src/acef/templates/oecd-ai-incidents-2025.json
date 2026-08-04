@@ -61,6 +61,15 @@
       "minimum_evidence_count": {},
       "evidence_freshness_max_days": null,
       "retention_years": null,
+      "retention": {
+        "kind": "not_assessed",
+        "duty_holder": "any",
+        "period": null,
+        "anchor_event": "not_specified",
+        "source": "not_assessed",
+        "normative_text_ref": "",
+        "basis": "NOT ASSESSED. This profile has established no retention basis for the OECD common reporting framework for AI incidents (OECD AI Papers No. 34, February 2025) (OECD CRF 2025, Table 2.2 (mandatory criteria, asterisked); Box 2.2 (selected-criteria counts)). No retention determination has been made for this provision: the instrument was not assessed for records-retention duties and no period is asserted here. The OECD CRF is a reporting-taxonomy proposal with no legal force; any retention duty over incident records arises from the adopting jurisdiction's own instrument, not from the CRF. Absence of a figure is NOT a finding that no retention period applies: a retention duty may arise from this instrument, from an implementing instrument, or from generally applicable records law that this profile does not model. Establishing a cited basis requires a separate research pass against the primary text of the instrument."
+      },
       "evaluation_dsl_note": "HONESTY (mirrors the eu-ai-act-art73-2026 template). The DSL-CORRECT check the generic engine CAN express is the existential presence + edition-pin of the OECD crosswalk member (exists_where on incident_card.taxonomy_crosswalk.oecd.edition). The PER-ORDINAL completeness check — 'does criteria[] contain an entry for each mandatory ordinal #1,2,3,4,7,10,11?' — is NOT DSL-expressible: criteria[] is an order-insensitive array (§5.10), exists_where resolves a SINGLE RFC-6901 pointer per record, and jsonpointer has NO array-wildcard, so no operator can scan array entries by an `id` predicate; hard-coding criteria/0/id would wrongly reject a valid card whose criteria are sorted differently (the index-0 anti-pattern). Encoding the 7 ordinals as fixed-index field_present rules is therefore a false signal and is NOT done. Instead: (a) the member-presence + edition-pin is encoded as an honest advisory exists_where rule; (b) the per-ordinal mandatory-core completeness is DECLARED in validator_delegated_enforcement and oecd_framework.mandatory_criteria for a richer (validator/SDK) completeness checker — and because the whole template is voluntary, even a delegated completeness gap is ADVISORY, never binding. All retained rules are warning severity.",
       "validator_delegated_enforcement": {
         "owner_feature": "F-M3-TEMPLATE-OECD",
@@ -118,6 +127,15 @@
       "minimum_evidence_count": {},
       "evidence_freshness_max_days": null,
       "retention_years": null,
+      "retention": {
+        "kind": "not_assessed",
+        "duty_holder": "any",
+        "period": null,
+        "anchor_event": "not_specified",
+        "source": "not_assessed",
+        "normative_text_ref": "",
+        "basis": "NOT ASSESSED. This profile has established no retention basis for the OECD common reporting framework for AI incidents (OECD AI Papers No. 34, February 2025) (OECD CRF 2025, Box 2.2 (selected criteria minus the 7 mandatory)). No retention determination has been made for this provision: the instrument was not assessed for records-retention duties and no period is asserted here. The OECD CRF is a reporting-taxonomy proposal with no legal force; any retention duty over incident records arises from the adopting jurisdiction's own instrument, not from the CRF. Absence of a figure is NOT a finding that no retention period applies: a retention duty may arise from this instrument, from an implementing instrument, or from generally applicable records law that this profile does not model. Establishing a cited basis requires a separate research pass against the primary text of the instrument."
+      },
       "evaluation_dsl_note": "The 22 optional criteria are enrichment 'where available'; their per-ordinal presence is the same order-insensitive-array-scan the generic DSL cannot express. The single retained rule is an info-severity advisory that the OECD member exists at all; per-ordinal optional completeness is left to the validator/SDK and is purely informational (never warning, never fail).",
       "evaluation": [
         {
