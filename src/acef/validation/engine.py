@@ -907,11 +907,17 @@ def _evaluate_profiles(
     for profile_id in profile_ids:
         try:
             template = load_template(profile_id)
-        except ACEFError:
+        except ACEFError as exc:
+            # Preserve the code and message the registry actually raised. This
+            # block previously discarded the exception and hardcoded ACEF-030
+            # "Template not found", so a template that EXISTS but is malformed —
+            # or one carrying an unsourced retention figure (ACEF-034) — was
+            # reported as missing, a factually false statement about a file on
+            # disk, and the real diagnostic never reached the caller.
             assessment.structural_errors.append(
                 ValidationDiagnostic(
-                    "ACEF-030",
-                    f"Template not found: {profile_id!r}",
+                    exc.code,
+                    str(exc),
                 ).to_dict()
             )
             continue

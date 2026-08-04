@@ -340,6 +340,32 @@ INCIDENT_ERROR_DETAILS: dict[str, IncidentErrorDetail] = {
 # evaluation-band ordinal (040-049, spec §3.6) reserved for "unknown comparison
 # operator in a rule" (audit finding F13).
 EXTENDED_ERROR_DETAILS: dict[str, IncidentErrorDetail] = {
+    "ACEF-034": IncidentErrorDetail(
+        severity=Severity.ERROR,
+        category=ErrorCategory.PROFILE,
+        problem=(
+            "a provision asserts a retention period with no recorded provenance, or its "
+            "retention block is internally inconsistent (a period-bearing kind with no "
+            "period, a 'none_stated'/'not_assessed' kind carrying one, an 'inferred' "
+            "source whose basis omits the INFERRED token, a 'cited' source with no "
+            "normative_text_ref, or a retention_years scalar disagreeing with the "
+            "structured block)"
+        ),
+        cause=(
+            "spec §3.1.4 (provision retention provenance). GitHub issue #1: "
+            "eu-ai-act-2024 asserted retention_years: 10 on eight provisions with no "
+            "basis, which for article-12 is a false statement of law — Art. 12 of "
+            "Regulation (EU) 2024/1689 states no retention period; Art. 19(1) and "
+            "Art. 26(6) govern log retention at 'at least six months'"
+        ),
+        fix=(
+            "give the provision a retention block whose kind, period and source agree: "
+            "use kind='none_stated' with source='cited' when the instrument states no "
+            "period, kind='not_assessed' with source='not_assessed' when it has not "
+            "been assessed, and carry the literal token INFERRED in the basis whenever "
+            "source='inferred'; a retention figure with no auditable source must not ship"
+        ),
+    ),
     "ACEF-046": IncidentErrorDetail(
         severity=Severity.ERROR,
         category=ErrorCategory.EVALUATION,

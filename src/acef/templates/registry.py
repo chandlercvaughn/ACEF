@@ -6,6 +6,8 @@ import json
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import ValidationError as PydanticValidationError
+
 from acef.errors import ACEFProfileError
 from acef.integrity import canonicalize, sha256_hex
 from acef.templates.models import Template
@@ -45,7 +47,19 @@ def _load_template_cached(template_id: str) -> Template:
             code="ACEF-030",
         ) from e
 
-    return Template.model_validate(data)
+    try:
+        return Template.model_validate(data)
+    except PydanticValidationError as e:
+        # Without this wrap the raw pydantic error escapes: no ACEF caller catches
+        # it, and `_evaluate_profiles` (which catches only ACEFError) aborts the
+        # whole validation run instead of emitting a diagnostic. The retention
+        # invariants raise with an "ACEF-034: " prefix, so preserve that code;
+        # any other model failure is a malformed template, not a missing one.
+        code = "ACEF-034" if "ACEF-034" in str(e) else "ACEF-030"
+        raise ACEFProfileError(
+            f"Invalid template {template_id}: {e}",
+            code=code,
+        ) from e
 
 
 def load_template(template_id: str) -> Template:
