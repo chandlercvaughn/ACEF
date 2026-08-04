@@ -224,3 +224,50 @@ def test_every_exists_where_rule_declares_record_type(template_id: str) -> None:
         "operators.py:1402 indexes it directly, so this raises KeyError at validation "
         "time."
     )
+
+
+# ── Evidence-side misattribution guard ──
+#
+# The template guard above tests `normative_text_ref` on PROVISIONS. Records
+# carry their own retention provenance in `payload.retention_policy_summary`
+# and on the envelope, and the same misattribution is expressible there —
+# golden-bundles/eu-high-risk-core shipped {"legal_basis": "EU AI Act Art.
+# 12(1)", "min_days": 3650} for exactly this reason (roborev on 0753d47).
+
+_BUNDLE_ROOT = _ROOT / "tests" / "conformance" / "golden-bundles"
+
+
+def _iter_record_retention() -> list[tuple[str, dict]]:
+    """Every (source, retention_policy_summary) across the golden corpus."""
+    found: list[tuple[str, dict]] = []
+    for jsonl in sorted(_BUNDLE_ROOT.glob("*/records/*.jsonl")):
+        for lineno, line in enumerate(jsonl.read_text(encoding="utf-8").splitlines(), 1):
+            if not line.strip():
+                continue
+            rec = json.loads(line)
+            summary = (rec.get("payload") or {}).get("retention_policy_summary")
+            if isinstance(summary, dict):
+                rel = jsonl.relative_to(_ROOT)
+                found.append((f"{rel}:{lineno}", summary))
+    return found
+
+
+def test_golden_corpus_has_retention_records_to_check() -> None:
+    """Guard the guard: an empty sweep would pass vacuously forever."""
+    assert _iter_record_retention(), "no retention_policy_summary found in any golden bundle"
+
+
+def test_no_golden_record_attributes_retention_to_article_12() -> None:
+    """Art. 12 states no retention period, so no record may cite it as one.
+
+    Retention of Art. 12(1) logs is governed by Art. 19(1) for providers and
+    Art. 26(6) for deployers, both "at least six months".
+    """
+    for source, summary in _iter_record_retention():
+        basis = str(summary.get("legal_basis", ""))
+        if _ART12_CITATION.search(basis):
+            pytest.fail(
+                f"{source} attributes a {summary.get('min_days')}-day retention to "
+                f"Art. 12, which states none: legal_basis={basis!r}. Cite Art. 19(1) "
+                f"(provider) or Art. 26(6) (deployer)."
+            )
