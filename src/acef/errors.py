@@ -366,6 +366,33 @@ EXTENDED_ERROR_DETAILS: dict[str, IncidentErrorDetail] = {
             "source='inferred'; a retention figure with no auditable source must not ship"
         ),
     ),
+    "ACEF-035": IncidentErrorDetail(
+        severity=Severity.INFO,
+        category=ErrorCategory.PROFILE,
+        problem=(
+            "a provision commences on two or more dates keyed to a classification the "
+            "bundle cannot express, and the evaluation instant falls between the "
+            "earliest and latest of them, so applicability is INDETERMINATE for this "
+            "subject — the reported outcome rests on the EARLIEST limb and is a "
+            "conservative projection, not a determination"
+        ),
+        cause=(
+            "spec §3.6. EU AI Act Art. 113 third paragraph point (c), as replaced by "
+            "Regulation (EU) 2026/1744 Art. 1 point (40)(b), applies Chapter III "
+            "Sections 1-3 from 2 December 2027 to Art. 6(2)/Annex III high-risk "
+            "systems and from 2 August 2028 to Art. 6(1)/Annex I. Provision."
+            "effective_date holds a single value and the risk_classification enum in "
+            "the frozen v1 manifest schema has no Annex I / Annex III member, so the "
+            "discriminator cannot be evaluated"
+        ),
+        fix=(
+            "determine the subject's Art. 6 / Annex classification out of band before "
+            "relying on this provision's outcome; it is reported against the earliest "
+            "commencement limb, so a subject falling under the later limb is reported "
+            "as bound sooner than it is. Both limbs are recorded on the provision's "
+            "tiered_requirements.adoption block"
+        ),
+    ),
     "ACEF-046": IncidentErrorDetail(
         severity=Severity.ERROR,
         category=ErrorCategory.EVALUATION,

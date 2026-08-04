@@ -107,6 +107,13 @@
           "message": "Every risk_register record must be linked to a subject entity to establish which AI system the risk applies to"
         }
       ],
+      "tiered_requirements": {
+        "adoption": {
+          "annex_iii_high_risk": "2027-12-02",
+          "annex_i_high_risk": "2028-08-02",
+          "basis": "Art. 113 third paragraph point (c), as replaced by Regulation (EU) 2026/1744 Art. 1 point (40)(b): Chapter III Sections 1-3 apply from 2 December 2027 for systems classified as high-risk under Art. 6(2) and Annex III, and from 2 August 2028 for systems classified as high-risk under Art. 6(1) and Annex I. Arts. 19 and 26 are both Chapter III Section 3. ACEF cannot express the Annex I / Annex III discriminator (effective_date is a single value and the risk_classification enum in the frozen v1 manifest schema has no such value), so effective_date carries the EARLIER limb as a conservative projection and both limbs are recorded here. A consumer MUST NOT read effective_date alone as a definitive statement that the obligation applies to a given subject between 2027-12-02 and 2028-08-02."
+        }
+      },
       "evaluation_scope": null
     },
     {
@@ -170,6 +177,13 @@
           "message": "Every data_provenance record must specify the source_uri for traceability of training data origin"
         }
       ],
+      "tiered_requirements": {
+        "adoption": {
+          "annex_iii_high_risk": "2027-12-02",
+          "annex_i_high_risk": "2028-08-02",
+          "basis": "Art. 113 third paragraph point (c), as replaced by Regulation (EU) 2026/1744 Art. 1 point (40)(b): Chapter III Sections 1-3 apply from 2 December 2027 for systems classified as high-risk under Art. 6(2) and Annex III, and from 2 August 2028 for systems classified as high-risk under Art. 6(1) and Annex I. Arts. 19 and 26 are both Chapter III Section 3. ACEF cannot express the Annex I / Annex III discriminator (effective_date is a single value and the risk_classification enum in the frozen v1 manifest schema has no such value), so effective_date carries the EARLIER limb as a conservative projection and both limbs are recorded here. A consumer MUST NOT read effective_date alone as a definitive statement that the obligation applies to a given subject between 2027-12-02 and 2028-08-02."
+        }
+      },
       "evaluation_scope": null
     },
     {
@@ -217,6 +231,13 @@
           "message": "Evaluation reports should document the methodology used, per Annex IV requirements for system performance evaluation methods"
         }
       ],
+      "tiered_requirements": {
+        "adoption": {
+          "annex_iii_high_risk": "2027-12-02",
+          "annex_i_high_risk": "2028-08-02",
+          "basis": "Art. 113 third paragraph point (c), as replaced by Regulation (EU) 2026/1744 Art. 1 point (40)(b): Chapter III Sections 1-3 apply from 2 December 2027 for systems classified as high-risk under Art. 6(2) and Annex III, and from 2 August 2028 for systems classified as high-risk under Art. 6(1) and Annex I. Arts. 19 and 26 are both Chapter III Section 3. ACEF cannot express the Annex I / Annex III discriminator (effective_date is a single value and the risk_classification enum in the frozen v1 manifest schema has no such value), so effective_date carries the EARLIER limb as a conservative projection and both limbs are recorded here. A consumer MUST NOT read effective_date alone as a definitive statement that the obligation applies to a given subject between 2027-12-02 and 2028-08-02."
+        }
+      },
       "evaluation_scope": null
     },
     {
@@ -287,6 +308,13 @@
           "message": "Event log records should be linked to a subject entity for traceability to the specific AI system"
         }
       ],
+      "tiered_requirements": {
+        "adoption": {
+          "annex_iii_high_risk": "2027-12-02",
+          "annex_i_high_risk": "2028-08-02",
+          "basis": "Art. 113 third paragraph point (c), as replaced by Regulation (EU) 2026/1744 Art. 1 point (40)(b): Chapter III Sections 1-3 apply from 2 December 2027 for systems classified as high-risk under Art. 6(2) and Annex III, and from 2 August 2028 for systems classified as high-risk under Art. 6(1) and Annex I. Arts. 19 and 26 are both Chapter III Section 3. ACEF cannot express the Annex I / Annex III discriminator (effective_date is a single value and the risk_classification enum in the frozen v1 manifest schema has no such value), so effective_date carries the EARLIER limb as a conservative projection and both limbs are recorded here. A consumer MUST NOT read effective_date alone as a definitive statement that the obligation applies to a given subject between 2027-12-02 and 2028-08-02."
+        }
+      },
       "evaluation_scope": null
     },
     {
@@ -334,6 +362,13 @@
           "message": "Transparency disclosures should be linked to a subject entity to identify which AI system's capabilities and limitations are documented"
         }
       ],
+      "tiered_requirements": {
+        "adoption": {
+          "annex_iii_high_risk": "2027-12-02",
+          "annex_i_high_risk": "2028-08-02",
+          "basis": "Art. 113 third paragraph point (c), as replaced by Regulation (EU) 2026/1744 Art. 1 point (40)(b): Chapter III Sections 1-3 apply from 2 December 2027 for systems classified as high-risk under Art. 6(2) and Annex III, and from 2 August 2028 for systems classified as high-risk under Art. 6(1) and Annex I. Arts. 19 and 26 are both Chapter III Section 3. ACEF cannot express the Annex I / Annex III discriminator (effective_date is a single value and the risk_classification enum in the frozen v1 manifest schema has no such value), so effective_date carries the EARLIER limb as a conservative projection and both limbs are recorded here. A consumer MUST NOT read effective_date alone as a definitive statement that the obligation applies to a given subject between 2027-12-02 and 2028-08-02."
+        }
+      },
       "evaluation_scope": null
     },
     {
@@ -381,6 +416,13 @@
           "message": "Human oversight actions should be linked to an actor entity to establish who performed the oversight"
         }
       ],
+      "tiered_requirements": {
+        "adoption": {
+          "annex_iii_high_risk": "2027-12-02",
+          "annex_i_high_risk": "2028-08-02",
+          "basis": "Art. 113 third paragraph point (c), as replaced by Regulation (EU) 2026/1744 Art. 1 point (40)(b): Chapter III Sections 1-3 apply from 2 December 2027 for systems classified as high-risk under Art. 6(2) and Annex III, and from 2 August 2028 for systems classified as high-risk under Art. 6(1) and Annex I. Arts. 19 and 26 are both Chapter III Section 3. ACEF cannot express the Annex I / Annex III discriminator (effective_date is a single value and the risk_classification enum in the frozen v1 manifest schema has no such value), so effective_date carries the EARLIER limb as a conservative projection and both limbs are recorded here. A consumer MUST NOT read effective_date alone as a definitive statement that the obligation applies to a given subject between 2027-12-02 and 2028-08-02."
+        }
+      },
       "evaluation_scope": null
     },
     {
@@ -428,6 +470,13 @@
           "message": "Evaluation reports should include quantified metrics for accuracy assessment per Art. 15(1)"
         }
       ],
+      "tiered_requirements": {
+        "adoption": {
+          "annex_iii_high_risk": "2027-12-02",
+          "annex_i_high_risk": "2028-08-02",
+          "basis": "Art. 113 third paragraph point (c), as replaced by Regulation (EU) 2026/1744 Art. 1 point (40)(b): Chapter III Sections 1-3 apply from 2 December 2027 for systems classified as high-risk under Art. 6(2) and Annex III, and from 2 August 2028 for systems classified as high-risk under Art. 6(1) and Annex I. Arts. 19 and 26 are both Chapter III Section 3. ACEF cannot express the Annex I / Annex III discriminator (effective_date is a single value and the risk_classification enum in the frozen v1 manifest schema has no such value), so effective_date carries the EARLIER limb as a conservative projection and both limbs are recorded here. A consumer MUST NOT read effective_date alone as a definitive statement that the obligation applies to a given subject between 2027-12-02 and 2028-08-02."
+        }
+      },
       "evaluation_scope": null
     },
     {
@@ -475,6 +524,13 @@
           "message": "Quality management system governance_policy records should include attached policy documents (PDF or similar)"
         }
       ],
+      "tiered_requirements": {
+        "adoption": {
+          "annex_iii_high_risk": "2027-12-02",
+          "annex_i_high_risk": "2028-08-02",
+          "basis": "Art. 113 third paragraph point (c), as replaced by Regulation (EU) 2026/1744 Art. 1 point (40)(b): Chapter III Sections 1-3 apply from 2 December 2027 for systems classified as high-risk under Art. 6(2) and Annex III, and from 2 August 2028 for systems classified as high-risk under Art. 6(1) and Annex I. Arts. 19 and 26 are both Chapter III Section 3. ACEF cannot express the Annex I / Annex III discriminator (effective_date is a single value and the risk_classification enum in the frozen v1 manifest schema has no such value), so effective_date carries the EARLIER limb as a conservative projection and both limbs are recorded here. A consumer MUST NOT read effective_date alone as a definitive statement that the obligation applies to a given subject between 2027-12-02 and 2028-08-02."
+        }
+      },
       "evaluation_scope": null
     },
     {

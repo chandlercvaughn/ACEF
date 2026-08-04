@@ -862,6 +862,60 @@ def _parse_iso_instant(value: str) -> datetime | None:
     return parsed
 
 
+def split_commencement_state(
+    adoption: dict[str, Any] | None,
+    evaluation_instant: str | None,
+) -> dict[str, Any] | None:
+    """Detect an unresolvable split-commencement window (ACEF-035).
+
+    A provision may commence on several dates keyed to a classification of the
+    regulated subject that ACEF cannot express — EU AI Act Art. 113 third
+    paragraph point (c), as replaced by Regulation (EU) 2026/1744, applies
+    Chapter III Sections 1-3 from 2027-12-02 to Annex III high-risk systems and
+    from 2028-08-02 to Annex I. ``Provision.effective_date`` holds one value and
+    carries the EARLIEST limb, so between the two dates the reported outcome is a
+    conservative projection rather than a determination.
+
+    Returns ``None`` when applicability is settled — before every limb (already
+    covered by ACEF-032 not-yet-effective), on or after the last limb (every
+    class has commenced), or when there is only one limb. Otherwise returns the
+    window and the classes whose commencement has NOT yet been reached, so the
+    caller can name the missing attribute in the diagnostic (the XACML
+    ``Indeterminate`` convention, distinct from ``NotApplicable``).
+
+    Non-date values in the adoption block — ``basis`` prose, for instance — are
+    ignored rather than parsed as limbs.
+    """
+    if not adoption or not evaluation_instant:
+        return None
+
+    limbs: dict[str, str] = {}
+    for key, value in adoption.items():
+        if not isinstance(value, str):
+            continue
+        if _parse_iso_instant(value) is None:
+            continue
+        limbs[key] = value
+    if len(limbs) < 2:
+        return None
+
+    dates = sorted(set(limbs.values()))
+    earliest, latest = dates[0], dates[-1]
+    if earliest == latest:
+        return None
+    # Before the earliest: nothing has commenced (ACEF-032 covers it).
+    # On/after the latest: every class has commenced, so applicability is settled.
+    if _is_before(evaluation_instant, earliest) or not _is_before(evaluation_instant, latest):
+        return None
+
+    undetermined = sorted(k for k, v in limbs.items() if not _is_before(v, evaluation_instant))
+    return {
+        "earliest": earliest,
+        "latest": latest,
+        "undetermined_classes": undetermined,
+    }
+
+
 def _is_before(a: str, b: str) -> bool:
     """Return True iff timestamp ``a`` is strictly before ``b``.
 
@@ -1041,6 +1095,31 @@ def _evaluate_profiles(
                             f"evaluation: {evaluation_instant})",
                         ).to_dict()
                     )
+                    continue
+            # ACEF-035: the provision commences on several dates keyed to a
+            # classification this bundle cannot express, and the instant falls
+            # between them. ``effective_date`` carries the EARLIEST limb, so the
+            # outcome reported below is a conservative projection, not a
+            # determination — say so rather than returning an unqualified binary
+            # with the caveat buried in documentation.
+            split = split_commencement_state(
+                (prov.tiered_requirements or {}).get("adoption"),
+                evaluation_instant,
+            )
+            if split is not None:
+                classes = ", ".join(split["undetermined_classes"])
+                assessment.structural_errors.append(
+                    ValidationDiagnostic(
+                        "ACEF-035",
+                        f"Provision {prov.provision_id} applicability is indeterminate at "
+                        f"{evaluation_instant}: it commences {split['earliest']} through "
+                        f"{split['latest']} depending on the subject's classification, and "
+                        f"{classes} has not yet commenced. The outcome reported for this "
+                        f"provision uses the earliest limb and is a conservative "
+                        f"projection; determine the subject's Art. 6 / Annex "
+                        f"classification to settle it.",
+                    ).to_dict()
+                )
 
         # Synthesize SKIPPED results for not-yet-effective provisions so the
         # roll-up algorithm reports ``skipped`` for them (spec §3.7 step 3).
