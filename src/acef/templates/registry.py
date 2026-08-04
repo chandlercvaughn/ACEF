@@ -55,7 +55,13 @@ def _load_template_cached(template_id: str) -> Template:
         # whole validation run instead of emitting a diagnostic. The retention
         # invariants raise with an "ACEF-034: " prefix, so preserve that code;
         # any other model failure is a malformed template, not a missing one.
-        code = "ACEF-034" if "ACEF-034" in str(e) else "ACEF-030"
+        #
+        # Classify on the STRUCTURED errors, never on ``str(e)``: pydantic's
+        # rendered text echoes ``input_value``, so a template that merely mentions
+        # "ACEF-034" anywhere in its content would be misclassified. A template
+        # missing ``template_id`` whose description cites the code reproduces this
+        # exactly — the only real error is "Field required".
+        code = "ACEF-034" if any("ACEF-034" in str(err.get("msg", "")) for err in e.errors()) else "ACEF-030"
         raise ACEFProfileError(
             f"Invalid template {template_id}: {e}",
             code=code,

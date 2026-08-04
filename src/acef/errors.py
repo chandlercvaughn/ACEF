@@ -352,11 +352,11 @@ EXTENDED_ERROR_DETAILS: dict[str, IncidentErrorDetail] = {
             "structured block)"
         ),
         cause=(
-            "spec §3.1.4 (provision retention provenance). GitHub issue #1: "
-            "eu-ai-act-2024 asserted retention_years: 10 on eight provisions with no "
-            "basis, which for article-12 is a false statement of law — Art. 12 of "
-            "Regulation (EU) 2024/1689 states no retention period; Art. 19(1) and "
-            "Art. 26(6) govern log retention at 'at least six months'"
+            "spec §3.6 (error taxonomy). GitHub issue #1: eu-ai-act-2024 asserted "
+            "retention_years: 10 on eight provisions with no basis, which for "
+            "article-12 is a false statement of law — Art. 12 of Regulation (EU) "
+            "2024/1689 states no retention period; Art. 19(1) (provider) and "
+            "Art. 26(6) (deployer) govern log retention at 'at least six months'"
         ),
         fix=(
             "give the provision a retention block whose kind, period and source agree: "

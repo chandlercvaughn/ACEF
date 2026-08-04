@@ -914,10 +914,14 @@ def _evaluate_profiles(
             # or one carrying an unsourced retention figure (ACEF-034) — was
             # reported as missing, a factually false statement about a file on
             # disk, and the real diagnostic never reached the caller.
+            # ``exc.message``, not ``str(exc)``: ACEFError.__str__ renders
+            # "[ACEF-NNN] ..." and ValidationDiagnostic already carries the code
+            # in its own field, so str() would duplicate it in every rendered
+            # report.
             assessment.structural_errors.append(
                 ValidationDiagnostic(
                     exc.code,
-                    str(exc),
+                    exc.message,
                 ).to_dict()
             )
             continue
