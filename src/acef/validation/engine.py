@@ -9,6 +9,7 @@ Phase 4: Rule evaluation (DSL rules -> provision rollup)
 from __future__ import annotations
 
 import json
+import re
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -862,6 +863,13 @@ def _parse_iso_instant(value: str) -> datetime | None:
     return parsed
 
 
+# A classification-guard key in a `tiered_requirements.adoption` block: it names
+# the subject class whose commencement date it carries. Both shipped conventions
+# match (`annex_iii_high_risk`, `annex_i_effective_date`) while non-guard dates
+# in the same block (`as_enacted_effective_date`, `effective_date`) do not.
+_CLASSIFICATION_LIMB = re.compile(r"^annex_[a-z]+_", re.IGNORECASE)
+
+
 def calendar_months_to_days(months: int) -> int:
     """Return the MINIMUM number of days that ``months`` calendar months can span.
 
@@ -921,11 +929,16 @@ def split_commencement_state(
     if not adoption or not evaluation_instant:
         return None
 
+    # Only CLASSIFICATION-GUARD keys are limbs. An adoption block also carries
+    # non-guard dates — eu-ai-act-art73-2026 records `as_enacted_effective_date`
+    # (the superseded date) and a generic `effective_date` alongside its real
+    # guards — and treating those as limbs invents a window that does not exist
+    # and reports "effective_date" as an undetermined class.
     limbs: dict[str, str] = {}
     for key, value in adoption.items():
-        if not isinstance(value, str):
+        if not _CLASSIFICATION_LIMB.match(key):
             continue
-        if _parse_iso_instant(value) is None:
+        if not isinstance(value, str) or _parse_iso_instant(value) is None:
             continue
         limbs[key] = value
     if len(limbs) < 2:
@@ -1115,6 +1128,12 @@ def _evaluate_profiles(
         # ``skipped`` outcome rather than being evaluated normally — a
         # provision that is not yet legally in force cannot fail.
         not_yet_effective: set[str] = set()
+        # Provisions whose applicability cannot be settled for this subject
+        # (ACEF-035). They must NOT roll up to a binary verdict: an Annex I
+        # system would otherwise be told it is compliant or non-compliant up to
+        # eight months before its obligation commences. They roll up to
+        # not-assessed instead, with ACEF-035 as the explanation.
+        indeterminate: set[str] = set()
         for prov in provisions_to_evaluate:
             if prov.effective_date and evaluation_instant:
                 if _is_before(evaluation_instant, prov.effective_date):
@@ -1173,6 +1192,7 @@ def _evaluate_profiles(
                 )
 
             if split is not None:
+                indeterminate.add(prov.provision_id)
                 classes = ", ".join(split["undetermined_classes"])
                 assessment.structural_errors.append(
                     ValidationDiagnostic(
@@ -1198,7 +1218,7 @@ def _evaluate_profiles(
         # violates the §3.7 MUST that per-subject ``provision_summary`` entries
         # identify their subject(s)). Package-scoped not-yet-effective provisions
         # still produce one summary with empty ``subject_scope``.
-        if not_yet_effective:
+        if not_yet_effective or indeterminate:
             from acef.models.assessment import RuleResult
             from acef.models.enums import RuleOutcome, RuleSeverity
 
@@ -1213,17 +1233,35 @@ def _evaluate_profiles(
                 """
 
                 def _mk(rule_id: str, severity: str) -> RuleResult:
+                    if prov.provision_id in indeterminate:
+                        # ERROR rolls up to NOT_ASSESSED at §3.7 step 2. A binary
+                        # verdict here would state a compliance conclusion the
+                        # evidence cannot support (ACEF-035).
+                        outcome, detail = (
+                            RuleOutcome.ERROR,
+                            (
+                                f"Provision applicability is indeterminate at "
+                                f"{evaluation_instant}: it commences on more than one date "
+                                f"depending on the subject's classification, which this "
+                                f"bundle cannot express. See ACEF-035."
+                            ),
+                        )
+                    else:
+                        outcome, detail = (
+                            RuleOutcome.SKIPPED,
+                            (
+                                f"Provision not yet effective "
+                                f"(effective_date={prov.effective_date}, "
+                                f"evaluation_instant={evaluation_instant})"
+                            ),
+                        )
                     return RuleResult(
                         rule_id=rule_id,
                         provision_id=prov.provision_id,
                         profile_id=profile_id,
                         rule_severity=RuleSeverity(severity),
-                        outcome=RuleOutcome.SKIPPED,
-                        message=(
-                            f"Provision not yet effective "
-                            f"(effective_date={prov.effective_date}, "
-                            f"evaluation_instant={evaluation_instant})"
-                        ),
+                        outcome=outcome,
+                        message=detail,
                         evidence_refs=[],
                         subject_scope=list(scope),
                     )
@@ -1241,7 +1279,8 @@ def _evaluate_profiles(
                 results.extend(_mk(rule.rule_id, rule.severity) for rule in prov.evaluation)
                 return results
 
-            nye_provisions = [p for p in provisions_to_evaluate if p.provision_id in not_yet_effective]
+            deferred_ids = not_yet_effective | indeterminate
+            nye_provisions = [p for p in provisions_to_evaluate if p.provision_id in deferred_ids]
             nye_package = [p for p in nye_provisions if p.evaluation_scope == "package"]
             nye_per_subject = [p for p in nye_provisions if p.evaluation_scope != "package"]
 
@@ -1285,7 +1324,9 @@ def _evaluate_profiles(
                         )
 
         # Exclude not-yet-effective provisions from further evaluation.
-        provisions_to_evaluate = [p for p in provisions_to_evaluate if p.provision_id not in not_yet_effective]
+        provisions_to_evaluate = [
+            p for p in provisions_to_evaluate if p.provision_id not in (not_yet_effective | indeterminate)
+        ]
 
         # Split provisions into package-scoped and per-subject (default)
         package_scoped = [p for p in provisions_to_evaluate if p.evaluation_scope == "package"]

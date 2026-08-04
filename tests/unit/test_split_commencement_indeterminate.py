@@ -230,3 +230,111 @@ class TestDiagnosticFiresThroughValidateBundle:
         inside = self._bundle(tmp_path / "a", "2028-01-15T00:00:00Z")
         after = self._bundle(tmp_path / "b", "2029-01-01T00:00:00Z")
         assert [r.outcome for r in inside.results] == [r.outcome for r in after.results]
+
+
+class TestIndeterminateDoesNotYieldABinaryVerdict:
+    """roborev HIGH on 0c5c6c8: annotating is not enough.
+
+    "ACEF-035 only appends an informational diagnostic; the provision remains in
+    evaluation and still rolls up to satisfied or not-satisfied. An Annex I
+    system can therefore still receive a false compliance verdict eight months
+    before its obligation commences." Confirmed, and fixed: split-window
+    provisions now roll up to not-assessed.
+    """
+
+    @staticmethod
+    def _validate(tmp_path, instant: str):
+        from acef.package import Package
+        from acef.validation.engine import validate_bundle
+
+        pkg = Package(producer={"name": "t", "version": "1"})
+        system = pkg.add_subject("ai_system", name="S", version="1", risk_classification="high-risk")
+        pkg.add_profile("eu-ai-act-2024", provisions=["article-9"])
+        for rt, payload in (
+            (
+                "risk_register",
+                {
+                    "risk_id": "R-1",
+                    "description": "d",
+                    "category": "safety",
+                    "likelihood": "likely",
+                    "severity": "major",
+                    "risk_level": "high",
+                },
+            ),
+            (
+                "risk_treatment",
+                {
+                    "risk_id": "R-1",
+                    "treatment_type": "mitigate",
+                    "control_description": "c",
+                    "implementation_status": "implemented",
+                },
+            ),
+        ):
+            pkg.record(
+                rt,
+                provisions=["article-9"],
+                payload=payload,
+                obligation_role="provider",
+                entity_refs={"subject_refs": [system.id]},
+                timestamp="2028-01-01T00:00:00Z",
+            )
+        out = tmp_path / "b"
+        pkg.export(str(out))
+        return validate_bundle(out, profiles=["eu-ai-act-2024"], evaluation_instant=instant)
+
+    def test_inside_the_window_rolls_up_to_not_assessed(self, tmp_path) -> None:
+        """The evidence would otherwise satisfy or fail — neither is supportable."""
+        assessment = self._validate(tmp_path, "2028-01-15T00:00:00Z")
+        outcomes = {s.provision_outcome.value for s in assessment.provision_summary}
+        assert outcomes == {"not-assessed"}, (
+            f"applicability is undecidable in the window, so a binary verdict is a false conclusion; got {outcomes}"
+        )
+        assert "ACEF-035" in [d.get("code") for d in assessment.structural_errors], (
+            "the outcome must stay explained — not-assessed without ACEF-035 is silent"
+        )
+
+    def test_after_both_limbs_a_real_verdict_returns(self, tmp_path) -> None:
+        """Once applicability is settled, normal evaluation resumes."""
+        assessment = self._validate(tmp_path, "2029-01-01T00:00:00Z")
+        outcomes = {s.provision_outcome.value for s in assessment.provision_summary}
+        assert outcomes and "not-assessed" not in outcomes, (
+            f"outside the window the provision must be genuinely evaluated; got {outcomes}"
+        )
+
+
+class TestOnlyClassificationGuardsAreLimbs:
+    """roborev MEDIUM on 0c5c6c8: non-guard dates were treated as limbs.
+
+    eu-ai-act-art73-2026's adoption block carries `as_enacted_effective_date`
+    (the SUPERSEDED date) and a generic `effective_date` alongside its real
+    Annex guards. Treating those as limbs invented a window starting 2026-08-02
+    and reported "effective_date" as an undetermined CLASS.
+    """
+
+    def test_art73_adoption_block_does_not_fire(self) -> None:
+        from acef.templates.registry import load_template
+
+        for prov in load_template("eu-ai-act-art73-2026").provisions:
+            adoption = (prov.tiered_requirements or {}).get("adoption")
+            if not adoption:
+                continue
+            assert split_commencement_state(adoption, "2026-08-04T00:00:00Z") is None, (
+                f"{prov.provision_id}: non-guard dates in the adoption block "
+                f"(as_enacted_effective_date / effective_date) were read as "
+                f"classification limbs"
+            )
+
+    def test_non_guard_keys_are_ignored_but_guards_are_not(self) -> None:
+        mixed = {
+            "as_enacted_effective_date": "2026-08-02",
+            "effective_date": "2027-12-02",
+            "annex_iii_high_risk": EARLY,
+            "annex_i_high_risk": LATE,
+            "basis": "prose",
+        }
+        state = split_commencement_state(mixed, "2028-01-15T00:00:00Z")
+        assert state is not None
+        assert state["earliest"] == EARLY, "a superseded date must not become the window start"
+        assert state["undetermined_classes"] == ["annex_i_high_risk"]
