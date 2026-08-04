@@ -1,7 +1,7 @@
 {
   "template_id": "nist-ai-rmf-1.0",
   "template_name": "NIST AI Risk Management Framework 1.0",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "jurisdiction": "US",
   "source_legislation": "NIST AI 100-1 (AI Risk Management Framework 1.0, January 2023)",
   "instrument_type": "standard",

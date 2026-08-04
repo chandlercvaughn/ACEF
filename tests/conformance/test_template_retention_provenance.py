@@ -271,3 +271,46 @@ def test_no_golden_record_attributes_retention_to_article_12() -> None:
                 f"Art. 12, which states none: legal_basis={basis!r}. Cite Art. 19(1) "
                 f"(provider) or Art. 26(6) (deployer)."
             )
+
+
+# ── Template-version pin integrity ──
+
+
+def test_add_profile_declares_the_actual_template_version() -> None:
+    """A manifest must pin the version it was actually built against.
+
+    `Package.add_profile` hardcoded `template_version="1.0.0"`, so every bundle
+    claimed v1.0.0 no matter which template it used. That defeats the pin: a
+    consumer could not tell which semantics produced the bundle, and a template
+    revision silently kept emitting bundles asserting the superseded version
+    (roborev on 4e583bd).
+    """
+    from acef.package import Package
+
+    pkg = Package(producer={"name": "t", "version": "1"})
+    for template_id in ALL_TEMPLATE_IDS:
+        entry = pkg.add_profile(template_id, provisions=["x"])
+        assert entry.template_version == load_template(template_id).version, (
+            f"{template_id}: manifest would declare {entry.template_version!r} but the "
+            f"registry ships {load_template(template_id).version!r}"
+        )
+
+
+def test_every_committed_manifest_pins_a_live_template_version() -> None:
+    """No committed bundle may declare a version the registry no longer ships.
+
+    A stale declaration emits ACEF-031 at validation time, so this catches the
+    drift at commit time instead.
+    """
+    live = {tid: load_template(tid).version for tid in ALL_TEMPLATE_IDS}
+    stale: list[str] = []
+    for manifest in sorted(_ROOT.glob("**/acef-manifest.json")):
+        if "/venv/" in str(manifest):
+            continue
+        data = json.loads(manifest.read_text(encoding="utf-8"))
+        for profile in data.get("profiles") or []:
+            pid = profile.get("profile_id")
+            declared = profile.get("template_version")
+            if pid in live and declared != live[pid]:
+                stale.append(f"{manifest.relative_to(_ROOT)}: {pid} declares {declared}")
+    assert not stale, "manifests pin superseded template versions:\n  " + "\n  ".join(stale)

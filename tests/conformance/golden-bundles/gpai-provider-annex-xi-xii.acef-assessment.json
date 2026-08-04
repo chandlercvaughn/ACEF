@@ -1,1 +1,106 @@
-{"assessment_id":"urn:acef:asx:55e1caa9-6867-44a3-8853-fa325c4976d1","assessor":{"name":"acef-validator","organization":"AI Commons","version":"0.1.0"},"evaluation_instant":"2026-03-15T12:00:00Z","evidence_bundle_ref":{"content_hash":"sha256:1951ee22886a624e16aa0f0855879d65cfb88e0147f81cb78fa619a202245e18","package_id":"urn:acef:pkg:cfb45b6a-5734-4a44-b94e-0a009a696cfb"},"integrity":null,"profiles_evaluated":["eu-ai-act-2024:1.0.0"],"provision_summary":[{"evidence_refs":["urn:acef:rec:9cbbd7e5-ec6f-46c6-8904-e7d7e12e93b5","urn:acef:rec:17a7bfa6-04bd-404a-a8a5-32640befb2ad","urn:acef:rec:e461e9ca-2e40-4336-ba12-e35f4e2a4d2d"],"fail_count":0,"profile_id":"eu-ai-act-2024","provision_id":"article-53","provision_outcome":"satisfied","skipped_count":0,"subject_scope":["urn:acef:sub:34a93a0d-4053-4c78-832e-c5adac90b030"],"warning_count":0}],"results":[{"error_code":null,"evidence_refs":["urn:acef:rec:9cbbd7e5-ec6f-46c6-8904-e7d7e12e93b5"],"message":null,"outcome":"passed","profile_id":"eu-ai-act-2024","provision_id":"article-53","rule_id":"art53-data-provenance","rule_severity":"fail","subject_scope":["urn:acef:sub:34a93a0d-4053-4c78-832e-c5adac90b030"]},{"error_code":null,"evidence_refs":["urn:acef:rec:17a7bfa6-04bd-404a-a8a5-32640befb2ad"],"message":null,"outcome":"passed","profile_id":"eu-ai-act-2024","provision_id":"article-53","rule_id":"art53-copyright","rule_severity":"fail","subject_scope":["urn:acef:sub:34a93a0d-4053-4c78-832e-c5adac90b030"]},{"error_code":null,"evidence_refs":["urn:acef:rec:e461e9ca-2e40-4336-ba12-e35f4e2a4d2d"],"message":null,"outcome":"passed","profile_id":"eu-ai-act-2024","provision_id":"article-53","rule_id":"art53-annex-xi-doc","rule_severity":"warning","subject_scope":["urn:acef:sub:34a93a0d-4053-4c78-832e-c5adac90b030"]},{"error_code":null,"evidence_refs":["urn:acef:rec:9cbbd7e5-ec6f-46c6-8904-e7d7e12e93b5"],"message":null,"outcome":"passed","profile_id":"eu-ai-act-2024","provision_id":"article-53","rule_id":"art53-provenance-source-type","rule_severity":"fail","subject_scope":["urn:acef:sub:34a93a0d-4053-4c78-832e-c5adac90b030"]}],"structural_errors":[],"template_digests":{"eu-ai-act-2024:1.0.0":"sha256:877eba550af93aff6da1d9dba5e8981c5801f3fe4c31d1e673857c52686053fb"},"timestamp":"2026-06-17T18:04:18Z","versioning":{"assessment_version":"1.0.0","core_version":"1.0.0"}}
+{
+  "assessment_id": "urn:acef:asx:55e1caa9-6867-44a3-8853-fa325c4976d1",
+  "assessor": {
+    "name": "acef-validator",
+    "organization": "AI Commons",
+    "version": "0.1.0"
+  },
+  "evaluation_instant": "2026-03-15T12:00:00Z",
+  "evidence_bundle_ref": {
+    "content_hash": "sha256:1951ee22886a624e16aa0f0855879d65cfb88e0147f81cb78fa619a202245e18",
+    "package_id": "urn:acef:pkg:cfb45b6a-5734-4a44-b94e-0a009a696cfb"
+  },
+  "integrity": null,
+  "profiles_evaluated": [
+    "eu-ai-act-2024:1.1.0"
+  ],
+  "provision_summary": [
+    {
+      "evidence_refs": [
+        "urn:acef:rec:9cbbd7e5-ec6f-46c6-8904-e7d7e12e93b5",
+        "urn:acef:rec:17a7bfa6-04bd-404a-a8a5-32640befb2ad",
+        "urn:acef:rec:e461e9ca-2e40-4336-ba12-e35f4e2a4d2d"
+      ],
+      "fail_count": 0,
+      "profile_id": "eu-ai-act-2024",
+      "provision_id": "article-53",
+      "provision_outcome": "satisfied",
+      "skipped_count": 0,
+      "subject_scope": [
+        "urn:acef:sub:34a93a0d-4053-4c78-832e-c5adac90b030"
+      ],
+      "warning_count": 0
+    }
+  ],
+  "results": [
+    {
+      "error_code": null,
+      "evidence_refs": [
+        "urn:acef:rec:9cbbd7e5-ec6f-46c6-8904-e7d7e12e93b5"
+      ],
+      "message": null,
+      "outcome": "passed",
+      "profile_id": "eu-ai-act-2024",
+      "provision_id": "article-53",
+      "rule_id": "art53-data-provenance",
+      "rule_severity": "fail",
+      "subject_scope": [
+        "urn:acef:sub:34a93a0d-4053-4c78-832e-c5adac90b030"
+      ]
+    },
+    {
+      "error_code": null,
+      "evidence_refs": [
+        "urn:acef:rec:17a7bfa6-04bd-404a-a8a5-32640befb2ad"
+      ],
+      "message": null,
+      "outcome": "passed",
+      "profile_id": "eu-ai-act-2024",
+      "provision_id": "article-53",
+      "rule_id": "art53-copyright",
+      "rule_severity": "fail",
+      "subject_scope": [
+        "urn:acef:sub:34a93a0d-4053-4c78-832e-c5adac90b030"
+      ]
+    },
+    {
+      "error_code": null,
+      "evidence_refs": [
+        "urn:acef:rec:e461e9ca-2e40-4336-ba12-e35f4e2a4d2d"
+      ],
+      "message": null,
+      "outcome": "passed",
+      "profile_id": "eu-ai-act-2024",
+      "provision_id": "article-53",
+      "rule_id": "art53-annex-xi-doc",
+      "rule_severity": "warning",
+      "subject_scope": [
+        "urn:acef:sub:34a93a0d-4053-4c78-832e-c5adac90b030"
+      ]
+    },
+    {
+      "error_code": null,
+      "evidence_refs": [
+        "urn:acef:rec:9cbbd7e5-ec6f-46c6-8904-e7d7e12e93b5"
+      ],
+      "message": null,
+      "outcome": "passed",
+      "profile_id": "eu-ai-act-2024",
+      "provision_id": "article-53",
+      "rule_id": "art53-provenance-source-type",
+      "rule_severity": "fail",
+      "subject_scope": [
+        "urn:acef:sub:34a93a0d-4053-4c78-832e-c5adac90b030"
+      ]
+    }
+  ],
+  "structural_errors": [],
+  "template_digests": {
+    "eu-ai-act-2024:1.1.0": "sha256:ffc9bb757d8148596c5eff491f7df037bac200076099506ed02401c7e85a6d2c"
+  },
+  "timestamp": "2026-06-17T18:04:18Z",
+  "versioning": {
+    "assessment_version": "1.0.0",
+    "core_version": "1.0.0"
+  }
+}

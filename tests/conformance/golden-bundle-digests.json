@@ -1,9 +1,9 @@
 {
   "_comment": "Frozen independent drift oracle (PhD-review finding 36). Each value is the ACEF bundle digest (sha256 of the RFC 8785-canonical content-hashes.json) of the same-named golden bundle, recorded once and frozen. The conformance test recomputes it with stdlib hashlib (NOT the SDK's canonicalizer) and compares: any symmetric build+validate canonicalization/hashing drift that the self-referential golden suite would miss changes the recomputed digest and fails against this pin. Do NOT regenerate these values to make a failing test pass \u2014 a mismatch means the bundle identity (spec 3.1.1) changed.",
-  "china-cac-labeling": "sha256:ee79fb2cfd8294692e697095b342f215123e734d99b0d357a7962b5fd21e4742",
-  "eu-high-risk-core": "sha256:05314618eddbbac1006c81876771aa72e44551ebc147b2972b07be1fe112e506",
-  "gpai-provider-annex-xi-xii": "sha256:1951ee22886a624e16aa0f0855879d65cfb88e0147f81cb78fa619a202245e18",
-  "multi-subject-composed": "sha256:27eafcb291350456457e4b144bf017fc219e069c133f4ce6763c453524817022",
-  "synthetic-content-marking": "sha256:091605f04f6d4b1f249ff1e6d3c33155cbdc5970a8eb6499b3937d2a679c2829",
-  "us-federal-governance": "sha256:c922f8bd7288f9aec2b8c4f0afc33b819e63ae3157d8707201fe3b20d34bdcb0"
+  "china-cac-labeling": "sha256:a24a29ec34daea245a3894d21fe0db149b16506e7d4b32e38eae653388820616",
+  "eu-high-risk-core": "sha256:982e92e0b849a98fb722f03b0b3d656c3280cd2ed2a0b90c81507f6ee9be5643",
+  "gpai-provider-annex-xi-xii": "sha256:eafd76429ba9d8e372255bc0ddbb5d7a42812d5fb07fa2a8db15e1b31bbb3948",
+  "multi-subject-composed": "sha256:6f96d38becf9c88b6380cada68711ba15a10cf95fce6f595c1470948a0b22cd4",
+  "synthetic-content-marking": "sha256:71f8539111d0c66a16561514f6e985423450a439d6ee0baa47471ef7d58e66ec",
+  "us-federal-governance": "sha256:b4c5ad0409829a7c39b5d463aac7d5f4d59f2e1b050cb984c04c4a8379e20b98"
 }

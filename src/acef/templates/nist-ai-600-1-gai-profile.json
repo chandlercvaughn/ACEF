@@ -1,7 +1,7 @@
 {
   "template_id": "nist-ai-600-1-gai-profile",
   "template_name": "NIST AI 600-1 Generative AI Profile",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "jurisdiction": "US",
   "source_legislation": "NIST AI 600-1",
   "instrument_type": "standard",
