@@ -136,58 +136,71 @@ def test_cited_retention_names_its_source(template_id: str) -> None:
 
 # ── The misattribution guard ──
 #
-# Modelled on tests/unit/test_widespread_art73_framing.py. Art. 12 must never be
-# named as the SOURCE of a retention period. The allow-list below exists because
-# the CORRECTED prose legitimately mentions Art. 12 and retention together —
-# "Art. 12 states no retention period; see Art. 19" must pass while
-# "retention per Art. 12" must fail.
+# Modelled on tests/unit/test_widespread_art73_framing.py: make the wrong framing
+# unable to recur, while leaving the CORRECTED framing expressible.
+#
+# The instrument is `normative_text_ref`, not `basis`. `normative_text_ref` IS the
+# attribution — the field that says which text a determination rests on — so
+# naming Art. 12 there on a period-bearing determination is exactly the defect.
+#
+# A free-text scan of `basis` was tried first and rejected: it produced a false
+# positive on article-19, whose basis correctly quotes Art. 19(1) — "shall keep
+# the logs referred to in Article 12(1) ... of at least six months". Any accurate
+# statement of the Art. 12 / Art. 19 split must reference Art. 12 alongside
+# retention language, so a co-occurrence test cannot separate the correct framing
+# from the wrong one. An allow-list of negated phrasings would have to enumerate
+# every way of writing that sentence, and would silently rot.
 
-_ART12 = re.compile(r"art(?:icle)?\.?\s*12\b|article-12", re.IGNORECASE)
-_RETENTION_PERIOD = re.compile(
-    r"\b(?:retention|retain|keep|kept)\b|\bmin_days\b|\bmin_retention_days\b",
+_ART12_CITATION = re.compile(
+    r"art(?:icle)?\.?\s*12\b(?!\s*\(1\)\s*logs)|(?<![\w-])article-12(?![\w-])",
     re.IGNORECASE,
-)
-# Phrases that NEGATE a retention duty under Art. 12. Longest first so a longer
-# phrase is consumed before a shorter substring of it.
-_ALLOWED_NEGATIONS = (
-    "states no retention period",
-    "sets no retention period",
-    "no retention period is stated",
-    "imposes no retention period",
-    "does not state a retention period",
-    "no retention period",
 )
 
 
 @pytest.mark.parametrize("template_id", ALL_TEMPLATE_IDS)
-def test_no_retention_period_is_attributed_to_article_12(template_id: str) -> None:
-    """Art. 12 may be discussed, but never cited AS a retention period.
+def test_no_retention_period_is_sourced_to_article_12(template_id: str) -> None:
+    """Art. 12 must never be the CITED SOURCE of a retention period.
 
     Art. 12 of Reg. (EU) 2024/1689 has exactly three paragraphs and contains no
-    duration. Retention of the logs it requires is governed by Art. 19(1)
-    (provider) and Art. 26(6) (deployer), both "at least six months".
+    duration; "over the lifetime of the system" in Art. 12(1) qualifies the
+    recording capability, not any keeping duty. Retention of those logs is
+    governed by Art. 19(1) (provider) and Art. 26(6) (deployer), both "at least
+    six months". Art. 18(1)'s ten years is a closed enumeration of five
+    document classes that does not include logs.
     """
     template = _load(template_id)
     for prov in template.provisions:
-        if prov.retention is None:
-            continue
         ret = prov.retention
+        if ret is None:
+            continue
         # Only a determination that actually asserts a PERIOD can misattribute one.
+        # `none_stated` on article-12 legitimately cites Art. 12 — that is the
+        # documented ABSENCE, and it is the correct outcome.
         if ret.kind not in ("fixed_period", "minimum_floor"):
             continue
-        for label, text in (
-            ("normative_text_ref", ret.normative_text_ref),
-            ("basis", ret.basis),
-        ):
-            stripped = text.lower()
-            for neg in _ALLOWED_NEGATIONS:
-                stripped = stripped.replace(neg, "")
-            if _ART12.search(stripped) and _RETENTION_PERIOD.search(stripped):
-                pytest.fail(
-                    f"{template_id}:{prov.provision_id} {label} attributes a retention "
-                    f"period to Art. 12, which states none. Retention of Art. 12(1) "
-                    f"logs is governed by Art. 19(1) / Art. 26(6). Got: {text[:160]!r}"
-                )
+        if _ART12_CITATION.search(ret.normative_text_ref):
+            pytest.fail(
+                f"{template_id}:{prov.provision_id} sources a {ret.kind} retention "
+                f"period to Art. 12, which states none. Cite Art. 19(1) (provider) or "
+                f"Art. 26(6) (deployer) for log retention, or Art. 18(1) for "
+                f"documentation. Got normative_text_ref={ret.normative_text_ref!r}"
+            )
+
+
+def test_article_12_records_a_documented_absence_not_a_period() -> None:
+    """The reported defect, pinned directly.
+
+    `none_stated` + `cited` is the shape that lets an auditor distinguish "the
+    instrument states no period" from "nobody looked" (`not_assessed`).
+    """
+    art12 = next(p for p in _load("eu-ai-act-2024").provisions if p.provision_id == "article-12")
+    assert art12.retention is not None
+    assert art12.retention.kind == "none_stated"
+    assert art12.retention.period is None
+    assert art12.retention.source == "cited"
+    assert art12.retention_years is None, (
+        "article-12 must not carry a retention_years figure — Art. 12 states no period"
+    )
 
 
 @pytest.mark.parametrize("template_id", ALL_TEMPLATE_IDS)

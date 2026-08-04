@@ -489,6 +489,14 @@ def _boundary_urn_generator() -> Callable[[URNType], str]:
     return _gen
 
 
+# Record timestamp for the boundary fixture. Must sit inside the art9-freshness
+# window (365 days) relative to the evaluation instant below, or ACEF-041 fires
+# and pollutes the structural-error baseline. Records otherwise default to the
+# real wall-clock "now", which is ~16 months before the Chapter III commencement
+# date that the instant must exceed.
+_BOUNDARY_TS = "2027-11-01T00:00:00Z"
+
+
 def _build_boundary_package(*, with_freddy: bool) -> Package:
     """Build a v1.1 boundary Package via the production exporter API.
 
@@ -529,6 +537,7 @@ def _build_boundary_package(*, with_freddy: bool) -> Package:
         },
         obligation_role="provider",
         entity_refs={"subject_refs": [system.id]},
+        timestamp=_BOUNDARY_TS,
     )
     pkg.record(
         "risk_treatment",
@@ -541,6 +550,7 @@ def _build_boundary_package(*, with_freddy: bool) -> Package:
         },
         obligation_role="provider",
         entity_refs={"subject_refs": [system.id]},
+        timestamp=_BOUNDARY_TS,
     )
     if with_freddy:
         pkg.record(FREDDY_NS, payload=_voice_rubric_payload())
@@ -555,7 +565,13 @@ def _run_boundary_bundle(bundle_dir: Path, *, with_freddy: bool) -> object:
     return validate_bundle(
         bundle_dir,
         profiles=["eu-ai-act-2024"],
-        evaluation_instant="2027-01-01T00:00:00Z",
+        # Must sit AFTER the Chapter III commencement date so these provisions
+        # evaluate rather than skip — an ACEF-032 "not yet effective" info
+        # diagnostic would otherwise pollute the structural-error baseline this
+        # test compares. 2027-01-01 was after the pre-amendment 2026-08-02 date,
+        # but Reg. (EU) 2026/1744 Art. 1 pt (40)(b) moved Chapter III Sections
+        # 1-3 to 2027-12-02 (Annex III) / 2028-08-02 (Annex I).
+        evaluation_instant="2027-12-15T12:00:00Z",
     )
 
 
