@@ -534,7 +534,7 @@ class ACEFReferenceError(ACEFError):
 
 
 class ACEFProfileError(ACEFError):
-    """Profile/template errors (ACEF-030 through ACEF-033)."""
+    """Profile/template errors (ACEF-030 through ACEF-036)."""
 
     code = "ACEF-030"
 

@@ -169,3 +169,59 @@ class TestEngineDiagnosticFormat:
             f"ACEFError.message must be unprefixed; got {exc.value.message[:40]!r}"
         )
         assert "ACEF-034" in exc.value.message, "the underlying pydantic text still names the invariant that failed"
+
+
+class TestEngineEmitsTheDiagnostic:
+    """roborev on 728d0d0 (Low): the format test never exercised the engine.
+
+    It asserted on ACEFError.message only, so it could not observe what
+    ValidationDiagnostic actually carries — the code field, the category, or
+    whether the code is duplicated inside the message text.
+    """
+
+    @staticmethod
+    def _validate_with_bad_template(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> object:
+        from acef.package import Package
+        from acef.validation.engine import validate_bundle
+
+        pkg = Package(producer={"name": "t", "version": "1"})
+        pkg.add_subject("ai_system", name="S", version="1", risk_classification="high-risk")
+        pkg.add_profile("thirdparty", provisions=["p1"], template_version="1.0.0")
+        out = tmp_path / "b"
+        pkg.export(str(out))
+
+        # Point the registry at a template carrying the issue #1 defect.
+        tpl_dir = tmp_path / "templates"
+        tpl_dir.mkdir()
+        _write(tpl_dir, "thirdparty", _minimal([{"provision_id": "p1", "retention_years": 10}]))
+        monkeypatch.setattr(registry, "_get_template_dir", lambda: tpl_dir)
+        registry.clear_template_cache()
+        try:
+            return validate_bundle(out, profiles=["thirdparty"])
+        finally:
+            registry.clear_template_cache()
+
+    def test_engine_emits_acef_034_not_a_false_not_found(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        assessment = self._validate_with_bad_template(tmp_path, monkeypatch)
+        diags = [d for d in assessment.structural_errors if d.get("code") == "ACEF-034"]
+        assert diags, f"engine did not surface ACEF-034; got {[d.get('code') for d in assessment.structural_errors]}"
+        assert not [d for d in assessment.structural_errors if d.get("code") == "ACEF-030"], (
+            "a template that EXISTS but carries an unsourced figure must not be reported as 'not found'"
+        )
+
+    def test_emitted_diagnostic_carries_the_right_category_and_severity(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        assessment = self._validate_with_bad_template(tmp_path, monkeypatch)
+        diag = next(d for d in assessment.structural_errors if d.get("code") == "ACEF-034")
+        assert diag.get("severity") == "error"
+        assert diag.get("category") == "profile"
+
+    def test_emitted_message_does_not_repeat_the_code_prefix(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The diagnostic already has a `code` field; "[ACEF-034] " in the text
+        duplicates it in every rendered report."""
+        assessment = self._validate_with_bad_template(tmp_path, monkeypatch)
+        diag = next(d for d in assessment.structural_errors if d.get("code") == "ACEF-034")
+        assert not diag["message"].startswith("[ACEF-"), f"message repeats the code prefix: {diag['message'][:50]!r}"

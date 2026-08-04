@@ -917,7 +917,7 @@ ACEF defines a structured error taxonomy with unique codes, severities, and cate
 | ACEF-026 | Error | Duplicate record_id within the package |
 | ACEF-027 | Warning | Attachment hash does not match content-hashes.json entry |
 
-### Profile Errors (ACEF-030 to ACEF-033)
+### Profile Errors (ACEF-030 to ACEF-036)
 
 | Code | Severity | Description |
 |---|---|---|
@@ -925,6 +925,9 @@ ACEF defines a structured error taxonomy with unique codes, severities, and cate
 | ACEF-031 | Error | Unknown template_version |
 | ACEF-032 | Info | Provision not yet effective -- rules produce skipped outcome |
 | ACEF-033 | Error | Incompatible module versions between bundle and template |
+| ACEF-034 | Error | Retention determination missing or internally inconsistent on a provision -- a figure with no recorded source, a kind/period/source disagreement, an `inferred` source whose basis omits the INFERRED token, or a `cited` source with no `normative_text_ref` |
+| ACEF-035 | Info | Applicability is indeterminate -- the provision commences on more than one date keyed to a subject classification the bundle cannot express, and the evaluation instant falls between them. The provision rolls up to `not-assessed` rather than a binary verdict |
+| ACEF-036 | Info | A retention obligation stated in calendar months is screened by a fixed day-count threshold, so exact calendar satisfaction (and the anchor event) was not verified |
 
 ### Evaluation Errors (ACEF-040 to ACEF-045)
 
