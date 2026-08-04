@@ -362,7 +362,8 @@ class TestRecordAttested:
 class TestOperatorRegistry:
     """All 10 operators are registered."""
 
-    def test_all_ten_operators_registered(self) -> None:
+    def test_all_eleven_operators_registered(self) -> None:
+        """11 since exists_where_any joined the §3.5 set (roborev High on 0753d47)."""
         expected = {
             "has_record_type",
             "field_present",
@@ -371,6 +372,7 @@ class TestOperatorRegistry:
             "attachment_exists",
             "entity_linked",
             "exists_where",
+            "exists_where_any",
             "attachment_kind_exists",
             "bundle_signed",
             "record_attested",

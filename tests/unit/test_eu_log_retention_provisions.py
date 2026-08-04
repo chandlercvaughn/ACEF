@@ -177,7 +177,9 @@ class TestEnforcementRules:
         floors = [
             r
             for r in _prov(template, pid).evaluation
-            if r.rule == "exists_where" and r.params.get("op") == "gte" and r.params.get("value") == 180
+            if r.rule in ("exists_where", "exists_where_any")
+            and r.params.get("op") == "gte"
+            and r.params.get("value") == 180
         ]
         assert floors, f"{pid} has no rule enforcing a 180-day floor"
         assert any(r.severity == "fail" for r in floors), (
@@ -195,10 +197,16 @@ class TestEnforcementRules:
         states retention ONLY in the payload, so a rule set reading just the
         envelope would not fire on ACEF's own reference bundle.
         """
-        fields = {str(r.params.get("field", "")) for r in _prov(template, pid).evaluation}
-        assert any("/retention/min_retention_days" == f for f in fields), (
-            f"{pid} does not read the envelope retention surface"
-        )
-        assert any("retention_policy_summary" in f for f in fields), (
-            f"{pid} does not read the payload retention surface"
+        # The fail-severity floor must be ONE rule spanning both surfaces, not two
+        # rules at different severities: ACEF's canonical logging_spec record has
+        # envelope retention null and states retention only in the payload, so an
+        # envelope-only fail rule rolls that valid record up to not-satisfied
+        # (roborev High on 0753d47).
+        floor = next(r for r in _prov(template, pid).evaluation if r.rule_id.endswith("-log-retention-floor"))
+        assert floor.severity == "fail"
+        assert floor.rule == "exists_where_any", "the floor must be a disjunction over both retention surfaces"
+        pointers = set(floor.params.get("fields", []))
+        assert "/retention/min_retention_days" in pointers, f"{pid} floor does not read the envelope retention surface"
+        assert any("retention_policy_summary" in p for p in pointers), (
+            f"{pid} floor does not read the payload retention surface"
         )

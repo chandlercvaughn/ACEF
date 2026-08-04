@@ -1424,6 +1424,56 @@ def op_exists_where(
     return len(evidence_refs) >= min_count, evidence_refs
 
 
+def op_exists_where_any(
+    params: dict[str, Any],
+    records: list[RecordEnvelope],
+) -> tuple[bool, list[str]]:
+    """exists_where_any: like ``exists_where`` but over ALTERNATIVE pointers.
+
+    At least ``min_count`` records exist for which **any** pointer in ``fields``
+    resolves and satisfies the comparison. Existential -> FAIL on zero matching
+    records when ``min_count`` > 0, matching :func:`op_exists_where`.
+
+    Motivation: ACEF states record retention on two distinct surfaces — the
+    envelope (``/retention/min_retention_days``) and the ``logging_spec`` payload
+    (``/payload/retention_policy_summary/min_days``). A single-pointer rule
+    cannot express "either surface satisfies the floor", so enforcing the
+    Art. 19(1) / Art. 26(6) six-month duty with ``exists_where`` fails records
+    that legitimately use only one of them — including ACEF's own canonical
+    logging record.
+
+    A record satisfying several listed pointers still counts ONCE: the
+    disjunction selects records, it does not multiply them.
+    """
+    record_type = params["record_type"]
+    fields = params["fields"]
+    op = params["op"]
+    value = params["value"]
+    min_count = params.get("min_count", 1)
+
+    if not isinstance(fields, list) or not fields:
+        raise ACEFEvaluationError(
+            "exists_where_any requires a non-empty 'fields' list — a disjunction over no pointers is not a rule",
+            code="ACEF-043",
+        )
+    # Validate EVERY pointer and the comparison op up front, so a malformed rule
+    # raises even when zero records match and the loop below never runs
+    # (validation-engine-dsl-3/-7), and so a bad pointer in any position is
+    # caught rather than only the first.
+    for field in fields:
+        _validate_pointer_syntax(field)
+    _validate_comparison_op(op)
+    matching = _filter_by_type(records, record_type)
+
+    evidence_refs: list[str] = []
+    for rec in matching:
+        data = rec.to_jsonl_dict()
+        if any(_compare(_resolve_pointer(data, field), op, value) for field in fields):
+            evidence_refs.append(rec.record_id)
+
+    return len(evidence_refs) >= min_count, evidence_refs
+
+
 def op_attachment_kind_exists(
     params: dict[str, Any],
     records: list[RecordEnvelope],
@@ -1618,6 +1668,7 @@ OPERATOR_REGISTRY: dict[str, OperatorFunc] = {
     "attachment_exists": op_attachment_exists,
     "entity_linked": op_entity_linked,
     "exists_where": op_exists_where,
+    "exists_where_any": op_exists_where_any,
     "attachment_kind_exists": op_attachment_kind_exists,
     "bundle_signed": op_bundle_signed,
     "record_attested": op_record_attested,

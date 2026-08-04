@@ -523,10 +523,10 @@
         },
         {
           "rule_id": "art19-log-retention-floor",
-          "rule": "exists_where",
+          "rule": "exists_where_any",
           "params": {
             "record_type": "event_log",
-            "field": "/retention/min_retention_days",
+            "fields": ["/retention/min_retention_days", "/payload/retention_policy_summary/min_days"],
             "op": "gte",
             "value": 180,
             "min_count": 1
@@ -649,10 +649,10 @@
         },
         {
           "rule_id": "art26-6-log-retention-floor",
-          "rule": "exists_where",
+          "rule": "exists_where_any",
           "params": {
             "record_type": "event_log",
-            "field": "/retention/min_retention_days",
+            "fields": ["/retention/min_retention_days", "/payload/retention_policy_summary/min_days"],
             "op": "gte",
             "value": 180,
             "min_count": 1

@@ -38,6 +38,7 @@ VALID_OPERATORS = frozenset(
         "attachment_exists",
         "entity_linked",
         "exists_where",
+        "exists_where_any",
         "attachment_kind_exists",
         "bundle_signed",
         "record_attested",
