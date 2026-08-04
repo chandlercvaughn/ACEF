@@ -9,7 +9,7 @@ Phase 4: Rule evaluation (DSL rules -> provision rollup)
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -862,6 +862,38 @@ def _parse_iso_instant(value: str) -> datetime | None:
     return parsed
 
 
+def calendar_months_to_days(months: int) -> int:
+    """Return the MINIMUM number of days that ``months`` calendar months can span.
+
+    A duration stated in calendar months has no fixed length: six months spans
+    181 to 184 days depending on which months it crosses, so no single day-count
+    is equivalent. Rules compare a stored integer against a constant and cannot
+    do calendar arithmetic against a per-record anchor date, so a day threshold
+    is only ever a screen for a month-denominated obligation.
+
+    The lower bound is the only safe fixed threshold. Screening at the maximum
+    would reject a lawful policy that happens to start in a short month;
+    screening at the minimum catches every policy that is unambiguously short
+    while never rejecting a compliant one. Callers MUST pair the screen with an
+    ACEF-036 disclosure that exact calendar satisfaction was not verified.
+    """
+    if months < 1:
+        raise ValueError(f"months must be >= 1, got {months}")
+    # Walk every start month across a leap and non-leap year and take the
+    # shortest span, rather than assuming a 30- or 31-day month.
+    shortest: int | None = None
+    for year in (2027, 2028):  # 2028 is a leap year; together these cover both
+        for month in range(1, 13):
+            start = date(year, month, 1)
+            total = month - 1 + months
+            end = date(year + total // 12, total % 12 + 1, 1)
+            span = (end - start).days
+            if shortest is None or span < shortest:
+                shortest = span
+    assert shortest is not None  # the loops above always run
+    return shortest
+
+
 def split_commencement_state(
     adoption: dict[str, Any] | None,
     evaluation_instant: str | None,
@@ -1106,6 +1138,40 @@ def _evaluate_profiles(
                 (prov.tiered_requirements or {}).get("adoption"),
                 evaluation_instant,
             )
+            # ACEF-036: the provision states its retention duty in calendar months
+            # but the rules can only screen a stored day-count against a constant.
+            # Disclose that exact calendar satisfaction was not verified, so the
+            # screen is not mistaken for a determination.
+            retention = prov.retention
+            if (
+                retention is not None
+                and retention.period is not None
+                and retention.period.unit == "months"
+                # ``not isinstance(v, bool)`` is load-bearing: bool subclasses int
+                # in Python, so a rule comparing against ``True`` (e.g. the CAC
+                # label-exception rule) would otherwise be mistaken for a
+                # day-count screen and this code would fire on a provision that
+                # has no day threshold at all.
+                and any(
+                    isinstance(r.params.get("value"), int) and not isinstance(r.params.get("value"), bool)
+                    for r in prov.evaluation
+                    if r.rule in ("exists_where", "exists_where_any")
+                )
+            ):
+                lower_bound = calendar_months_to_days(retention.period.value)
+                assessment.structural_errors.append(
+                    ValidationDiagnostic(
+                        "ACEF-036",
+                        f"Provision {prov.provision_id} states a retention floor of "
+                        f"{retention.period.value} {retention.period.unit} from "
+                        f"{retention.anchor_event}, screened as >= {lower_bound} days. "
+                        f"{retention.period.value} calendar months has no fixed length, "
+                        f"and no rule operator resolves a duration against a per-record "
+                        f"anchor, so a record passing this screen may still fall short "
+                        f"of the stated period measured from its own start event.",
+                    ).to_dict()
+                )
+
             if split is not None:
                 classes = ", ".join(split["undetermined_classes"])
                 assessment.structural_errors.append(

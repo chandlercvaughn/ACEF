@@ -584,11 +584,11 @@
             "record_type": "event_log",
             "fields": ["/retention/min_retention_days", "/payload/retention_policy_summary/min_days"],
             "op": "gte",
-            "value": 180,
+            "value": 181,
             "min_count": 1
           },
           "severity": "fail",
-          "message": "At least one event_log must declare retention of >= 180 days — the 'at least six months' floor binding the provider",
+          "message": "At least one event_log must declare retention of >= 181 days — a SCREEN for the Art. 19(1) 'at least six months' floor binding the provider. Six calendar months spans 181-184 days, so this threshold is the lower bound: it never rejects a compliant policy but cannot confirm one. See ACEF-036; the authoritative obligation is retention.period (6 months) from retention.anchor_event.",
           "scope": {
             "obligation_roles": [
               "provider"
@@ -602,11 +602,11 @@
             "record_type": "event_log",
             "field": "/payload/retention_policy_summary/min_days",
             "op": "gte",
-            "value": 180,
+            "value": 181,
             "min_count": 1
           },
           "severity": "warning",
-          "message": "A logging_spec record should declare retention_policy_summary.min_days >= 180; ACEF bundles state retention on this payload surface as well as on the record envelope",
+          "message": "A logging_spec record should declare retention_policy_summary.min_days >= 181 (the lower bound of six calendar months); ACEF bundles state retention on this payload surface as well as on the record envelope",
           "scope": {
             "obligation_roles": [
               "provider"
@@ -710,11 +710,11 @@
             "record_type": "event_log",
             "fields": ["/retention/min_retention_days", "/payload/retention_policy_summary/min_days"],
             "op": "gte",
-            "value": 180,
+            "value": 181,
             "min_count": 1
           },
           "severity": "fail",
-          "message": "At least one event_log must declare retention of >= 180 days — the 'at least six months' floor binding the deployer",
+          "message": "At least one event_log must declare retention of >= 181 days — a SCREEN for the Art. 26(6) 'at least six months' floor binding the deployer. Six calendar months spans 181-184 days, so this threshold is the lower bound: it never rejects a compliant policy but cannot confirm one. See ACEF-036; the authoritative obligation is retention.period (6 months) from retention.anchor_event.",
           "scope": {
             "obligation_roles": [
               "deployer"
@@ -728,11 +728,11 @@
             "record_type": "event_log",
             "field": "/payload/retention_policy_summary/min_days",
             "op": "gte",
-            "value": 180,
+            "value": 181,
             "min_count": 1
           },
           "severity": "warning",
-          "message": "A logging_spec record should declare retention_policy_summary.min_days >= 180; ACEF bundles state retention on this payload surface as well as on the record envelope",
+          "message": "A logging_spec record should declare retention_policy_summary.min_days >= 181 (the lower bound of six calendar months); ACEF bundles state retention on this payload surface as well as on the record envelope",
           "scope": {
             "obligation_roles": [
               "deployer"

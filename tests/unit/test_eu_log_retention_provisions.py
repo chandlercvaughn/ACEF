@@ -179,9 +179,9 @@ class TestEnforcementRules:
             for r in _prov(template, pid).evaluation
             if r.rule in ("exists_where", "exists_where_any")
             and r.params.get("op") == "gte"
-            and r.params.get("value") == 180
+            and r.params.get("value") == 181
         ]
-        assert floors, f"{pid} has no rule enforcing a 180-day floor"
+        assert floors, f"{pid} has no rule enforcing the 181-day calendar lower bound"
         assert any(r.severity == "fail" for r in floors), (
             f"{pid}: the retention floor is only advisory; Art. 19(1)/26(6) are binding"
         )

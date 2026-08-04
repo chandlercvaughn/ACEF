@@ -393,6 +393,29 @@ EXTENDED_ERROR_DETAILS: dict[str, IncidentErrorDetail] = {
             "tiered_requirements.adoption block"
         ),
     ),
+    "ACEF-036": IncidentErrorDetail(
+        severity=Severity.INFO,
+        category=ErrorCategory.PROFILE,
+        problem=(
+            "a retention obligation stated in calendar months is screened by a fixed "
+            "day-count threshold, so exact calendar satisfaction was NOT verified: a "
+            "record passing the screen may still fall short of the stated duration "
+            "measured from its own anchor event, and the anchor itself is not checked"
+        ),
+        cause=(
+            "spec §3.5. Calendar months have no fixed length — six months spans 181 to "
+            "184 days depending on which months it crosses — and no §3.5 operator "
+            "resolves a duration against a per-record anchor date. The threshold is "
+            "therefore set to the LOWER bound of the stated period, which never "
+            "rejects a compliant record but cannot confirm one either"
+        ),
+        fix=(
+            "read the provision's retention.period (value + unit) and "
+            "retention.anchor_event as the authoritative obligation, and verify "
+            "calendar satisfaction out of band against each record's own start_event; "
+            "the rule outcome is a necessary-but-not-sufficient screen"
+        ),
+    ),
     "ACEF-046": IncidentErrorDetail(
         severity=Severity.ERROR,
         category=ErrorCategory.EVALUATION,
