@@ -150,3 +150,79 @@ class TestMalformedRuleRaises:
         """A disjunction over nothing is not a rule."""
         with pytest.raises(ACEFEvaluationError):
             op(_params(fields=[]), [_event_log("r1", payload_days=365)])
+
+
+class TestUnresolvedPointersAreNotMatches:
+    """roborev MEDIUM on 4e583bd: `ne` counted records where nothing resolved.
+
+    `_resolve_pointer` returns None for a missing path, and
+    `_compare(None, "ne", value)` is True — so a rule asserting "some record has
+    a value other than X" was satisfied by records having no such field at all,
+    contradicting the "resolves and satisfies" semantics. The same defect was
+    PRE-EXISTING in `exists_where`.
+    """
+
+    def test_ne_does_not_count_a_record_with_no_resolving_pointer(self, op) -> None:
+        ok, refs = op(_params(op="ne", value=999), [_event_log("r1")])
+        assert not ok and refs == [], "a record where neither pointer resolves must not satisfy an existential rule"
+
+    def test_ne_still_counts_a_genuinely_different_value(self, op) -> None:
+        ok, refs = op(_params(op="ne", value=999), [_event_log("r1", payload_days=365)])
+        assert ok and refs == ["r1"]
+
+    def test_ne_does_not_count_an_equal_resolved_value(self, op) -> None:
+        ok, _ = op(_params(op="ne", value=365), [_event_log("r1", payload_days=365)])
+        assert not ok
+
+    def test_one_missing_one_equal_does_not_match(self, op) -> None:
+        """The missing pointer must not rescue a record the resolved one rejects."""
+        ok, _ = op(_params(op="ne", value=365), [_event_log("r1", payload_days=365)])
+        assert not ok
+
+    def test_exists_where_has_the_same_semantics(self) -> None:
+        """The sibling operator carried the identical pre-existing defect."""
+        single = OPERATOR_REGISTRY["exists_where"]
+        params = {
+            "record_type": "event_log",
+            "field": ENVELOPE_PTR,
+            "op": "ne",
+            "value": 999,
+            "min_count": 1,
+        }
+        assert not single(params, [_event_log("r1")])[0]
+        assert single(params, [_event_log("r1", envelope_days=365)])[0]
+
+
+class TestRegexOperandValidatedUpFront:
+    """roborev MEDIUM on 4e583bd: an invalid pattern never got compiled.
+
+    With zero records — or with every pointer unresolved — the per-record match
+    loop never runs, so `"("` produced an ordinary rule FAILURE instead of the
+    ACEF-045 rule ERROR a malformed rule requires.
+    """
+
+    def test_malformed_regex_raises_with_zero_records(self, op) -> None:
+        with pytest.raises(ACEFEvaluationError) as exc:
+            op(_params(op="regex", value="("), [])
+        assert exc.value.code == "ACEF-045"
+
+    def test_malformed_regex_raises_when_no_pointer_resolves(self, op) -> None:
+        with pytest.raises(ACEFEvaluationError) as exc:
+            op(_params(op="regex", value="["), [_event_log("r1")])
+        assert exc.value.code == "ACEF-045"
+
+    def test_non_string_regex_operand_raises(self, op) -> None:
+        with pytest.raises(ACEFEvaluationError) as exc:
+            op(_params(op="regex", value=42), [_event_log("r1", payload_days=365)])
+        assert exc.value.code == "ACEF-045"
+
+    def test_valid_regex_still_matches(self, op) -> None:
+        ok, refs = op(
+            _params(
+                fields=["/payload/retention_policy_summary/legal_basis"],
+                op="regex",
+                value=r"Art(icle)?\.?\s*19\b",
+            ),
+            [_event_log("r1", payload_days=365)],
+        )
+        assert ok and refs == ["r1"]

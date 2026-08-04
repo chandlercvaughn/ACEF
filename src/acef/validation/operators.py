@@ -1018,6 +1018,36 @@ def _validate_pointer_syntax(pointer: str) -> None:
         ) from exc
 
 
+# Distinguishes "the pointer path does not exist" from "the path exists and holds
+# JSON null". Both resolve to None, and conflating them makes `ne` count records
+# where nothing resolved at all: _compare(None, "ne", 999) is True, so a rule
+# asserting "some record has a value other than 999" was satisfied by records
+# that have no such field. Existential rules must only count a record when the
+# pointer RESOLVES and the comparison holds.
+_MISSING = object()
+
+
+def _resolve_or_missing(record_data: dict[str, Any], pointer: str) -> Any:
+    """Resolve a pointer, returning :data:`_MISSING` when the path is absent."""
+    node: Any = record_data
+    for raw in pointer.split("/")[1:]:
+        token = raw.replace("~1", "/").replace("~0", "~")
+        if isinstance(node, dict):
+            if token not in node:
+                return _MISSING
+            node = node[token]
+        elif isinstance(node, list):
+            if not token.isdigit():
+                return _MISSING
+            idx = int(token)
+            if idx >= len(node):
+                return _MISSING
+            node = node[idx]
+        else:
+            return _MISSING
+    return node
+
+
 def _resolve_pointer(record_data: dict[str, Any], pointer: str) -> Any:
     """Resolve a JSON Pointer (RFC 6901) against a record dict.
 
@@ -1051,6 +1081,34 @@ def _resolve_pointer(record_data: dict[str, Any], pointer: str) -> Any:
 # An ``op`` outside this set is a MALFORMED RULE, not a silent FALSE — see
 # ``_validate_comparison_op`` (ACEF-046, audit finding F13).
 _VALID_COMPARISON_OPS: frozenset[str] = frozenset({"eq", "ne", "gt", "gte", "lt", "lte", "in", "regex"})
+
+
+def _validate_regex_operand(op: str, value: Any) -> None:
+    """Raise ACEF-045 when a ``regex`` rule's operand is not a usable pattern.
+
+    Called UPFRONT, mirroring :func:`_validate_comparison_op`. Without it an
+    invalid pattern such as ``"("`` is never compiled when zero records match or
+    no pointer resolves, so a malformed rule yields an ordinary failure rather
+    than the rule error the spec requires.
+    """
+    if op != "regex":
+        return
+    if not isinstance(value, str):
+        raise ACEFEvaluationError(
+            f"regex comparison operand must be a string pattern, got {type(value).__name__}",
+            code="ACEF-045",
+        )
+    # Reuse the hardened checker so length/ReDoS rejection is identical to the
+    # per-record path; matching against the empty string is side-effect free.
+    # A syntactically invalid pattern surfaces from ``re`` as a raw error, which
+    # is not an ACEF diagnostic — translate it.
+    try:
+        _safe_regex_search(value, "")
+    except re.error as exc:
+        raise ACEFEvaluationError(
+            f"invalid ECMA-262 regex pattern {value!r}: {exc}",
+            code="ACEF-045",
+        ) from exc
 
 
 def _validate_comparison_op(op: str) -> None:
@@ -1412,12 +1470,18 @@ def op_exists_where(
     # And the comparison op upfront (ACEF-046, F13): an unknown op on an
     # existential rule must raise, not pass/fail silently.
     _validate_comparison_op(op)
+    # Same reasoning for the regex OPERAND (ACEF-045): a malformed pattern must
+    # raise even when zero records match or no pointer resolves, otherwise a
+    # broken rule reports an ordinary failure instead of a rule error.
+    _validate_regex_operand(op, value)
     matching = _filter_by_type(records, record_type)
 
     evidence_refs: list[str] = []
     for rec in matching:
         data = rec.to_jsonl_dict()
-        actual = _resolve_pointer(data, field)
+        actual = _resolve_or_missing(data, field)
+        if actual is _MISSING:
+            continue
         if _compare(actual, op, value):
             evidence_refs.append(rec.record_id)
 
@@ -1463,12 +1527,14 @@ def op_exists_where_any(
     for field in fields:
         _validate_pointer_syntax(field)
     _validate_comparison_op(op)
+    _validate_regex_operand(op, value)
     matching = _filter_by_type(records, record_type)
 
     evidence_refs: list[str] = []
     for rec in matching:
         data = rec.to_jsonl_dict()
-        if any(_compare(_resolve_pointer(data, field), op, value) for field in fields):
+        resolved = [v for v in (_resolve_or_missing(data, field) for field in fields) if v is not _MISSING]
+        if any(_compare(v, op, value) for v in resolved):
             evidence_refs.append(rec.record_id)
 
     return len(evidence_refs) >= min_count, evidence_refs
