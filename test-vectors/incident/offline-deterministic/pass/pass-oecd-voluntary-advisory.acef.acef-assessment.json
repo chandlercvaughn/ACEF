@@ -1,1 +1,11 @@
-{"class":"offline-deterministic","disposition":"pass","emitted_codes":["ACEF-081"],"vector":"pass-oecd-voluntary-advisory"}
+{
+  "class": "offline-deterministic",
+  "disposition": "pass",
+  "emitted_codes": [
+    "ACEF-081"
+  ],
+  "vector": "pass-oecd-voluntary-advisory",
+  "evidence_bundle_ref": {
+    "content_hash": "sha256:1b81f85e2574536be1d2fa2188ecdb22150125eac55dd45d5162ea8ad7a404c7"
+  }
+}

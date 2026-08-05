@@ -1,7 +1,7 @@
 {
   "template_id": "eu-labelling-code-of-practice-2026",
   "template_name": "EU Code of Practice on Marking and Labelling AI-Generated Content",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "jurisdiction": "EU",
   "source_legislation": "Second Draft Code of Practice (March 2026)",
   "instrument_type": "code_of_practice",
@@ -38,6 +38,15 @@
       },
       "evidence_freshness_max_days": null,
       "retention_years": null,
+      "retention": {
+        "kind": "not_assessed",
+        "duty_holder": "any",
+        "period": null,
+        "anchor_event": "not_specified",
+        "source": "not_assessed",
+        "normative_text_ref": "",
+        "basis": "NOT ASSESSED. This profile has established no retention basis for the EU Code of Practice on Transparent Generative AI Content (Second Draft, March 2026) (EU Labelling CoP Layer 1). No retention determination has been made for this provision: the instrument was not assessed for records-retention duties and no period is asserted here. This is a DRAFT, voluntary instrument whose text is not final; no retention duty has been located in it, and a determination taken against a draft could be invalidated by the final text. Absence of a figure is NOT a finding that no retention period applies: a retention duty may arise from this instrument, from an implementing instrument, or from generally applicable records law that this profile does not model. Establishing a cited basis requires a separate research pass against the primary text of the instrument."
+      },
       "evaluation": [
         {
           "rule_id": "label-l1-marking-exists",
@@ -99,6 +108,15 @@
       },
       "evidence_freshness_max_days": null,
       "retention_years": null,
+      "retention": {
+        "kind": "not_assessed",
+        "duty_holder": "any",
+        "period": null,
+        "anchor_event": "not_specified",
+        "source": "not_assessed",
+        "normative_text_ref": "",
+        "basis": "NOT ASSESSED. This profile has established no retention basis for the EU Code of Practice on Transparent Generative AI Content (Second Draft, March 2026) (EU Labelling CoP Layer 2). No retention determination has been made for this provision: the instrument was not assessed for records-retention duties and no period is asserted here. This is a DRAFT, voluntary instrument whose text is not final; no retention duty has been located in it, and a determination taken against a draft could be invalidated by the final text. Absence of a figure is NOT a finding that no retention period applies: a retention duty may arise from this instrument, from an implementing instrument, or from generally applicable records law that this profile does not model. Establishing a cited basis requires a separate research pass against the primary text of the instrument."
+      },
       "evaluation": [
         {
           "rule_id": "label-l2-marking-exists",
@@ -163,6 +181,15 @@
       },
       "evidence_freshness_max_days": null,
       "retention_years": null,
+      "retention": {
+        "kind": "not_assessed",
+        "duty_holder": "any",
+        "period": null,
+        "anchor_event": "not_specified",
+        "source": "not_assessed",
+        "normative_text_ref": "",
+        "basis": "NOT ASSESSED. This profile has established no retention basis for the EU Code of Practice on Transparent Generative AI Content (Second Draft, March 2026) (EU Labelling CoP Detection Commitment). No retention determination has been made for this provision: the instrument was not assessed for records-retention duties and no period is asserted here. This is a DRAFT, voluntary instrument whose text is not final; no retention duty has been located in it, and a determination taken against a draft could be invalidated by the final text. Absence of a figure is NOT a finding that no retention period applies: a retention duty may arise from this instrument, from an implementing instrument, or from generally applicable records law that this profile does not model. Establishing a cited basis requires a separate research pass against the primary text of the instrument."
+      },
       "evaluation": [
         {
           "rule_id": "label-det-marking-exists",
@@ -210,6 +237,15 @@
       },
       "evidence_freshness_max_days": null,
       "retention_years": null,
+      "retention": {
+        "kind": "not_assessed",
+        "duty_holder": "any",
+        "period": null,
+        "anchor_event": "not_specified",
+        "source": "not_assessed",
+        "normative_text_ref": "",
+        "basis": "NOT ASSESSED. This profile has established no retention basis for the EU Code of Practice on Transparent Generative AI Content (Second Draft, March 2026) (EU Labelling CoP Icon Commitment). No retention determination has been made for this provision: the instrument was not assessed for records-retention duties and no period is asserted here. This is a DRAFT, voluntary instrument whose text is not final; no retention duty has been located in it, and a determination taken against a draft could be invalidated by the final text. Absence of a figure is NOT a finding that no retention period applies: a retention duty may arise from this instrument, from an implementing instrument, or from generally applicable records law that this profile does not model. Establishing a cited basis requires a separate research pass against the primary text of the instrument."
+      },
       "evaluation": [
         {
           "rule_id": "label-icon-disclosure-exists",
@@ -251,6 +287,15 @@
       },
       "evidence_freshness_max_days": null,
       "retention_years": null,
+      "retention": {
+        "kind": "not_assessed",
+        "duty_holder": "any",
+        "period": null,
+        "anchor_event": "not_specified",
+        "source": "not_assessed",
+        "normative_text_ref": "",
+        "basis": "NOT ASSESSED. This profile has established no retention basis for the EU Code of Practice on Transparent Generative AI Content (Second Draft, March 2026) (EU Labelling CoP Provider Obligations). No retention determination has been made for this provision: the instrument was not assessed for records-retention duties and no period is asserted here. This is a DRAFT, voluntary instrument whose text is not final; no retention duty has been located in it, and a determination taken against a draft could be invalidated by the final text. Absence of a figure is NOT a finding that no retention period applies: a retention duty may arise from this instrument, from an implementing instrument, or from generally applicable records law that this profile does not model. Establishing a cited basis requires a separate research pass against the primary text of the instrument."
+      },
       "evaluation": [
         {
           "rule_id": "label-prov-marking-exists",
@@ -301,6 +346,15 @@
       },
       "evidence_freshness_max_days": null,
       "retention_years": null,
+      "retention": {
+        "kind": "not_assessed",
+        "duty_holder": "any",
+        "period": null,
+        "anchor_event": "not_specified",
+        "source": "not_assessed",
+        "normative_text_ref": "",
+        "basis": "NOT ASSESSED. This profile has established no retention basis for the EU Code of Practice on Transparent Generative AI Content (Second Draft, March 2026) (EU Labelling CoP Deployer Obligations). No retention determination has been made for this provision: the instrument was not assessed for records-retention duties and no period is asserted here. This is a DRAFT, voluntary instrument whose text is not final; no retention duty has been located in it, and a determination taken against a draft could be invalidated by the final text. Absence of a figure is NOT a finding that no retention period applies: a retention duty may arise from this instrument, from an implementing instrument, or from generally applicable records law that this profile does not model. Establishing a cited basis requires a separate research pass against the primary text of the instrument."
+      },
       "evaluation": [
         {
           "rule_id": "label-dep-disclosure-exists",

@@ -799,7 +799,7 @@ from acef.errors import (
     ACEFSchemaError,     # Schema validation (ACEF-001 to ACEF-004)
     ACEFIntegrityError,  # Integrity verification (ACEF-010 to ACEF-014)
     ACEFReferenceError,  # Reference integrity (ACEF-020 to ACEF-027)
-    ACEFProfileError,    # Profile/template (ACEF-030 to ACEF-033)
+    ACEFProfileError,    # Profile/template (ACEF-030 to ACEF-036)
     ACEFEvaluationError, # Rule evaluation (ACEF-040 to ACEF-045)
     ACEFFormatError,     # Format (ACEF-050 to ACEF-053)
     ACEFMergeError,      # Merge conflicts (ACEF-060)

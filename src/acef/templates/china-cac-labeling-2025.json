@@ -1,7 +1,7 @@
 {
   "template_id": "china-cac-labeling-2025",
   "template_name": "CAC Measures for Labeling AI-Generated and Synthesized Content",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "jurisdiction": "CN",
   "source_legislation": "Measures for Labeling AI-Generated and Synthesized Content (Cyberspace Administration of China, 2025)",
   "instrument_type": "law",
@@ -38,6 +38,15 @@
       },
       "evidence_freshness_max_days": null,
       "retention_years": null,
+      "retention": {
+        "kind": "not_assessed",
+        "duty_holder": "any",
+        "period": null,
+        "anchor_event": "not_specified",
+        "source": "not_assessed",
+        "normative_text_ref": "",
+        "basis": "NOT ASSESSED. This profile has established no retention basis for the CAC Measures for Labeling AI-Generated and Synthesized Content (国信办通字〔2025〕2号, effective 2025-09-01, 14 articles) (CAC Labeling Measures Art. 4). No retention determination has been made for this provision: the instrument was not assessed for records-retention duties and no period is asserted here. Note that Art. 9 of the same instrument DOES state a six-month log-retention floor, modelled on the cac-log-retention provision; no such duty has been located for this provision, but the remaining 13 articles were not systematically swept for retention duties. Absence of a figure is NOT a finding that no retention period applies: a retention duty may arise from this instrument, from an implementing instrument, or from generally applicable records law that this profile does not model. Establishing a cited basis requires a separate research pass against the primary text of the instrument."
+      },
       "evaluation": [
         {
           "rule_id": "cac-explicit-disclosure-exists",
@@ -97,6 +106,15 @@
       },
       "evidence_freshness_max_days": null,
       "retention_years": null,
+      "retention": {
+        "kind": "not_assessed",
+        "duty_holder": "any",
+        "period": null,
+        "anchor_event": "not_specified",
+        "source": "not_assessed",
+        "normative_text_ref": "",
+        "basis": "NOT ASSESSED. This profile has established no retention basis for the CAC Measures for Labeling AI-Generated and Synthesized Content (国信办通字〔2025〕2号, effective 2025-09-01, 14 articles) (CAC Labeling Measures Art. 5). No retention determination has been made for this provision: the instrument was not assessed for records-retention duties and no period is asserted here. Note that Art. 9 of the same instrument DOES state a six-month log-retention floor, modelled on the cac-log-retention provision; no such duty has been located for this provision, but the remaining 13 articles were not systematically swept for retention duties. Absence of a figure is NOT a finding that no retention period applies: a retention duty may arise from this instrument, from an implementing instrument, or from generally applicable records law that this profile does not model. Establishing a cited basis requires a separate research pass against the primary text of the instrument."
+      },
       "evaluation": [
         {
           "rule_id": "cac-implicit-marking-exists",
@@ -163,6 +181,15 @@
       },
       "evidence_freshness_max_days": null,
       "retention_years": null,
+      "retention": {
+        "kind": "not_assessed",
+        "duty_holder": "any",
+        "period": null,
+        "anchor_event": "not_specified",
+        "source": "not_assessed",
+        "normative_text_ref": "",
+        "basis": "NOT ASSESSED. This profile has established no retention basis for the CAC Measures for Labeling AI-Generated and Synthesized Content (国信办通字〔2025〕2号, effective 2025-09-01, 14 articles) (CAC Labeling Measures Art. 5). No retention determination has been made for this provision: the instrument was not assessed for records-retention duties and no period is asserted here. Note that Art. 9 of the same instrument DOES state a six-month log-retention floor, modelled on the cac-log-retention provision; no such duty has been located for this provision, but the remaining 13 articles were not systematically swept for retention duties. Absence of a figure is NOT a finding that no retention period applies: a retention duty may arise from this instrument, from an implementing instrument, or from generally applicable records law that this profile does not model. Establishing a cited basis requires a separate research pass against the primary text of the instrument."
+      },
       "evaluation": [
         {
           "rule_id": "cac-watermark-applied",
@@ -220,6 +247,18 @@
       },
       "evidence_freshness_max_days": 180,
       "retention_years": null,
+      "retention": {
+        "kind": "minimum_floor",
+        "duty_holder": "provider",
+        "period": {
+          "value": 6,
+          "unit": "months"
+        },
+        "anchor_event": "record_creation",
+        "source": "cited",
+        "normative_text_ref": "CAC Labeling Measures (人工智能生成合成内容标识办法, 国信办通字〔2025〕2号, promulgated 2025-03-07, effective 2025-09-01, 14 articles) Art. 9",
+        "basis": "CITED: Art. 9 (第九条) of the CAC Labeling Measures — “…并依法留存提供对象信息等相关日志不少于六个月” ('and shall retain, in accordance with law, the relevant logs including information on the party to whom the content was provided, for not less than six months'). The period is carried in the instrument's own unit, SIX MONTHS. It is deliberately NOT expressed as 180 days: 181-184 calendar days elapse over six months depending on the anchor date, so 180 is an unsourced conversion and asserting it under a citation would restate the very defect GitHub issue #1 reports. The 180 value appearing in this provision's evidence_freshness_max_days and in its cac-log-freshness rule params is a machine-checkable proxy only. THREE qualifications are load-bearing. (1) NOT MACHINE-ENFORCED: the only rule attached to this provision is cac-log-freshness = evidence_freshness(max_days=180), which caps how OLD evidence may be — the semantic INVERSE of a retention floor — so this declared floor is not enforced anywhere in ACEF today. (2) CONDITIONAL DUTY: Art. 9 attaches only where a user requests generated content without an explicit label and the provider supplies it after fixing the user's labeling obligations by user agreement; it is not a general log-retention duty on all service providers. (3) OUTWARD REFERENCE: “依法留存” ('retain in accordance with law') incorporates the general network-log floor at Cybersecurity Law Art. 23(3) (“留存相关的网络日志不少于六个月”), which was Art. 21(3) until the NPCSC amendment of 2025-10-28 renumbered it effective 2026-01-01 — which is why normative_text_ref here carries an instrument version anchor rather than a bare article number. REPO CONFLICT RECORDED: tests/conformance/golden-bundles/china-cac-labeling/records/event_log.jsonl line 2, a FROZEN record whose provisions_addressed is ['cac-log-retention'], gives legal_basis 'CAC Labeling Measures Art. 14'. Art. 14 (第十四条) is the commencement clause (“本办法自2025年9月1日起施行”) and nothing else; it states no retention duty. Art. 9 is correct and Art. 14 is a mis-citation."
+      },
       "evaluation": [
         {
           "rule_id": "cac-event-log-exists",

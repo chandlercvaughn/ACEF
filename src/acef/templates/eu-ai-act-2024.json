@@ -1,7 +1,7 @@
 {
   "template_id": "eu-ai-act-2024",
   "template_name": "EU Artificial Intelligence Act",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "jurisdiction": "EU",
   "source_legislation": "Regulation (EU) 2024/1689",
   "instrument_type": "law",
@@ -16,7 +16,7 @@
       "provision_name": "Risk Management System",
       "normative_text_ref": "EU AI Act Art. 9(1)-(9)",
       "description": "Continuous, iterative risk management across full lifecycle including risk identification, estimation, evaluation, elimination/reduction/mitigation, residual risk acceptance, testing, and post-market monitoring integration",
-      "effective_date": "2026-08-02",
+      "effective_date": "2027-12-02",
       "applicable_to": ["high-risk"],
       "sub_provisions": [
         {
@@ -40,6 +40,19 @@
       },
       "evidence_freshness_max_days": 365,
       "retention_years": 10,
+      "retention_years_basis": "INFERRED default, NOT stated by Art. 9 (which sets no retention period). The 10-year figure is reached transitively: Annex IV point 5 — 'A detailed description of the risk management system in accordance with Article 9'. The chain is: the named Annex IV point is content of the Art. 11 technical documentation ('The technical documentation ... shall contain, at a minimum, the elements set out in Annex IV'), and Art. 18(1)(a) puts a 10-year period on 'the technical documentation referred to in Article 11'. ANCHOR: the clock runs from placing on the market / putting into service, NOT from the evidence-record timestamp; a consumer computing an expiry date from record timestamps will compute it wrong. Art. 18(2) (Member State-defined arrangements applying on provider bankruptcy or cessation of activity) and Art. 18(3) (financial-institution providers redirected to Union financial services law) are out of scope for this profile and are not modelled. It is a profile choice about the transitive Annex IV -> Art. 11 -> Art. 18(1)(a) chain, not a citation of Art. 9.",
+      "retention": {
+        "kind": "fixed_period",
+        "duty_holder": "provider",
+        "period": {
+          "value": 10,
+          "unit": "years"
+        },
+        "anchor_event": "placed_on_market_or_put_into_service",
+        "source": "inferred",
+        "normative_text_ref": "EU AI Act Annex IV point 5 -> Art. 11 -> Art. 18(1)(a)",
+        "basis": "INFERRED default, NOT stated by Art. 9 (which sets no retention period). The 10-year figure is reached transitively: Annex IV point 5 — 'A detailed description of the risk management system in accordance with Article 9'. The chain is: the named Annex IV point is content of the Art. 11 technical documentation ('The technical documentation ... shall contain, at a minimum, the elements set out in Annex IV'), and Art. 18(1)(a) puts a 10-year period on 'the technical documentation referred to in Article 11'. ANCHOR: the clock runs from placing on the market / putting into service, NOT from the evidence-record timestamp; a consumer computing an expiry date from record timestamps will compute it wrong. Art. 18(2) (Member State-defined arrangements applying on provider bankruptcy or cessation of activity) and Art. 18(3) (financial-institution providers redirected to Union financial services law) are out of scope for this profile and are not modelled. It is a profile choice about the transitive Annex IV -> Art. 11 -> Art. 18(1)(a) chain, not a citation of Art. 9."
+      },
       "evaluation": [
         {
           "rule_id": "art9-risk-register",
@@ -94,6 +107,13 @@
           "message": "Every risk_register record must be linked to a subject entity to establish which AI system the risk applies to"
         }
       ],
+      "tiered_requirements": {
+        "adoption": {
+          "annex_iii_high_risk": "2027-12-02",
+          "annex_i_high_risk": "2028-08-02",
+          "basis": "Art. 113 third paragraph point (c), as replaced by Regulation (EU) 2026/1744 Art. 1 point (40)(b): Chapter III Sections 1-3 apply from 2 December 2027 for systems classified as high-risk under Art. 6(2) and Annex III, and from 2 August 2028 for systems classified as high-risk under Art. 6(1) and Annex I. Arts. 19 and 26 are both Chapter III Section 3. ACEF cannot express the Annex I / Annex III discriminator (effective_date is a single value and the risk_classification enum in the frozen v1 manifest schema has no such value), so effective_date carries the EARLIER limb as a conservative projection and both limbs are recorded here. A consumer MUST NOT read effective_date alone as a definitive statement that the obligation applies to a given subject between 2027-12-02 and 2028-08-02."
+        }
+      },
       "evaluation_scope": null
     },
     {
@@ -101,7 +121,7 @@
       "provision_name": "Data Governance",
       "normative_text_ref": "EU AI Act Art. 10(1)-(6)",
       "description": "Training, validation, and testing data shall be subject to data governance and management practices covering design choices, data collection processes, data preparation, bias examination, and gap identification",
-      "effective_date": "2026-08-02",
+      "effective_date": "2027-12-02",
       "applicable_to": ["high-risk"],
       "sub_provisions": [],
       "required_evidence_types": [
@@ -114,6 +134,19 @@
       },
       "evidence_freshness_max_days": null,
       "retention_years": 10,
+      "retention_years_basis": "INFERRED default, NOT stated by Art. 10 (which sets no retention period). The 10-year figure is reached transitively: Annex IV point 2(d) — 'the data requirements in terms of datasheets describing the training methodologies and techniques and the training data sets used'. The chain is: the named Annex IV point is content of the Art. 11 technical documentation ('The technical documentation ... shall contain, at a minimum, the elements set out in Annex IV'), and Art. 18(1)(a) puts a 10-year period on 'the technical documentation referred to in Article 11'. ANCHOR: the clock runs from placing on the market / putting into service, NOT from the evidence-record timestamp; a consumer computing an expiry date from record timestamps will compute it wrong. Art. 18(2) (Member State-defined arrangements applying on provider bankruptcy or cessation of activity) and Art. 18(3) (financial-institution providers redirected to Union financial services law) are out of scope for this profile and are not modelled. It is a profile choice about the transitive Annex IV -> Art. 11 -> Art. 18(1)(a) chain, not a citation of Art. 10. SCOPE WARNING: the 10 years attaches to the Annex IV point 2(d) DATASHEET describing the data sets, not to the data sets themselves. Art. 10(5) independently requires that special categories of personal data processed for bias detection be 'deleted once the bias has been corrected or the personal data has reached the end of its retention period, whichever comes first' — this profile expresses no maximum-retention or deletion duty.",
+      "retention": {
+        "kind": "fixed_period",
+        "duty_holder": "provider",
+        "period": {
+          "value": 10,
+          "unit": "years"
+        },
+        "anchor_event": "placed_on_market_or_put_into_service",
+        "source": "inferred",
+        "normative_text_ref": "EU AI Act Annex IV point 2(d) -> Art. 11 -> Art. 18(1)(a)",
+        "basis": "INFERRED default, NOT stated by Art. 10 (which sets no retention period). The 10-year figure is reached transitively: Annex IV point 2(d) — 'the data requirements in terms of datasheets describing the training methodologies and techniques and the training data sets used'. The chain is: the named Annex IV point is content of the Art. 11 technical documentation ('The technical documentation ... shall contain, at a minimum, the elements set out in Annex IV'), and Art. 18(1)(a) puts a 10-year period on 'the technical documentation referred to in Article 11'. ANCHOR: the clock runs from placing on the market / putting into service, NOT from the evidence-record timestamp; a consumer computing an expiry date from record timestamps will compute it wrong. Art. 18(2) (Member State-defined arrangements applying on provider bankruptcy or cessation of activity) and Art. 18(3) (financial-institution providers redirected to Union financial services law) are out of scope for this profile and are not modelled. It is a profile choice about the transitive Annex IV -> Art. 11 -> Art. 18(1)(a) chain, not a citation of Art. 10. SCOPE WARNING: the 10 years attaches to the Annex IV point 2(d) DATASHEET describing the data sets, not to the data sets themselves. Art. 10(5) independently requires that special categories of personal data processed for bias detection be 'deleted once the bias has been corrected or the personal data has reached the end of its retention period, whichever comes first' — this profile expresses no maximum-retention or deletion duty."
+      },
       "evaluation": [
         {
           "rule_id": "art10-data-provenance",
@@ -144,6 +177,13 @@
           "message": "Every data_provenance record must specify the source_uri for traceability of training data origin"
         }
       ],
+      "tiered_requirements": {
+        "adoption": {
+          "annex_iii_high_risk": "2027-12-02",
+          "annex_i_high_risk": "2028-08-02",
+          "basis": "Art. 113 third paragraph point (c), as replaced by Regulation (EU) 2026/1744 Art. 1 point (40)(b): Chapter III Sections 1-3 apply from 2 December 2027 for systems classified as high-risk under Art. 6(2) and Annex III, and from 2 August 2028 for systems classified as high-risk under Art. 6(1) and Annex I. Arts. 19 and 26 are both Chapter III Section 3. ACEF cannot express the Annex I / Annex III discriminator (effective_date is a single value and the risk_classification enum in the frozen v1 manifest schema has no such value), so effective_date carries the EARLIER limb as a conservative projection and both limbs are recorded here. A consumer MUST NOT read effective_date alone as a definitive statement that the obligation applies to a given subject between 2027-12-02 and 2028-08-02."
+        }
+      },
       "evaluation_scope": null
     },
     {
@@ -151,7 +191,7 @@
       "provision_name": "Technical Documentation",
       "normative_text_ref": "EU AI Act Art. 11(1)-(2), Annex IV",
       "description": "Technical documentation shall be drawn up before the high-risk AI system is placed on the market or put into service and shall be kept up-to-date, demonstrating compliance with the requirements set out in this Chapter",
-      "effective_date": "2026-08-02",
+      "effective_date": "2027-12-02",
       "applicable_to": ["high-risk"],
       "sub_provisions": [],
       "required_evidence_types": [
@@ -162,6 +202,19 @@
       },
       "evidence_freshness_max_days": null,
       "retention_years": 10,
+      "retention_years_basis": "CITED: Art. 18(1) — 'The provider shall, for a period ending 10 years after the high-risk AI system has been placed on the market or put into service, keep at the disposal of the national competent authorities: (a) the technical documentation referred to in Article 11'. Art. 11 itself states no period; the 10 years is stated by Art. 18(1)(a) and names Article 11 directly. ANCHOR: the clock runs from placing on the market / putting into service, NOT from the evidence-record timestamp; a consumer computing an expiry date from record timestamps will compute it wrong. Art. 18(2) (Member State-defined arrangements applying on provider bankruptcy or cessation of activity) and Art. 18(3) (financial-institution providers redirected to Union financial services law) are out of scope for this profile and are not modelled.",
+      "retention": {
+        "kind": "fixed_period",
+        "duty_holder": "provider",
+        "period": {
+          "value": 10,
+          "unit": "years"
+        },
+        "anchor_event": "placed_on_market_or_put_into_service",
+        "source": "cited",
+        "normative_text_ref": "EU AI Act Art. 18(1)(a)",
+        "basis": "CITED: Art. 18(1) — 'The provider shall, for a period ending 10 years after the high-risk AI system has been placed on the market or put into service, keep at the disposal of the national competent authorities: (a) the technical documentation referred to in Article 11'. Art. 11 itself states no period; the 10 years is stated by Art. 18(1)(a) and names Article 11 directly. ANCHOR: the clock runs from placing on the market / putting into service, NOT from the evidence-record timestamp; a consumer computing an expiry date from record timestamps will compute it wrong. Art. 18(2) (Member State-defined arrangements applying on provider bankruptcy or cessation of activity) and Art. 18(3) (financial-institution providers redirected to Union financial services law) are out of scope for this profile and are not modelled."
+      },
       "evaluation": [
         {
           "rule_id": "art11-evaluation-report",
@@ -178,6 +231,13 @@
           "message": "Evaluation reports should document the methodology used, per Annex IV requirements for system performance evaluation methods"
         }
       ],
+      "tiered_requirements": {
+        "adoption": {
+          "annex_iii_high_risk": "2027-12-02",
+          "annex_i_high_risk": "2028-08-02",
+          "basis": "Art. 113 third paragraph point (c), as replaced by Regulation (EU) 2026/1744 Art. 1 point (40)(b): Chapter III Sections 1-3 apply from 2 December 2027 for systems classified as high-risk under Art. 6(2) and Annex III, and from 2 August 2028 for systems classified as high-risk under Art. 6(1) and Annex I. Arts. 19 and 26 are both Chapter III Section 3. ACEF cannot express the Annex I / Annex III discriminator (effective_date is a single value and the risk_classification enum in the frozen v1 manifest schema has no such value), so effective_date carries the EARLIER limb as a conservative projection and both limbs are recorded here. A consumer MUST NOT read effective_date alone as a definitive statement that the obligation applies to a given subject between 2027-12-02 and 2028-08-02."
+        }
+      },
       "evaluation_scope": null
     },
     {
@@ -185,7 +245,7 @@
       "provision_name": "Record-Keeping and Automatic Logging",
       "normative_text_ref": "EU AI Act Art. 12(1)-(4)",
       "description": "High-risk AI systems shall technically allow for the automatic recording of events (logs) over the lifetime of the system, ensuring a level of traceability appropriate to the intended purpose",
-      "effective_date": "2026-08-02",
+      "effective_date": "2027-12-02",
       "applicable_to": ["high-risk"],
       "sub_provisions": [],
       "required_evidence_types": [
@@ -195,7 +255,16 @@
         "event_log": 1
       },
       "evidence_freshness_max_days": null,
-      "retention_years": 10,
+      "retention_years": null,
+      "retention": {
+        "kind": "none_stated",
+        "duty_holder": "any",
+        "period": null,
+        "anchor_event": "not_specified",
+        "source": "cited",
+        "normative_text_ref": "EU AI Act Art. 12(1)-(3)",
+        "basis": "Art. 12 states NO retention period. It has exactly three paragraphs and imposes a system-level logging CAPABILITY duty only — Art. 12(1): 'High-risk AI systems shall technically allow for the automatic recording of events (logs) over the lifetime of the system.' The phrase 'over the lifetime of the system' qualifies the recording capability, not any keeping duty. The previously published 10-year value was uncited and is WITHDRAWN: Art. 18(1) is a closed enumeration of five document classes and logs are not among them; Art. 16 splits the two duties into '(d) keep the documentation referred to in Article 18' and '(e) when under their control, keep the logs automatically generated by their high-risk AI systems as referred to in Article 19'; and Annex IV does not include logs of the Art. 12(1) kind — it contains no reference to Article 12, and its only 'logs' are the point 2(g) development-phase test logs. The period that DOES attach to the Art. 12(1) logs is the at-least-six-months floor in Art. 19(1) (provider) and Art. 26(6) first subparagraph (deployer), modelled as the separate article-19 and article-26.6 provisions of this template and enforced there against the record-envelope /retention/min_retention_days field. Corrected per GitHub issue #1."
+      },
       "evaluation": [
         {
           "rule_id": "art12-event-log",
@@ -239,6 +308,13 @@
           "message": "Event log records should be linked to a subject entity for traceability to the specific AI system"
         }
       ],
+      "tiered_requirements": {
+        "adoption": {
+          "annex_iii_high_risk": "2027-12-02",
+          "annex_i_high_risk": "2028-08-02",
+          "basis": "Art. 113 third paragraph point (c), as replaced by Regulation (EU) 2026/1744 Art. 1 point (40)(b): Chapter III Sections 1-3 apply from 2 December 2027 for systems classified as high-risk under Art. 6(2) and Annex III, and from 2 August 2028 for systems classified as high-risk under Art. 6(1) and Annex I. Arts. 19 and 26 are both Chapter III Section 3. ACEF cannot express the Annex I / Annex III discriminator (effective_date is a single value and the risk_classification enum in the frozen v1 manifest schema has no such value), so effective_date carries the EARLIER limb as a conservative projection and both limbs are recorded here. A consumer MUST NOT read effective_date alone as a definitive statement that the obligation applies to a given subject between 2027-12-02 and 2028-08-02."
+        }
+      },
       "evaluation_scope": null
     },
     {
@@ -246,7 +322,7 @@
       "provision_name": "Transparency and Provision of Information to Deployers",
       "normative_text_ref": "EU AI Act Art. 13(1)-(3)",
       "description": "High-risk AI systems shall be designed and developed in such a way as to ensure that their operation is sufficiently transparent to enable deployers to interpret a system's output and use it appropriately",
-      "effective_date": "2026-08-02",
+      "effective_date": "2027-12-02",
       "applicable_to": ["high-risk"],
       "sub_provisions": [],
       "required_evidence_types": [
@@ -257,6 +333,19 @@
       },
       "evidence_freshness_max_days": null,
       "retention_years": 10,
+      "retention_years_basis": "INFERRED default, NOT stated by Art. 13 (which sets no retention period). The 10-year figure is reached transitively: Annex IV point 1(h) — 'instructions for use for the deployer, and a basic description of the user-interface provided to the deployer, where applicable'. The chain is: the named Annex IV point is content of the Art. 11 technical documentation ('The technical documentation ... shall contain, at a minimum, the elements set out in Annex IV'), and Art. 18(1)(a) puts a 10-year period on 'the technical documentation referred to in Article 11'. ANCHOR: the clock runs from placing on the market / putting into service, NOT from the evidence-record timestamp; a consumer computing an expiry date from record timestamps will compute it wrong. Art. 18(2) (Member State-defined arrangements applying on provider bankruptcy or cessation of activity) and Art. 18(3) (financial-institution providers redirected to Union financial services law) are out of scope for this profile and are not modelled. It is a profile choice about the transitive Annex IV -> Art. 11 -> Art. 18(1)(a) chain, not a citation of Art. 13.",
+      "retention": {
+        "kind": "fixed_period",
+        "duty_holder": "provider",
+        "period": {
+          "value": 10,
+          "unit": "years"
+        },
+        "anchor_event": "placed_on_market_or_put_into_service",
+        "source": "inferred",
+        "normative_text_ref": "EU AI Act Annex IV point 1(h) -> Art. 11 -> Art. 18(1)(a)",
+        "basis": "INFERRED default, NOT stated by Art. 13 (which sets no retention period). The 10-year figure is reached transitively: Annex IV point 1(h) — 'instructions for use for the deployer, and a basic description of the user-interface provided to the deployer, where applicable'. The chain is: the named Annex IV point is content of the Art. 11 technical documentation ('The technical documentation ... shall contain, at a minimum, the elements set out in Annex IV'), and Art. 18(1)(a) puts a 10-year period on 'the technical documentation referred to in Article 11'. ANCHOR: the clock runs from placing on the market / putting into service, NOT from the evidence-record timestamp; a consumer computing an expiry date from record timestamps will compute it wrong. Art. 18(2) (Member State-defined arrangements applying on provider bankruptcy or cessation of activity) and Art. 18(3) (financial-institution providers redirected to Union financial services law) are out of scope for this profile and are not modelled. It is a profile choice about the transitive Annex IV -> Art. 11 -> Art. 18(1)(a) chain, not a citation of Art. 13."
+      },
       "evaluation": [
         {
           "rule_id": "art13-transparency-disclosure",
@@ -273,6 +362,13 @@
           "message": "Transparency disclosures should be linked to a subject entity to identify which AI system's capabilities and limitations are documented"
         }
       ],
+      "tiered_requirements": {
+        "adoption": {
+          "annex_iii_high_risk": "2027-12-02",
+          "annex_i_high_risk": "2028-08-02",
+          "basis": "Art. 113 third paragraph point (c), as replaced by Regulation (EU) 2026/1744 Art. 1 point (40)(b): Chapter III Sections 1-3 apply from 2 December 2027 for systems classified as high-risk under Art. 6(2) and Annex III, and from 2 August 2028 for systems classified as high-risk under Art. 6(1) and Annex I. Arts. 19 and 26 are both Chapter III Section 3. ACEF cannot express the Annex I / Annex III discriminator (effective_date is a single value and the risk_classification enum in the frozen v1 manifest schema has no such value), so effective_date carries the EARLIER limb as a conservative projection and both limbs are recorded here. A consumer MUST NOT read effective_date alone as a definitive statement that the obligation applies to a given subject between 2027-12-02 and 2028-08-02."
+        }
+      },
       "evaluation_scope": null
     },
     {
@@ -280,7 +376,7 @@
       "provision_name": "Human Oversight",
       "normative_text_ref": "EU AI Act Art. 14(1)-(5)",
       "description": "High-risk AI systems shall be designed and developed in such a way, including with appropriate human-machine interface tools, that they can be effectively overseen by natural persons during the period in which they are used",
-      "effective_date": "2026-08-02",
+      "effective_date": "2027-12-02",
       "applicable_to": ["high-risk"],
       "sub_provisions": [],
       "required_evidence_types": [
@@ -291,6 +387,19 @@
       },
       "evidence_freshness_max_days": null,
       "retention_years": 10,
+      "retention_years_basis": "INFERRED default, NOT stated by Art. 14 (which sets no retention period). The 10-year figure is reached transitively: Annex IV point 2(e) — 'assessment of the human oversight measures needed in accordance with Article 14', together with Annex IV point 3. The chain is: the named Annex IV point is content of the Art. 11 technical documentation ('The technical documentation ... shall contain, at a minimum, the elements set out in Annex IV'), and Art. 18(1)(a) puts a 10-year period on 'the technical documentation referred to in Article 11'. ANCHOR: the clock runs from placing on the market / putting into service, NOT from the evidence-record timestamp; a consumer computing an expiry date from record timestamps will compute it wrong. Art. 18(2) (Member State-defined arrangements applying on provider bankruptcy or cessation of activity) and Art. 18(3) (financial-institution providers redirected to Union financial services law) are out of scope for this profile and are not modelled. It is a profile choice about the transitive Annex IV -> Art. 11 -> Art. 18(1)(a) chain, not a citation of Art. 14.",
+      "retention": {
+        "kind": "fixed_period",
+        "duty_holder": "provider",
+        "period": {
+          "value": 10,
+          "unit": "years"
+        },
+        "anchor_event": "placed_on_market_or_put_into_service",
+        "source": "inferred",
+        "normative_text_ref": "EU AI Act Annex IV point 2(e) -> Art. 11 -> Art. 18(1)(a)",
+        "basis": "INFERRED default, NOT stated by Art. 14 (which sets no retention period). The 10-year figure is reached transitively: Annex IV point 2(e) — 'assessment of the human oversight measures needed in accordance with Article 14', together with Annex IV point 3. The chain is: the named Annex IV point is content of the Art. 11 technical documentation ('The technical documentation ... shall contain, at a minimum, the elements set out in Annex IV'), and Art. 18(1)(a) puts a 10-year period on 'the technical documentation referred to in Article 11'. ANCHOR: the clock runs from placing on the market / putting into service, NOT from the evidence-record timestamp; a consumer computing an expiry date from record timestamps will compute it wrong. Art. 18(2) (Member State-defined arrangements applying on provider bankruptcy or cessation of activity) and Art. 18(3) (financial-institution providers redirected to Union financial services law) are out of scope for this profile and are not modelled. It is a profile choice about the transitive Annex IV -> Art. 11 -> Art. 18(1)(a) chain, not a citation of Art. 14."
+      },
       "evaluation": [
         {
           "rule_id": "art14-human-oversight",
@@ -307,6 +416,13 @@
           "message": "Human oversight actions should be linked to an actor entity to establish who performed the oversight"
         }
       ],
+      "tiered_requirements": {
+        "adoption": {
+          "annex_iii_high_risk": "2027-12-02",
+          "annex_i_high_risk": "2028-08-02",
+          "basis": "Art. 113 third paragraph point (c), as replaced by Regulation (EU) 2026/1744 Art. 1 point (40)(b): Chapter III Sections 1-3 apply from 2 December 2027 for systems classified as high-risk under Art. 6(2) and Annex III, and from 2 August 2028 for systems classified as high-risk under Art. 6(1) and Annex I. Arts. 19 and 26 are both Chapter III Section 3. ACEF cannot express the Annex I / Annex III discriminator (effective_date is a single value and the risk_classification enum in the frozen v1 manifest schema has no such value), so effective_date carries the EARLIER limb as a conservative projection and both limbs are recorded here. A consumer MUST NOT read effective_date alone as a definitive statement that the obligation applies to a given subject between 2027-12-02 and 2028-08-02."
+        }
+      },
       "evaluation_scope": null
     },
     {
@@ -314,7 +430,7 @@
       "provision_name": "Accuracy, Robustness, and Cybersecurity",
       "normative_text_ref": "EU AI Act Art. 15(1)-(5)",
       "description": "High-risk AI systems shall be designed and developed in such a way that they achieve an appropriate level of accuracy, robustness, and cybersecurity, and perform consistently in those respects throughout their lifecycle",
-      "effective_date": "2026-08-02",
+      "effective_date": "2027-12-02",
       "applicable_to": ["high-risk"],
       "sub_provisions": [],
       "required_evidence_types": [
@@ -325,6 +441,19 @@
       },
       "evidence_freshness_max_days": null,
       "retention_years": 10,
+      "retention_years_basis": "INFERRED default, NOT stated by Art. 15 (which sets no retention period). The 10-year figure is reached transitively: Annex IV point 2(g) (metrics used to measure accuracy and robustness), point 2(h) — 'cybersecurity measures put in place' — and point 3 (degrees of accuracy for specific persons or groups). The chain is: the named Annex IV point is content of the Art. 11 technical documentation ('The technical documentation ... shall contain, at a minimum, the elements set out in Annex IV'), and Art. 18(1)(a) puts a 10-year period on 'the technical documentation referred to in Article 11'. ANCHOR: the clock runs from placing on the market / putting into service, NOT from the evidence-record timestamp; a consumer computing an expiry date from record timestamps will compute it wrong. Art. 18(2) (Member State-defined arrangements applying on provider bankruptcy or cessation of activity) and Art. 18(3) (financial-institution providers redirected to Union financial services law) are out of scope for this profile and are not modelled. It is a profile choice about the transitive Annex IV -> Art. 11 -> Art. 18(1)(a) chain, not a citation of Art. 15.",
+      "retention": {
+        "kind": "fixed_period",
+        "duty_holder": "provider",
+        "period": {
+          "value": 10,
+          "unit": "years"
+        },
+        "anchor_event": "placed_on_market_or_put_into_service",
+        "source": "inferred",
+        "normative_text_ref": "EU AI Act Annex IV point 2(g)-(h) -> Art. 11 -> Art. 18(1)(a)",
+        "basis": "INFERRED default, NOT stated by Art. 15 (which sets no retention period). The 10-year figure is reached transitively: Annex IV point 2(g) (metrics used to measure accuracy and robustness), point 2(h) — 'cybersecurity measures put in place' — and point 3 (degrees of accuracy for specific persons or groups). The chain is: the named Annex IV point is content of the Art. 11 technical documentation ('The technical documentation ... shall contain, at a minimum, the elements set out in Annex IV'), and Art. 18(1)(a) puts a 10-year period on 'the technical documentation referred to in Article 11'. ANCHOR: the clock runs from placing on the market / putting into service, NOT from the evidence-record timestamp; a consumer computing an expiry date from record timestamps will compute it wrong. Art. 18(2) (Member State-defined arrangements applying on provider bankruptcy or cessation of activity) and Art. 18(3) (financial-institution providers redirected to Union financial services law) are out of scope for this profile and are not modelled. It is a profile choice about the transitive Annex IV -> Art. 11 -> Art. 18(1)(a) chain, not a citation of Art. 15."
+      },
       "evaluation": [
         {
           "rule_id": "art15-evaluation-report",
@@ -341,6 +470,13 @@
           "message": "Evaluation reports should include quantified metrics for accuracy assessment per Art. 15(1)"
         }
       ],
+      "tiered_requirements": {
+        "adoption": {
+          "annex_iii_high_risk": "2027-12-02",
+          "annex_i_high_risk": "2028-08-02",
+          "basis": "Art. 113 third paragraph point (c), as replaced by Regulation (EU) 2026/1744 Art. 1 point (40)(b): Chapter III Sections 1-3 apply from 2 December 2027 for systems classified as high-risk under Art. 6(2) and Annex III, and from 2 August 2028 for systems classified as high-risk under Art. 6(1) and Annex I. Arts. 19 and 26 are both Chapter III Section 3. ACEF cannot express the Annex I / Annex III discriminator (effective_date is a single value and the risk_classification enum in the frozen v1 manifest schema has no such value), so effective_date carries the EARLIER limb as a conservative projection and both limbs are recorded here. A consumer MUST NOT read effective_date alone as a definitive statement that the obligation applies to a given subject between 2027-12-02 and 2028-08-02."
+        }
+      },
       "evaluation_scope": null
     },
     {
@@ -348,7 +484,7 @@
       "provision_name": "Quality Management System",
       "normative_text_ref": "EU AI Act Art. 17(1)",
       "description": "Providers of high-risk AI systems shall put a quality management system in place that ensures compliance with this Regulation, covering policies, procedures, and instructions spanning the full compliance lifecycle",
-      "effective_date": "2026-08-02",
+      "effective_date": "2027-12-02",
       "applicable_to": ["high-risk"],
       "sub_provisions": [],
       "required_evidence_types": [
@@ -359,6 +495,19 @@
       },
       "evidence_freshness_max_days": null,
       "retention_years": 10,
+      "retention_years_basis": "CITED: Art. 18(1) — 'The provider shall, for a period ending 10 years after the high-risk AI system has been placed on the market or put into service, keep at the disposal of the national competent authorities: ... (b) the documentation concerning the quality management system referred to in Article 17'. Art. 17 itself states no period; the 10 years is stated by Art. 18(1)(b) and names Article 17 directly. ANCHOR: the clock runs from placing on the market / putting into service, NOT from the evidence-record timestamp; a consumer computing an expiry date from record timestamps will compute it wrong. Art. 18(2) (Member State-defined arrangements applying on provider bankruptcy or cessation of activity) and Art. 18(3) (financial-institution providers redirected to Union financial services law) are out of scope for this profile and are not modelled.",
+      "retention": {
+        "kind": "fixed_period",
+        "duty_holder": "provider",
+        "period": {
+          "value": 10,
+          "unit": "years"
+        },
+        "anchor_event": "placed_on_market_or_put_into_service",
+        "source": "cited",
+        "normative_text_ref": "EU AI Act Art. 18(1)(b)",
+        "basis": "CITED: Art. 18(1) — 'The provider shall, for a period ending 10 years after the high-risk AI system has been placed on the market or put into service, keep at the disposal of the national competent authorities: ... (b) the documentation concerning the quality management system referred to in Article 17'. Art. 17 itself states no period; the 10 years is stated by Art. 18(1)(b) and names Article 17 directly. ANCHOR: the clock runs from placing on the market / putting into service, NOT from the evidence-record timestamp; a consumer computing an expiry date from record timestamps will compute it wrong. Art. 18(2) (Member State-defined arrangements applying on provider bankruptcy or cessation of activity) and Art. 18(3) (financial-institution providers redirected to Union financial services law) are out of scope for this profile and are not modelled."
+      },
       "evaluation": [
         {
           "rule_id": "art17-governance-policy",
@@ -375,6 +524,265 @@
           "message": "Quality management system governance_policy records should include attached policy documents (PDF or similar)"
         }
       ],
+      "tiered_requirements": {
+        "adoption": {
+          "annex_iii_high_risk": "2027-12-02",
+          "annex_i_high_risk": "2028-08-02",
+          "basis": "Art. 113 third paragraph point (c), as replaced by Regulation (EU) 2026/1744 Art. 1 point (40)(b): Chapter III Sections 1-3 apply from 2 December 2027 for systems classified as high-risk under Art. 6(2) and Annex III, and from 2 August 2028 for systems classified as high-risk under Art. 6(1) and Annex I. Arts. 19 and 26 are both Chapter III Section 3. ACEF cannot express the Annex I / Annex III discriminator (effective_date is a single value and the risk_classification enum in the frozen v1 manifest schema has no such value), so effective_date carries the EARLIER limb as a conservative projection and both limbs are recorded here. A consumer MUST NOT read effective_date alone as a definitive statement that the obligation applies to a given subject between 2027-12-02 and 2028-08-02."
+        }
+      },
+      "evaluation_scope": null
+    },
+    {
+      "provision_id": "article-19",
+      "provision_name": "Automatically Generated Logs — Provider Retention",
+      "normative_text_ref": "EU AI Act Art. 19(1)",
+      "description": "Providers of high-risk AI systems shall keep the logs referred to in Article 12(1), automatically generated by their high-risk AI systems, to the extent such logs are under their control, for a period appropriate to the intended purpose, of at least six months",
+      "effective_date": "2027-12-02",
+      "applicable_to": ["high-risk"],
+      "sub_provisions": [],
+      "required_evidence_types": [
+        "event_log"
+      ],
+      "minimum_evidence_count": {
+        "event_log": 1
+      },
+      "evidence_freshness_max_days": null,
+      "retention_years": null,
+      "retention": {
+        "kind": "minimum_floor",
+        "duty_holder": "provider",
+        "period": {
+          "value": 6,
+          "unit": "months"
+        },
+        "anchor_event": "record_creation",
+        "source": "cited",
+        "normative_text_ref": "EU AI Act Art. 19(1)",
+        "basis": "EU AI Act Art. 19(1): Providers shall keep the logs referred to in Article 12(1), automatically generated by their high-risk AI systems, to the extent such logs are under their control, for a period appropriate to the intended purpose of the high-risk AI system, of at least six months, unless provided otherwise in the applicable Union or national law, in particular in Union law on the protection of personal data. This is a MINIMUM FLOOR, unbounded above — not a fixed period — so it is not representable as an integer number of years, which is why retention_years is null here. Art. 19(2) routes providers that are financial institutions to their obligations under Union financial services law. The 10-year figure in Art. 18(1) governs documentation, not logs: Art. 16 splits the duties expressly into '(d) keep the documentation referred to in Article 18' and '(e) ... keep the logs automatically generated by their high-risk AI systems as referred to in Article 19'."
+      },
+      "evaluation": [
+        {
+          "rule_id": "art19-event-log",
+          "rule": "has_record_type",
+          "params": {
+            "type": "event_log",
+            "min_count": 1
+          },
+          "severity": "fail",
+          "message": "At least one event_log record is required — the provider must keep the Art. 12(1) logs under their control",
+          "scope": {
+            "obligation_roles": [
+              "provider"
+            ]
+          }
+        },
+        {
+          "rule_id": "art19-log-retention-floor",
+          "rule": "exists_where_any",
+          "params": {
+            "record_type": "event_log",
+            "fields": ["/retention/min_retention_days", "/payload/retention_policy_summary/min_days"],
+            "op": "gte",
+            "value": 181,
+            "min_count": 1
+          },
+          "severity": "fail",
+          "message": "At least one event_log must declare retention of >= 181 days — a SCREEN for the Art. 19(1) 'at least six months' floor binding the provider. Six calendar months spans 181-184 days, so this threshold is the lower bound: it never rejects a compliant policy but cannot confirm one. See ACEF-036; the authoritative obligation is retention.period (6 months) from retention.anchor_event.",
+          "scope": {
+            "obligation_roles": [
+              "provider"
+            ]
+          }
+        },
+        {
+          "rule_id": "art19-logging-spec-declared-floor",
+          "rule": "exists_where",
+          "params": {
+            "record_type": "event_log",
+            "field": "/payload/retention_policy_summary/min_days",
+            "op": "gte",
+            "value": 181,
+            "min_count": 1
+          },
+          "severity": "warning",
+          "message": "A logging_spec record should declare retention_policy_summary.min_days >= 181 (the lower bound of six calendar months); ACEF bundles state retention on this payload surface as well as on the record envelope",
+          "scope": {
+            "obligation_roles": [
+              "provider"
+            ]
+          }
+        },
+        {
+          "rule_id": "art19-logging-spec-legal-basis",
+          "rule": "exists_where",
+          "params": {
+            "record_type": "event_log",
+            "field": "/payload/retention_policy_summary/legal_basis",
+            "op": "regex",
+            "value": "[Aa]rt(icle)?\\.?\\s*19\\b|article-19",
+            "min_count": 1
+          },
+          "severity": "warning",
+          "message": "A declared log-retention policy should cite Art. 19 as its legal basis. Art. 12 states no retention period, so attributing a log retention period to Art. 12 is a misattribution",
+          "scope": {
+            "obligation_roles": [
+              "provider"
+            ]
+          }
+        },
+        {
+          "rule_id": "art19-log-retention-legal-basis",
+          "rule": "exists_where",
+          "params": {
+            "record_type": "event_log",
+            "field": "/retention/legal_basis",
+            "op": "regex",
+            "value": "[Aa]rt(icle)?\\.?\\s*19\\b|article-19",
+            "min_count": 1
+          },
+          "severity": "warning",
+          "message": "Record-level retention should cite Art. 19. Matched by regex because several legal_basis spellings ship in live data",
+          "scope": {
+            "obligation_roles": [
+              "provider"
+            ]
+          }
+        }
+      ],
+      "tiered_requirements": {
+        "adoption": {
+          "annex_iii_high_risk": "2027-12-02",
+          "annex_i_high_risk": "2028-08-02",
+          "basis": "Art. 113 third paragraph point (c), as replaced by Regulation (EU) 2026/1744 Art. 1 point (40)(b): Chapter III Sections 1-3 apply from 2 December 2027 for systems classified as high-risk under Art. 6(2) and Annex III, and from 2 August 2028 for systems classified as high-risk under Art. 6(1) and Annex I. Arts. 19 and 26 are both Chapter III Section 3. ACEF cannot express the Annex I / Annex III discriminator (effective_date is a single value and the risk_classification enum in the frozen v1 manifest schema has no such value), so effective_date carries the EARLIER limb as a conservative projection and both limbs are recorded here. A consumer MUST NOT read effective_date alone as a definitive statement that the obligation applies to a given subject between 2027-12-02 and 2028-08-02."
+        }
+      },
+      "evaluation_scope": null
+    },
+    {
+      "provision_id": "article-26.6",
+      "provision_name": "Deployer Log Retention",
+      "normative_text_ref": "EU AI Act Art. 26(6)",
+      "description": "Deployers of high-risk AI systems shall keep the logs automatically generated by that high-risk AI system to the extent such logs are under their control, for a period appropriate to the intended purpose, of at least six months",
+      "effective_date": "2027-12-02",
+      "applicable_to": ["high-risk"],
+      "sub_provisions": [],
+      "required_evidence_types": [
+        "event_log"
+      ],
+      "minimum_evidence_count": {
+        "event_log": 1
+      },
+      "evidence_freshness_max_days": null,
+      "retention_years": null,
+      "retention": {
+        "kind": "minimum_floor",
+        "duty_holder": "deployer",
+        "period": {
+          "value": 6,
+          "unit": "months"
+        },
+        "anchor_event": "record_creation",
+        "source": "cited",
+        "normative_text_ref": "EU AI Act Art. 26(6)",
+        "basis": "EU AI Act Art. 26(6): Deployers shall keep the logs referred to in Article 12(1), automatically generated by their high-risk AI systems, to the extent such logs are under their control, for a period appropriate to the intended purpose of the high-risk AI system, of at least six months, unless provided otherwise in the applicable Union or national law, in particular in Union law on the protection of personal data. This is a MINIMUM FLOOR, unbounded above — not a fixed period — so it is not representable as an integer number of years, which is why retention_years is null here. The second subparagraph routes deployer financial institutions to their record-keeping obligations under Union financial services law. The 10-year figure in Art. 18(1) governs documentation, not logs: Art. 16 splits the duties expressly into '(d) keep the documentation referred to in Article 18' and '(e) ... keep the logs automatically generated by their high-risk AI systems as referred to in Article 19'."
+      },
+      "evaluation": [
+        {
+          "rule_id": "art26-6-event-log",
+          "rule": "has_record_type",
+          "params": {
+            "type": "event_log",
+            "min_count": 1
+          },
+          "severity": "fail",
+          "message": "At least one event_log record is required — the deployer must keep the Art. 12(1) logs under their control",
+          "scope": {
+            "obligation_roles": [
+              "deployer"
+            ]
+          }
+        },
+        {
+          "rule_id": "art26-6-log-retention-floor",
+          "rule": "exists_where_any",
+          "params": {
+            "record_type": "event_log",
+            "fields": ["/retention/min_retention_days", "/payload/retention_policy_summary/min_days"],
+            "op": "gte",
+            "value": 181,
+            "min_count": 1
+          },
+          "severity": "fail",
+          "message": "At least one event_log must declare retention of >= 181 days — a SCREEN for the Art. 26(6) 'at least six months' floor binding the deployer. Six calendar months spans 181-184 days, so this threshold is the lower bound: it never rejects a compliant policy but cannot confirm one. See ACEF-036; the authoritative obligation is retention.period (6 months) from retention.anchor_event.",
+          "scope": {
+            "obligation_roles": [
+              "deployer"
+            ]
+          }
+        },
+        {
+          "rule_id": "art26-6-logging-spec-declared-floor",
+          "rule": "exists_where",
+          "params": {
+            "record_type": "event_log",
+            "field": "/payload/retention_policy_summary/min_days",
+            "op": "gte",
+            "value": 181,
+            "min_count": 1
+          },
+          "severity": "warning",
+          "message": "A logging_spec record should declare retention_policy_summary.min_days >= 181 (the lower bound of six calendar months); ACEF bundles state retention on this payload surface as well as on the record envelope",
+          "scope": {
+            "obligation_roles": [
+              "deployer"
+            ]
+          }
+        },
+        {
+          "rule_id": "art26-6-logging-spec-legal-basis",
+          "rule": "exists_where",
+          "params": {
+            "record_type": "event_log",
+            "field": "/payload/retention_policy_summary/legal_basis",
+            "op": "regex",
+            "value": "[Aa]rt(icle)?\\.?\\s*26\\b|article-26",
+            "min_count": 1
+          },
+          "severity": "warning",
+          "message": "A declared log-retention policy should cite Art. 26 as its legal basis. Art. 12 states no retention period, so attributing a log retention period to Art. 12 is a misattribution",
+          "scope": {
+            "obligation_roles": [
+              "deployer"
+            ]
+          }
+        },
+        {
+          "rule_id": "art26-6-log-retention-legal-basis",
+          "rule": "exists_where",
+          "params": {
+            "record_type": "event_log",
+            "field": "/retention/legal_basis",
+            "op": "regex",
+            "value": "[Aa]rt(icle)?\\.?\\s*26\\b|article-26",
+            "min_count": 1
+          },
+          "severity": "warning",
+          "message": "Record-level retention should cite Art. 26. Matched by regex because several legal_basis spellings ship in live data",
+          "scope": {
+            "obligation_roles": [
+              "deployer"
+            ]
+          }
+        }
+      ],
+      "tiered_requirements": {
+        "adoption": {
+          "annex_iii_high_risk": "2027-12-02",
+          "annex_i_high_risk": "2028-08-02",
+          "basis": "Art. 113 third paragraph point (c), as replaced by Regulation (EU) 2026/1744 Art. 1 point (40)(b): Chapter III Sections 1-3 apply from 2 December 2027 for systems classified as high-risk under Art. 6(2) and Annex III, and from 2 August 2028 for systems classified as high-risk under Art. 6(1) and Annex I. Arts. 19 and 26 are both Chapter III Section 3. ACEF cannot express the Annex I / Annex III discriminator (effective_date is a single value and the risk_classification enum in the frozen v1 manifest schema has no such value), so effective_date carries the EARLIER limb as a conservative projection and both limbs are recorded here. A consumer MUST NOT read effective_date alone as a definitive statement that the obligation applies to a given subject between 2027-12-02 and 2028-08-02."
+        }
+      },
       "evaluation_scope": null
     },
     {
@@ -393,6 +801,15 @@
       },
       "evidence_freshness_max_days": null,
       "retention_years": null,
+      "retention": {
+        "kind": "none_stated",
+        "duty_holder": "any",
+        "period": null,
+        "anchor_event": "not_specified",
+        "source": "cited",
+        "normative_text_ref": "EU AI Act Art. 50(1)-(7)",
+        "basis": "CITED: no paragraph of Art. 50 states any keeping or retention duration. Art. 50(2) requires that providers of AI systems generating synthetic audio, image, video or text content 'shall ensure that the outputs of the AI system are marked in a machine-readable format and detectable as artificially generated or manipulated'; Art. 50(1)-(7) were read in full and none of them attaches a period to any record. No retention obligation is asserted by this profile for this provision. This is a determination that the instrument states no period — it is distinct from 'not assessed'. Any retention duty over transparency-marking evidence must be sourced elsewhere (for a high-risk system that also falls under Chapter III, Art. 18(1)(a) may reach the marking description as Annex IV technical-documentation content; that chain is not asserted here)."
+      },
       "evaluation": [
         {
           "rule_id": "art50-marking-exists",
@@ -443,6 +860,15 @@
       },
       "evidence_freshness_max_days": null,
       "retention_years": null,
+      "retention": {
+        "kind": "none_stated",
+        "duty_holder": "any",
+        "period": null,
+        "anchor_event": "not_specified",
+        "source": "cited",
+        "normative_text_ref": "EU AI Act Art. 53(1)-(7), Annex XI Sections 1-2",
+        "basis": "CITED: no paragraph of Art. 53 states any keeping or retention duration. Art. 53(1)(a) requires the provider of a general-purpose AI model to 'draw up and keep up-to-date the technical documentation of the model, including its training and testing process and the results of its evaluation, which shall contain, at a minimum, the information set out in Annex XI'; 'keep up-to-date' is a currency duty, not a keeping-period duty. Art. 53(1)-(7) and Annex XI Sections 1-2 were read in full: Annex XI specifies documentation CONTENT only and states no period. Note that Art. 54(3)(b) does place a 10-year keeping duty on the GPAI provider's AUTHORISED REPRESENTATIVE ('keep a copy of the authorisation ... at the disposal of the AI Office for a period of 10 years'); that duty binds a duty-holder this profile does not model and is therefore not asserted as this provision's retention. This is a determination that the instrument states no period for the provider — it is distinct from 'not assessed'."
+      },
       "evaluation": [
         {
           "rule_id": "art53-data-provenance",

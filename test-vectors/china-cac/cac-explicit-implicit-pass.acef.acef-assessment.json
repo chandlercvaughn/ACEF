@@ -1,1 +1,341 @@
-{"assessment_id":"urn:acef:asx:5c5700fa-dbe8-4fed-9609-095a8bf6432b","assessor":{"name":"acef-validator","organization":"AI Commons","version":"0.1.0"},"evaluation_instant":"2026-03-15T12:00:00Z","evidence_bundle_ref":{"content_hash":"sha256:32939cba3ea9e4f26faaa558ecd36472cc8e70e823bd3e02162fc15d31646082","package_id":"urn:acef:pkg:d112cdd3-914e-4c15-8920-e10ea7c5b6ce"},"integrity":null,"profiles_evaluated":["china-cac-labeling-2025:1.0.0"],"provision_summary":[{"evidence_refs":["urn:acef:rec:279c9bb9-a636-484d-8d19-077a26d0f3e2"],"fail_count":0,"profile_id":"china-cac-labeling-2025","provision_id":"cac-explicit-label","provision_outcome":"satisfied","skipped_count":0,"subject_scope":["urn:acef:sub:385e7835-fd9a-4345-8392-1a10602d7262"],"warning_count":0},{"evidence_refs":["urn:acef:rec:205d596e-c344-4459-95bc-9fe450584176"],"fail_count":0,"profile_id":"china-cac-labeling-2025","provision_id":"cac-implicit-metadata","provision_outcome":"satisfied","skipped_count":0,"subject_scope":["urn:acef:sub:385e7835-fd9a-4345-8392-1a10602d7262"],"warning_count":0},{"evidence_refs":["urn:acef:rec:110befbf-14d2-4956-95e6-4072c9e45923","urn:acef:rec:279c9bb9-a636-484d-8d19-077a26d0f3e2","urn:acef:rec:205d596e-c344-4459-95bc-9fe450584176"],"fail_count":0,"profile_id":"china-cac-labeling-2025","provision_id":"cac-log-retention","provision_outcome":"satisfied","skipped_count":0,"subject_scope":["urn:acef:sub:385e7835-fd9a-4345-8392-1a10602d7262"],"warning_count":0},{"evidence_refs":["urn:acef:rec:205d596e-c344-4459-95bc-9fe450584176"],"fail_count":0,"profile_id":"china-cac-labeling-2025","provision_id":"cac-watermark","provision_outcome":"not-assessed","skipped_count":0,"subject_scope":["urn:acef:sub:385e7835-fd9a-4345-8392-1a10602d7262"],"warning_count":0}],"results":[{"error_code":null,"evidence_refs":["urn:acef:rec:279c9bb9-a636-484d-8d19-077a26d0f3e2"],"message":null,"outcome":"passed","profile_id":"china-cac-labeling-2025","provision_id":"cac-explicit-label","rule_id":"cac-explicit-disclosure-exists","rule_severity":"fail","subject_scope":["urn:acef:sub:385e7835-fd9a-4345-8392-1a10602d7262"]},{"error_code":null,"evidence_refs":["urn:acef:rec:279c9bb9-a636-484d-8d19-077a26d0f3e2"],"message":null,"outcome":"passed","profile_id":"china-cac-labeling-2025","provision_id":"cac-explicit-label","rule_id":"cac-explicit-presentation","rule_severity":"fail","subject_scope":["urn:acef:sub:385e7835-fd9a-4345-8392-1a10602d7262"]},{"error_code":null,"evidence_refs":["urn:acef:rec:279c9bb9-a636-484d-8d19-077a26d0f3e2"],"message":null,"outcome":"passed","profile_id":"china-cac-labeling-2025","provision_id":"cac-explicit-label","rule_id":"cac-explicit-label-type","rule_severity":"warning","subject_scope":["urn:acef:sub:385e7835-fd9a-4345-8392-1a10602d7262"]},{"error_code":null,"evidence_refs":["urn:acef:rec:279c9bb9-a636-484d-8d19-077a26d0f3e2"],"message":null,"outcome":"passed","profile_id":"china-cac-labeling-2025","provision_id":"cac-explicit-label","rule_id":"cac-explicit-locale","rule_severity":"warning","subject_scope":["urn:acef:sub:385e7835-fd9a-4345-8392-1a10602d7262"]},{"error_code":null,"evidence_refs":["urn:acef:rec:205d596e-c344-4459-95bc-9fe450584176"],"message":null,"outcome":"passed","profile_id":"china-cac-labeling-2025","provision_id":"cac-implicit-metadata","rule_id":"cac-implicit-marking-exists","rule_severity":"fail","subject_scope":["urn:acef:sub:385e7835-fd9a-4345-8392-1a10602d7262"]},{"error_code":null,"evidence_refs":["urn:acef:rec:205d596e-c344-4459-95bc-9fe450584176"],"message":null,"outcome":"passed","profile_id":"china-cac-labeling-2025","provision_id":"cac-implicit-metadata","rule_id":"cac-implicit-marking-scheme-id","rule_severity":"fail","subject_scope":["urn:acef:sub:385e7835-fd9a-4345-8392-1a10602d7262"]},{"error_code":null,"evidence_refs":["urn:acef:rec:205d596e-c344-4459-95bc-9fe450584176"],"message":null,"outcome":"passed","profile_id":"china-cac-labeling-2025","provision_id":"cac-implicit-metadata","rule_id":"cac-implicit-jurisdiction","rule_severity":"fail","subject_scope":["urn:acef:sub:385e7835-fd9a-4345-8392-1a10602d7262"]},{"error_code":null,"evidence_refs":["urn:acef:rec:205d596e-c344-4459-95bc-9fe450584176"],"message":null,"outcome":"passed","profile_id":"china-cac-labeling-2025","provision_id":"cac-implicit-metadata","rule_id":"cac-implicit-modality","rule_severity":"warning","subject_scope":["urn:acef:sub:385e7835-fd9a-4345-8392-1a10602d7262"]},{"error_code":null,"evidence_refs":["urn:acef:rec:205d596e-c344-4459-95bc-9fe450584176"],"message":null,"outcome":"passed","profile_id":"china-cac-labeling-2025","provision_id":"cac-implicit-metadata","rule_id":"cac-implicit-metadata-container","rule_severity":"warning","subject_scope":["urn:acef:sub:385e7835-fd9a-4345-8392-1a10602d7262"]},{"error_code":null,"evidence_refs":["urn:acef:rec:205d596e-c344-4459-95bc-9fe450584176"],"message":null,"outcome":"passed","profile_id":"china-cac-labeling-2025","provision_id":"cac-watermark","rule_id":"cac-watermark-applied","rule_severity":"warning","subject_scope":["urn:acef:sub:385e7835-fd9a-4345-8392-1a10602d7262"]},{"error_code":null,"evidence_refs":["urn:acef:rec:205d596e-c344-4459-95bc-9fe450584176"],"message":null,"outcome":"passed","profile_id":"china-cac-labeling-2025","provision_id":"cac-watermark","rule_id":"cac-watermark-family","rule_severity":"info","subject_scope":["urn:acef:sub:385e7835-fd9a-4345-8392-1a10602d7262"]},{"error_code":null,"evidence_refs":[],"message":"Transparency marking records with watermarks should include a verification_method_ref pointing to the detection or verification mechanism","outcome":"failed","profile_id":"china-cac-labeling-2025","provision_id":"cac-watermark","rule_id":"cac-watermark-verification","rule_severity":"info","subject_scope":["urn:acef:sub:385e7835-fd9a-4345-8392-1a10602d7262"]},{"error_code":null,"evidence_refs":["urn:acef:rec:110befbf-14d2-4956-95e6-4072c9e45923"],"message":null,"outcome":"passed","profile_id":"china-cac-labeling-2025","provision_id":"cac-log-retention","rule_id":"cac-event-log-exists","rule_severity":"fail","subject_scope":["urn:acef:sub:385e7835-fd9a-4345-8392-1a10602d7262"]},{"error_code":null,"evidence_refs":["urn:acef:rec:279c9bb9-a636-484d-8d19-077a26d0f3e2","urn:acef:rec:110befbf-14d2-4956-95e6-4072c9e45923","urn:acef:rec:205d596e-c344-4459-95bc-9fe450584176"],"message":null,"outcome":"passed","profile_id":"china-cac-labeling-2025","provision_id":"cac-log-retention","rule_id":"cac-log-freshness","rule_severity":"fail","subject_scope":["urn:acef:sub:385e7835-fd9a-4345-8392-1a10602d7262"]},{"error_code":null,"evidence_refs":["urn:acef:rec:110befbf-14d2-4956-95e6-4072c9e45923"],"message":null,"outcome":"passed","profile_id":"china-cac-labeling-2025","provision_id":"cac-log-retention","rule_id":"cac-log-event-type","rule_severity":"fail","subject_scope":["urn:acef:sub:385e7835-fd9a-4345-8392-1a10602d7262"]},{"error_code":null,"evidence_refs":["urn:acef:rec:110befbf-14d2-4956-95e6-4072c9e45923"],"message":null,"outcome":"passed","profile_id":"china-cac-labeling-2025","provision_id":"cac-log-retention","rule_id":"cac-log-correlation-id","rule_severity":"warning","subject_scope":["urn:acef:sub:385e7835-fd9a-4345-8392-1a10602d7262"]},{"error_code":null,"evidence_refs":[],"message":null,"outcome":"passed","profile_id":"china-cac-labeling-2025","provision_id":"cac-log-retention","rule_id":"cac-log-label-exception","rule_severity":"info","subject_scope":["urn:acef:sub:385e7835-fd9a-4345-8392-1a10602d7262"]}],"structural_errors":[],"template_digests":{"china-cac-labeling-2025:1.0.0":"sha256:d38a5db7975ab0017111b5b94a6d5547090232090045a0a03f9b347b34d5c737"},"timestamp":"2026-06-17T18:04:18Z","versioning":{"assessment_version":"1.0.0","core_version":"1.0.0"}}
+{
+  "assessment_id": "urn:acef:asx:5c5700fa-dbe8-4fed-9609-095a8bf6432b",
+  "assessor": {
+    "name": "acef-validator",
+    "organization": "AI Commons",
+    "version": "0.1.0"
+  },
+  "evaluation_instant": "2026-03-15T12:00:00Z",
+  "evidence_bundle_ref": {
+    "content_hash": "sha256:9d83446690fe59b3051f01274a884aa1a96c5cc0834f30c777ac55cafa6ab2b3",
+    "package_id": "urn:acef:pkg:d112cdd3-914e-4c15-8920-e10ea7c5b6ce"
+  },
+  "integrity": null,
+  "profiles_evaluated": [
+    "china-cac-labeling-2025:1.1.0"
+  ],
+  "provision_summary": [
+    {
+      "evidence_refs": [
+        "urn:acef:rec:279c9bb9-a636-484d-8d19-077a26d0f3e2"
+      ],
+      "fail_count": 0,
+      "profile_id": "china-cac-labeling-2025",
+      "provision_id": "cac-explicit-label",
+      "provision_outcome": "satisfied",
+      "skipped_count": 0,
+      "subject_scope": [
+        "urn:acef:sub:385e7835-fd9a-4345-8392-1a10602d7262"
+      ],
+      "warning_count": 0
+    },
+    {
+      "evidence_refs": [
+        "urn:acef:rec:205d596e-c344-4459-95bc-9fe450584176"
+      ],
+      "fail_count": 0,
+      "profile_id": "china-cac-labeling-2025",
+      "provision_id": "cac-implicit-metadata",
+      "provision_outcome": "satisfied",
+      "skipped_count": 0,
+      "subject_scope": [
+        "urn:acef:sub:385e7835-fd9a-4345-8392-1a10602d7262"
+      ],
+      "warning_count": 0
+    },
+    {
+      "evidence_refs": [
+        "urn:acef:rec:110befbf-14d2-4956-95e6-4072c9e45923",
+        "urn:acef:rec:279c9bb9-a636-484d-8d19-077a26d0f3e2",
+        "urn:acef:rec:205d596e-c344-4459-95bc-9fe450584176"
+      ],
+      "fail_count": 0,
+      "profile_id": "china-cac-labeling-2025",
+      "provision_id": "cac-log-retention",
+      "provision_outcome": "satisfied",
+      "skipped_count": 0,
+      "subject_scope": [
+        "urn:acef:sub:385e7835-fd9a-4345-8392-1a10602d7262"
+      ],
+      "warning_count": 0
+    },
+    {
+      "evidence_refs": [
+        "urn:acef:rec:205d596e-c344-4459-95bc-9fe450584176"
+      ],
+      "fail_count": 0,
+      "profile_id": "china-cac-labeling-2025",
+      "provision_id": "cac-watermark",
+      "provision_outcome": "not-assessed",
+      "skipped_count": 0,
+      "subject_scope": [
+        "urn:acef:sub:385e7835-fd9a-4345-8392-1a10602d7262"
+      ],
+      "warning_count": 0
+    }
+  ],
+  "results": [
+    {
+      "error_code": null,
+      "evidence_refs": [
+        "urn:acef:rec:279c9bb9-a636-484d-8d19-077a26d0f3e2"
+      ],
+      "message": null,
+      "outcome": "passed",
+      "profile_id": "china-cac-labeling-2025",
+      "provision_id": "cac-explicit-label",
+      "rule_id": "cac-explicit-disclosure-exists",
+      "rule_severity": "fail",
+      "subject_scope": [
+        "urn:acef:sub:385e7835-fd9a-4345-8392-1a10602d7262"
+      ]
+    },
+    {
+      "error_code": null,
+      "evidence_refs": [
+        "urn:acef:rec:279c9bb9-a636-484d-8d19-077a26d0f3e2"
+      ],
+      "message": null,
+      "outcome": "passed",
+      "profile_id": "china-cac-labeling-2025",
+      "provision_id": "cac-explicit-label",
+      "rule_id": "cac-explicit-presentation",
+      "rule_severity": "fail",
+      "subject_scope": [
+        "urn:acef:sub:385e7835-fd9a-4345-8392-1a10602d7262"
+      ]
+    },
+    {
+      "error_code": null,
+      "evidence_refs": [
+        "urn:acef:rec:279c9bb9-a636-484d-8d19-077a26d0f3e2"
+      ],
+      "message": null,
+      "outcome": "passed",
+      "profile_id": "china-cac-labeling-2025",
+      "provision_id": "cac-explicit-label",
+      "rule_id": "cac-explicit-label-type",
+      "rule_severity": "warning",
+      "subject_scope": [
+        "urn:acef:sub:385e7835-fd9a-4345-8392-1a10602d7262"
+      ]
+    },
+    {
+      "error_code": null,
+      "evidence_refs": [
+        "urn:acef:rec:279c9bb9-a636-484d-8d19-077a26d0f3e2"
+      ],
+      "message": null,
+      "outcome": "passed",
+      "profile_id": "china-cac-labeling-2025",
+      "provision_id": "cac-explicit-label",
+      "rule_id": "cac-explicit-locale",
+      "rule_severity": "warning",
+      "subject_scope": [
+        "urn:acef:sub:385e7835-fd9a-4345-8392-1a10602d7262"
+      ]
+    },
+    {
+      "error_code": null,
+      "evidence_refs": [
+        "urn:acef:rec:205d596e-c344-4459-95bc-9fe450584176"
+      ],
+      "message": null,
+      "outcome": "passed",
+      "profile_id": "china-cac-labeling-2025",
+      "provision_id": "cac-implicit-metadata",
+      "rule_id": "cac-implicit-marking-exists",
+      "rule_severity": "fail",
+      "subject_scope": [
+        "urn:acef:sub:385e7835-fd9a-4345-8392-1a10602d7262"
+      ]
+    },
+    {
+      "error_code": null,
+      "evidence_refs": [
+        "urn:acef:rec:205d596e-c344-4459-95bc-9fe450584176"
+      ],
+      "message": null,
+      "outcome": "passed",
+      "profile_id": "china-cac-labeling-2025",
+      "provision_id": "cac-implicit-metadata",
+      "rule_id": "cac-implicit-marking-scheme-id",
+      "rule_severity": "fail",
+      "subject_scope": [
+        "urn:acef:sub:385e7835-fd9a-4345-8392-1a10602d7262"
+      ]
+    },
+    {
+      "error_code": null,
+      "evidence_refs": [
+        "urn:acef:rec:205d596e-c344-4459-95bc-9fe450584176"
+      ],
+      "message": null,
+      "outcome": "passed",
+      "profile_id": "china-cac-labeling-2025",
+      "provision_id": "cac-implicit-metadata",
+      "rule_id": "cac-implicit-jurisdiction",
+      "rule_severity": "fail",
+      "subject_scope": [
+        "urn:acef:sub:385e7835-fd9a-4345-8392-1a10602d7262"
+      ]
+    },
+    {
+      "error_code": null,
+      "evidence_refs": [
+        "urn:acef:rec:205d596e-c344-4459-95bc-9fe450584176"
+      ],
+      "message": null,
+      "outcome": "passed",
+      "profile_id": "china-cac-labeling-2025",
+      "provision_id": "cac-implicit-metadata",
+      "rule_id": "cac-implicit-modality",
+      "rule_severity": "warning",
+      "subject_scope": [
+        "urn:acef:sub:385e7835-fd9a-4345-8392-1a10602d7262"
+      ]
+    },
+    {
+      "error_code": null,
+      "evidence_refs": [
+        "urn:acef:rec:205d596e-c344-4459-95bc-9fe450584176"
+      ],
+      "message": null,
+      "outcome": "passed",
+      "profile_id": "china-cac-labeling-2025",
+      "provision_id": "cac-implicit-metadata",
+      "rule_id": "cac-implicit-metadata-container",
+      "rule_severity": "warning",
+      "subject_scope": [
+        "urn:acef:sub:385e7835-fd9a-4345-8392-1a10602d7262"
+      ]
+    },
+    {
+      "error_code": null,
+      "evidence_refs": [
+        "urn:acef:rec:205d596e-c344-4459-95bc-9fe450584176"
+      ],
+      "message": null,
+      "outcome": "passed",
+      "profile_id": "china-cac-labeling-2025",
+      "provision_id": "cac-watermark",
+      "rule_id": "cac-watermark-applied",
+      "rule_severity": "warning",
+      "subject_scope": [
+        "urn:acef:sub:385e7835-fd9a-4345-8392-1a10602d7262"
+      ]
+    },
+    {
+      "error_code": null,
+      "evidence_refs": [
+        "urn:acef:rec:205d596e-c344-4459-95bc-9fe450584176"
+      ],
+      "message": null,
+      "outcome": "passed",
+      "profile_id": "china-cac-labeling-2025",
+      "provision_id": "cac-watermark",
+      "rule_id": "cac-watermark-family",
+      "rule_severity": "info",
+      "subject_scope": [
+        "urn:acef:sub:385e7835-fd9a-4345-8392-1a10602d7262"
+      ]
+    },
+    {
+      "error_code": null,
+      "evidence_refs": [],
+      "message": "Transparency marking records with watermarks should include a verification_method_ref pointing to the detection or verification mechanism",
+      "outcome": "failed",
+      "profile_id": "china-cac-labeling-2025",
+      "provision_id": "cac-watermark",
+      "rule_id": "cac-watermark-verification",
+      "rule_severity": "info",
+      "subject_scope": [
+        "urn:acef:sub:385e7835-fd9a-4345-8392-1a10602d7262"
+      ]
+    },
+    {
+      "error_code": null,
+      "evidence_refs": [
+        "urn:acef:rec:110befbf-14d2-4956-95e6-4072c9e45923"
+      ],
+      "message": null,
+      "outcome": "passed",
+      "profile_id": "china-cac-labeling-2025",
+      "provision_id": "cac-log-retention",
+      "rule_id": "cac-event-log-exists",
+      "rule_severity": "fail",
+      "subject_scope": [
+        "urn:acef:sub:385e7835-fd9a-4345-8392-1a10602d7262"
+      ]
+    },
+    {
+      "error_code": null,
+      "evidence_refs": [
+        "urn:acef:rec:279c9bb9-a636-484d-8d19-077a26d0f3e2",
+        "urn:acef:rec:110befbf-14d2-4956-95e6-4072c9e45923",
+        "urn:acef:rec:205d596e-c344-4459-95bc-9fe450584176"
+      ],
+      "message": null,
+      "outcome": "passed",
+      "profile_id": "china-cac-labeling-2025",
+      "provision_id": "cac-log-retention",
+      "rule_id": "cac-log-freshness",
+      "rule_severity": "fail",
+      "subject_scope": [
+        "urn:acef:sub:385e7835-fd9a-4345-8392-1a10602d7262"
+      ]
+    },
+    {
+      "error_code": null,
+      "evidence_refs": [
+        "urn:acef:rec:110befbf-14d2-4956-95e6-4072c9e45923"
+      ],
+      "message": null,
+      "outcome": "passed",
+      "profile_id": "china-cac-labeling-2025",
+      "provision_id": "cac-log-retention",
+      "rule_id": "cac-log-event-type",
+      "rule_severity": "fail",
+      "subject_scope": [
+        "urn:acef:sub:385e7835-fd9a-4345-8392-1a10602d7262"
+      ]
+    },
+    {
+      "error_code": null,
+      "evidence_refs": [
+        "urn:acef:rec:110befbf-14d2-4956-95e6-4072c9e45923"
+      ],
+      "message": null,
+      "outcome": "passed",
+      "profile_id": "china-cac-labeling-2025",
+      "provision_id": "cac-log-retention",
+      "rule_id": "cac-log-correlation-id",
+      "rule_severity": "warning",
+      "subject_scope": [
+        "urn:acef:sub:385e7835-fd9a-4345-8392-1a10602d7262"
+      ]
+    },
+    {
+      "error_code": null,
+      "evidence_refs": [],
+      "message": null,
+      "outcome": "passed",
+      "profile_id": "china-cac-labeling-2025",
+      "provision_id": "cac-log-retention",
+      "rule_id": "cac-log-label-exception",
+      "rule_severity": "info",
+      "subject_scope": [
+        "urn:acef:sub:385e7835-fd9a-4345-8392-1a10602d7262"
+      ]
+    }
+  ],
+  "structural_errors": [],
+  "template_digests": {
+    "china-cac-labeling-2025:1.1.0": "sha256:b503d4fadfe0c4b48efb9b1c3fa3da38b40377f2fc25a3c1f80ee0671b669f45"
+  },
+  "timestamp": "2026-06-17T18:04:18Z",
+  "versioning": {
+    "assessment_version": "1.0.0",
+    "core_version": "1.0.0"
+  }
+}

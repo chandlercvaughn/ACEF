@@ -1,1 +1,12 @@
-{"class":"source-backed","disposition":"fail","emitted_codes":["ACEF-032","ACEF-084"],"vector":"fail-art73-compound-wrong-clock-084"}
+{
+  "class": "source-backed",
+  "disposition": "fail",
+  "emitted_codes": [
+    "ACEF-032",
+    "ACEF-084"
+  ],
+  "vector": "fail-art73-compound-wrong-clock-084",
+  "evidence_bundle_ref": {
+    "content_hash": "sha256:674a1cfb1cb192d0c3931defe6e4538e9586af664a31053ed0f6525bc5528e05"
+  }
+}

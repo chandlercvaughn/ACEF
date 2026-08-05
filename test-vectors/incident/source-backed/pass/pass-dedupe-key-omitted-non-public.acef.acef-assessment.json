@@ -1,1 +1,11 @@
-{"class":"source-backed","disposition":"pass","emitted_codes":["ACEF-032"],"vector":"pass-dedupe-key-omitted-non-public"}
+{
+  "class": "source-backed",
+  "disposition": "pass",
+  "emitted_codes": [
+    "ACEF-032"
+  ],
+  "vector": "pass-dedupe-key-omitted-non-public",
+  "evidence_bundle_ref": {
+    "content_hash": "sha256:8c4cd114766e130a8125e9886a48d35d3f6c9a714f3a9d56a83c95abe9d1a1f4"
+  }
+}

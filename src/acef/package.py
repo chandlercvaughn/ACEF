@@ -67,6 +67,7 @@ from acef.schemas.registry import (
     load_schema,
     parse_core_version_minor,
 )
+from acef.templates.registry import list_templates, load_template
 
 # Spec §3.1 timestamp format — ISO 8601 with explicit ``Z`` suffix and no
 # sub-second precision. Both the model default factories and the injected-
@@ -1541,7 +1542,7 @@ class Package:
         profile_id: str,
         *,
         provisions: list[str] | tuple[str, ...],
-        template_version: str = "1.0.0",
+        template_version: str | None = None,
     ) -> ProfileEntry:
         """Declare a regulation profile for this package.
 
@@ -1613,9 +1614,31 @@ class Package:
                     code="ACEF-002",
                 )
             normalized.append(provision)
+        # Default the declared version to the template's ACTUAL version rather
+        # than a hardcoded "1.0.0". Hardcoding made every bundle claim v1.0.0
+        # regardless of the template it was built against, which defeats the
+        # manifest's version pin: a consumer could not tell which semantics the
+        # bundle was evaluated under, and a template revision silently produced
+        # bundles asserting the old version. Unknown/third-party profile ids keep
+        # the historical default so callers outside the bundled registry are
+        # unaffected.
+        if template_version is None:
+            # Discriminate on REGISTRY MEMBERSHIP, not on the error code:
+            # load_template raises ACEF-030 for a missing file, for malformed
+            # JSON, AND (via the wrap) for model failures, so the code cannot
+            # tell "unknown third-party profile" from "known template that is
+            # broken". Only the former may fall back — otherwise registry
+            # corruption silently produces bundles pinning a version that never
+            # existed.
+            if profile_id in list_templates():
+                _resolved_template_version = load_template(profile_id).version
+            else:
+                _resolved_template_version = "1.0.0"
+        else:
+            _resolved_template_version = template_version
         entry = ProfileEntry(
             profile_id=profile_id,
-            template_version=template_version,
+            template_version=_resolved_template_version,
             applicable_provisions=normalized,
         )
         self._profiles.append(entry)

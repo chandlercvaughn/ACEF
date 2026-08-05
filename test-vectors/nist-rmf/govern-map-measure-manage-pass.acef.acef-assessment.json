@@ -1,1 +1,400 @@
-{"assessment_id":"urn:acef:asx:eac2c4ca-4201-4f76-88b6-4e298c394601","assessor":{"name":"acef-validator","organization":"AI Commons","version":"0.1.0"},"evaluation_instant":"2026-03-15T12:00:00Z","evidence_bundle_ref":{"content_hash":"sha256:bd1c43bc747da5c3c32f41881bbb5f688eb0043b554a05dd803a67e57e399b74","package_id":"urn:acef:pkg:7e476e4d-7c4b-4712-aff5-e4b4634ee92d"},"integrity":null,"profiles_evaluated":["nist-ai-rmf-1.0:1.0.0"],"provision_summary":[{"evidence_refs":["urn:acef:rec:20e0e9e7-216d-4479-83d3-fa2f3014081c"],"fail_count":0,"profile_id":"nist-ai-rmf-1.0","provision_id":"govern-1","provision_outcome":"satisfied","skipped_count":0,"subject_scope":["urn:acef:sub:2ecb679e-6e02-4388-afa7-638a0a19aa17"],"warning_count":0},{"evidence_refs":["urn:acef:rec:29892749-a401-4da3-9cf3-f1b96b2b1506"],"fail_count":0,"profile_id":"nist-ai-rmf-1.0","provision_id":"manage-1","provision_outcome":"satisfied","skipped_count":0,"subject_scope":["urn:acef:sub:2ecb679e-6e02-4388-afa7-638a0a19aa17"],"warning_count":0},{"evidence_refs":["urn:acef:rec:78f1747e-54d1-4b5f-a37e-eef61d94f6fe"],"fail_count":0,"profile_id":"nist-ai-rmf-1.0","provision_id":"manage-4","provision_outcome":"satisfied","skipped_count":0,"subject_scope":["urn:acef:sub:2ecb679e-6e02-4388-afa7-638a0a19aa17"],"warning_count":0},{"evidence_refs":["urn:acef:rec:ca36fae7-0ab6-4ec6-a324-ab67023dd13f"],"fail_count":0,"profile_id":"nist-ai-rmf-1.0","provision_id":"map-1","provision_outcome":"satisfied","skipped_count":0,"subject_scope":["urn:acef:sub:2ecb679e-6e02-4388-afa7-638a0a19aa17"],"warning_count":0},{"evidence_refs":["urn:acef:rec:6d0771f2-b167-4eb8-b2d4-68d952da9bee","urn:acef:rec:7fdded59-a74a-4ff7-b723-c598d269ecd7"],"fail_count":0,"profile_id":"nist-ai-rmf-1.0","provision_id":"map-2","provision_outcome":"satisfied","skipped_count":0,"subject_scope":["urn:acef:sub:2ecb679e-6e02-4388-afa7-638a0a19aa17"],"warning_count":0},{"evidence_refs":["urn:acef:rec:ef6230b7-0b9e-42a2-9a0c-444d2ba2a262"],"fail_count":0,"profile_id":"nist-ai-rmf-1.0","provision_id":"measure-1","provision_outcome":"satisfied","skipped_count":0,"subject_scope":["urn:acef:sub:2ecb679e-6e02-4388-afa7-638a0a19aa17"],"warning_count":0}],"results":[{"error_code":null,"evidence_refs":["urn:acef:rec:20e0e9e7-216d-4479-83d3-fa2f3014081c"],"message":null,"outcome":"passed","profile_id":"nist-ai-rmf-1.0","provision_id":"govern-1","rule_id":"govern1-governance-policy","rule_severity":"fail","subject_scope":["urn:acef:sub:2ecb679e-6e02-4388-afa7-638a0a19aa17"]},{"error_code":null,"evidence_refs":["urn:acef:rec:20e0e9e7-216d-4479-83d3-fa2f3014081c"],"message":null,"outcome":"passed","profile_id":"nist-ai-rmf-1.0","provision_id":"govern-1","rule_id":"govern1-policy-attachment","rule_severity":"warning","subject_scope":["urn:acef:sub:2ecb679e-6e02-4388-afa7-638a0a19aa17"]},{"error_code":null,"evidence_refs":["urn:acef:rec:20e0e9e7-216d-4479-83d3-fa2f3014081c"],"message":null,"outcome":"passed","profile_id":"nist-ai-rmf-1.0","provision_id":"govern-1","rule_id":"govern1-policy-entity-linked","rule_severity":"warning","subject_scope":["urn:acef:sub:2ecb679e-6e02-4388-afa7-638a0a19aa17"]},{"error_code":null,"evidence_refs":["urn:acef:rec:ca36fae7-0ab6-4ec6-a324-ab67023dd13f"],"message":null,"outcome":"passed","profile_id":"nist-ai-rmf-1.0","provision_id":"map-1","rule_id":"map1-risk-register","rule_severity":"fail","subject_scope":["urn:acef:sub:2ecb679e-6e02-4388-afa7-638a0a19aa17"]},{"error_code":null,"evidence_refs":["urn:acef:rec:ca36fae7-0ab6-4ec6-a324-ab67023dd13f"],"message":null,"outcome":"passed","profile_id":"nist-ai-rmf-1.0","provision_id":"map-1","rule_id":"map1-risk-entity-linked","rule_severity":"warning","subject_scope":["urn:acef:sub:2ecb679e-6e02-4388-afa7-638a0a19aa17"]},{"error_code":null,"evidence_refs":["urn:acef:rec:ca36fae7-0ab6-4ec6-a324-ab67023dd13f"],"message":null,"outcome":"passed","profile_id":"nist-ai-rmf-1.0","provision_id":"map-1","rule_id":"map1-risk-category","rule_severity":"warning","subject_scope":["urn:acef:sub:2ecb679e-6e02-4388-afa7-638a0a19aa17"]},{"error_code":null,"evidence_refs":["urn:acef:rec:6d0771f2-b167-4eb8-b2d4-68d952da9bee"],"message":null,"outcome":"passed","profile_id":"nist-ai-rmf-1.0","provision_id":"map-2","rule_id":"map2-dataset-card","rule_severity":"fail","subject_scope":["urn:acef:sub:2ecb679e-6e02-4388-afa7-638a0a19aa17"]},{"error_code":null,"evidence_refs":["urn:acef:rec:7fdded59-a74a-4ff7-b723-c598d269ecd7"],"message":null,"outcome":"passed","profile_id":"nist-ai-rmf-1.0","provision_id":"map-2","rule_id":"map2-data-provenance","rule_severity":"fail","subject_scope":["urn:acef:sub:2ecb679e-6e02-4388-afa7-638a0a19aa17"]},{"error_code":null,"evidence_refs":["urn:acef:rec:6d0771f2-b167-4eb8-b2d4-68d952da9bee"],"message":null,"outcome":"passed","profile_id":"nist-ai-rmf-1.0","provision_id":"map-2","rule_id":"map2-dataset-entity-linked","rule_severity":"warning","subject_scope":["urn:acef:sub:2ecb679e-6e02-4388-afa7-638a0a19aa17"]},{"error_code":null,"evidence_refs":["urn:acef:rec:ef6230b7-0b9e-42a2-9a0c-444d2ba2a262"],"message":null,"outcome":"passed","profile_id":"nist-ai-rmf-1.0","provision_id":"measure-1","rule_id":"measure1-evaluation-report","rule_severity":"fail","subject_scope":["urn:acef:sub:2ecb679e-6e02-4388-afa7-638a0a19aa17"]},{"error_code":null,"evidence_refs":["urn:acef:rec:ef6230b7-0b9e-42a2-9a0c-444d2ba2a262"],"message":null,"outcome":"passed","profile_id":"nist-ai-rmf-1.0","provision_id":"measure-1","rule_id":"measure1-metrics-present","rule_severity":"warning","subject_scope":["urn:acef:sub:2ecb679e-6e02-4388-afa7-638a0a19aa17"]},{"error_code":null,"evidence_refs":["urn:acef:rec:ef6230b7-0b9e-42a2-9a0c-444d2ba2a262"],"message":null,"outcome":"passed","profile_id":"nist-ai-rmf-1.0","provision_id":"measure-1","rule_id":"measure1-methodology-present","rule_severity":"warning","subject_scope":["urn:acef:sub:2ecb679e-6e02-4388-afa7-638a0a19aa17"]},{"error_code":null,"evidence_refs":["urn:acef:rec:29892749-a401-4da3-9cf3-f1b96b2b1506"],"message":null,"outcome":"passed","profile_id":"nist-ai-rmf-1.0","provision_id":"manage-1","rule_id":"manage1-risk-treatment","rule_severity":"fail","subject_scope":["urn:acef:sub:2ecb679e-6e02-4388-afa7-638a0a19aa17"]},{"error_code":null,"evidence_refs":["urn:acef:rec:29892749-a401-4da3-9cf3-f1b96b2b1506"],"message":null,"outcome":"passed","profile_id":"nist-ai-rmf-1.0","provision_id":"manage-1","rule_id":"manage1-treatment-type","rule_severity":"warning","subject_scope":["urn:acef:sub:2ecb679e-6e02-4388-afa7-638a0a19aa17"]},{"error_code":null,"evidence_refs":["urn:acef:rec:29892749-a401-4da3-9cf3-f1b96b2b1506"],"message":null,"outcome":"passed","profile_id":"nist-ai-rmf-1.0","provision_id":"manage-1","rule_id":"manage1-treatment-entity-linked","rule_severity":"warning","subject_scope":["urn:acef:sub:2ecb679e-6e02-4388-afa7-638a0a19aa17"]},{"error_code":null,"evidence_refs":["urn:acef:rec:78f1747e-54d1-4b5f-a37e-eef61d94f6fe"],"message":null,"outcome":"passed","profile_id":"nist-ai-rmf-1.0","provision_id":"manage-4","rule_id":"manage4-incident-report","rule_severity":"fail","subject_scope":["urn:acef:sub:2ecb679e-6e02-4388-afa7-638a0a19aa17"]},{"error_code":null,"evidence_refs":["urn:acef:rec:78f1747e-54d1-4b5f-a37e-eef61d94f6fe"],"message":null,"outcome":"passed","profile_id":"nist-ai-rmf-1.0","provision_id":"manage-4","rule_id":"manage4-incident-severity","rule_severity":"warning","subject_scope":["urn:acef:sub:2ecb679e-6e02-4388-afa7-638a0a19aa17"]},{"error_code":null,"evidence_refs":["urn:acef:rec:78f1747e-54d1-4b5f-a37e-eef61d94f6fe"],"message":null,"outcome":"passed","profile_id":"nist-ai-rmf-1.0","provision_id":"manage-4","rule_id":"manage4-incident-entity-linked","rule_severity":"warning","subject_scope":["urn:acef:sub:2ecb679e-6e02-4388-afa7-638a0a19aa17"]},{"error_code":null,"evidence_refs":["urn:acef:rec:78f1747e-54d1-4b5f-a37e-eef61d94f6fe"],"message":null,"outcome":"passed","profile_id":"nist-ai-rmf-1.0","provision_id":"manage-4","rule_id":"manage4-corrective-actions","rule_severity":"warning","subject_scope":["urn:acef:sub:2ecb679e-6e02-4388-afa7-638a0a19aa17"]}],"structural_errors":[],"template_digests":{"nist-ai-rmf-1.0:1.0.0":"sha256:e70c1e2867f473273879a545a3d868570bf48ea92f60e3139ff93a740cb93f12"},"timestamp":"2026-06-17T18:04:18Z","versioning":{"assessment_version":"1.0.0","core_version":"1.0.0"}}
+{
+  "assessment_id": "urn:acef:asx:eac2c4ca-4201-4f76-88b6-4e298c394601",
+  "assessor": {
+    "name": "acef-validator",
+    "organization": "AI Commons",
+    "version": "0.1.0"
+  },
+  "evaluation_instant": "2026-03-15T12:00:00Z",
+  "evidence_bundle_ref": {
+    "content_hash": "sha256:1fa064e24e5f132378b2f7e3b858e37b8f9d4e4d5088a30c5721d4cc5261887d",
+    "package_id": "urn:acef:pkg:7e476e4d-7c4b-4712-aff5-e4b4634ee92d"
+  },
+  "integrity": null,
+  "profiles_evaluated": [
+    "nist-ai-rmf-1.0:1.1.0"
+  ],
+  "provision_summary": [
+    {
+      "evidence_refs": [
+        "urn:acef:rec:20e0e9e7-216d-4479-83d3-fa2f3014081c"
+      ],
+      "fail_count": 0,
+      "profile_id": "nist-ai-rmf-1.0",
+      "provision_id": "govern-1",
+      "provision_outcome": "satisfied",
+      "skipped_count": 0,
+      "subject_scope": [
+        "urn:acef:sub:2ecb679e-6e02-4388-afa7-638a0a19aa17"
+      ],
+      "warning_count": 0
+    },
+    {
+      "evidence_refs": [
+        "urn:acef:rec:29892749-a401-4da3-9cf3-f1b96b2b1506"
+      ],
+      "fail_count": 0,
+      "profile_id": "nist-ai-rmf-1.0",
+      "provision_id": "manage-1",
+      "provision_outcome": "satisfied",
+      "skipped_count": 0,
+      "subject_scope": [
+        "urn:acef:sub:2ecb679e-6e02-4388-afa7-638a0a19aa17"
+      ],
+      "warning_count": 0
+    },
+    {
+      "evidence_refs": [
+        "urn:acef:rec:78f1747e-54d1-4b5f-a37e-eef61d94f6fe"
+      ],
+      "fail_count": 0,
+      "profile_id": "nist-ai-rmf-1.0",
+      "provision_id": "manage-4",
+      "provision_outcome": "satisfied",
+      "skipped_count": 0,
+      "subject_scope": [
+        "urn:acef:sub:2ecb679e-6e02-4388-afa7-638a0a19aa17"
+      ],
+      "warning_count": 0
+    },
+    {
+      "evidence_refs": [
+        "urn:acef:rec:ca36fae7-0ab6-4ec6-a324-ab67023dd13f"
+      ],
+      "fail_count": 0,
+      "profile_id": "nist-ai-rmf-1.0",
+      "provision_id": "map-1",
+      "provision_outcome": "satisfied",
+      "skipped_count": 0,
+      "subject_scope": [
+        "urn:acef:sub:2ecb679e-6e02-4388-afa7-638a0a19aa17"
+      ],
+      "warning_count": 0
+    },
+    {
+      "evidence_refs": [
+        "urn:acef:rec:6d0771f2-b167-4eb8-b2d4-68d952da9bee",
+        "urn:acef:rec:7fdded59-a74a-4ff7-b723-c598d269ecd7"
+      ],
+      "fail_count": 0,
+      "profile_id": "nist-ai-rmf-1.0",
+      "provision_id": "map-2",
+      "provision_outcome": "satisfied",
+      "skipped_count": 0,
+      "subject_scope": [
+        "urn:acef:sub:2ecb679e-6e02-4388-afa7-638a0a19aa17"
+      ],
+      "warning_count": 0
+    },
+    {
+      "evidence_refs": [
+        "urn:acef:rec:ef6230b7-0b9e-42a2-9a0c-444d2ba2a262"
+      ],
+      "fail_count": 0,
+      "profile_id": "nist-ai-rmf-1.0",
+      "provision_id": "measure-1",
+      "provision_outcome": "satisfied",
+      "skipped_count": 0,
+      "subject_scope": [
+        "urn:acef:sub:2ecb679e-6e02-4388-afa7-638a0a19aa17"
+      ],
+      "warning_count": 0
+    }
+  ],
+  "results": [
+    {
+      "error_code": null,
+      "evidence_refs": [
+        "urn:acef:rec:20e0e9e7-216d-4479-83d3-fa2f3014081c"
+      ],
+      "message": null,
+      "outcome": "passed",
+      "profile_id": "nist-ai-rmf-1.0",
+      "provision_id": "govern-1",
+      "rule_id": "govern1-governance-policy",
+      "rule_severity": "fail",
+      "subject_scope": [
+        "urn:acef:sub:2ecb679e-6e02-4388-afa7-638a0a19aa17"
+      ]
+    },
+    {
+      "error_code": null,
+      "evidence_refs": [
+        "urn:acef:rec:20e0e9e7-216d-4479-83d3-fa2f3014081c"
+      ],
+      "message": null,
+      "outcome": "passed",
+      "profile_id": "nist-ai-rmf-1.0",
+      "provision_id": "govern-1",
+      "rule_id": "govern1-policy-attachment",
+      "rule_severity": "warning",
+      "subject_scope": [
+        "urn:acef:sub:2ecb679e-6e02-4388-afa7-638a0a19aa17"
+      ]
+    },
+    {
+      "error_code": null,
+      "evidence_refs": [
+        "urn:acef:rec:20e0e9e7-216d-4479-83d3-fa2f3014081c"
+      ],
+      "message": null,
+      "outcome": "passed",
+      "profile_id": "nist-ai-rmf-1.0",
+      "provision_id": "govern-1",
+      "rule_id": "govern1-policy-entity-linked",
+      "rule_severity": "warning",
+      "subject_scope": [
+        "urn:acef:sub:2ecb679e-6e02-4388-afa7-638a0a19aa17"
+      ]
+    },
+    {
+      "error_code": null,
+      "evidence_refs": [
+        "urn:acef:rec:ca36fae7-0ab6-4ec6-a324-ab67023dd13f"
+      ],
+      "message": null,
+      "outcome": "passed",
+      "profile_id": "nist-ai-rmf-1.0",
+      "provision_id": "map-1",
+      "rule_id": "map1-risk-register",
+      "rule_severity": "fail",
+      "subject_scope": [
+        "urn:acef:sub:2ecb679e-6e02-4388-afa7-638a0a19aa17"
+      ]
+    },
+    {
+      "error_code": null,
+      "evidence_refs": [
+        "urn:acef:rec:ca36fae7-0ab6-4ec6-a324-ab67023dd13f"
+      ],
+      "message": null,
+      "outcome": "passed",
+      "profile_id": "nist-ai-rmf-1.0",
+      "provision_id": "map-1",
+      "rule_id": "map1-risk-entity-linked",
+      "rule_severity": "warning",
+      "subject_scope": [
+        "urn:acef:sub:2ecb679e-6e02-4388-afa7-638a0a19aa17"
+      ]
+    },
+    {
+      "error_code": null,
+      "evidence_refs": [
+        "urn:acef:rec:ca36fae7-0ab6-4ec6-a324-ab67023dd13f"
+      ],
+      "message": null,
+      "outcome": "passed",
+      "profile_id": "nist-ai-rmf-1.0",
+      "provision_id": "map-1",
+      "rule_id": "map1-risk-category",
+      "rule_severity": "warning",
+      "subject_scope": [
+        "urn:acef:sub:2ecb679e-6e02-4388-afa7-638a0a19aa17"
+      ]
+    },
+    {
+      "error_code": null,
+      "evidence_refs": [
+        "urn:acef:rec:6d0771f2-b167-4eb8-b2d4-68d952da9bee"
+      ],
+      "message": null,
+      "outcome": "passed",
+      "profile_id": "nist-ai-rmf-1.0",
+      "provision_id": "map-2",
+      "rule_id": "map2-dataset-card",
+      "rule_severity": "fail",
+      "subject_scope": [
+        "urn:acef:sub:2ecb679e-6e02-4388-afa7-638a0a19aa17"
+      ]
+    },
+    {
+      "error_code": null,
+      "evidence_refs": [
+        "urn:acef:rec:7fdded59-a74a-4ff7-b723-c598d269ecd7"
+      ],
+      "message": null,
+      "outcome": "passed",
+      "profile_id": "nist-ai-rmf-1.0",
+      "provision_id": "map-2",
+      "rule_id": "map2-data-provenance",
+      "rule_severity": "fail",
+      "subject_scope": [
+        "urn:acef:sub:2ecb679e-6e02-4388-afa7-638a0a19aa17"
+      ]
+    },
+    {
+      "error_code": null,
+      "evidence_refs": [
+        "urn:acef:rec:6d0771f2-b167-4eb8-b2d4-68d952da9bee"
+      ],
+      "message": null,
+      "outcome": "passed",
+      "profile_id": "nist-ai-rmf-1.0",
+      "provision_id": "map-2",
+      "rule_id": "map2-dataset-entity-linked",
+      "rule_severity": "warning",
+      "subject_scope": [
+        "urn:acef:sub:2ecb679e-6e02-4388-afa7-638a0a19aa17"
+      ]
+    },
+    {
+      "error_code": null,
+      "evidence_refs": [
+        "urn:acef:rec:ef6230b7-0b9e-42a2-9a0c-444d2ba2a262"
+      ],
+      "message": null,
+      "outcome": "passed",
+      "profile_id": "nist-ai-rmf-1.0",
+      "provision_id": "measure-1",
+      "rule_id": "measure1-evaluation-report",
+      "rule_severity": "fail",
+      "subject_scope": [
+        "urn:acef:sub:2ecb679e-6e02-4388-afa7-638a0a19aa17"
+      ]
+    },
+    {
+      "error_code": null,
+      "evidence_refs": [
+        "urn:acef:rec:ef6230b7-0b9e-42a2-9a0c-444d2ba2a262"
+      ],
+      "message": null,
+      "outcome": "passed",
+      "profile_id": "nist-ai-rmf-1.0",
+      "provision_id": "measure-1",
+      "rule_id": "measure1-metrics-present",
+      "rule_severity": "warning",
+      "subject_scope": [
+        "urn:acef:sub:2ecb679e-6e02-4388-afa7-638a0a19aa17"
+      ]
+    },
+    {
+      "error_code": null,
+      "evidence_refs": [
+        "urn:acef:rec:ef6230b7-0b9e-42a2-9a0c-444d2ba2a262"
+      ],
+      "message": null,
+      "outcome": "passed",
+      "profile_id": "nist-ai-rmf-1.0",
+      "provision_id": "measure-1",
+      "rule_id": "measure1-methodology-present",
+      "rule_severity": "warning",
+      "subject_scope": [
+        "urn:acef:sub:2ecb679e-6e02-4388-afa7-638a0a19aa17"
+      ]
+    },
+    {
+      "error_code": null,
+      "evidence_refs": [
+        "urn:acef:rec:29892749-a401-4da3-9cf3-f1b96b2b1506"
+      ],
+      "message": null,
+      "outcome": "passed",
+      "profile_id": "nist-ai-rmf-1.0",
+      "provision_id": "manage-1",
+      "rule_id": "manage1-risk-treatment",
+      "rule_severity": "fail",
+      "subject_scope": [
+        "urn:acef:sub:2ecb679e-6e02-4388-afa7-638a0a19aa17"
+      ]
+    },
+    {
+      "error_code": null,
+      "evidence_refs": [
+        "urn:acef:rec:29892749-a401-4da3-9cf3-f1b96b2b1506"
+      ],
+      "message": null,
+      "outcome": "passed",
+      "profile_id": "nist-ai-rmf-1.0",
+      "provision_id": "manage-1",
+      "rule_id": "manage1-treatment-type",
+      "rule_severity": "warning",
+      "subject_scope": [
+        "urn:acef:sub:2ecb679e-6e02-4388-afa7-638a0a19aa17"
+      ]
+    },
+    {
+      "error_code": null,
+      "evidence_refs": [
+        "urn:acef:rec:29892749-a401-4da3-9cf3-f1b96b2b1506"
+      ],
+      "message": null,
+      "outcome": "passed",
+      "profile_id": "nist-ai-rmf-1.0",
+      "provision_id": "manage-1",
+      "rule_id": "manage1-treatment-entity-linked",
+      "rule_severity": "warning",
+      "subject_scope": [
+        "urn:acef:sub:2ecb679e-6e02-4388-afa7-638a0a19aa17"
+      ]
+    },
+    {
+      "error_code": null,
+      "evidence_refs": [
+        "urn:acef:rec:78f1747e-54d1-4b5f-a37e-eef61d94f6fe"
+      ],
+      "message": null,
+      "outcome": "passed",
+      "profile_id": "nist-ai-rmf-1.0",
+      "provision_id": "manage-4",
+      "rule_id": "manage4-incident-report",
+      "rule_severity": "fail",
+      "subject_scope": [
+        "urn:acef:sub:2ecb679e-6e02-4388-afa7-638a0a19aa17"
+      ]
+    },
+    {
+      "error_code": null,
+      "evidence_refs": [
+        "urn:acef:rec:78f1747e-54d1-4b5f-a37e-eef61d94f6fe"
+      ],
+      "message": null,
+      "outcome": "passed",
+      "profile_id": "nist-ai-rmf-1.0",
+      "provision_id": "manage-4",
+      "rule_id": "manage4-incident-severity",
+      "rule_severity": "warning",
+      "subject_scope": [
+        "urn:acef:sub:2ecb679e-6e02-4388-afa7-638a0a19aa17"
+      ]
+    },
+    {
+      "error_code": null,
+      "evidence_refs": [
+        "urn:acef:rec:78f1747e-54d1-4b5f-a37e-eef61d94f6fe"
+      ],
+      "message": null,
+      "outcome": "passed",
+      "profile_id": "nist-ai-rmf-1.0",
+      "provision_id": "manage-4",
+      "rule_id": "manage4-incident-entity-linked",
+      "rule_severity": "warning",
+      "subject_scope": [
+        "urn:acef:sub:2ecb679e-6e02-4388-afa7-638a0a19aa17"
+      ]
+    },
+    {
+      "error_code": null,
+      "evidence_refs": [
+        "urn:acef:rec:78f1747e-54d1-4b5f-a37e-eef61d94f6fe"
+      ],
+      "message": null,
+      "outcome": "passed",
+      "profile_id": "nist-ai-rmf-1.0",
+      "provision_id": "manage-4",
+      "rule_id": "manage4-corrective-actions",
+      "rule_severity": "warning",
+      "subject_scope": [
+        "urn:acef:sub:2ecb679e-6e02-4388-afa7-638a0a19aa17"
+      ]
+    }
+  ],
+  "structural_errors": [],
+  "template_digests": {
+    "nist-ai-rmf-1.0:1.1.0": "sha256:c05a66f1eef21ac4c2f9d627de858831997048581908f291c6f2b3e40b9bcade"
+  },
+  "timestamp": "2026-06-17T18:04:18Z",
+  "versioning": {
+    "assessment_version": "1.0.0",
+    "core_version": "1.0.0"
+  }
+}

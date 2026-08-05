@@ -1,1 +1,12 @@
-{"class":"offline-deterministic","disposition":"fail","emitted_codes":["ACEF-004","ACEF-083"],"vector":"fail-public-id-offline-083"}
+{
+  "class": "offline-deterministic",
+  "disposition": "fail",
+  "emitted_codes": [
+    "ACEF-004",
+    "ACEF-083"
+  ],
+  "vector": "fail-public-id-offline-083",
+  "evidence_bundle_ref": {
+    "content_hash": "sha256:d6f8d9017b3c076500cf63e41a4a9104f1ae1002f44ab5dfc6a2d0a9f6b398c9"
+  }
+}

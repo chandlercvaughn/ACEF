@@ -1,1 +1,11 @@
-{"class":"source-backed","disposition":"pass","emitted_codes":["ACEF-032"],"vector":"pass-dedupe-key-hmac-variant"}
+{
+  "class": "source-backed",
+  "disposition": "pass",
+  "emitted_codes": [
+    "ACEF-032"
+  ],
+  "vector": "pass-dedupe-key-hmac-variant",
+  "evidence_bundle_ref": {
+    "content_hash": "sha256:9980cc180e1662fbaafab7f8e43baf77790357eab06bf7afb9ec498581be48c7"
+  }
+}

@@ -1,1 +1,127 @@
-{"assessment_id":"urn:acef:asx:781966ae-63b2-45cf-9953-f91b83c7c593","assessor":{"name":"acef-validator","organization":"AI Commons","version":"0.1.0"},"evaluation_instant":"2026-03-15T12:00:00Z","evidence_bundle_ref":{"content_hash":"sha256:d42dd209474aeb5f3b196b3b0c5444d5985481ac004accee035026fddb1a2fc5","package_id":"urn:acef:pkg:04e52f05-c389-47dd-aae9-112846133238"},"integrity":null,"profiles_evaluated":["eu-ai-act-2024:1.0.0"],"provision_summary":[{"evidence_refs":[],"fail_count":0,"profile_id":"eu-ai-act-2024","provision_id":"article-9","provision_outcome":"skipped","skipped_count":6,"subject_scope":["urn:acef:sub:74d29331-2aa4-4321-928d-067877b72933"],"warning_count":0}],"results":[{"error_code":null,"evidence_refs":[],"message":"Provision not yet effective (effective_date=2026-08-02, evaluation_instant=2026-03-15T12:00:00Z)","outcome":"skipped","profile_id":"eu-ai-act-2024","provision_id":"article-9","rule_id":"art9-risk-register","rule_severity":"fail","subject_scope":["urn:acef:sub:74d29331-2aa4-4321-928d-067877b72933"]},{"error_code":null,"evidence_refs":[],"message":"Provision not yet effective (effective_date=2026-08-02, evaluation_instant=2026-03-15T12:00:00Z)","outcome":"skipped","profile_id":"eu-ai-act-2024","provision_id":"article-9","rule_id":"art9-risk-treatment","rule_severity":"fail","subject_scope":["urn:acef:sub:74d29331-2aa4-4321-928d-067877b72933"]},{"error_code":null,"evidence_refs":[],"message":"Provision not yet effective (effective_date=2026-08-02, evaluation_instant=2026-03-15T12:00:00Z)","outcome":"skipped","profile_id":"eu-ai-act-2024","provision_id":"article-9","rule_id":"art9-management-review","rule_severity":"fail","subject_scope":["urn:acef:sub:74d29331-2aa4-4321-928d-067877b72933"]},{"error_code":null,"evidence_refs":[],"message":"Provision not yet effective (effective_date=2026-08-02, evaluation_instant=2026-03-15T12:00:00Z)","outcome":"skipped","profile_id":"eu-ai-act-2024","provision_id":"article-9","rule_id":"art9-freshness","rule_severity":"warning","subject_scope":["urn:acef:sub:74d29331-2aa4-4321-928d-067877b72933"]},{"error_code":null,"evidence_refs":[],"message":"Provision not yet effective (effective_date=2026-08-02, evaluation_instant=2026-03-15T12:00:00Z)","outcome":"skipped","profile_id":"eu-ai-act-2024","provision_id":"article-9","rule_id":"art9-post-market-monitoring","rule_severity":"warning","subject_scope":["urn:acef:sub:74d29331-2aa4-4321-928d-067877b72933"]},{"error_code":null,"evidence_refs":[],"message":"Provision not yet effective (effective_date=2026-08-02, evaluation_instant=2026-03-15T12:00:00Z)","outcome":"skipped","profile_id":"eu-ai-act-2024","provision_id":"article-9","rule_id":"art9-entity-linked","rule_severity":"fail","subject_scope":["urn:acef:sub:74d29331-2aa4-4321-928d-067877b72933"]}],"structural_errors":[{"category":"profile","code":"ACEF-032","message":"Provision article-9 not yet effective (effective: 2026-08-02, evaluation: 2026-03-15T12:00:00Z)","severity":"info"}],"template_digests":{"eu-ai-act-2024:1.0.0":"sha256:877eba550af93aff6da1d9dba5e8981c5801f3fe4c31d1e673857c52686053fb"},"timestamp":"2026-06-17T18:04:18Z","versioning":{"assessment_version":"1.0.0","core_version":"1.0.0"}}
+{
+  "assessment_id": "urn:acef:asx:781966ae-63b2-45cf-9953-f91b83c7c593",
+  "assessor": {
+    "name": "acef-validator",
+    "organization": "AI Commons",
+    "version": "0.1.0"
+  },
+  "evaluation_instant": "2026-03-15T12:00:00Z",
+  "evidence_bundle_ref": {
+    "content_hash": "sha256:f006fd4ea700e00797d7d34484c5f1f838510b8219130af17ffa2006f42a944d",
+    "package_id": "urn:acef:pkg:04e52f05-c389-47dd-aae9-112846133238"
+  },
+  "integrity": null,
+  "profiles_evaluated": [
+    "eu-ai-act-2024:1.1.0"
+  ],
+  "provision_summary": [
+    {
+      "evidence_refs": [],
+      "fail_count": 0,
+      "profile_id": "eu-ai-act-2024",
+      "provision_id": "article-9",
+      "provision_outcome": "skipped",
+      "skipped_count": 6,
+      "subject_scope": [
+        "urn:acef:sub:74d29331-2aa4-4321-928d-067877b72933"
+      ],
+      "warning_count": 0
+    }
+  ],
+  "results": [
+    {
+      "error_code": null,
+      "evidence_refs": [],
+      "message": "Provision not yet effective (effective_date=2026-08-02, evaluation_instant=2026-03-15T12:00:00Z)",
+      "outcome": "skipped",
+      "profile_id": "eu-ai-act-2024",
+      "provision_id": "article-9",
+      "rule_id": "art9-risk-register",
+      "rule_severity": "fail",
+      "subject_scope": [
+        "urn:acef:sub:74d29331-2aa4-4321-928d-067877b72933"
+      ]
+    },
+    {
+      "error_code": null,
+      "evidence_refs": [],
+      "message": "Provision not yet effective (effective_date=2026-08-02, evaluation_instant=2026-03-15T12:00:00Z)",
+      "outcome": "skipped",
+      "profile_id": "eu-ai-act-2024",
+      "provision_id": "article-9",
+      "rule_id": "art9-risk-treatment",
+      "rule_severity": "fail",
+      "subject_scope": [
+        "urn:acef:sub:74d29331-2aa4-4321-928d-067877b72933"
+      ]
+    },
+    {
+      "error_code": null,
+      "evidence_refs": [],
+      "message": "Provision not yet effective (effective_date=2026-08-02, evaluation_instant=2026-03-15T12:00:00Z)",
+      "outcome": "skipped",
+      "profile_id": "eu-ai-act-2024",
+      "provision_id": "article-9",
+      "rule_id": "art9-management-review",
+      "rule_severity": "fail",
+      "subject_scope": [
+        "urn:acef:sub:74d29331-2aa4-4321-928d-067877b72933"
+      ]
+    },
+    {
+      "error_code": null,
+      "evidence_refs": [],
+      "message": "Provision not yet effective (effective_date=2026-08-02, evaluation_instant=2026-03-15T12:00:00Z)",
+      "outcome": "skipped",
+      "profile_id": "eu-ai-act-2024",
+      "provision_id": "article-9",
+      "rule_id": "art9-freshness",
+      "rule_severity": "warning",
+      "subject_scope": [
+        "urn:acef:sub:74d29331-2aa4-4321-928d-067877b72933"
+      ]
+    },
+    {
+      "error_code": null,
+      "evidence_refs": [],
+      "message": "Provision not yet effective (effective_date=2026-08-02, evaluation_instant=2026-03-15T12:00:00Z)",
+      "outcome": "skipped",
+      "profile_id": "eu-ai-act-2024",
+      "provision_id": "article-9",
+      "rule_id": "art9-post-market-monitoring",
+      "rule_severity": "warning",
+      "subject_scope": [
+        "urn:acef:sub:74d29331-2aa4-4321-928d-067877b72933"
+      ]
+    },
+    {
+      "error_code": null,
+      "evidence_refs": [],
+      "message": "Provision not yet effective (effective_date=2026-08-02, evaluation_instant=2026-03-15T12:00:00Z)",
+      "outcome": "skipped",
+      "profile_id": "eu-ai-act-2024",
+      "provision_id": "article-9",
+      "rule_id": "art9-entity-linked",
+      "rule_severity": "fail",
+      "subject_scope": [
+        "urn:acef:sub:74d29331-2aa4-4321-928d-067877b72933"
+      ]
+    }
+  ],
+  "structural_errors": [
+    {
+      "category": "profile",
+      "code": "ACEF-032",
+      "message": "Provision article-9 not yet effective (effective: 2026-08-02, evaluation: 2026-03-15T12:00:00Z)",
+      "severity": "info"
+    }
+  ],
+  "template_digests": {
+    "eu-ai-act-2024:1.1.0": "sha256:ffc9bb757d8148596c5eff491f7df037bac200076099506ed02401c7e85a6d2c"
+  },
+  "timestamp": "2026-06-17T18:04:18Z",
+  "versioning": {
+    "assessment_version": "1.0.0",
+    "core_version": "1.0.0"
+  }
+}

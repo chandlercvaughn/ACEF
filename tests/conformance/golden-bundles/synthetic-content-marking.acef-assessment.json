@@ -1,1 +1,101 @@
-{"assessment_id":"urn:acef:asx:f768925c-0647-4e56-a229-d9ac93d273b5","assessor":{"name":"acef-validator","organization":"AI Commons","version":"0.1.0"},"evaluation_instant":"2026-03-15T12:00:00Z","evidence_bundle_ref":{"content_hash":"sha256:091605f04f6d4b1f249ff1e6d3c33155cbdc5970a8eb6499b3937d2a679c2829","package_id":"urn:acef:pkg:fc12b81e-b323-4219-8f6e-34bb2de3300c"},"integrity":null,"profiles_evaluated":["eu-ai-act-2024:1.0.0"],"provision_summary":[{"evidence_refs":[],"fail_count":0,"profile_id":"eu-ai-act-2024","provision_id":"article-50.2","provision_outcome":"skipped","skipped_count":4,"subject_scope":["urn:acef:sub:246763ee-a955-4a49-8e77-64056e4202c0"],"warning_count":0}],"results":[{"error_code":null,"evidence_refs":[],"message":"Provision not yet effective (effective_date=2026-08-02, evaluation_instant=2026-03-15T12:00:00Z)","outcome":"skipped","profile_id":"eu-ai-act-2024","provision_id":"article-50.2","rule_id":"art50-marking-exists","rule_severity":"fail","subject_scope":["urn:acef:sub:246763ee-a955-4a49-8e77-64056e4202c0"]},{"error_code":null,"evidence_refs":[],"message":"Provision not yet effective (effective_date=2026-08-02, evaluation_instant=2026-03-15T12:00:00Z)","outcome":"skipped","profile_id":"eu-ai-act-2024","provision_id":"article-50.2","rule_id":"art50-marking-scheme-id","rule_severity":"fail","subject_scope":["urn:acef:sub:246763ee-a955-4a49-8e77-64056e4202c0"]},{"error_code":null,"evidence_refs":[],"message":"Provision not yet effective (effective_date=2026-08-02, evaluation_instant=2026-03-15T12:00:00Z)","outcome":"skipped","profile_id":"eu-ai-act-2024","provision_id":"article-50.2","rule_id":"art50-modality","rule_severity":"fail","subject_scope":["urn:acef:sub:246763ee-a955-4a49-8e77-64056e4202c0"]},{"error_code":null,"evidence_refs":[],"message":"Provision not yet effective (effective_date=2026-08-02, evaluation_instant=2026-03-15T12:00:00Z)","outcome":"skipped","profile_id":"eu-ai-act-2024","provision_id":"article-50.2","rule_id":"art50-marking-technique","rule_severity":"warning","subject_scope":["urn:acef:sub:246763ee-a955-4a49-8e77-64056e4202c0"]}],"structural_errors":[{"category":"profile","code":"ACEF-032","message":"Provision article-50.2 not yet effective (effective: 2026-08-02, evaluation: 2026-03-15T12:00:00Z)","severity":"info"}],"template_digests":{"eu-ai-act-2024:1.0.0":"sha256:877eba550af93aff6da1d9dba5e8981c5801f3fe4c31d1e673857c52686053fb"},"timestamp":"2026-06-17T18:04:18Z","versioning":{"assessment_version":"1.0.0","core_version":"1.0.0"}}
+{
+  "assessment_id": "urn:acef:asx:f768925c-0647-4e56-a229-d9ac93d273b5",
+  "assessor": {
+    "name": "acef-validator",
+    "organization": "AI Commons",
+    "version": "0.1.0"
+  },
+  "evaluation_instant": "2026-03-15T12:00:00Z",
+  "evidence_bundle_ref": {
+    "content_hash": "sha256:71f8539111d0c66a16561514f6e985423450a439d6ee0baa47471ef7d58e66ec",
+    "package_id": "urn:acef:pkg:fc12b81e-b323-4219-8f6e-34bb2de3300c"
+  },
+  "integrity": null,
+  "profiles_evaluated": [
+    "eu-ai-act-2024:1.1.0"
+  ],
+  "provision_summary": [
+    {
+      "evidence_refs": [],
+      "fail_count": 0,
+      "profile_id": "eu-ai-act-2024",
+      "provision_id": "article-50.2",
+      "provision_outcome": "skipped",
+      "skipped_count": 4,
+      "subject_scope": [
+        "urn:acef:sub:246763ee-a955-4a49-8e77-64056e4202c0"
+      ],
+      "warning_count": 0
+    }
+  ],
+  "results": [
+    {
+      "error_code": null,
+      "evidence_refs": [],
+      "message": "Provision not yet effective (effective_date=2026-08-02, evaluation_instant=2026-03-15T12:00:00Z)",
+      "outcome": "skipped",
+      "profile_id": "eu-ai-act-2024",
+      "provision_id": "article-50.2",
+      "rule_id": "art50-marking-exists",
+      "rule_severity": "fail",
+      "subject_scope": [
+        "urn:acef:sub:246763ee-a955-4a49-8e77-64056e4202c0"
+      ]
+    },
+    {
+      "error_code": null,
+      "evidence_refs": [],
+      "message": "Provision not yet effective (effective_date=2026-08-02, evaluation_instant=2026-03-15T12:00:00Z)",
+      "outcome": "skipped",
+      "profile_id": "eu-ai-act-2024",
+      "provision_id": "article-50.2",
+      "rule_id": "art50-marking-scheme-id",
+      "rule_severity": "fail",
+      "subject_scope": [
+        "urn:acef:sub:246763ee-a955-4a49-8e77-64056e4202c0"
+      ]
+    },
+    {
+      "error_code": null,
+      "evidence_refs": [],
+      "message": "Provision not yet effective (effective_date=2026-08-02, evaluation_instant=2026-03-15T12:00:00Z)",
+      "outcome": "skipped",
+      "profile_id": "eu-ai-act-2024",
+      "provision_id": "article-50.2",
+      "rule_id": "art50-modality",
+      "rule_severity": "fail",
+      "subject_scope": [
+        "urn:acef:sub:246763ee-a955-4a49-8e77-64056e4202c0"
+      ]
+    },
+    {
+      "error_code": null,
+      "evidence_refs": [],
+      "message": "Provision not yet effective (effective_date=2026-08-02, evaluation_instant=2026-03-15T12:00:00Z)",
+      "outcome": "skipped",
+      "profile_id": "eu-ai-act-2024",
+      "provision_id": "article-50.2",
+      "rule_id": "art50-marking-technique",
+      "rule_severity": "warning",
+      "subject_scope": [
+        "urn:acef:sub:246763ee-a955-4a49-8e77-64056e4202c0"
+      ]
+    }
+  ],
+  "structural_errors": [
+    {
+      "category": "profile",
+      "code": "ACEF-032",
+      "message": "Provision article-50.2 not yet effective (effective: 2026-08-02, evaluation: 2026-03-15T12:00:00Z)",
+      "severity": "info"
+    }
+  ],
+  "template_digests": {
+    "eu-ai-act-2024:1.1.0": "sha256:ffc9bb757d8148596c5eff491f7df037bac200076099506ed02401c7e85a6d2c"
+  },
+  "timestamp": "2026-06-17T18:04:18Z",
+  "versioning": {
+    "assessment_version": "1.0.0",
+    "core_version": "1.0.0"
+  }
+}

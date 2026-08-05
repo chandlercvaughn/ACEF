@@ -1,7 +1,7 @@
 {
   "template_id": "us-omb-m-24-10",
   "template_name": "OMB M-24-10: Advancing Governance, Innovation, and Risk Management for Agency Use of AI",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "jurisdiction": "US",
   "source_legislation": "OMB Memorandum M-24-10 (March 28, 2024)",
   "instrument_type": "guidance",
@@ -37,7 +37,16 @@
         "governance_policy": 1
       },
       "evidence_freshness_max_days": 365,
-      "retention_years": 7,
+      "retention_years": null,
+      "retention": {
+        "kind": "not_assessed",
+        "duty_holder": "any",
+        "period": null,
+        "anchor_event": "not_specified",
+        "source": "not_assessed",
+        "normative_text_ref": "",
+        "basis": "NOT ASSESSED. This profile has not established a retention basis for OMB M-24-10 Section 5(b). The previously published value of 7 years was uncited and is WITHDRAWN rather than restated: the full text of M-24-10 states no records-retention requirement of any kind — it contains no reference to NARA, the National Archives, a records schedule, or the Federal Records Act (44 U.S.C. § 3301 et seq.); its only 44 U.S.C. citations are § 3502 definitions and one Paperwork Reduction Act cite at § 3507, and its only year figure is 'every two years thereafter until 2036'. The successor instrument, OMB M-25-21 (3 April 2025), which expressly 'rescinds and replaces' M-24-10, likewise states no retention period. Absence of a figure here is NOT a finding that no retention period applies — US federal records retention derives from an agency records schedule this profile does not model. Establishing a cited basis requires a separate NARA / General Records Schedule research pass against a different instrument family."
+      },
       "evaluation": [
         {
           "rule_id": "omb-inv-governance-policy",
@@ -91,7 +100,16 @@
         "governance_policy": 1
       },
       "evidence_freshness_max_days": null,
-      "retention_years": 7,
+      "retention_years": null,
+      "retention": {
+        "kind": "not_assessed",
+        "duty_holder": "any",
+        "period": null,
+        "anchor_event": "not_specified",
+        "source": "not_assessed",
+        "normative_text_ref": "",
+        "basis": "NOT ASSESSED. This profile has not established a retention basis for OMB M-24-10 Section 3. The previously published value of 7 years was uncited and is WITHDRAWN rather than restated: the full text of M-24-10 states no records-retention requirement of any kind — it contains no reference to NARA, the National Archives, a records schedule, or the Federal Records Act (44 U.S.C. § 3301 et seq.); its only 44 U.S.C. citations are § 3502 definitions and one Paperwork Reduction Act cite at § 3507, and its only year figure is 'every two years thereafter until 2036'. The successor instrument, OMB M-25-21 (3 April 2025), which expressly 'rescinds and replaces' M-24-10, likewise states no retention period. Absence of a figure here is NOT a finding that no retention period applies — US federal records retention derives from an agency records schedule this profile does not model. Establishing a cited basis requires a separate NARA / General Records Schedule research pass against a different instrument family."
+      },
       "evaluation": [
         {
           "rule_id": "omb-caio-designation",
@@ -142,7 +160,16 @@
         "governance_policy": 1
       },
       "evidence_freshness_max_days": null,
-      "retention_years": 7,
+      "retention_years": null,
+      "retention": {
+        "kind": "not_assessed",
+        "duty_holder": "any",
+        "period": null,
+        "anchor_event": "not_specified",
+        "source": "not_assessed",
+        "normative_text_ref": "",
+        "basis": "NOT ASSESSED. This profile has not established a retention basis for OMB M-24-10 Section 5(c). The previously published value of 7 years was uncited and is WITHDRAWN rather than restated: the full text of M-24-10 states no records-retention requirement of any kind — it contains no reference to NARA, the National Archives, a records schedule, or the Federal Records Act (44 U.S.C. § 3301 et seq.); its only 44 U.S.C. citations are § 3502 definitions and one Paperwork Reduction Act cite at § 3507, and its only year figure is 'every two years thereafter until 2036'. The successor instrument, OMB M-25-21 (3 April 2025), which expressly 'rescinds and replaces' M-24-10, likewise states no retention period. Absence of a figure here is NOT a finding that no retention period applies — US federal records retention derives from an agency records schedule this profile does not model. Establishing a cited basis requires a separate NARA / General Records Schedule research pass against a different instrument family."
+      },
       "evaluation": [
         {
           "rule_id": "omb-rights-safety-classification",
@@ -176,7 +203,16 @@
         "governance_policy": 1
       },
       "evidence_freshness_max_days": null,
-      "retention_years": 7,
+      "retention_years": null,
+      "retention": {
+        "kind": "not_assessed",
+        "duty_holder": "any",
+        "period": null,
+        "anchor_event": "not_specified",
+        "source": "not_assessed",
+        "normative_text_ref": "",
+        "basis": "NOT ASSESSED. This profile has not established a retention basis for OMB M-24-10 Section 4. The previously published value of 7 years was uncited and is WITHDRAWN rather than restated: the full text of M-24-10 states no records-retention requirement of any kind — it contains no reference to NARA, the National Archives, a records schedule, or the Federal Records Act (44 U.S.C. § 3301 et seq.); its only 44 U.S.C. citations are § 3502 definitions and one Paperwork Reduction Act cite at § 3507, and its only year figure is 'every two years thereafter until 2036'. The successor instrument, OMB M-25-21 (3 April 2025), which expressly 'rescinds and replaces' M-24-10, likewise states no retention period. Absence of a figure here is NOT a finding that no retention period applies — US federal records retention derives from an agency records schedule this profile does not model. Establishing a cited basis requires a separate NARA / General Records Schedule research pass against a different instrument family."
+      },
       "evaluation": [
         {
           "rule_id": "omb-gov-governance-policy",

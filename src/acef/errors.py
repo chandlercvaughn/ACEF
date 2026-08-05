@@ -340,6 +340,82 @@ INCIDENT_ERROR_DETAILS: dict[str, IncidentErrorDetail] = {
 # evaluation-band ordinal (040-049, spec §3.6) reserved for "unknown comparison
 # operator in a rule" (audit finding F13).
 EXTENDED_ERROR_DETAILS: dict[str, IncidentErrorDetail] = {
+    "ACEF-034": IncidentErrorDetail(
+        severity=Severity.ERROR,
+        category=ErrorCategory.PROFILE,
+        problem=(
+            "a provision asserts a retention period with no recorded provenance, or its "
+            "retention block is internally inconsistent (a period-bearing kind with no "
+            "period, a 'none_stated'/'not_assessed' kind carrying one, an 'inferred' "
+            "source whose basis omits the INFERRED token, a 'cited' source with no "
+            "normative_text_ref, or a retention_years scalar disagreeing with the "
+            "structured block)"
+        ),
+        cause=(
+            "spec §3.6 (error taxonomy). GitHub issue #1: eu-ai-act-2024 asserted "
+            "retention_years: 10 on eight provisions with no basis, which for "
+            "article-12 is a false statement of law — Art. 12 of Regulation (EU) "
+            "2024/1689 states no retention period; Art. 19(1) (provider) and "
+            "Art. 26(6) (deployer) govern log retention at 'at least six months'"
+        ),
+        fix=(
+            "give the provision a retention block whose kind, period and source agree: "
+            "use kind='none_stated' with source='cited' when the instrument states no "
+            "period, kind='not_assessed' with source='not_assessed' when it has not "
+            "been assessed, and carry the literal token INFERRED in the basis whenever "
+            "source='inferred'; a retention figure with no auditable source must not ship"
+        ),
+    ),
+    "ACEF-035": IncidentErrorDetail(
+        severity=Severity.INFO,
+        category=ErrorCategory.PROFILE,
+        problem=(
+            "a provision commences on two or more dates keyed to a classification the "
+            "bundle cannot express, and the evaluation instant falls between the "
+            "earliest and latest of them, so applicability is INDETERMINATE for this "
+            "subject — the reported outcome rests on the EARLIEST limb and is a "
+            "conservative projection, not a determination"
+        ),
+        cause=(
+            "spec §3.6. EU AI Act Art. 113 third paragraph point (c), as replaced by "
+            "Regulation (EU) 2026/1744 Art. 1 point (40)(b), applies Chapter III "
+            "Sections 1-3 from 2 December 2027 to Art. 6(2)/Annex III high-risk "
+            "systems and from 2 August 2028 to Art. 6(1)/Annex I. Provision."
+            "effective_date holds a single value and the risk_classification enum in "
+            "the frozen v1 manifest schema has no Annex I / Annex III member, so the "
+            "discriminator cannot be evaluated"
+        ),
+        fix=(
+            "determine the subject's Art. 6 / Annex classification out of band before "
+            "relying on this provision's outcome; it is reported against the earliest "
+            "commencement limb, so a subject falling under the later limb is reported "
+            "as bound sooner than it is. Both limbs are recorded on the provision's "
+            "tiered_requirements.adoption block"
+        ),
+    ),
+    "ACEF-036": IncidentErrorDetail(
+        severity=Severity.INFO,
+        category=ErrorCategory.PROFILE,
+        problem=(
+            "a retention obligation stated in calendar months is screened by a fixed "
+            "day-count threshold, so exact calendar satisfaction was NOT verified: a "
+            "record passing the screen may still fall short of the stated duration "
+            "measured from its own anchor event, and the anchor itself is not checked"
+        ),
+        cause=(
+            "spec §3.5. Calendar months have no fixed length — six months spans 181 to "
+            "184 days depending on which months it crosses — and no §3.5 operator "
+            "resolves a duration against a per-record anchor date. The threshold is "
+            "therefore set to the LOWER bound of the stated period, which never "
+            "rejects a compliant record but cannot confirm one either"
+        ),
+        fix=(
+            "read the provision's retention.period (value + unit) and "
+            "retention.anchor_event as the authoritative obligation, and verify "
+            "calendar satisfaction out of band against each record's own start_event; "
+            "the rule outcome is a necessary-but-not-sufficient screen"
+        ),
+    ),
     "ACEF-046": IncidentErrorDetail(
         severity=Severity.ERROR,
         category=ErrorCategory.EVALUATION,
@@ -458,7 +534,7 @@ class ACEFReferenceError(ACEFError):
 
 
 class ACEFProfileError(ACEFError):
-    """Profile/template errors (ACEF-030 through ACEF-033)."""
+    """Profile/template errors (ACEF-030 through ACEF-036)."""
 
     code = "ACEF-030"
 

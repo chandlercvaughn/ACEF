@@ -1018,6 +1018,42 @@ def _validate_pointer_syntax(pointer: str) -> None:
         ) from exc
 
 
+# Distinguishes "the pointer path does not exist" from "the path exists and holds
+# JSON null". Both resolve to None, and conflating them makes `ne` count records
+# where nothing resolved at all: _compare(None, "ne", 999) is True, so a rule
+# asserting "some record has a value other than 999" was satisfied by records
+# that have no such field. Existential rules must only count a record when the
+# pointer RESOLVES and the comparison holds.
+_ARRAY_INDEX = re.compile(r"0|[1-9][0-9]*")
+
+_MISSING = object()
+
+
+def _resolve_or_missing(record_data: dict[str, Any], pointer: str) -> Any:
+    """Resolve a pointer, returning :data:`_MISSING` when the path is absent."""
+    node: Any = record_data
+    for raw in pointer.split("/")[1:]:
+        token = raw.replace("~1", "/").replace("~0", "~")
+        if isinstance(node, dict):
+            if token not in node:
+                return _MISSING
+            node = node[token]
+        elif isinstance(node, list):
+            # RFC 6901 §4: an array index is "0" or [1-9][0-9]* — ASCII only, no
+            # leading zeros. ``str.isdigit()`` accepts both ("01" and Unicode
+            # digits such as U+0663), and the latter reaches int() and resolves,
+            # creating matches on a pointer the spec does not admit.
+            if not _ARRAY_INDEX.fullmatch(token):
+                return _MISSING
+            idx = int(token)
+            if idx >= len(node):
+                return _MISSING
+            node = node[idx]
+        else:
+            return _MISSING
+    return node
+
+
 def _resolve_pointer(record_data: dict[str, Any], pointer: str) -> Any:
     """Resolve a JSON Pointer (RFC 6901) against a record dict.
 
@@ -1053,6 +1089,34 @@ def _resolve_pointer(record_data: dict[str, Any], pointer: str) -> Any:
 _VALID_COMPARISON_OPS: frozenset[str] = frozenset({"eq", "ne", "gt", "gte", "lt", "lte", "in", "regex"})
 
 
+def _validate_regex_operand(op: str, value: Any) -> None:
+    """Raise ACEF-045 when a ``regex`` rule's operand is not a usable pattern.
+
+    Called UPFRONT, mirroring :func:`_validate_comparison_op`. Without it an
+    invalid pattern such as ``"("`` is never compiled when zero records match or
+    no pointer resolves, so a malformed rule yields an ordinary failure rather
+    than the rule error the spec requires.
+    """
+    if op != "regex":
+        return
+    if not isinstance(value, str):
+        raise ACEFEvaluationError(
+            f"regex comparison operand must be a string pattern, got {type(value).__name__}",
+            code="ACEF-045",
+        )
+    # Reuse the hardened checker so length/ReDoS rejection is identical to the
+    # per-record path; matching against the empty string is side-effect free.
+    # A syntactically invalid pattern surfaces from ``re`` as a raw error, which
+    # is not an ACEF diagnostic — translate it.
+    try:
+        _safe_regex_search(value, "")
+    except re.error as exc:
+        raise ACEFEvaluationError(
+            f"invalid ECMA-262 regex pattern {value!r}: {exc}",
+            code="ACEF-045",
+        ) from exc
+
+
 def _validate_comparison_op(op: str) -> None:
     """Raise ACEF-046 when a rule's comparison ``op`` is not a recognized operator.
 
@@ -1071,6 +1135,31 @@ def _validate_comparison_op(op: str) -> None:
             f"Unknown comparison operator {op!r} in rule. Valid operators: {', '.join(sorted(_VALID_COMPARISON_OPS))}.",
             code="ACEF-046",
         )
+
+
+def _compare_resolved(actual: Any, op: str, expected: Any) -> bool:
+    """Compare a value that is known to have RESOLVED, including explicit null.
+
+    :func:`_compare` treats ``actual is None`` as "missing path" and short-
+    circuits to ``op == "ne"``. Once :func:`_resolve_or_missing` separates
+    absence from an explicitly-null value, that branch is wrong for the latter:
+    ``eq null`` would reject a field that IS null, and ``ne null`` would match
+    it. Callers using the sentinel must route through here.
+    """
+    if actual is None:
+        _validate_comparison_op(op)
+        if op == "eq":
+            return expected is None
+        if op == "ne":
+            return expected is not None
+        if op == "in":
+            # `in` is VALUE membership, so an explicitly-null field is a member of
+            # a list containing null. Returning False unconditionally would make
+            # `null in [null]` false.
+            return isinstance(expected, list) and any(item is None for item in expected)
+        # Ordering against null is false, not an error.
+        return False
+    return _compare(actual, op, expected)
 
 
 def _compare(actual: Any, op: str, expected: Any) -> bool:
@@ -1215,6 +1304,9 @@ def op_field_value(
     # a malformed rule regardless of data presence — it must NOT pass vacuously
     # on zero records nor silently FALSE-FAIL on a non-empty set.
     _validate_comparison_op(op)
+    # And the regex OPERAND (ACEF-045), for the same reason: an invalid pattern
+    # is a malformed rule whether or not any record resolves the pointer.
+    _validate_regex_operand(op, value)
     matching = _filter_by_type(records, record_type)
 
     if not matching:
@@ -1224,8 +1316,19 @@ def op_field_value(
     all_match = True
     for rec in matching:
         data = rec.to_jsonl_dict()
-        actual = _resolve_pointer(data, field)
-        if _compare(actual, op, value):
+        # Resolve through the sentinel so an ABSENT path and an explicitly-null
+        # VALUE are distinguishable. Routing both through _compare preserved
+        # missing-path semantics but made `eq null` / `in [null]` reject a field
+        # that IS null; routing both through _compare_resolved would have broken
+        # the missing-path contract instead. They are different facts and need
+        # different comparators.
+        actual = _resolve_or_missing(data, field)
+        matched = (
+            _compare(None, op, value)  # historic missing-path: only `ne` matches
+            if actual is _MISSING
+            else _compare_resolved(actual, op, value)
+        )
+        if matched:
             evidence_refs.append(rec.record_id)
         else:
             all_match = False
@@ -1412,13 +1515,71 @@ def op_exists_where(
     # And the comparison op upfront (ACEF-046, F13): an unknown op on an
     # existential rule must raise, not pass/fail silently.
     _validate_comparison_op(op)
+    # Same reasoning for the regex OPERAND (ACEF-045): a malformed pattern must
+    # raise even when zero records match or no pointer resolves, otherwise a
+    # broken rule reports an ordinary failure instead of a rule error.
+    _validate_regex_operand(op, value)
     matching = _filter_by_type(records, record_type)
 
     evidence_refs: list[str] = []
     for rec in matching:
         data = rec.to_jsonl_dict()
-        actual = _resolve_pointer(data, field)
-        if _compare(actual, op, value):
+        actual = _resolve_or_missing(data, field)
+        if actual is _MISSING:
+            continue
+        if _compare_resolved(actual, op, value):
+            evidence_refs.append(rec.record_id)
+
+    return len(evidence_refs) >= min_count, evidence_refs
+
+
+def op_exists_where_any(
+    params: dict[str, Any],
+    records: list[RecordEnvelope],
+) -> tuple[bool, list[str]]:
+    """exists_where_any: like ``exists_where`` but over ALTERNATIVE pointers.
+
+    At least ``min_count`` records exist for which **any** pointer in ``fields``
+    resolves and satisfies the comparison. Existential -> FAIL on zero matching
+    records when ``min_count`` > 0, matching :func:`op_exists_where`.
+
+    Motivation: ACEF states record retention on two distinct surfaces — the
+    envelope (``/retention/min_retention_days``) and the ``logging_spec`` payload
+    (``/payload/retention_policy_summary/min_days``). A single-pointer rule
+    cannot express "either surface satisfies the floor", so enforcing the
+    Art. 19(1) / Art. 26(6) six-month duty with ``exists_where`` fails records
+    that legitimately use only one of them — including ACEF's own canonical
+    logging record.
+
+    A record satisfying several listed pointers still counts ONCE: the
+    disjunction selects records, it does not multiply them.
+    """
+    record_type = params["record_type"]
+    fields = params["fields"]
+    op = params["op"]
+    value = params["value"]
+    min_count = params.get("min_count", 1)
+
+    if not isinstance(fields, list) or not fields:
+        raise ACEFEvaluationError(
+            "exists_where_any requires a non-empty 'fields' list — a disjunction over no pointers is not a rule",
+            code="ACEF-043",
+        )
+    # Validate EVERY pointer and the comparison op up front, so a malformed rule
+    # raises even when zero records match and the loop below never runs
+    # (validation-engine-dsl-3/-7), and so a bad pointer in any position is
+    # caught rather than only the first.
+    for field in fields:
+        _validate_pointer_syntax(field)
+    _validate_comparison_op(op)
+    _validate_regex_operand(op, value)
+    matching = _filter_by_type(records, record_type)
+
+    evidence_refs: list[str] = []
+    for rec in matching:
+        data = rec.to_jsonl_dict()
+        resolved = [v for v in (_resolve_or_missing(data, field) for field in fields) if v is not _MISSING]
+        if any(_compare_resolved(v, op, value) for v in resolved):
             evidence_refs.append(rec.record_id)
 
     return len(evidence_refs) >= min_count, evidence_refs
@@ -1618,6 +1779,7 @@ OPERATOR_REGISTRY: dict[str, OperatorFunc] = {
     "attachment_exists": op_attachment_exists,
     "entity_linked": op_entity_linked,
     "exists_where": op_exists_where,
+    "exists_where_any": op_exists_where_any,
     "attachment_kind_exists": op_attachment_kind_exists,
     "bundle_signed": op_bundle_signed,
     "record_attested": op_record_attested,

@@ -1,1 +1,11 @@
-{"class":"offline-deterministic","disposition":"fail","emitted_codes":["ACEF-085"],"vector":"fail-harm-core-crosswalk-085"}
+{
+  "class": "offline-deterministic",
+  "disposition": "fail",
+  "emitted_codes": [
+    "ACEF-085"
+  ],
+  "vector": "fail-harm-core-crosswalk-085",
+  "evidence_bundle_ref": {
+    "content_hash": "sha256:ba38cd0de0ec9d4a5d01e32ef3235b03ae0a3f93e3e2d5c872e997f0659938f1"
+  }
+}

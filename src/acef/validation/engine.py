@@ -9,7 +9,9 @@ Phase 4: Rule evaluation (DSL rules -> provision rollup)
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+import re
+from datetime import UTC, date, datetime
+from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -862,6 +864,123 @@ def _parse_iso_instant(value: str) -> datetime | None:
     return parsed
 
 
+# A classification-guard key in a `tiered_requirements.adoption` block: it names
+# the subject class whose commencement date it carries. Both shipped conventions
+# match (`annex_iii_high_risk`, `annex_i_effective_date`) while non-guard dates
+# in the same block (`as_enacted_effective_date`, `effective_date`) do not.
+_CLASSIFICATION_LIMB = re.compile(r"^annex_[a-z]+_", re.IGNORECASE)
+
+
+# 1200 months = 100 years; the longest real statutory retention is an order of
+# magnitude below this, and it keeps the scan far inside datetime.date range.
+_MAX_RETENTION_MONTHS = 1200
+
+
+@lru_cache(maxsize=64)
+def calendar_months_to_days(months: int) -> int:
+    """Return the MINIMUM number of days that ``months`` calendar months can span.
+
+    A duration stated in calendar months has no fixed length: six months spans
+    181 to 184 days depending on which months it crosses, so no single day-count
+    is equivalent. Rules compare a stored integer against a constant and cannot
+    do calendar arithmetic against a per-record anchor date, so a day threshold
+    is only ever a screen for a month-denominated obligation.
+
+    The lower bound is the only safe fixed threshold. Screening at the maximum
+    would reject a lawful policy that happens to start in a short month;
+    screening at the minimum catches every policy that is unambiguously short
+    while never rejecting a compliant one. Callers MUST pair the screen with an
+    ACEF-036 disclosure that exact calendar satisfaction was not verified.
+    """
+    if months < 1:
+        raise ValueError(f"months must be >= 1, got {months}")
+    # The 400-year scan below adds `months` to a start as late as 2399-12, so an
+    # unbounded value overflows datetime.date (year > 9999) and aborts an
+    # otherwise valid validation run. No real retention period approaches this.
+    if months > _MAX_RETENTION_MONTHS:
+        raise ValueError(
+            f"months must be <= {_MAX_RETENTION_MONTHS} ({_MAX_RETENTION_MONTHS // 12} years), got {months}"
+        )
+    # Walk every start month of a FULL 400-year Gregorian cycle. Sampling only a
+    # leap/non-leap PAIR is not enough: century years divisible by 100 but not
+    # 400 are common years, so e.g. 48 months starting 2097-03 spans 1460 days
+    # while every start inside 2027-2028 gives 1461 — a two-year window returns
+    # a minimum that is one day too high and would reject a lawful policy.
+    shortest: int | None = None
+    for year in range(2000, 2400):
+        for month in range(1, 13):
+            start = date(year, month, 1)
+            total = month - 1 + months
+            end = date(year + total // 12, total % 12 + 1, 1)
+            span = (end - start).days
+            if shortest is None or span < shortest:
+                shortest = span
+    assert shortest is not None  # the loops above always run
+    return shortest
+
+
+def split_commencement_state(
+    adoption: dict[str, Any] | None,
+    evaluation_instant: str | None,
+) -> dict[str, Any] | None:
+    """Detect an unresolvable split-commencement window (ACEF-035).
+
+    A provision may commence on several dates keyed to a classification of the
+    regulated subject that ACEF cannot express — EU AI Act Art. 113 third
+    paragraph point (c), as replaced by Regulation (EU) 2026/1744, applies
+    Chapter III Sections 1-3 from 2027-12-02 to Annex III high-risk systems and
+    from 2028-08-02 to Annex I. ``Provision.effective_date`` holds one value and
+    carries the EARLIEST limb, so between the two dates the reported outcome is a
+    conservative projection rather than a determination.
+
+    Returns ``None`` when applicability is settled — before every limb (already
+    covered by ACEF-032 not-yet-effective), on or after the last limb (every
+    class has commenced), or when there is only one limb. Otherwise returns the
+    window and the classes whose commencement has NOT yet been reached, so the
+    caller can name the missing attribute in the diagnostic (the XACML
+    ``Indeterminate`` convention, distinct from ``NotApplicable``).
+
+    Non-date values in the adoption block — ``basis`` prose, for instance — are
+    ignored rather than parsed as limbs.
+    """
+    if not adoption or not evaluation_instant:
+        return None
+
+    # Only CLASSIFICATION-GUARD keys are limbs. An adoption block also carries
+    # non-guard dates — eu-ai-act-art73-2026 records `as_enacted_effective_date`
+    # (the superseded date) and a generic `effective_date` alongside its real
+    # guards — and treating those as limbs invents a window that does not exist
+    # and reports "effective_date" as an undetermined class.
+    limbs: dict[str, str] = {}
+    for key, value in adoption.items():
+        if not _CLASSIFICATION_LIMB.match(key):
+            continue
+        if not isinstance(value, str) or _parse_iso_instant(value) is None:
+            continue
+        limbs[key] = value
+    if len(limbs) < 2:
+        return None
+
+    dates = sorted(set(limbs.values()))
+    earliest, latest = dates[0], dates[-1]
+    if earliest == latest:
+        return None
+    # Before the earliest: nothing has commenced (ACEF-032 covers it).
+    # On/after the latest: every class has commenced, so applicability is settled.
+    if _is_before(evaluation_instant, earliest) or not _is_before(evaluation_instant, latest):
+        return None
+
+    # Strictly AFTER the instant: a limb whose date equals the evaluation
+    # instant HAS commenced (the gate is inclusive), so listing it as
+    # undetermined tells the reader an already-live class has not started.
+    undetermined = sorted(k for k, v in limbs.items() if _is_before(evaluation_instant, v))
+    return {
+        "earliest": earliest,
+        "latest": latest,
+        "undetermined_classes": undetermined,
+    }
+
+
 def _is_before(a: str, b: str) -> bool:
     """Return True iff timestamp ``a`` is strictly before ``b``.
 
@@ -907,11 +1026,21 @@ def _evaluate_profiles(
     for profile_id in profile_ids:
         try:
             template = load_template(profile_id)
-        except ACEFError:
+        except ACEFError as exc:
+            # Preserve the code and message the registry actually raised. This
+            # block previously discarded the exception and hardcoded ACEF-030
+            # "Template not found", so a template that EXISTS but is malformed —
+            # or one carrying an unsourced retention figure (ACEF-034) — was
+            # reported as missing, a factually false statement about a file on
+            # disk, and the real diagnostic never reached the caller.
+            # ``exc.message``, not ``str(exc)``: ACEFError.__str__ renders
+            # "[ACEF-NNN] ..." and ValidationDiagnostic already carries the code
+            # in its own field, so str() would duplicate it in every rendered
+            # report.
             assessment.structural_errors.append(
                 ValidationDiagnostic(
-                    "ACEF-030",
-                    f"Template not found: {profile_id!r}",
+                    exc.code,
+                    exc.message,
                 ).to_dict()
             )
             continue
@@ -1018,8 +1147,39 @@ def _evaluate_profiles(
         # Per spec §3.6 the rules for these provisions MUST produce a
         # ``skipped`` outcome rather than being evaluated normally — a
         # provision that is not yet legally in force cannot fail.
+        # Risk classifications actually present in this bundle. ACEF-035/036 are
+        # ADVISORY notes about how a provision was evaluated, so emitting them for
+        # a provision that applies to no subject here reports an evaluation that
+        # never happened (roborev on d04da7d/0c5c6c8: a minimal-risk-only bundle
+        # was told an Art. 19 screen occurred, with zero rule results).
+        _bundle_risk_classes = {
+            str(subj.get("risk_classification", ""))
+            for subj in (manifest_data.get("subjects") or [])
+            if isinstance(subj, dict)
+        }
+
+        def _applies_to_any_subject(prov: Any) -> bool:
+            if not prov.applicable_to:
+                return True
+            if not _bundle_risk_classes or _bundle_risk_classes == {""}:
+                return True
+            return bool(set(prov.applicable_to) & _bundle_risk_classes)
+
         not_yet_effective: set[str] = set()
+        # Provisions whose applicability cannot be settled for this subject
+        # (ACEF-035). They must NOT roll up to a binary verdict: an Annex I
+        # system would otherwise be told it is compliant or non-compliant up to
+        # eight months before its obligation commences. They roll up to
+        # not-assessed instead, with ACEF-035 as the explanation.
+        indeterminate: set[str] = set()
         for prov in provisions_to_evaluate:
+            # A provision that applies to no subject in this bundle produces no
+            # rule results, so none of the advisory diagnostics below describe
+            # anything that happened. Gate them all identically — ACEF-032
+            # included, which previously told a minimal-risk-only bundle that
+            # high-risk-only rules had been skipped.
+            if not _applies_to_any_subject(prov):
+                continue
             if prov.effective_date and evaluation_instant:
                 if _is_before(evaluation_instant, prov.effective_date):
                     not_yet_effective.add(prov.provision_id)
@@ -1031,6 +1191,71 @@ def _evaluate_profiles(
                             f"evaluation: {evaluation_instant})",
                         ).to_dict()
                     )
+                    continue
+            # ACEF-035: the provision commences on several dates keyed to a
+            # classification this bundle cannot express, and the instant falls
+            # between them. ``effective_date`` carries the EARLIEST limb, so the
+            # outcome reported below is a conservative projection, not a
+            # determination — say so rather than returning an unqualified binary
+            # with the caveat buried in documentation.
+            split = (
+                split_commencement_state(
+                    (prov.tiered_requirements or {}).get("adoption"),
+                    evaluation_instant,
+                )
+                if _applies_to_any_subject(prov)
+                else None
+            )
+            # ACEF-036: the provision states its retention duty in calendar months
+            # but the rules can only screen a stored day-count against a constant.
+            # Disclose that exact calendar satisfaction was not verified, so the
+            # screen is not mistaken for a determination.
+            retention = prov.retention
+            if (
+                _applies_to_any_subject(prov)
+                and retention is not None
+                and retention.period is not None
+                and retention.period.unit == "months"
+                # ``not isinstance(v, bool)`` is load-bearing: bool subclasses int
+                # in Python, so a rule comparing against ``True`` (e.g. the CAC
+                # label-exception rule) would otherwise be mistaken for a
+                # day-count screen and this code would fire on a provision that
+                # has no day threshold at all.
+                and any(
+                    isinstance(r.params.get("value"), int) and not isinstance(r.params.get("value"), bool)
+                    for r in prov.evaluation
+                    if r.rule in ("exists_where", "exists_where_any")
+                )
+            ):
+                lower_bound = calendar_months_to_days(retention.period.value)
+                assessment.structural_errors.append(
+                    ValidationDiagnostic(
+                        "ACEF-036",
+                        f"Provision {prov.provision_id} states a retention floor of "
+                        f"{retention.period.value} {retention.period.unit} from "
+                        f"{retention.anchor_event}, screened as >= {lower_bound} days. "
+                        f"{retention.period.value} calendar months has no fixed length, "
+                        f"and no rule operator resolves a duration against a per-record "
+                        f"anchor, so a record passing this screen may still fall short "
+                        f"of the stated period measured from its own start event.",
+                    ).to_dict()
+                )
+
+            if split is not None:
+                indeterminate.add(prov.provision_id)
+                classes = ", ".join(split["undetermined_classes"])
+                assessment.structural_errors.append(
+                    ValidationDiagnostic(
+                        "ACEF-035",
+                        f"Provision {prov.provision_id} applicability is indeterminate at "
+                        f"{evaluation_instant}: it commences {split['earliest']} through "
+                        f"{split['latest']} depending on the subject's classification, and "
+                        f"{classes} has not yet commenced. This provision is therefore "
+                        f"reported as not-assessed rather than satisfied or not-satisfied; "
+                        f"determine the subject's Art. 6 / Annex classification to settle "
+                        f"applicability and obtain a verdict.",
+                    ).to_dict()
+                )
 
         # Synthesize SKIPPED results for not-yet-effective provisions so the
         # roll-up algorithm reports ``skipped`` for them (spec §3.7 step 3).
@@ -1043,7 +1268,7 @@ def _evaluate_profiles(
         # violates the §3.7 MUST that per-subject ``provision_summary`` entries
         # identify their subject(s)). Package-scoped not-yet-effective provisions
         # still produce one summary with empty ``subject_scope``.
-        if not_yet_effective:
+        if not_yet_effective or indeterminate:
             from acef.models.assessment import RuleResult
             from acef.models.enums import RuleOutcome, RuleSeverity
 
@@ -1058,19 +1283,38 @@ def _evaluate_profiles(
                 """
 
                 def _mk(rule_id: str, severity: str) -> RuleResult:
+                    if prov.provision_id in indeterminate:
+                        # ERROR rolls up to NOT_ASSESSED at §3.7 step 2. A binary
+                        # verdict here would state a compliance conclusion the
+                        # evidence cannot support (ACEF-035).
+                        outcome, detail = (
+                            RuleOutcome.ERROR,
+                            (
+                                f"Provision applicability is indeterminate at "
+                                f"{evaluation_instant}: it commences on more than one date "
+                                f"depending on the subject's classification, which this "
+                                f"bundle cannot express. See ACEF-035."
+                            ),
+                        )
+                    else:
+                        outcome, detail = (
+                            RuleOutcome.SKIPPED,
+                            (
+                                f"Provision not yet effective "
+                                f"(effective_date={prov.effective_date}, "
+                                f"evaluation_instant={evaluation_instant})"
+                            ),
+                        )
                     return RuleResult(
                         rule_id=rule_id,
                         provision_id=prov.provision_id,
                         profile_id=profile_id,
                         rule_severity=RuleSeverity(severity),
-                        outcome=RuleOutcome.SKIPPED,
-                        message=(
-                            f"Provision not yet effective "
-                            f"(effective_date={prov.effective_date}, "
-                            f"evaluation_instant={evaluation_instant})"
-                        ),
+                        outcome=outcome,
+                        message=detail,
                         evidence_refs=[],
                         subject_scope=list(scope),
+                        error_code=("ACEF-035" if prov.provision_id in indeterminate else None),
                     )
 
                 explicit_has_record_types = {
@@ -1086,7 +1330,8 @@ def _evaluate_profiles(
                 results.extend(_mk(rule.rule_id, rule.severity) for rule in prov.evaluation)
                 return results
 
-            nye_provisions = [p for p in provisions_to_evaluate if p.provision_id in not_yet_effective]
+            deferred_ids = not_yet_effective | indeterminate
+            nye_provisions = [p for p in provisions_to_evaluate if p.provision_id in deferred_ids]
             nye_package = [p for p in nye_provisions if p.evaluation_scope == "package"]
             nye_per_subject = [p for p in nye_provisions if p.evaluation_scope != "package"]
 
@@ -1130,7 +1375,9 @@ def _evaluate_profiles(
                         )
 
         # Exclude not-yet-effective provisions from further evaluation.
-        provisions_to_evaluate = [p for p in provisions_to_evaluate if p.provision_id not in not_yet_effective]
+        provisions_to_evaluate = [
+            p for p in provisions_to_evaluate if p.provision_id not in (not_yet_effective | indeterminate)
+        ]
 
         # Split provisions into package-scoped and per-subject (default)
         package_scoped = [p for p in provisions_to_evaluate if p.evaluation_scope == "package"]

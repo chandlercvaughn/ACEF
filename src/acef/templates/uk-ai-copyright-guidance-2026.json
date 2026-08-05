@@ -1,7 +1,7 @@
 {
   "template_id": "uk-ai-copyright-guidance-2026",
   "template_name": "UK AI, Copyright and the Creative Industries Guidance",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "jurisdiction": "UK",
   "source_legislation": "House of Lords Communications and Digital Committee: AI, Copyright and the Creative Industries (March 2026)",
   "instrument_type": "parliamentary_report",
@@ -40,6 +40,15 @@
       },
       "evidence_freshness_max_days": null,
       "retention_years": null,
+      "retention": {
+        "kind": "not_assessed",
+        "duty_holder": "any",
+        "period": null,
+        "anchor_event": "not_specified",
+        "source": "not_assessed",
+        "normative_text_ref": "",
+        "basis": "NOT ASSESSED. This profile has established no retention basis for the House of Lords Communications and Digital Committee report AI, Copyright and the Creative Industries (March 2026) (UK AI, Copyright and the Creative Industries — Recommendation: Mandatory Training Data Disclosure). No retention determination has been made for this provision: the instrument was not assessed for records-retention duties and no period is asserted here. This is a parliamentary committee report making recommendations; it is advisory and enacts nothing, so any retention duty would arise from subsequent UK legislation that does not yet exist. Absence of a figure is NOT a finding that no retention period applies: a retention duty may arise from this instrument, from an implementing instrument, or from generally applicable records law that this profile does not model. Establishing a cited basis requires a separate research pass against the primary text of the instrument."
+      },
       "evaluation": [
         {
           "rule_id": "uk-disc-data-provenance",
@@ -88,6 +97,15 @@
       },
       "evidence_freshness_max_days": null,
       "retention_years": null,
+      "retention": {
+        "kind": "not_assessed",
+        "duty_holder": "any",
+        "period": null,
+        "anchor_event": "not_specified",
+        "source": "not_assessed",
+        "normative_text_ref": "",
+        "basis": "NOT ASSESSED. This profile has established no retention basis for the House of Lords Communications and Digital Committee report AI, Copyright and the Creative Industries (March 2026) (UK AI, Copyright and the Creative Industries — Recommendation: Rights Reservation and Opt-Out). No retention determination has been made for this provision: the instrument was not assessed for records-retention duties and no period is asserted here. This is a parliamentary committee report making recommendations; it is advisory and enacts nothing, so any retention duty would arise from subsequent UK legislation that does not yet exist. Absence of a figure is NOT a finding that no retention period applies: a retention duty may arise from this instrument, from an implementing instrument, or from generally applicable records law that this profile does not model. Establishing a cited basis requires a separate research pass against the primary text of the instrument."
+      },
       "evaluation": [
         {
           "rule_id": "uk-rights-copyright-reservation",
@@ -129,6 +147,15 @@
       },
       "evidence_freshness_max_days": null,
       "retention_years": null,
+      "retention": {
+        "kind": "not_assessed",
+        "duty_holder": "any",
+        "period": null,
+        "anchor_event": "not_specified",
+        "source": "not_assessed",
+        "normative_text_ref": "",
+        "basis": "NOT ASSESSED. This profile has established no retention basis for the House of Lords Communications and Digital Committee report AI, Copyright and the Creative Industries (March 2026) (UK AI, Copyright and the Creative Industries — Recommendation: Provenance Standards Compliance). No retention determination has been made for this provision: the instrument was not assessed for records-retention duties and no period is asserted here. This is a parliamentary committee report making recommendations; it is advisory and enacts nothing, so any retention duty would arise from subsequent UK legislation that does not yet exist. Absence of a figure is NOT a finding that no retention period applies: a retention duty may arise from this instrument, from an implementing instrument, or from generally applicable records law that this profile does not model. Establishing a cited basis requires a separate research pass against the primary text of the instrument."
+      },
       "evaluation": [
         {
           "rule_id": "uk-prov-transparency-marking",
@@ -163,6 +190,15 @@
       },
       "evidence_freshness_max_days": null,
       "retention_years": null,
+      "retention": {
+        "kind": "not_assessed",
+        "duty_holder": "any",
+        "period": null,
+        "anchor_event": "not_specified",
+        "source": "not_assessed",
+        "normative_text_ref": "",
+        "basis": "NOT ASSESSED. This profile has established no retention basis for the House of Lords Communications and Digital Committee report AI, Copyright and the Creative Industries (March 2026) (UK AI, Copyright and the Creative Industries — Recommendation: Licensing with Rights-Holders). No retention determination has been made for this provision: the instrument was not assessed for records-retention duties and no period is asserted here. This is a parliamentary committee report making recommendations; it is advisory and enacts nothing, so any retention duty would arise from subsequent UK legislation that does not yet exist. Absence of a figure is NOT a finding that no retention period applies: a retention duty may arise from this instrument, from an implementing instrument, or from generally applicable records law that this profile does not model. Establishing a cited basis requires a separate research pass against the primary text of the instrument."
+      },
       "evaluation": [
         {
           "rule_id": "uk-lic-license-record",

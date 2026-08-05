@@ -1,7 +1,7 @@
 {
   "template_id": "eu-gpai-code-of-practice-2025",
   "template_name": "EU General-Purpose AI Code of Practice",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "jurisdiction": "EU",
   "source_legislation": "GPAI Code of Practice (July 2025)",
   "instrument_type": "code_of_practice",
@@ -38,6 +38,15 @@
       },
       "evidence_freshness_max_days": null,
       "retention_years": null,
+      "retention": {
+        "kind": "not_assessed",
+        "duty_holder": "any",
+        "period": null,
+        "anchor_event": "not_specified",
+        "source": "not_assessed",
+        "normative_text_ref": "",
+        "basis": "NOT ASSESSED. This profile has established no retention basis for the EU General-Purpose AI Code of Practice (July 2025), a voluntary Art. 56 code (GPAI Code of Practice Transparency Commitment 1). No retention determination has been made for this provision: the instrument was not assessed for records-retention duties and no period is asserted here. The Code is a voluntary adequacy instrument; retention duties over GPAI documentation, where any exist, arise from Regulation (EU) 2024/1689 itself (which states none in Art. 53) and not from the Code. That reading has not been verified commitment by commitment. Absence of a figure is NOT a finding that no retention period applies: a retention duty may arise from this instrument, from an implementing instrument, or from generally applicable records law that this profile does not model. Establishing a cited basis requires a separate research pass against the primary text of the instrument."
+      },
       "evaluation": [
         {
           "rule_id": "gpai-t1-data-provenance",
@@ -105,6 +114,15 @@
       },
       "evidence_freshness_max_days": null,
       "retention_years": null,
+      "retention": {
+        "kind": "not_assessed",
+        "duty_holder": "any",
+        "period": null,
+        "anchor_event": "not_specified",
+        "source": "not_assessed",
+        "normative_text_ref": "",
+        "basis": "NOT ASSESSED. This profile has established no retention basis for the EU General-Purpose AI Code of Practice (July 2025), a voluntary Art. 56 code (GPAI Code of Practice Transparency Commitment 2). No retention determination has been made for this provision: the instrument was not assessed for records-retention duties and no period is asserted here. The Code is a voluntary adequacy instrument; retention duties over GPAI documentation, where any exist, arise from Regulation (EU) 2024/1689 itself (which states none in Art. 53) and not from the Code. That reading has not been verified commitment by commitment. Absence of a figure is NOT a finding that no retention period applies: a retention duty may arise from this instrument, from an implementing instrument, or from generally applicable records law that this profile does not model. Establishing a cited basis requires a separate research pass against the primary text of the instrument."
+      },
       "evaluation": [
         {
           "rule_id": "gpai-t2-data-provenance",
@@ -164,6 +182,15 @@
       },
       "evidence_freshness_max_days": null,
       "retention_years": null,
+      "retention": {
+        "kind": "not_assessed",
+        "duty_holder": "any",
+        "period": null,
+        "anchor_event": "not_specified",
+        "source": "not_assessed",
+        "normative_text_ref": "",
+        "basis": "NOT ASSESSED. This profile has established no retention basis for the EU General-Purpose AI Code of Practice (July 2025), a voluntary Art. 56 code (GPAI Code of Practice Copyright Commitment 1). No retention determination has been made for this provision: the instrument was not assessed for records-retention duties and no period is asserted here. The Code is a voluntary adequacy instrument; retention duties over GPAI documentation, where any exist, arise from Regulation (EU) 2024/1689 itself (which states none in Art. 53) and not from the Code. That reading has not been verified commitment by commitment. Absence of a figure is NOT a finding that no retention period applies: a retention duty may arise from this instrument, from an implementing instrument, or from generally applicable records law that this profile does not model. Establishing a cited basis requires a separate research pass against the primary text of the instrument."
+      },
       "evaluation": [
         {
           "rule_id": "gpai-c1-copyright-reservation",
@@ -212,6 +239,15 @@
       },
       "evidence_freshness_max_days": null,
       "retention_years": null,
+      "retention": {
+        "kind": "not_assessed",
+        "duty_holder": "any",
+        "period": null,
+        "anchor_event": "not_specified",
+        "source": "not_assessed",
+        "normative_text_ref": "",
+        "basis": "NOT ASSESSED. This profile has established no retention basis for the EU General-Purpose AI Code of Practice (July 2025), a voluntary Art. 56 code (GPAI Code of Practice Copyright Commitment 2). No retention determination has been made for this provision: the instrument was not assessed for records-retention duties and no period is asserted here. The Code is a voluntary adequacy instrument; retention duties over GPAI documentation, where any exist, arise from Regulation (EU) 2024/1689 itself (which states none in Art. 53) and not from the Code. That reading has not been verified commitment by commitment. Absence of a figure is NOT a finding that no retention period applies: a retention duty may arise from this instrument, from an implementing instrument, or from generally applicable records law that this profile does not model. Establishing a cited basis requires a separate research pass against the primary text of the instrument."
+      },
       "evaluation": [
         {
           "rule_id": "gpai-c2-license-record",
@@ -264,6 +300,15 @@
       },
       "evidence_freshness_max_days": null,
       "retention_years": null,
+      "retention": {
+        "kind": "not_assessed",
+        "duty_holder": "any",
+        "period": null,
+        "anchor_event": "not_specified",
+        "source": "not_assessed",
+        "normative_text_ref": "",
+        "basis": "NOT ASSESSED. This profile has established no retention basis for the EU General-Purpose AI Code of Practice (July 2025), a voluntary Art. 56 code (GPAI Code of Practice Safety Commitment 1). No retention determination has been made for this provision: the instrument was not assessed for records-retention duties and no period is asserted here. The Code is a voluntary adequacy instrument; retention duties over GPAI documentation, where any exist, arise from Regulation (EU) 2024/1689 itself (which states none in Art. 53) and not from the Code. That reading has not been verified commitment by commitment. Absence of a figure is NOT a finding that no retention period applies: a retention duty may arise from this instrument, from an implementing instrument, or from generally applicable records law that this profile does not model. Establishing a cited basis requires a separate research pass against the primary text of the instrument."
+      },
       "evaluation": [
         {
           "rule_id": "gpai-s1-governance-policy",
@@ -325,6 +370,15 @@
       },
       "evidence_freshness_max_days": null,
       "retention_years": null,
+      "retention": {
+        "kind": "not_assessed",
+        "duty_holder": "any",
+        "period": null,
+        "anchor_event": "not_specified",
+        "source": "not_assessed",
+        "normative_text_ref": "",
+        "basis": "NOT ASSESSED. This profile has established no retention basis for the EU General-Purpose AI Code of Practice (July 2025), a voluntary Art. 56 code (GPAI Code of Practice Safety Commitment 2). No retention determination has been made for this provision: the instrument was not assessed for records-retention duties and no period is asserted here. The Code is a voluntary adequacy instrument; retention duties over GPAI documentation, where any exist, arise from Regulation (EU) 2024/1689 itself (which states none in Art. 53) and not from the Code. That reading has not been verified commitment by commitment. Absence of a figure is NOT a finding that no retention period applies: a retention duty may arise from this instrument, from an implementing instrument, or from generally applicable records law that this profile does not model. Establishing a cited basis requires a separate research pass against the primary text of the instrument."
+      },
       "evaluation": [
         {
           "rule_id": "gpai-s2-risk-register",
@@ -391,6 +445,15 @@
       },
       "evidence_freshness_max_days": null,
       "retention_years": null,
+      "retention": {
+        "kind": "not_assessed",
+        "duty_holder": "any",
+        "period": null,
+        "anchor_event": "not_specified",
+        "source": "not_assessed",
+        "normative_text_ref": "",
+        "basis": "NOT ASSESSED. This profile has established no retention basis for the EU General-Purpose AI Code of Practice (July 2025), a voluntary Art. 56 code (GPAI Code of Practice (July 2025), Safety and Security chapter, Commitment 9 (Serious incident reporting); EU AI Act Article 55). No retention determination has been made for this provision: the instrument was not assessed for records-retention duties and no period is asserted here. The Code is a voluntary adequacy instrument; retention duties over GPAI documentation, where any exist, arise from Regulation (EU) 2024/1689 itself (which states none in Art. 53) and not from the Code. That reading has not been verified commitment by commitment. Absence of a figure is NOT a finding that no retention period applies: a retention duty may arise from this instrument, from an implementing instrument, or from generally applicable records law that this profile does not model. Establishing a cited basis requires a separate research pass against the primary text of the instrument."
+      },
       "evaluation": [
         {
           "rule_id": "gpai-s3-incident-report",

@@ -1,1 +1,11 @@
-{"class":"offline-deterministic","disposition":"fail","emitted_codes":["ACEF-083"],"vector":"fail-projection-edge-mismatch-083"}
+{
+  "class": "offline-deterministic",
+  "disposition": "fail",
+  "emitted_codes": [
+    "ACEF-083"
+  ],
+  "vector": "fail-projection-edge-mismatch-083",
+  "evidence_bundle_ref": {
+    "content_hash": "sha256:8daaac47cda5fc261184d352340dd397046009fc366a48e6be47d389e028aff7"
+  }
+}

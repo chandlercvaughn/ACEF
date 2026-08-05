@@ -62,7 +62,13 @@ def _make_record(
 class TestOperatorRegistry:
     """Verify all 10 operators registered."""
 
-    def test_all_10_operators(self):
+    def test_all_11_operators(self):
+        """11 since exists_where_any joined the §3.5 set (roborev High on 0753d47).
+
+        The Art. 19(1)/26(6) retention floor must pass for a record stating
+        retention on EITHER the envelope or the logging_spec payload surface;
+        no single-pointer operator can express that disjunction.
+        """
         expected = {
             "has_record_type",
             "field_present",
@@ -71,6 +77,7 @@ class TestOperatorRegistry:
             "attachment_exists",
             "entity_linked",
             "exists_where",
+            "exists_where_any",
             "attachment_kind_exists",
             "bundle_signed",
             "record_attested",

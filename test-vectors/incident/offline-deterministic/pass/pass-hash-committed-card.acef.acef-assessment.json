@@ -1,1 +1,9 @@
-{"class":"offline-deterministic","disposition":"pass","emitted_codes":[],"vector":"pass-hash-committed-card"}
+{
+  "class": "offline-deterministic",
+  "disposition": "pass",
+  "emitted_codes": [],
+  "vector": "pass-hash-committed-card",
+  "evidence_bundle_ref": {
+    "content_hash": "sha256:9d4c16a1a69866f1f7bf64edaf5bcd7585dc7b8b836efd8e3d3be5412b2fd9bb"
+  }
+}

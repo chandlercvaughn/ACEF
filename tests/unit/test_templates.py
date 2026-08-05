@@ -38,6 +38,7 @@ VALID_OPERATORS = frozenset(
         "attachment_exists",
         "entity_linked",
         "exists_where",
+        "exists_where_any",
         "attachment_kind_exists",
         "bundle_signed",
         "record_attested",
@@ -365,7 +366,11 @@ class TestEUAIActTemplate:
     def test_has_article_9_provision(self, template: Template) -> None:
         prov = self._find_provision(template, "article-9")
         assert prov.provision_name == "Risk Management System"
-        assert prov.effective_date == "2026-08-02"
+        # Reg. (EU) 2026/1744 Art. 1 pt (40)(b) replaced Art. 113 third para (c):
+        # Chapter III Sections 1-3 now apply from 2027-12-02 (Annex III high-risk)
+        # / 2028-08-02 (Annex I). The earlier limb is stored; both are recorded in
+        # tiered_requirements.adoption. 2026-08-02 was correct until 27 July 2026.
+        assert prov.effective_date == "2027-12-02"
         assert "high-risk" in prov.applicable_to
         assert "risk_register" in prov.required_evidence_types
         assert "risk_treatment" in prov.required_evidence_types
@@ -462,7 +467,10 @@ class TestEUAIActTemplate:
                 assert "gpai" in rule.condition.if_system_type or ("gpai-systemic" in rule.condition.if_system_type)
 
     def test_total_provision_count(self, template: Template) -> None:
-        assert len(template.provisions) == 10
+        # 10 original + article-19 (provider log floor) + article-26.6 (deployer
+        # log floor), added so the Art. 19(1) / Art. 26(6) "at least six months"
+        # duty is expressible at all — issue #1.
+        assert len(template.provisions) == 12
 
     def test_total_test_vectors(self, template: Template) -> None:
         assert len(template.test_vectors) == 10
