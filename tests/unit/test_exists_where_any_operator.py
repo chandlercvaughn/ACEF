@@ -226,3 +226,77 @@ class TestRegexOperandValidatedUpFront:
             [_event_log("r1", payload_days=365)],
         )
         assert ok and refs == ["r1"]
+
+
+class TestExplicitNullIsAValueNotAnAbsence:
+    """roborev on 93ede26: resolved nulls still took _compare's missing branch.
+
+    `_compare` short-circuits `actual is None` to `op == "ne"`, which encodes
+    "the path is missing". Once the sentinel separates absence from an
+    explicitly-null value, that branch is wrong for the latter: `eq null` would
+    REJECT a field that is null, and `ne null` would MATCH it.
+    """
+
+    @staticmethod
+    def _with_null_payload(record_id: str) -> RecordEnvelope:
+        return RecordEnvelope(
+            record_id=record_id,
+            record_type="event_log",
+            timestamp="2027-11-01T00:00:00Z",
+            payload={"event_type": "logging_spec", "retention_policy_summary": {"min_days": None}},
+        )
+
+    def test_eq_null_matches_an_explicitly_null_field(self, op) -> None:
+        ok, refs = op(_params(fields=[PAYLOAD_PTR], op="eq", value=None), [self._with_null_payload("r1")])
+        assert ok and refs == ["r1"], "a field that IS null must satisfy `eq null`"
+
+    def test_ne_null_does_not_match_an_explicitly_null_field(self, op) -> None:
+        ok, _ = op(_params(fields=[PAYLOAD_PTR], op="ne", value=None), [self._with_null_payload("r1")])
+        assert not ok, "a field that IS null must not satisfy `ne null`"
+
+    def test_ne_value_still_matches_an_explicitly_null_field(self, op) -> None:
+        """null is genuinely different from 999, so `ne 999` holds."""
+        ok, _ = op(_params(fields=[PAYLOAD_PTR], op="ne", value=999), [self._with_null_payload("r1")])
+        assert ok
+
+    def test_absent_field_still_matches_nothing(self, op) -> None:
+        """The sentinel path is unaffected by the null handling above."""
+        ok, _ = op(_params(op="ne", value=None), [_event_log("r1")])
+        assert not ok
+
+
+class TestArrayIndexIsRFC6901Compliant:
+    """roborev on 93ede26 (Low): str.isdigit() is not an RFC 6901 index test.
+
+    §4 admits "0" or [1-9][0-9]* only. isdigit() accepts leading zeros ("01")
+    and Unicode digits (U+0663 "٣"), the latter reaching int() and RESOLVING —
+    a match on a pointer the spec does not admit.
+    """
+
+    @staticmethod
+    def _with_list() -> RecordEnvelope:
+        return RecordEnvelope(
+            record_id="r1",
+            record_type="event_log",
+            timestamp="2027-11-01T00:00:00Z",
+            payload={"event_type": "logging_spec", "items": [181, 400]},
+        )
+
+    def test_plain_index_resolves(self, op) -> None:
+        ok, _ = op(_params(fields=["/payload/items/1"], op="gte", value=181), [self._with_list()])
+        assert ok
+
+    def test_leading_zero_index_does_not_resolve(self, op) -> None:
+        ok, _ = op(_params(fields=["/payload/items/01"], op="gte", value=0), [self._with_list()])
+        assert not ok, "'01' is not an RFC 6901 array index"
+
+    def test_unicode_digit_index_does_not_resolve(self, op) -> None:
+        ok, _ = op(_params(fields=["/payload/items/١"], op="gte", value=0), [self._with_list()])
+        assert not ok, "U+0661 is not an ASCII RFC 6901 array index"
+
+
+def test_field_value_also_validates_its_regex_operand() -> None:
+    """roborev on 93ede26: field_value was left out of the up-front check."""
+    with pytest.raises(ACEFEvaluationError) as exc:
+        OPERATOR_REGISTRY["field_value"]({"record_type": "event_log", "field": "/a", "op": "regex", "value": "("}, [])
+    assert exc.value.code == "ACEF-045"

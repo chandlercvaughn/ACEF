@@ -958,7 +958,10 @@ def split_commencement_state(
     if _is_before(evaluation_instant, earliest) or not _is_before(evaluation_instant, latest):
         return None
 
-    undetermined = sorted(k for k, v in limbs.items() if not _is_before(v, evaluation_instant))
+    # Strictly AFTER the instant: a limb whose date equals the evaluation
+    # instant HAS commenced (the gate is inclusive), so listing it as
+    # undetermined tells the reader an already-live class has not started.
+    undetermined = sorted(k for k, v in limbs.items() if _is_before(evaluation_instant, v))
     return {
         "earliest": earliest,
         "latest": latest,
@@ -1228,10 +1231,10 @@ def _evaluate_profiles(
                         f"Provision {prov.provision_id} applicability is indeterminate at "
                         f"{evaluation_instant}: it commences {split['earliest']} through "
                         f"{split['latest']} depending on the subject's classification, and "
-                        f"{classes} has not yet commenced. The outcome reported for this "
-                        f"provision uses the earliest limb and is a conservative "
-                        f"projection; determine the subject's Art. 6 / Annex "
-                        f"classification to settle it.",
+                        f"{classes} has not yet commenced. This provision is therefore "
+                        f"reported as not-assessed rather than satisfied or not-satisfied; "
+                        f"determine the subject's Art. 6 / Annex classification to settle "
+                        f"applicability and obtain a verdict.",
                     ).to_dict()
                 )
 
@@ -1292,6 +1295,7 @@ def _evaluate_profiles(
                         message=detail,
                         evidence_refs=[],
                         subject_scope=list(scope),
+                        error_code=("ACEF-035" if prov.provision_id in indeterminate else None),
                     )
 
                 explicit_has_record_types = {

@@ -1024,6 +1024,8 @@ def _validate_pointer_syntax(pointer: str) -> None:
 # asserting "some record has a value other than 999" was satisfied by records
 # that have no such field. Existential rules must only count a record when the
 # pointer RESOLVES and the comparison holds.
+_ARRAY_INDEX = re.compile(r"0|[1-9][0-9]*")
+
 _MISSING = object()
 
 
@@ -1037,7 +1039,11 @@ def _resolve_or_missing(record_data: dict[str, Any], pointer: str) -> Any:
                 return _MISSING
             node = node[token]
         elif isinstance(node, list):
-            if not token.isdigit():
+            # RFC 6901 §4: an array index is "0" or [1-9][0-9]* — ASCII only, no
+            # leading zeros. ``str.isdigit()`` accepts both ("01" and Unicode
+            # digits such as U+0663), and the latter reaches int() and resolves,
+            # creating matches on a pointer the spec does not admit.
+            if not _ARRAY_INDEX.fullmatch(token):
                 return _MISSING
             idx = int(token)
             if idx >= len(node):
@@ -1129,6 +1135,26 @@ def _validate_comparison_op(op: str) -> None:
             f"Unknown comparison operator {op!r} in rule. Valid operators: {', '.join(sorted(_VALID_COMPARISON_OPS))}.",
             code="ACEF-046",
         )
+
+
+def _compare_resolved(actual: Any, op: str, expected: Any) -> bool:
+    """Compare a value that is known to have RESOLVED, including explicit null.
+
+    :func:`_compare` treats ``actual is None`` as "missing path" and short-
+    circuits to ``op == "ne"``. Once :func:`_resolve_or_missing` separates
+    absence from an explicitly-null value, that branch is wrong for the latter:
+    ``eq null`` would reject a field that IS null, and ``ne null`` would match
+    it. Callers using the sentinel must route through here.
+    """
+    if actual is None:
+        _validate_comparison_op(op)
+        if op == "eq":
+            return expected is None
+        if op == "ne":
+            return expected is not None
+        # Ordering and membership against null are false, not an error.
+        return False
+    return _compare(actual, op, expected)
 
 
 def _compare(actual: Any, op: str, expected: Any) -> bool:
@@ -1273,6 +1299,9 @@ def op_field_value(
     # a malformed rule regardless of data presence — it must NOT pass vacuously
     # on zero records nor silently FALSE-FAIL on a non-empty set.
     _validate_comparison_op(op)
+    # And the regex OPERAND (ACEF-045), for the same reason: an invalid pattern
+    # is a malformed rule whether or not any record resolves the pointer.
+    _validate_regex_operand(op, value)
     matching = _filter_by_type(records, record_type)
 
     if not matching:
@@ -1283,7 +1312,7 @@ def op_field_value(
     for rec in matching:
         data = rec.to_jsonl_dict()
         actual = _resolve_pointer(data, field)
-        if _compare(actual, op, value):
+        if _compare_resolved(actual, op, value):
             evidence_refs.append(rec.record_id)
         else:
             all_match = False
@@ -1528,13 +1557,14 @@ def op_exists_where_any(
         _validate_pointer_syntax(field)
     _validate_comparison_op(op)
     _validate_regex_operand(op, value)
+    _validate_regex_operand(op, value)
     matching = _filter_by_type(records, record_type)
 
     evidence_refs: list[str] = []
     for rec in matching:
         data = rec.to_jsonl_dict()
         resolved = [v for v in (_resolve_or_missing(data, field) for field in fields) if v is not _MISSING]
-        if any(_compare(v, op, value) for v in resolved):
+        if any(_compare_resolved(v, op, value) for v in resolved):
             evidence_refs.append(rec.record_id)
 
     return len(evidence_refs) >= min_count, evidence_refs
