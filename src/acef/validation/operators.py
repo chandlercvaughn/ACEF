@@ -1152,7 +1152,12 @@ def _compare_resolved(actual: Any, op: str, expected: Any) -> bool:
             return expected is None
         if op == "ne":
             return expected is not None
-        # Ordering and membership against null are false, not an error.
+        if op == "in":
+            # `in` is VALUE membership, so an explicitly-null field is a member of
+            # a list containing null. Returning False unconditionally would make
+            # `null in [null]` false.
+            return isinstance(expected, list) and any(item is None for item in expected)
+        # Ordering against null is false, not an error.
         return False
     return _compare(actual, op, expected)
 
@@ -1312,7 +1317,7 @@ def op_field_value(
     for rec in matching:
         data = rec.to_jsonl_dict()
         actual = _resolve_pointer(data, field)
-        if _compare_resolved(actual, op, value):
+        if _compare(actual, op, value):
             evidence_refs.append(rec.record_id)
         else:
             all_match = False
@@ -1511,7 +1516,7 @@ def op_exists_where(
         actual = _resolve_or_missing(data, field)
         if actual is _MISSING:
             continue
-        if _compare(actual, op, value):
+        if _compare_resolved(actual, op, value):
             evidence_refs.append(rec.record_id)
 
     return len(evidence_refs) >= min_count, evidence_refs
@@ -1556,7 +1561,6 @@ def op_exists_where_any(
     for field in fields:
         _validate_pointer_syntax(field)
     _validate_comparison_op(op)
-    _validate_regex_operand(op, value)
     _validate_regex_operand(op, value)
     matching = _filter_by_type(records, record_type)
 

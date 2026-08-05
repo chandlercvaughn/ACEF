@@ -300,3 +300,87 @@ def test_field_value_also_validates_its_regex_operand() -> None:
     with pytest.raises(ACEFEvaluationError) as exc:
         OPERATOR_REGISTRY["field_value"]({"record_type": "event_log", "field": "/a", "op": "regex", "value": "("}, [])
     assert exc.value.code == "ACEF-045"
+
+
+class TestComparatorRoutingMatchesResolution:
+    """roborev on a3ae02f: I routed the WRONG operator through _compare_resolved.
+
+    The two comparators encode different meanings for `None`:
+      * `_compare`          — None means the path is MISSING (op == "ne" only)
+      * `_compare_resolved` — None means the value IS null
+
+    So each operator must use the comparator matching how it resolved. A
+    count=1 replacement landed on `field_value` (which resolves with
+    `_resolve_pointer`, i.e. None means missing) instead of `exists_where`
+    (which filters `_MISSING`, so None means null) — inverting both.
+    """
+
+    @staticmethod
+    def _rec(record_id: str, payload: dict) -> RecordEnvelope:
+        return RecordEnvelope(
+            record_id=record_id,
+            record_type="event_log",
+            timestamp="2027-11-01T00:00:00Z",
+            payload=payload,
+        )
+
+    def test_field_value_absent_path_does_not_satisfy_eq_null(self) -> None:
+        """field_value resolves absent -> None; it must not read as an explicit null."""
+        ok, _ = OPERATOR_REGISTRY["field_value"](
+            {"record_type": "event_log", "field": "/payload/missing", "op": "eq", "value": None},
+            [self._rec("r1", {"a": 1})],
+        )
+        assert not ok
+
+    def test_field_value_absent_path_satisfies_ne_null(self) -> None:
+        """Historic missing-path semantics for field_value are preserved."""
+        ok, _ = OPERATOR_REGISTRY["field_value"](
+            {"record_type": "event_log", "field": "/payload/missing", "op": "ne", "value": None},
+            [self._rec("r1", {"a": 1})],
+        )
+        assert ok
+
+    def test_exists_where_explicit_null_satisfies_eq_null(self) -> None:
+        ok, _ = OPERATOR_REGISTRY["exists_where"](
+            {
+                "record_type": "event_log",
+                "field": "/payload/a",
+                "op": "eq",
+                "value": None,
+                "min_count": 1,
+            },
+            [self._rec("r1", {"a": None})],
+        )
+        assert ok, "exists_where filters _MISSING, so a resolved None IS a null value"
+
+    def test_exists_where_absent_path_does_not_satisfy_eq_null(self) -> None:
+        ok, _ = OPERATOR_REGISTRY["exists_where"](
+            {
+                "record_type": "event_log",
+                "field": "/payload/zz",
+                "op": "eq",
+                "value": None,
+                "min_count": 1,
+            },
+            [self._rec("r1", {"a": None})],
+        )
+        assert not ok
+
+
+class TestInMembershipAgainstNull:
+    """roborev on a3ae02f (Low): `in` is value membership, so null ∈ [null]."""
+
+    def test_null_is_a_member_of_a_list_containing_null(self) -> None:
+        from acef.validation.operators import _compare_resolved
+
+        assert _compare_resolved(None, "in", [None]) is True
+
+    def test_null_is_not_a_member_of_a_list_without_null(self) -> None:
+        from acef.validation.operators import _compare_resolved
+
+        assert _compare_resolved(None, "in", [1, 2]) is False
+
+    def test_null_membership_against_a_non_list_is_false(self) -> None:
+        from acef.validation.operators import _compare_resolved
+
+        assert _compare_resolved(None, "in", "not-a-list") is False
