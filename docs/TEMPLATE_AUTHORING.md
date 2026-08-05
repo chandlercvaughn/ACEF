@@ -96,6 +96,16 @@ Each provision represents a regulatory requirement with machine-executable evalu
   },
   "evidence_freshness_max_days": 365,
   "retention_years": 10,
+  "retention_years_basis": "INFERRED, not stated by Art. 9. Art. 9 sets no retention period; the risk-management documentation reaches the Art. 18(1)(a) 10-year period transitively via Annex IV point 5 and Art. 11.",
+  "retention": {
+    "kind": "fixed_period",
+    "duty_holder": "provider",
+    "period": {"value": 10, "unit": "years"},
+    "anchor_event": "placed_on_market_or_put_into_service",
+    "source": "inferred",
+    "normative_text_ref": "EU AI Act Annex IV point 5 -> Art. 11 -> Art. 18(1)(a)",
+    "basis": "INFERRED, not stated by Art. 9. Art. 9 sets no retention period; the risk-management documentation reaches the Art. 18(1)(a) 10-year period transitively via Annex IV point 5 and Art. 11."
+  },
   "evaluation_scope": null,
   "evaluation": [
     {
@@ -137,7 +147,9 @@ Each provision represents a regulatory requirement with machine-executable evalu
 | `required_evidence_types` | No | `list[string]` | Record types needed (informational) |
 | `minimum_evidence_count` | No | `dict[string, int]` | Minimum record counts per type (informational) |
 | `evidence_freshness_max_days` | No | `int` | Maximum age in days (informational) |
-| `retention_years` | No | `int` | Required retention period in years |
+| `retention_years` | No | `int` | **Legacy.** Integer-years scalar, retained for backward compatibility. Setting it REQUIRES a matching `retention` block (see below) or the template fails to load with `ACEF-034` |
+| `retention_years_basis` | Conditional | `string` | Required whenever `retention_years` is set, and must equal `retention.basis` |
+| `retention` | Yes | `RetentionRequirement` | The retention determination and its provenance |
 | `evaluation_scope` | No | `string\|null` | `"package"` for package-scoped, `null` for per-subject (default) |
 | `evaluation` | Yes | `list[EvaluationRule]` | Machine-executable DSL rules |
 | `tiered_requirements` | No | `dict` | Tiered requirements by risk level |
@@ -644,3 +656,59 @@ Add test vector paths to the template's `test_vectors` field:
 4. **Review with legal counsel.** Template rules encode legal interpretations. Ensure they are reviewed by someone who understands the regulation.
 
 5. **Use the `superseded_by` field.** When a regulation is updated, create a new template and set `superseded_by` on the old one.
+
+## Retention provenance (`retention`)
+
+Every provision MUST carry a `retention` block. It records a determination
+*and* where that determination comes from, so a consumer can tell a period the
+instrument states from one a profile author inferred — and both from one nobody
+researched. A bare figure is rejected at load with `ACEF-034`.
+
+GitHub issue #1 is why this exists: `eu-ai-act-2024` shipped
+`"retention_years": 10` on eight provisions with no source, and for `article-12`
+that was a false statement of law — Art. 12 of Regulation (EU) 2024/1689 states
+no retention period at all.
+
+| Field | Required | Values | Meaning |
+|---|---|---|---|
+| `kind` | Yes | `fixed_period` \| `minimum_floor` \| `none_stated` \| `not_assessed` | The four determinations a bare integer conflates |
+| `duty_holder` | No | `provider` \| `deployer` \| `authorised_representative` \| `importer` \| `any` | Who owes the duty (default `any`) |
+| `period` | Conditional | `{value: int >= 1, unit: days\|months\|years}` | Required for `fixed_period`/`minimum_floor`; FORBIDDEN otherwise |
+| `anchor_event` | No | `placed_on_market_or_put_into_service`, `record_creation`, ... | When the clock starts (default `not_specified`) |
+| `source` | Yes | `cited` \| `inferred` \| `not_assessed` | Provenance of the DETERMINATION, not only of a number |
+| `normative_text_ref` | Conditional | `string` | Required when `source` is `cited` |
+| `basis` | Yes | `string` | Non-empty in every case |
+
+### Choosing a `kind`
+
+- **`fixed_period`** — the instrument states a definite period (Art. 18(1): ten
+  years).
+- **`minimum_floor`** — the instrument states a floor, unbounded above
+  (Art. 19(1): "at least six months"). Not representable as `retention_years`,
+  so leave that null.
+- **`none_stated`** — the instrument was read and states no period. Use
+  `source: "cited"` and cite the text you read. This is a *positive* finding.
+- **`not_assessed`** — nobody has determined it. Use `source: "not_assessed"`.
+  Honest, and distinguishable from `none_stated`.
+
+### Invariants (enforced at load; violations raise `ACEF-034`)
+
+1. `fixed_period`/`minimum_floor` require a `period`.
+2. `none_stated`/`not_assessed` must NOT carry one.
+3. `kind == "not_assessed"` if and only if `source == "not_assessed"`.
+4. `source: "inferred"` requires the literal token `INFERRED` in `basis`, so a
+   derived figure is visibly distinct from a cited one.
+5. `source: "cited"` requires a non-empty `normative_text_ref` and must NOT
+   contain `INFERRED` — a determination is grounded or derived, not both.
+6. `basis` is non-empty always.
+
+When `retention_years` is also set it must agree with the block: a
+`fixed_period` in `years` of the same magnitude, and `retention_years_basis`
+equal to `retention.basis`.
+
+### Do not attribute a period to the wrong article
+
+A conformance guard rejects any provision whose `normative_text_ref` sources a
+period-bearing determination to Art. 12. Retention of Art. 12(1) logs is
+governed by Art. 19(1) (provider) and Art. 26(6) (deployer). The same guard
+sweeps record `legal_basis` fields across the golden corpus.
