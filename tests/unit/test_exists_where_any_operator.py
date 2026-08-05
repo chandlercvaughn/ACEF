@@ -384,3 +384,46 @@ class TestInMembershipAgainstNull:
         from acef.validation.operators import _compare_resolved
 
         assert _compare_resolved(None, "in", "not-a-list") is False
+
+
+class TestFieldValueDistinguishesAbsentFromNull:
+    """roborev on d81afd8: field_value could not tell the two apart.
+
+    `_resolve_pointer` returns None for both, so whichever comparator it used
+    was wrong for one case: `_compare` preserved missing-path semantics but made
+    `eq null` reject a field that IS null, and `_compare_resolved` would have
+    broken the missing-path contract instead. It now resolves through the
+    sentinel and picks the comparator per case.
+    """
+
+    @staticmethod
+    def _rec(payload: dict) -> RecordEnvelope:
+        return RecordEnvelope(
+            record_id="r1",
+            record_type="event_log",
+            timestamp="2027-11-01T00:00:00Z",
+            payload=payload,
+        )
+
+    def _fv(self, payload: dict, field: str, op: str, value: object) -> bool:
+        ok, _ = OPERATOR_REGISTRY["field_value"](
+            {"record_type": "event_log", "field": field, "op": op, "value": value},
+            [self._rec(payload)],
+        )
+        return ok
+
+    def test_absent_path_keeps_historic_missing_semantics(self) -> None:
+        """Only `ne` matches a missing path — the documented §3.5 behaviour."""
+        assert not self._fv({"a": 1}, "/payload/zz", "eq", None)
+        assert self._fv({"a": 1}, "/payload/zz", "ne", None)
+
+    def test_explicit_null_compares_as_a_value(self) -> None:
+        assert self._fv({"a": None}, "/payload/a", "eq", None)
+        assert not self._fv({"a": None}, "/payload/a", "ne", None)
+
+    def test_explicit_null_is_a_member_of_a_list_containing_null(self) -> None:
+        assert self._fv({"a": None}, "/payload/a", "in", [None])
+
+    def test_ordinary_values_are_unaffected(self) -> None:
+        assert self._fv({"a": 5}, "/payload/a", "eq", 5)
+        assert not self._fv({"a": 5}, "/payload/a", "eq", 6)

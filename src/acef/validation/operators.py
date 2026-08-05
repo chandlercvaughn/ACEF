@@ -1316,8 +1316,19 @@ def op_field_value(
     all_match = True
     for rec in matching:
         data = rec.to_jsonl_dict()
-        actual = _resolve_pointer(data, field)
-        if _compare(actual, op, value):
+        # Resolve through the sentinel so an ABSENT path and an explicitly-null
+        # VALUE are distinguishable. Routing both through _compare preserved
+        # missing-path semantics but made `eq null` / `in [null]` reject a field
+        # that IS null; routing both through _compare_resolved would have broken
+        # the missing-path contract instead. They are different facts and need
+        # different comparators.
+        actual = _resolve_or_missing(data, field)
+        matched = (
+            _compare(None, op, value)  # historic missing-path: only `ne` matches
+            if actual is _MISSING
+            else _compare_resolved(actual, op, value)
+        )
+        if matched:
             evidence_refs.append(rec.record_id)
         else:
             all_match = False
