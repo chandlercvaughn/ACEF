@@ -278,3 +278,39 @@ class TestAdvisoryDiagnosticsRespectApplicability:
         codes, n_results = self._run(tmp_path, "high-risk")
         assert n_results > 0
         assert "ACEF-036" in codes, "gating must not suppress the genuine case"
+
+
+class TestRetentionCeilingIsUnitAware:
+    """roborev on 08d3f25: a unit-blind cap is wrong in both directions.
+
+    `le=1200` on the raw value rejected 1201 DAYS (~3.3 years, entirely
+    ordinary) while admitting 1200 YEARS, despite the intent being a 100-year
+    ceiling. Only month-denominated periods can overflow the calendar scan, but
+    the bound must be expressed in each period's own unit.
+    """
+
+    @pytest.mark.parametrize(
+        ("value", "unit"),
+        [(1201, "days"), (36525, "days"), (1200, "months"), (100, "years"), (6, "months")],
+    )
+    def test_periods_within_a_century_are_accepted(self, value: int, unit: str) -> None:
+        from acef.templates.models import RetentionPeriod
+
+        assert RetentionPeriod(value=value, unit=unit).value == value
+
+    @pytest.mark.parametrize(("value", "unit"), [(36526, "days"), (1201, "months"), (101, "years"), (1200, "years")])
+    def test_periods_beyond_a_century_are_rejected(self, value: int, unit: str) -> None:
+        from pydantic import ValidationError
+
+        from acef.templates.models import RetentionPeriod
+
+        with pytest.raises(ValidationError, match="ACEF-034"):
+            RetentionPeriod(value=value, unit=unit)
+
+    def test_the_engine_bound_and_the_model_bound_agree_for_months(self) -> None:
+        """The model must not admit a month count the engine scan would reject."""
+        from acef.templates.models import _MAX_PERIOD_BY_UNIT
+        from acef.validation.engine import _MAX_RETENTION_MONTHS
+
+        assert _MAX_PERIOD_BY_UNIT["months"] == _MAX_RETENTION_MONTHS
+        calendar_months_to_days(_MAX_PERIOD_BY_UNIT["months"])  # must not raise

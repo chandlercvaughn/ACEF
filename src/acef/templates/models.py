@@ -43,6 +43,10 @@ class SubProvision(BaseModel):
     description: str = ""
 
 
+# 100 years, expressed per unit. 36525 days = 100 Julian years incl. leap days.
+_MAX_PERIOD_BY_UNIT = {"days": 36525, "months": 1200, "years": 100}
+
+
 class RetentionPeriod(BaseModel):
     """A retention magnitude with its unit.
 
@@ -52,12 +56,26 @@ class RetentionPeriod(BaseModel):
     representable.
     """
 
-    # Upper bound mirrors validation.engine._MAX_RETENTION_MONTHS (1200 months =
-    # 100 years). Without it a model-valid but absurd value reaches the
-    # calendar-minimum scan and aborts validation with an uncaught ValueError;
-    # no real statutory retention approaches a century.
-    value: int = Field(ge=1, le=1200)
+    value: int = Field(ge=1)
     unit: Literal["days", "months", "years"]
+
+    @model_validator(mode="after")
+    def _check_ceiling(self) -> RetentionPeriod:
+        """Cap the period at 100 years, expressed in this period's OWN unit.
+
+        A unit-blind cap is wrong in both directions: it rejects 1201 days
+        (~3.3 years, entirely ordinary) while admitting 1200 years. The ceiling
+        exists so a month-denominated period cannot overflow
+        ``datetime.date`` inside the calendar-minimum scan
+        (validation.engine._MAX_RETENTION_MONTHS), and no real statutory
+        retention approaches a century.
+        """
+        if self.value > _MAX_PERIOD_BY_UNIT[self.unit]:
+            raise ValueError(
+                f"ACEF-034: retention period {self.value} {self.unit} exceeds the "
+                f"100-year ceiling ({_MAX_PERIOD_BY_UNIT[self.unit]} {self.unit})"
+            )
+        return self
 
 
 class RetentionRequirement(BaseModel):
