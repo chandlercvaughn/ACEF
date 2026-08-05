@@ -52,7 +52,11 @@ class RetentionPeriod(BaseModel):
     representable.
     """
 
-    value: int = Field(ge=1)
+    # Upper bound mirrors validation.engine._MAX_RETENTION_MONTHS (1200 months =
+    # 100 years). Without it a model-valid but absurd value reaches the
+    # calendar-minimum scan and aborts validation with an uncaught ValueError;
+    # no real statutory retention approaches a century.
+    value: int = Field(ge=1, le=1200)
     unit: Literal["days", "months", "years"]
 
 

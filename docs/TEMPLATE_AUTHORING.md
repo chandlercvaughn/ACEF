@@ -149,7 +149,7 @@ Each provision represents a regulatory requirement with machine-executable evalu
 | `evidence_freshness_max_days` | No | `int` | Maximum age in days (informational) |
 | `retention_years` | No | `int` | **Legacy.** Integer-years scalar, retained for backward compatibility. Setting it REQUIRES a matching `retention` block (see below) or the template fails to load with `ACEF-034` |
 | `retention_years_basis` | Conditional | `string` | Required whenever `retention_years` is set, and must equal `retention.basis` |
-| `retention` | Yes | `RetentionRequirement` | The retention determination and its provenance |
+| `retention` | Yes for bundled templates | `RetentionRequirement` | The retention determination and its provenance. The Pydantic model defaults it to `None` so third-party `Provision` objects built in code keep working; presence is enforced across the shipped templates by the repo-wide conformance guard |
 | `evaluation_scope` | No | `string\|null` | `"package"` for package-scoped, `null` for per-subject (default) |
 | `evaluation` | Yes | `list[EvaluationRule]` | Machine-executable DSL rules |
 | `tiered_requirements` | No | `dict` | Tiered requirements by risk level |
@@ -659,7 +659,11 @@ Add test vector paths to the template's `test_vectors` field:
 
 ## Retention provenance (`retention`)
 
-Every provision MUST carry a `retention` block. It records a determination
+Every provision in a template shipped by this repository MUST carry a
+`retention` block, enforced by a conformance guard parametrized over all
+templates. (The `Provision` model itself defaults the field to `None`, so
+third-party provisions constructed in code are unaffected; what the model
+rejects is an INCONSISTENT block, not an absent one.) It records a determination
 *and* where that determination comes from, so a consumer can tell a period the
 instrument states from one a profile author inferred — and both from one nobody
 researched. A bare figure is rejected at load with `ACEF-034`.
@@ -704,11 +708,17 @@ no retention period at all.
 
 When `retention_years` is also set it must agree with the block: a
 `fixed_period` in `years` of the same magnitude, and `retention_years_basis`
-equal to `retention.basis`.
+equal to `retention.basis`. Conversely, `retention_years_basis` MUST be absent
+when `retention_years` is — a basis for a figure that does not exist is itself
+an `ACEF-034` violation. Put the reasoning in `retention.basis` instead.
 
 ### Do not attribute a period to the wrong article
 
-A conformance guard rejects any provision whose `normative_text_ref` sources a
-period-bearing determination to Art. 12. Retention of Art. 12(1) logs is
+A conformance guard rejects any provision whose **`retention.normative_text_ref`**
+sources a period-bearing (`fixed_period` / `minimum_floor`) determination to
+Art. 12. The PROVISION-level `normative_text_ref` is untouched — `article-12`
+legitimately cites "EU AI Act Art. 12(1)-(3)" there, and its own retention block
+cites Art. 12 too, because `none_stated` records the documented ABSENCE of a
+period rather than asserting one. Retention of Art. 12(1) logs is
 governed by Art. 19(1) (provider) and Art. 26(6) (deployer). The same guard
 sweeps record `legal_basis` fields across the golden corpus.

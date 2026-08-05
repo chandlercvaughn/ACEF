@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Any, Concatenate, ParamSpec, TypeVar, cast
 
 from pydantic import ValidationError
 
-from acef.errors import ACEFError, ACEFProfileError, ACEFSchemaError
+from acef.errors import ACEFError, ACEFSchemaError
 from acef.integrity import (
     canonicalize,
     path_nfc_utf8_problem,
@@ -67,7 +67,7 @@ from acef.schemas.registry import (
     load_schema,
     parse_core_version_minor,
 )
-from acef.templates.registry import load_template
+from acef.templates.registry import list_templates, load_template
 
 # Spec §3.1 timestamp format — ISO 8601 with explicit ``Z`` suffix and no
 # sub-second precision. Both the model default factories and the injected-
@@ -1623,16 +1623,16 @@ class Package:
         # the historical default so callers outside the bundled registry are
         # unaffected.
         if template_version is None:
-            try:
+            # Discriminate on REGISTRY MEMBERSHIP, not on the error code:
+            # load_template raises ACEF-030 for a missing file, for malformed
+            # JSON, AND (via the wrap) for model failures, so the code cannot
+            # tell "unknown third-party profile" from "known template that is
+            # broken". Only the former may fall back — otherwise registry
+            # corruption silently produces bundles pinning a version that never
+            # existed.
+            if profile_id in list_templates():
                 _resolved_template_version = load_template(profile_id).version
-            except ACEFProfileError as exc:
-                # ONLY a genuinely unknown profile falls back. A known template
-                # that fails to load — malformed JSON, or an ACEF-034 retention
-                # invariant — must surface, not be silently relabelled as a
-                # third-party id and stamped 1.0.0; registry corruption would
-                # otherwise produce bundles pinning a version that never existed.
-                if exc.code != "ACEF-030":
-                    raise
+            else:
                 _resolved_template_version = "1.0.0"
         else:
             _resolved_template_version = template_version

@@ -360,8 +360,10 @@ def test_every_committed_assessment_matches_its_bundle_identity() -> None:
         if hashes.exists():
             expected = compute_bundle_digest(json.loads(hashes.read_text(encoding="utf-8")))
             declared = (data.get("evidence_bundle_ref") or {}).get("content_hash")
-            if declared and declared != expected:
-                stale.append(f"{rel}: evidence_bundle_ref.content_hash is stale")
+            # Compare unconditionally: a missing/empty/null hash is not "no claim
+            # to check", it is an assessment that fails to identify its bundle.
+            if declared != expected:
+                stale.append(f"{rel}: evidence_bundle_ref.content_hash is {declared!r}, expected {expected!r}")
 
         for entry in data.get("profiles_evaluated") or []:
             tid = str(entry).split(":")[0]
