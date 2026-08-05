@@ -151,6 +151,10 @@ def test_cited_retention_names_its_source(template_id: str) -> None:
 # from the wrong one. An allow-list of negated phrasings would have to enumerate
 # every way of writing that sentence, and would silently rot.
 
+# Unconditional Art. 12 match, for CITATION fields where no prose exemption
+# is warranted.
+_ART12_ANY = re.compile(r"art(?:icle)?\.?\s*12\b|(?<![\w-])article-12(?![\w-])", re.IGNORECASE)
+
 _ART12_CITATION = re.compile(
     r"art(?:icle)?\.?\s*12\b(?!\s*\(1\)\s*logs)|(?<![\w-])article-12(?![\w-])",
     re.IGNORECASE,
@@ -238,17 +242,26 @@ _BUNDLE_ROOT = _ROOT / "tests" / "conformance" / "golden-bundles"
 
 
 def _iter_record_retention() -> list[tuple[str, dict]]:
-    """Every (source, retention_policy_summary) across the golden corpus."""
+    """Every retention block across the golden corpus, on BOTH surfaces.
+
+    ACEF states record retention in two places and a record may use either: the
+    ENVELOPE (``retention.legal_basis`` / ``min_retention_days``) and the
+    ``logging_spec`` PAYLOAD (``retention_policy_summary``). Sweeping only the
+    payload would let an envelope-side Art. 12 attribution pass unnoticed.
+    """
     found: list[tuple[str, dict]] = []
     for jsonl in sorted(_BUNDLE_ROOT.glob("*/records/*.jsonl")):
+        rel = jsonl.relative_to(_ROOT)
         for lineno, line in enumerate(jsonl.read_text(encoding="utf-8").splitlines(), 1):
             if not line.strip():
                 continue
             rec = json.loads(line)
             summary = (rec.get("payload") or {}).get("retention_policy_summary")
             if isinstance(summary, dict):
-                rel = jsonl.relative_to(_ROOT)
-                found.append((f"{rel}:{lineno}", summary))
+                found.append((f"{rel}:{lineno} payload", summary))
+            envelope = rec.get("retention")
+            if isinstance(envelope, dict):
+                found.append((f"{rel}:{lineno} envelope", envelope))
     return found
 
 
@@ -265,7 +278,11 @@ def test_no_golden_record_attributes_retention_to_article_12() -> None:
     """
     for source, summary in _iter_record_retention():
         basis = str(summary.get("legal_basis", ""))
-        if _ART12_CITATION.search(basis):
+        # NOT _ART12_CITATION: that pattern exempts "Art. 12(1) logs" so
+        # NORMATIVE PROSE can name the logs Art. 12 requires. A legal_basis is a
+        # pure citation with no prose around it, so the exemption would let the
+        # exact misattribution "EU AI Act Art. 12(1) logs" evade the guard.
+        if _ART12_ANY.search(basis):
             pytest.fail(
                 f"{source} attributes a {summary.get('min_days')}-day retention to "
                 f"Art. 12, which states none: legal_basis={basis!r}. Cite Art. 19(1) "

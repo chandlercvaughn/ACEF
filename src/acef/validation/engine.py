@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import re
 from datetime import UTC, date, datetime
+from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -870,6 +871,7 @@ def _parse_iso_instant(value: str) -> datetime | None:
 _CLASSIFICATION_LIMB = re.compile(r"^annex_[a-z]+_", re.IGNORECASE)
 
 
+@lru_cache(maxsize=64)
 def calendar_months_to_days(months: int) -> int:
     """Return the MINIMUM number of days that ``months`` calendar months can span.
 
@@ -887,10 +889,13 @@ def calendar_months_to_days(months: int) -> int:
     """
     if months < 1:
         raise ValueError(f"months must be >= 1, got {months}")
-    # Walk every start month across a leap and non-leap year and take the
-    # shortest span, rather than assuming a 30- or 31-day month.
+    # Walk every start month of a FULL 400-year Gregorian cycle. Sampling only a
+    # leap/non-leap PAIR is not enough: century years divisible by 100 but not
+    # 400 are common years, so e.g. 48 months starting 2097-03 spans 1460 days
+    # while every start inside 2027-2028 gives 1461 — a two-year window returns
+    # a minimum that is one day too high and would reject a lawful policy.
     shortest: int | None = None
-    for year in (2027, 2028):  # 2028 is a leap year; together these cover both
+    for year in range(2000, 2400):
         for month in range(1, 13):
             start = date(year, month, 1)
             total = month - 1 + months
@@ -1127,6 +1132,24 @@ def _evaluate_profiles(
         # Per spec §3.6 the rules for these provisions MUST produce a
         # ``skipped`` outcome rather than being evaluated normally — a
         # provision that is not yet legally in force cannot fail.
+        # Risk classifications actually present in this bundle. ACEF-035/036 are
+        # ADVISORY notes about how a provision was evaluated, so emitting them for
+        # a provision that applies to no subject here reports an evaluation that
+        # never happened (roborev on d04da7d/0c5c6c8: a minimal-risk-only bundle
+        # was told an Art. 19 screen occurred, with zero rule results).
+        _bundle_risk_classes = {
+            str(subj.get("risk_classification", ""))
+            for subj in (manifest_data.get("subjects") or [])
+            if isinstance(subj, dict)
+        }
+
+        def _applies_to_any_subject(prov: Any) -> bool:
+            if not prov.applicable_to:
+                return True
+            if not _bundle_risk_classes or _bundle_risk_classes == {""}:
+                return True
+            return bool(set(prov.applicable_to) & _bundle_risk_classes)
+
         not_yet_effective: set[str] = set()
         # Provisions whose applicability cannot be settled for this subject
         # (ACEF-035). They must NOT roll up to a binary verdict: an Annex I
@@ -1153,9 +1176,13 @@ def _evaluate_profiles(
             # outcome reported below is a conservative projection, not a
             # determination — say so rather than returning an unqualified binary
             # with the caveat buried in documentation.
-            split = split_commencement_state(
-                (prov.tiered_requirements or {}).get("adoption"),
-                evaluation_instant,
+            split = (
+                split_commencement_state(
+                    (prov.tiered_requirements or {}).get("adoption"),
+                    evaluation_instant,
+                )
+                if _applies_to_any_subject(prov)
+                else None
             )
             # ACEF-036: the provision states its retention duty in calendar months
             # but the rules can only screen a stored day-count against a constant.
@@ -1163,7 +1190,8 @@ def _evaluate_profiles(
             # screen is not mistaken for a determination.
             retention = prov.retention
             if (
-                retention is not None
+                _applies_to_any_subject(prov)
+                and retention is not None
                 and retention.period is not None
                 and retention.period.unit == "months"
                 # ``not isinstance(v, bool)`` is load-bearing: bool subclasses int

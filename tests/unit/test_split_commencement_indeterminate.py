@@ -181,7 +181,10 @@ class TestDiagnosticFiresThroughValidateBundle:
         from acef.validation.engine import validate_bundle
 
         pkg = Package(producer={"name": "t", "version": "1"})
-        system = pkg.add_subject("ai_system", name="S", version="1")
+        # high-risk, not the minimal-risk default: article-9 is high-risk only, so
+        # a minimal-risk subject exercises the no-applicable-provision path and
+        # asserts nothing about the diagnostic (roborev on 0c5c6c8).
+        system = pkg.add_subject("ai_system", name="S", version="1", risk_classification="high-risk")
         pkg.add_profile("eu-ai-act-2024", provisions=["article-9"])
         pkg.record(
             "risk_register",
@@ -225,11 +228,24 @@ class TestDiagnosticFiresThroughValidateBundle:
         assert "annex_i_high_risk" in msg, "must name the attribute that would settle it"
         assert "2028-08-02" in msg and "2027-12-02" in msg, "both limbs must be visible"
 
-    def test_indeterminacy_does_not_change_any_rule_outcome(self, tmp_path) -> None:
-        """Info severity: it annotates the result, it does not alter it."""
+    def test_indeterminacy_replaces_the_verdict_rather_than_annotating_it(self, tmp_path) -> None:
+        """Rule outcomes inside the window are ERROR, not a pass/fail verdict.
+
+        This originally asserted the outcomes were IDENTICAL inside and outside
+        the window — encoding the behaviour roborev then flagged as a HIGH: the
+        diagnostic was emitted while the provision still produced a binary
+        verdict. They must differ, and the difference must be ERROR (which rolls
+        up to not-assessed at §3.7 step 2), never a compliance conclusion.
+        """
+        from acef.models.enums import RuleOutcome
+
         inside = self._bundle(tmp_path / "a", "2028-01-15T00:00:00Z")
         after = self._bundle(tmp_path / "b", "2029-01-01T00:00:00Z")
-        assert [r.outcome for r in inside.results] == [r.outcome for r in after.results]
+        assert inside.results, "the provision must still appear in the assessment"
+        assert {r.outcome for r in inside.results} == {RuleOutcome.ERROR}
+        assert RuleOutcome.ERROR not in {r.outcome for r in after.results}, (
+            "outside the window the rules must genuinely evaluate"
+        )
 
 
 class TestIndeterminateDoesNotYieldABinaryVerdict:

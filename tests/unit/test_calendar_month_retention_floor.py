@@ -204,3 +204,77 @@ class TestBoolIsNotADayCount:
             "ACEF-036 fired on a provision with no day-count screen; a rule "
             "comparing against a boolean is not a day threshold"
         )
+
+
+class TestCalendarMinimumCoversTheGregorianCycle:
+    """roborev on d04da7d (Low): a two-year sample misses century behaviour.
+
+    Century years divisible by 100 but not 400 are common years, so 48 months
+    starting 2097-03 spans 1460 days while every start inside 2027-2028 gives
+    1461. A window that narrow returns a minimum one day too HIGH, which would
+    reject a lawful policy — the exact failure direction the lower bound exists
+    to avoid.
+    """
+
+    def test_forty_eight_months_accounts_for_a_non_leap_century(self) -> None:
+        assert calendar_months_to_days(48) == 1460, "48 months can span 1460 days across a non-leap century year (2100)"
+
+    def test_minimum_is_never_above_any_real_span(self) -> None:
+        """Exhaustive over a full 400-year cycle for several month counts."""
+        for months in (1, 6, 12, 48, 60):
+            bound = calendar_months_to_days(months)
+            for year in range(2000, 2400):
+                for month in range(1, 13):
+                    total = month - 1 + months
+                    span = (dt.date(year + total // 12, total % 12 + 1, 1) - dt.date(year, month, 1)).days
+                    assert bound <= span, (
+                        f"{months} months: bound {bound} exceeds a real span of {span} starting {year}-{month:02d}"
+                    )
+
+
+class TestAdvisoryDiagnosticsRespectApplicability:
+    """roborev on d04da7d (Medium): ACEF-036 fired before applicability filtering.
+
+    A bundle whose only subject is minimal-risk was told an Article 19 retention
+    screen occurred, even though that high-risk-only provision produced zero
+    rule results. An advisory about how a provision was evaluated must not be
+    emitted when it was not evaluated at all.
+    """
+
+    @staticmethod
+    def _run(tmp_path, risk_classification: str):
+        from acef.package import Package
+        from acef.validation.engine import validate_bundle
+
+        pkg = Package(producer={"name": "t", "version": "1"})
+        subject = pkg.add_subject("ai_system", name="S", version="1", risk_classification=risk_classification)
+        pkg.add_profile("eu-ai-act-2024", provisions=["article-19"])
+        pkg.record(
+            "event_log",
+            provisions=["article-19"],
+            payload={
+                "event_type": "logging_spec",
+                "retention_policy_summary": {
+                    "min_days": 400,
+                    "start_event": "record_creation",
+                    "legal_basis": "EU AI Act Art. 19(1)",
+                },
+            },
+            obligation_role="provider",
+            entity_refs={"subject_refs": [subject.id]},
+            timestamp="2028-09-01T00:00:00Z",
+        )
+        out = tmp_path / risk_classification
+        pkg.export(str(out))
+        assessment = validate_bundle(out, profiles=["eu-ai-act-2024"], evaluation_instant="2028-09-15T12:00:00Z")
+        return [d.get("code") for d in assessment.structural_errors], len(assessment.results)
+
+    def test_no_advisory_when_the_provision_applies_to_no_subject(self, tmp_path) -> None:
+        codes, n_results = self._run(tmp_path, "minimal-risk")
+        assert n_results == 0, "article-19 is high-risk only; nothing should evaluate"
+        assert "ACEF-036" not in codes, "reported a calendar screen for a provision that never ran"
+
+    def test_advisory_still_fires_when_the_provision_does_apply(self, tmp_path) -> None:
+        codes, n_results = self._run(tmp_path, "high-risk")
+        assert n_results > 0
+        assert "ACEF-036" in codes, "gating must not suppress the genuine case"
