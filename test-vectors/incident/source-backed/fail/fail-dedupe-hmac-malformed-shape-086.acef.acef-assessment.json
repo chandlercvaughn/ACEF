@@ -1,1 +1,12 @@
-{"class":"source-backed","disposition":"fail","emitted_codes":["ACEF-032","ACEF-086"],"vector":"fail-dedupe-hmac-malformed-shape-086"}
+{
+  "class": "source-backed",
+  "disposition": "fail",
+  "emitted_codes": [
+    "ACEF-032",
+    "ACEF-086"
+  ],
+  "vector": "fail-dedupe-hmac-malformed-shape-086",
+  "evidence_bundle_ref": {
+    "content_hash": "sha256:0f691393c92dec5de0e9d3bf7c1f5e1bb51a60f995991c2967cfb7eb9b0178b4"
+  }
+}

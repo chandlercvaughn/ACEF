@@ -1,1 +1,248 @@
-{"assessment_id":"urn:acef:asx:67caa656-e9cd-4c0c-88f6-40ef5e8881a3","assessor":{"name":"acef-validator","organization":"AI Commons","version":"0.1.0"},"evaluation_instant":"2026-03-15T12:00:00Z","evidence_bundle_ref":{"content_hash":"sha256:cc296990074cf4adc6f33a7e282f6a0861067d2b80f61703867ab3efcdb88fc2","package_id":"urn:acef:pkg:2f95873f-b97d-4b4a-84ab-bab78acb9af6"},"integrity":null,"profiles_evaluated":["us-omb-m-24-10:1.0.0"],"provision_summary":[{"evidence_refs":["urn:acef:rec:29815fd3-3032-4018-803d-e342e7e68ea6","urn:acef:rec:70cc14c5-c915-4bbb-93c3-6fd1b327514c"],"fail_count":0,"profile_id":"us-omb-m-24-10","provision_id":"omb-caio","provision_outcome":"satisfied","skipped_count":0,"subject_scope":["urn:acef:sub:a2108281-5afd-4c20-880e-0fd3ebadf961"],"warning_count":0},{"evidence_refs":["urn:acef:rec:29815fd3-3032-4018-803d-e342e7e68ea6","urn:acef:rec:70cc14c5-c915-4bbb-93c3-6fd1b327514c"],"fail_count":0,"profile_id":"us-omb-m-24-10","provision_id":"omb-governance","provision_outcome":"satisfied","skipped_count":0,"subject_scope":["urn:acef:sub:a2108281-5afd-4c20-880e-0fd3ebadf961"],"warning_count":0},{"evidence_refs":["urn:acef:rec:29815fd3-3032-4018-803d-e342e7e68ea6","urn:acef:rec:70cc14c5-c915-4bbb-93c3-6fd1b327514c"],"fail_count":0,"profile_id":"us-omb-m-24-10","provision_id":"omb-inventory","provision_outcome":"satisfied","skipped_count":0,"subject_scope":["urn:acef:sub:a2108281-5afd-4c20-880e-0fd3ebadf961"],"warning_count":0},{"evidence_refs":["urn:acef:rec:29815fd3-3032-4018-803d-e342e7e68ea6","urn:acef:rec:70cc14c5-c915-4bbb-93c3-6fd1b327514c"],"fail_count":0,"profile_id":"us-omb-m-24-10","provision_id":"omb-rights-safety","provision_outcome":"satisfied","skipped_count":0,"subject_scope":["urn:acef:sub:a2108281-5afd-4c20-880e-0fd3ebadf961"],"warning_count":0}],"results":[{"error_code":null,"evidence_refs":["urn:acef:rec:29815fd3-3032-4018-803d-e342e7e68ea6","urn:acef:rec:70cc14c5-c915-4bbb-93c3-6fd1b327514c"],"message":null,"outcome":"passed","profile_id":"us-omb-m-24-10","provision_id":"omb-inventory","rule_id":"omb-inv-governance-policy","rule_severity":"fail","subject_scope":["urn:acef:sub:a2108281-5afd-4c20-880e-0fd3ebadf961"]},{"error_code":null,"evidence_refs":["urn:acef:rec:29815fd3-3032-4018-803d-e342e7e68ea6"],"message":null,"outcome":"passed","profile_id":"us-omb-m-24-10","provision_id":"omb-inventory","rule_id":"omb-inv-inventory-variant","rule_severity":"fail","subject_scope":["urn:acef:sub:a2108281-5afd-4c20-880e-0fd3ebadf961"]},{"error_code":null,"evidence_refs":["urn:acef:rec:29815fd3-3032-4018-803d-e342e7e68ea6","urn:acef:rec:70cc14c5-c915-4bbb-93c3-6fd1b327514c"],"message":null,"outcome":"passed","profile_id":"us-omb-m-24-10","provision_id":"omb-inventory","rule_id":"omb-inv-freshness","rule_severity":"warning","subject_scope":["urn:acef:sub:a2108281-5afd-4c20-880e-0fd3ebadf961"]},{"error_code":null,"evidence_refs":["urn:acef:rec:29815fd3-3032-4018-803d-e342e7e68ea6","urn:acef:rec:70cc14c5-c915-4bbb-93c3-6fd1b327514c"],"message":null,"outcome":"passed","profile_id":"us-omb-m-24-10","provision_id":"omb-inventory","rule_id":"omb-inv-entity-linked","rule_severity":"warning","subject_scope":["urn:acef:sub:a2108281-5afd-4c20-880e-0fd3ebadf961"]},{"error_code":null,"evidence_refs":["urn:acef:rec:29815fd3-3032-4018-803d-e342e7e68ea6","urn:acef:rec:70cc14c5-c915-4bbb-93c3-6fd1b327514c"],"message":null,"outcome":"passed","profile_id":"us-omb-m-24-10","provision_id":"omb-caio","rule_id":"omb-caio-designation","rule_severity":"fail","subject_scope":["urn:acef:sub:a2108281-5afd-4c20-880e-0fd3ebadf961"]},{"error_code":null,"evidence_refs":["urn:acef:rec:29815fd3-3032-4018-803d-e342e7e68ea6","urn:acef:rec:70cc14c5-c915-4bbb-93c3-6fd1b327514c"],"message":null,"outcome":"passed","profile_id":"us-omb-m-24-10","provision_id":"omb-caio","rule_id":"omb-caio-inventory-has-caio","rule_severity":"fail","subject_scope":["urn:acef:sub:a2108281-5afd-4c20-880e-0fd3ebadf961"]},{"error_code":null,"evidence_refs":["urn:acef:rec:29815fd3-3032-4018-803d-e342e7e68ea6","urn:acef:rec:70cc14c5-c915-4bbb-93c3-6fd1b327514c"],"message":null,"outcome":"passed","profile_id":"us-omb-m-24-10","provision_id":"omb-rights-safety","rule_id":"omb-rights-safety-classification","rule_severity":"fail","subject_scope":["urn:acef:sub:a2108281-5afd-4c20-880e-0fd3ebadf961"]},{"error_code":null,"evidence_refs":["urn:acef:rec:29815fd3-3032-4018-803d-e342e7e68ea6","urn:acef:rec:70cc14c5-c915-4bbb-93c3-6fd1b327514c"],"message":null,"outcome":"passed","profile_id":"us-omb-m-24-10","provision_id":"omb-rights-safety","rule_id":"omb-rights-safety-rationale","rule_severity":"warning","subject_scope":["urn:acef:sub:a2108281-5afd-4c20-880e-0fd3ebadf961"]},{"error_code":null,"evidence_refs":["urn:acef:rec:29815fd3-3032-4018-803d-e342e7e68ea6","urn:acef:rec:70cc14c5-c915-4bbb-93c3-6fd1b327514c"],"message":null,"outcome":"passed","profile_id":"us-omb-m-24-10","provision_id":"omb-governance","rule_id":"omb-gov-governance-policy","rule_severity":"fail","subject_scope":["urn:acef:sub:a2108281-5afd-4c20-880e-0fd3ebadf961"]},{"error_code":null,"evidence_refs":["urn:acef:rec:70cc14c5-c915-4bbb-93c3-6fd1b327514c"],"message":null,"outcome":"passed","profile_id":"us-omb-m-24-10","provision_id":"omb-governance","rule_id":"omb-gov-attachment","rule_severity":"warning","subject_scope":["urn:acef:sub:a2108281-5afd-4c20-880e-0fd3ebadf961"]}],"structural_errors":[],"template_digests":{"us-omb-m-24-10:1.0.0":"sha256:b4ec3df14573ed60d872b8c34525a19011f687dca164de41b10a4cf34e55d4a9"},"timestamp":"2026-06-17T18:04:18Z","versioning":{"assessment_version":"1.0.0","core_version":"1.0.0"}}
+{
+  "assessment_id": "urn:acef:asx:67caa656-e9cd-4c0c-88f6-40ef5e8881a3",
+  "assessor": {
+    "name": "acef-validator",
+    "organization": "AI Commons",
+    "version": "0.1.0"
+  },
+  "evaluation_instant": "2026-03-15T12:00:00Z",
+  "evidence_bundle_ref": {
+    "content_hash": "sha256:0c3afedb68b8ffad4817857c6607ffcca313c17227bd3520d0e7c5be554080a9",
+    "package_id": "urn:acef:pkg:2f95873f-b97d-4b4a-84ab-bab78acb9af6"
+  },
+  "integrity": null,
+  "profiles_evaluated": [
+    "us-omb-m-24-10:1.1.0"
+  ],
+  "provision_summary": [
+    {
+      "evidence_refs": [
+        "urn:acef:rec:29815fd3-3032-4018-803d-e342e7e68ea6",
+        "urn:acef:rec:70cc14c5-c915-4bbb-93c3-6fd1b327514c"
+      ],
+      "fail_count": 0,
+      "profile_id": "us-omb-m-24-10",
+      "provision_id": "omb-caio",
+      "provision_outcome": "satisfied",
+      "skipped_count": 0,
+      "subject_scope": [
+        "urn:acef:sub:a2108281-5afd-4c20-880e-0fd3ebadf961"
+      ],
+      "warning_count": 0
+    },
+    {
+      "evidence_refs": [
+        "urn:acef:rec:29815fd3-3032-4018-803d-e342e7e68ea6",
+        "urn:acef:rec:70cc14c5-c915-4bbb-93c3-6fd1b327514c"
+      ],
+      "fail_count": 0,
+      "profile_id": "us-omb-m-24-10",
+      "provision_id": "omb-governance",
+      "provision_outcome": "satisfied",
+      "skipped_count": 0,
+      "subject_scope": [
+        "urn:acef:sub:a2108281-5afd-4c20-880e-0fd3ebadf961"
+      ],
+      "warning_count": 0
+    },
+    {
+      "evidence_refs": [
+        "urn:acef:rec:29815fd3-3032-4018-803d-e342e7e68ea6",
+        "urn:acef:rec:70cc14c5-c915-4bbb-93c3-6fd1b327514c"
+      ],
+      "fail_count": 0,
+      "profile_id": "us-omb-m-24-10",
+      "provision_id": "omb-inventory",
+      "provision_outcome": "satisfied",
+      "skipped_count": 0,
+      "subject_scope": [
+        "urn:acef:sub:a2108281-5afd-4c20-880e-0fd3ebadf961"
+      ],
+      "warning_count": 0
+    },
+    {
+      "evidence_refs": [
+        "urn:acef:rec:29815fd3-3032-4018-803d-e342e7e68ea6",
+        "urn:acef:rec:70cc14c5-c915-4bbb-93c3-6fd1b327514c"
+      ],
+      "fail_count": 0,
+      "profile_id": "us-omb-m-24-10",
+      "provision_id": "omb-rights-safety",
+      "provision_outcome": "satisfied",
+      "skipped_count": 0,
+      "subject_scope": [
+        "urn:acef:sub:a2108281-5afd-4c20-880e-0fd3ebadf961"
+      ],
+      "warning_count": 0
+    }
+  ],
+  "results": [
+    {
+      "error_code": null,
+      "evidence_refs": [
+        "urn:acef:rec:29815fd3-3032-4018-803d-e342e7e68ea6",
+        "urn:acef:rec:70cc14c5-c915-4bbb-93c3-6fd1b327514c"
+      ],
+      "message": null,
+      "outcome": "passed",
+      "profile_id": "us-omb-m-24-10",
+      "provision_id": "omb-inventory",
+      "rule_id": "omb-inv-governance-policy",
+      "rule_severity": "fail",
+      "subject_scope": [
+        "urn:acef:sub:a2108281-5afd-4c20-880e-0fd3ebadf961"
+      ]
+    },
+    {
+      "error_code": null,
+      "evidence_refs": [
+        "urn:acef:rec:29815fd3-3032-4018-803d-e342e7e68ea6"
+      ],
+      "message": null,
+      "outcome": "passed",
+      "profile_id": "us-omb-m-24-10",
+      "provision_id": "omb-inventory",
+      "rule_id": "omb-inv-inventory-variant",
+      "rule_severity": "fail",
+      "subject_scope": [
+        "urn:acef:sub:a2108281-5afd-4c20-880e-0fd3ebadf961"
+      ]
+    },
+    {
+      "error_code": null,
+      "evidence_refs": [
+        "urn:acef:rec:29815fd3-3032-4018-803d-e342e7e68ea6",
+        "urn:acef:rec:70cc14c5-c915-4bbb-93c3-6fd1b327514c"
+      ],
+      "message": null,
+      "outcome": "passed",
+      "profile_id": "us-omb-m-24-10",
+      "provision_id": "omb-inventory",
+      "rule_id": "omb-inv-freshness",
+      "rule_severity": "warning",
+      "subject_scope": [
+        "urn:acef:sub:a2108281-5afd-4c20-880e-0fd3ebadf961"
+      ]
+    },
+    {
+      "error_code": null,
+      "evidence_refs": [
+        "urn:acef:rec:29815fd3-3032-4018-803d-e342e7e68ea6",
+        "urn:acef:rec:70cc14c5-c915-4bbb-93c3-6fd1b327514c"
+      ],
+      "message": null,
+      "outcome": "passed",
+      "profile_id": "us-omb-m-24-10",
+      "provision_id": "omb-inventory",
+      "rule_id": "omb-inv-entity-linked",
+      "rule_severity": "warning",
+      "subject_scope": [
+        "urn:acef:sub:a2108281-5afd-4c20-880e-0fd3ebadf961"
+      ]
+    },
+    {
+      "error_code": null,
+      "evidence_refs": [
+        "urn:acef:rec:29815fd3-3032-4018-803d-e342e7e68ea6",
+        "urn:acef:rec:70cc14c5-c915-4bbb-93c3-6fd1b327514c"
+      ],
+      "message": null,
+      "outcome": "passed",
+      "profile_id": "us-omb-m-24-10",
+      "provision_id": "omb-caio",
+      "rule_id": "omb-caio-designation",
+      "rule_severity": "fail",
+      "subject_scope": [
+        "urn:acef:sub:a2108281-5afd-4c20-880e-0fd3ebadf961"
+      ]
+    },
+    {
+      "error_code": null,
+      "evidence_refs": [
+        "urn:acef:rec:29815fd3-3032-4018-803d-e342e7e68ea6",
+        "urn:acef:rec:70cc14c5-c915-4bbb-93c3-6fd1b327514c"
+      ],
+      "message": null,
+      "outcome": "passed",
+      "profile_id": "us-omb-m-24-10",
+      "provision_id": "omb-caio",
+      "rule_id": "omb-caio-inventory-has-caio",
+      "rule_severity": "fail",
+      "subject_scope": [
+        "urn:acef:sub:a2108281-5afd-4c20-880e-0fd3ebadf961"
+      ]
+    },
+    {
+      "error_code": null,
+      "evidence_refs": [
+        "urn:acef:rec:29815fd3-3032-4018-803d-e342e7e68ea6",
+        "urn:acef:rec:70cc14c5-c915-4bbb-93c3-6fd1b327514c"
+      ],
+      "message": null,
+      "outcome": "passed",
+      "profile_id": "us-omb-m-24-10",
+      "provision_id": "omb-rights-safety",
+      "rule_id": "omb-rights-safety-classification",
+      "rule_severity": "fail",
+      "subject_scope": [
+        "urn:acef:sub:a2108281-5afd-4c20-880e-0fd3ebadf961"
+      ]
+    },
+    {
+      "error_code": null,
+      "evidence_refs": [
+        "urn:acef:rec:29815fd3-3032-4018-803d-e342e7e68ea6",
+        "urn:acef:rec:70cc14c5-c915-4bbb-93c3-6fd1b327514c"
+      ],
+      "message": null,
+      "outcome": "passed",
+      "profile_id": "us-omb-m-24-10",
+      "provision_id": "omb-rights-safety",
+      "rule_id": "omb-rights-safety-rationale",
+      "rule_severity": "warning",
+      "subject_scope": [
+        "urn:acef:sub:a2108281-5afd-4c20-880e-0fd3ebadf961"
+      ]
+    },
+    {
+      "error_code": null,
+      "evidence_refs": [
+        "urn:acef:rec:29815fd3-3032-4018-803d-e342e7e68ea6",
+        "urn:acef:rec:70cc14c5-c915-4bbb-93c3-6fd1b327514c"
+      ],
+      "message": null,
+      "outcome": "passed",
+      "profile_id": "us-omb-m-24-10",
+      "provision_id": "omb-governance",
+      "rule_id": "omb-gov-governance-policy",
+      "rule_severity": "fail",
+      "subject_scope": [
+        "urn:acef:sub:a2108281-5afd-4c20-880e-0fd3ebadf961"
+      ]
+    },
+    {
+      "error_code": null,
+      "evidence_refs": [
+        "urn:acef:rec:70cc14c5-c915-4bbb-93c3-6fd1b327514c"
+      ],
+      "message": null,
+      "outcome": "passed",
+      "profile_id": "us-omb-m-24-10",
+      "provision_id": "omb-governance",
+      "rule_id": "omb-gov-attachment",
+      "rule_severity": "warning",
+      "subject_scope": [
+        "urn:acef:sub:a2108281-5afd-4c20-880e-0fd3ebadf961"
+      ]
+    }
+  ],
+  "structural_errors": [],
+  "template_digests": {
+    "us-omb-m-24-10:1.1.0": "sha256:c502b53b2ddced25615c70399a11da4e1315ea9bea280a7cd9e710e9dc2c2f58"
+  },
+  "timestamp": "2026-06-17T18:04:18Z",
+  "versioning": {
+    "assessment_version": "1.0.0",
+    "core_version": "1.0.0"
+  }
+}

@@ -1,1 +1,9 @@
-{"class":"offline-deterministic","disposition":"pass","emitted_codes":[],"vector":"pass-dedupe-key-public-card"}
+{
+  "class": "offline-deterministic",
+  "disposition": "pass",
+  "emitted_codes": [],
+  "vector": "pass-dedupe-key-public-card",
+  "evidence_bundle_ref": {
+    "content_hash": "sha256:48c75e1025767f0f0d7558d30ae35a3b6af91c4b9c930ee190c1c1c4faa86d9f"
+  }
+}

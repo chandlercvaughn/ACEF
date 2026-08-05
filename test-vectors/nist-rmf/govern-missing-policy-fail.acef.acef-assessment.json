@@ -1,1 +1,81 @@
-{"assessment_id":"urn:acef:asx:b7bd0a1c-8fed-4cce-a4d6-f880fc6897e8","assessor":{"name":"acef-validator","organization":"AI Commons","version":"0.1.0"},"evaluation_instant":"2026-03-15T12:00:00Z","evidence_bundle_ref":{"content_hash":"sha256:a1d68269b9b739567262d73de61621c3f0abf6bb08de180eb41fc68830aafe51","package_id":"urn:acef:pkg:53bb495b-86c0-4479-bece-7253a0be123e"},"integrity":null,"profiles_evaluated":["nist-ai-rmf-1.0:1.0.0"],"provision_summary":[{"evidence_refs":[],"fail_count":1,"profile_id":"nist-ai-rmf-1.0","provision_id":"govern-1","provision_outcome":"not-satisfied","skipped_count":0,"subject_scope":["urn:acef:sub:1de04de6-81fb-46d2-884a-8dbc39a85792"],"warning_count":1}],"results":[{"error_code":null,"evidence_refs":[],"message":"At least one governance_policy record is required — GOVERN 1 mandates documented policies, processes, and procedures for AI risk management","outcome":"failed","profile_id":"nist-ai-rmf-1.0","provision_id":"govern-1","rule_id":"govern1-governance-policy","rule_severity":"fail","subject_scope":["urn:acef:sub:1de04de6-81fb-46d2-884a-8dbc39a85792"]},{"error_code":null,"evidence_refs":[],"message":"Governance policy records should include attached policy documents demonstrating established organizational AI governance","outcome":"failed","profile_id":"nist-ai-rmf-1.0","provision_id":"govern-1","rule_id":"govern1-policy-attachment","rule_severity":"warning","subject_scope":["urn:acef:sub:1de04de6-81fb-46d2-884a-8dbc39a85792"]},{"error_code":null,"evidence_refs":[],"message":null,"outcome":"passed","profile_id":"nist-ai-rmf-1.0","provision_id":"govern-1","rule_id":"govern1-policy-entity-linked","rule_severity":"warning","subject_scope":["urn:acef:sub:1de04de6-81fb-46d2-884a-8dbc39a85792"]}],"structural_errors":[],"template_digests":{"nist-ai-rmf-1.0:1.0.0":"sha256:e70c1e2867f473273879a545a3d868570bf48ea92f60e3139ff93a740cb93f12"},"timestamp":"2026-06-17T18:04:18Z","versioning":{"assessment_version":"1.0.0","core_version":"1.0.0"}}
+{
+  "assessment_id": "urn:acef:asx:b7bd0a1c-8fed-4cce-a4d6-f880fc6897e8",
+  "assessor": {
+    "name": "acef-validator",
+    "organization": "AI Commons",
+    "version": "0.1.0"
+  },
+  "evaluation_instant": "2026-03-15T12:00:00Z",
+  "evidence_bundle_ref": {
+    "content_hash": "sha256:e823bbfb06f0e032ea3bbfcc34f1f581c52f099340a8c9dfe6c3701e2fe97cd6",
+    "package_id": "urn:acef:pkg:53bb495b-86c0-4479-bece-7253a0be123e"
+  },
+  "integrity": null,
+  "profiles_evaluated": [
+    "nist-ai-rmf-1.0:1.1.0"
+  ],
+  "provision_summary": [
+    {
+      "evidence_refs": [],
+      "fail_count": 1,
+      "profile_id": "nist-ai-rmf-1.0",
+      "provision_id": "govern-1",
+      "provision_outcome": "not-satisfied",
+      "skipped_count": 0,
+      "subject_scope": [
+        "urn:acef:sub:1de04de6-81fb-46d2-884a-8dbc39a85792"
+      ],
+      "warning_count": 1
+    }
+  ],
+  "results": [
+    {
+      "error_code": null,
+      "evidence_refs": [],
+      "message": "At least one governance_policy record is required — GOVERN 1 mandates documented policies, processes, and procedures for AI risk management",
+      "outcome": "failed",
+      "profile_id": "nist-ai-rmf-1.0",
+      "provision_id": "govern-1",
+      "rule_id": "govern1-governance-policy",
+      "rule_severity": "fail",
+      "subject_scope": [
+        "urn:acef:sub:1de04de6-81fb-46d2-884a-8dbc39a85792"
+      ]
+    },
+    {
+      "error_code": null,
+      "evidence_refs": [],
+      "message": "Governance policy records should include attached policy documents demonstrating established organizational AI governance",
+      "outcome": "failed",
+      "profile_id": "nist-ai-rmf-1.0",
+      "provision_id": "govern-1",
+      "rule_id": "govern1-policy-attachment",
+      "rule_severity": "warning",
+      "subject_scope": [
+        "urn:acef:sub:1de04de6-81fb-46d2-884a-8dbc39a85792"
+      ]
+    },
+    {
+      "error_code": null,
+      "evidence_refs": [],
+      "message": null,
+      "outcome": "passed",
+      "profile_id": "nist-ai-rmf-1.0",
+      "provision_id": "govern-1",
+      "rule_id": "govern1-policy-entity-linked",
+      "rule_severity": "warning",
+      "subject_scope": [
+        "urn:acef:sub:1de04de6-81fb-46d2-884a-8dbc39a85792"
+      ]
+    }
+  ],
+  "structural_errors": [],
+  "template_digests": {
+    "nist-ai-rmf-1.0:1.1.0": "sha256:c05a66f1eef21ac4c2f9d627de858831997048581908f291c6f2b3e40b9bcade"
+  },
+  "timestamp": "2026-06-17T18:04:18Z",
+  "versioning": {
+    "assessment_version": "1.0.0",
+    "core_version": "1.0.0"
+  }
+}

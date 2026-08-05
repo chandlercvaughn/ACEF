@@ -1,1 +1,11 @@
-{"class":"offline-deterministic","disposition":"fail","emitted_codes":["ACEF-088"],"vector":"fail-severity-band-088"}
+{
+  "class": "offline-deterministic",
+  "disposition": "fail",
+  "emitted_codes": [
+    "ACEF-088"
+  ],
+  "vector": "fail-severity-band-088",
+  "evidence_bundle_ref": {
+    "content_hash": "sha256:40fba58b6c12c2f2dfb3b35e664c3ad72f4ac6da70ee57ca125814ef2fa2ad0b"
+  }
+}

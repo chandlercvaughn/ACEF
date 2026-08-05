@@ -871,6 +871,11 @@ def _parse_iso_instant(value: str) -> datetime | None:
 _CLASSIFICATION_LIMB = re.compile(r"^annex_[a-z]+_", re.IGNORECASE)
 
 
+# 1200 months = 100 years; the longest real statutory retention is an order of
+# magnitude below this, and it keeps the scan far inside datetime.date range.
+_MAX_RETENTION_MONTHS = 1200
+
+
 @lru_cache(maxsize=64)
 def calendar_months_to_days(months: int) -> int:
     """Return the MINIMUM number of days that ``months`` calendar months can span.
@@ -889,6 +894,13 @@ def calendar_months_to_days(months: int) -> int:
     """
     if months < 1:
         raise ValueError(f"months must be >= 1, got {months}")
+    # The 400-year scan below adds `months` to a start as late as 2399-12, so an
+    # unbounded value overflows datetime.date (year > 9999) and aborts an
+    # otherwise valid validation run. No real retention period approaches this.
+    if months > _MAX_RETENTION_MONTHS:
+        raise ValueError(
+            f"months must be <= {_MAX_RETENTION_MONTHS} ({_MAX_RETENTION_MONTHS // 12} years), got {months}"
+        )
     # Walk every start month of a FULL 400-year Gregorian cycle. Sampling only a
     # leap/non-leap PAIR is not enough: century years divisible by 100 but not
     # 400 are common years, so e.g. 48 months starting 2097-03 spans 1460 days
@@ -1161,6 +1173,13 @@ def _evaluate_profiles(
         # not-assessed instead, with ACEF-035 as the explanation.
         indeterminate: set[str] = set()
         for prov in provisions_to_evaluate:
+            # A provision that applies to no subject in this bundle produces no
+            # rule results, so none of the advisory diagnostics below describe
+            # anything that happened. Gate them all identically — ACEF-032
+            # included, which previously told a minimal-risk-only bundle that
+            # high-risk-only rules had been skipped.
+            if not _applies_to_any_subject(prov):
+                continue
             if prov.effective_date and evaluation_instant:
                 if _is_before(evaluation_instant, prov.effective_date):
                     not_yet_effective.add(prov.provision_id)

@@ -1,1 +1,11 @@
-{"class":"offline-deterministic","disposition":"pass","emitted_codes":["ACEF-087"],"vector":"pass-near-miss-info"}
+{
+  "class": "offline-deterministic",
+  "disposition": "pass",
+  "emitted_codes": [
+    "ACEF-087"
+  ],
+  "vector": "pass-near-miss-info",
+  "evidence_bundle_ref": {
+    "content_hash": "sha256:e28d24140015dde7d2a9f61dbe13c0c8c131e61b72859c7ebfa9d587f1d1f332"
+  }
+}

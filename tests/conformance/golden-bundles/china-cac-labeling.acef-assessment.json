@@ -7,7 +7,7 @@
   },
   "evaluation_instant": "2026-03-15T12:00:00Z",
   "evidence_bundle_ref": {
-    "content_hash": "sha256:ee79fb2cfd8294692e697095b342f215123e734d99b0d357a7962b5fd21e4742",
+    "content_hash": "sha256:a24a29ec34daea245a3894d21fe0db149b16506e7d4b32e38eae653388820616",
     "package_id": "urn:acef:pkg:a18668f4-37e3-42ef-a0a2-3a82172c6ca2"
   },
   "integrity": null,

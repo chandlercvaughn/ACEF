@@ -1,1 +1,11 @@
-{"class":"source-backed","disposition":"pass","emitted_codes":["ACEF-032"],"vector":"reserved-id-death-10day"}
+{
+  "class": "source-backed",
+  "disposition": "pass",
+  "emitted_codes": [
+    "ACEF-032"
+  ],
+  "vector": "reserved-id-death-10day",
+  "evidence_bundle_ref": {
+    "content_hash": "sha256:7bbe8612aa2f6dab022bb92fc1bfa1f2e8e0fe8cd3aac2133c5a8e240b1a278b"
+  }
+}

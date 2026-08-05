@@ -1,1 +1,326 @@
-{"assessment_id":"urn:acef:asx:71039b51-f5a5-47a1-95d5-e54fff2bc834","assessor":{"name":"acef-validator","organization":"AI Commons","version":"0.1.0"},"evaluation_instant":"2026-03-15T12:00:00Z","evidence_bundle_ref":{"content_hash":"sha256:53e50dd09aa7b13194a09451b8937fc3063700c9e5fbeaf3ab8dce2d25bfcbbe","package_id":"urn:acef:pkg:c2280927-d17d-46b0-93e1-b73c4aae9f33"},"integrity":null,"profiles_evaluated":["eu-gpai-code-of-practice-2025:1.0.0"],"provision_summary":[{"evidence_refs":["urn:acef:rec:ba25d463-d93a-42f6-bd6e-fdc684f25424"],"fail_count":0,"profile_id":"eu-gpai-code-of-practice-2025","provision_id":"gpai-copyright-1","provision_outcome":"satisfied","skipped_count":0,"subject_scope":["urn:acef:sub:1e8a36be-58ac-4c49-80c9-153b04302630"],"warning_count":0},{"evidence_refs":["urn:acef:rec:e0e128dc-3f2a-4938-a560-3c544ae14fd4"],"fail_count":0,"profile_id":"eu-gpai-code-of-practice-2025","provision_id":"gpai-copyright-2","provision_outcome":"satisfied","skipped_count":0,"subject_scope":["urn:acef:sub:1e8a36be-58ac-4c49-80c9-153b04302630"],"warning_count":0},{"evidence_refs":["urn:acef:rec:40dee884-a354-4ed3-abcd-cc57b3fbb73d"],"fail_count":0,"profile_id":"eu-gpai-code-of-practice-2025","provision_id":"gpai-transparency-1","provision_outcome":"satisfied","skipped_count":0,"subject_scope":["urn:acef:sub:1e8a36be-58ac-4c49-80c9-153b04302630"],"warning_count":0},{"evidence_refs":["urn:acef:rec:40dee884-a354-4ed3-abcd-cc57b3fbb73d"],"fail_count":0,"profile_id":"eu-gpai-code-of-practice-2025","provision_id":"gpai-transparency-2","provision_outcome":"satisfied","skipped_count":0,"subject_scope":["urn:acef:sub:1e8a36be-58ac-4c49-80c9-153b04302630"],"warning_count":0}],"results":[{"error_code":null,"evidence_refs":["urn:acef:rec:40dee884-a354-4ed3-abcd-cc57b3fbb73d"],"message":null,"outcome":"passed","profile_id":"eu-gpai-code-of-practice-2025","provision_id":"gpai-transparency-1","rule_id":"gpai-t1-data-provenance","rule_severity":"fail","subject_scope":["urn:acef:sub:1e8a36be-58ac-4c49-80c9-153b04302630"]},{"error_code":null,"evidence_refs":["urn:acef:rec:40dee884-a354-4ed3-abcd-cc57b3fbb73d"],"message":null,"outcome":"passed","profile_id":"eu-gpai-code-of-practice-2025","provision_id":"gpai-transparency-1","rule_id":"gpai-t1-source-type","rule_severity":"fail","subject_scope":["urn:acef:sub:1e8a36be-58ac-4c49-80c9-153b04302630"]},{"error_code":null,"evidence_refs":["urn:acef:rec:40dee884-a354-4ed3-abcd-cc57b3fbb73d"],"message":null,"outcome":"passed","profile_id":"eu-gpai-code-of-practice-2025","provision_id":"gpai-transparency-1","rule_id":"gpai-t1-training-summary","rule_severity":"fail","subject_scope":["urn:acef:sub:1e8a36be-58ac-4c49-80c9-153b04302630"]},{"error_code":null,"evidence_refs":["urn:acef:rec:40dee884-a354-4ed3-abcd-cc57b3fbb73d"],"message":null,"outcome":"passed","profile_id":"eu-gpai-code-of-practice-2025","provision_id":"gpai-transparency-1","rule_id":"gpai-t1-modalities-present","rule_severity":"warning","subject_scope":["urn:acef:sub:1e8a36be-58ac-4c49-80c9-153b04302630"]},{"error_code":null,"evidence_refs":["urn:acef:rec:40dee884-a354-4ed3-abcd-cc57b3fbb73d"],"message":null,"outcome":"passed","profile_id":"eu-gpai-code-of-practice-2025","provision_id":"gpai-transparency-1","rule_id":"gpai-t1-entity-linked","rule_severity":"warning","subject_scope":["urn:acef:sub:1e8a36be-58ac-4c49-80c9-153b04302630"]},{"error_code":null,"evidence_refs":["urn:acef:rec:40dee884-a354-4ed3-abcd-cc57b3fbb73d"],"message":null,"outcome":"passed","profile_id":"eu-gpai-code-of-practice-2025","provision_id":"gpai-transparency-2","rule_id":"gpai-t2-data-provenance","rule_severity":"fail","subject_scope":["urn:acef:sub:1e8a36be-58ac-4c49-80c9-153b04302630"]},{"error_code":null,"evidence_refs":["urn:acef:rec:40dee884-a354-4ed3-abcd-cc57b3fbb73d"],"message":null,"outcome":"passed","profile_id":"eu-gpai-code-of-practice-2025","provision_id":"gpai-transparency-2","rule_id":"gpai-t2-source-uris","rule_severity":"fail","subject_scope":["urn:acef:sub:1e8a36be-58ac-4c49-80c9-153b04302630"]},{"error_code":null,"evidence_refs":["urn:acef:rec:40dee884-a354-4ed3-abcd-cc57b3fbb73d"],"message":null,"outcome":"passed","profile_id":"eu-gpai-code-of-practice-2025","provision_id":"gpai-transparency-2","rule_id":"gpai-t2-acquisition-method","rule_severity":"warning","subject_scope":["urn:acef:sub:1e8a36be-58ac-4c49-80c9-153b04302630"]},{"error_code":null,"evidence_refs":["urn:acef:rec:40dee884-a354-4ed3-abcd-cc57b3fbb73d"],"message":null,"outcome":"passed","profile_id":"eu-gpai-code-of-practice-2025","provision_id":"gpai-transparency-2","rule_id":"gpai-t2-dataset-linked","rule_severity":"warning","subject_scope":["urn:acef:sub:1e8a36be-58ac-4c49-80c9-153b04302630"]},{"error_code":null,"evidence_refs":["urn:acef:rec:ba25d463-d93a-42f6-bd6e-fdc684f25424"],"message":null,"outcome":"passed","profile_id":"eu-gpai-code-of-practice-2025","provision_id":"gpai-copyright-1","rule_id":"gpai-c1-copyright-reservation","rule_severity":"fail","subject_scope":["urn:acef:sub:1e8a36be-58ac-4c49-80c9-153b04302630"]},{"error_code":null,"evidence_refs":["urn:acef:rec:ba25d463-d93a-42f6-bd6e-fdc684f25424"],"message":null,"outcome":"passed","profile_id":"eu-gpai-code-of-practice-2025","provision_id":"gpai-copyright-1","rule_id":"gpai-c1-opt-out-method","rule_severity":"fail","subject_scope":["urn:acef:sub:1e8a36be-58ac-4c49-80c9-153b04302630"]},{"error_code":null,"evidence_refs":["urn:acef:rec:ba25d463-d93a-42f6-bd6e-fdc684f25424"],"message":null,"outcome":"passed","profile_id":"eu-gpai-code-of-practice-2025","provision_id":"gpai-copyright-1","rule_id":"gpai-c1-compliance-date","rule_severity":"warning","subject_scope":["urn:acef:sub:1e8a36be-58ac-4c49-80c9-153b04302630"]},{"error_code":null,"evidence_refs":["urn:acef:rec:ba25d463-d93a-42f6-bd6e-fdc684f25424"],"message":null,"outcome":"passed","profile_id":"eu-gpai-code-of-practice-2025","provision_id":"gpai-copyright-1","rule_id":"gpai-c1-entity-linked","rule_severity":"warning","subject_scope":["urn:acef:sub:1e8a36be-58ac-4c49-80c9-153b04302630"]},{"error_code":null,"evidence_refs":["urn:acef:rec:e0e128dc-3f2a-4938-a560-3c544ae14fd4"],"message":null,"outcome":"passed","profile_id":"eu-gpai-code-of-practice-2025","provision_id":"gpai-copyright-2","rule_id":"gpai-c2-license-record","rule_severity":"fail","subject_scope":["urn:acef:sub:1e8a36be-58ac-4c49-80c9-153b04302630"]},{"error_code":null,"evidence_refs":["urn:acef:rec:e0e128dc-3f2a-4938-a560-3c544ae14fd4"],"message":null,"outcome":"passed","profile_id":"eu-gpai-code-of-practice-2025","provision_id":"gpai-copyright-2","rule_id":"gpai-c2-licensor-present","rule_severity":"warning","subject_scope":["urn:acef:sub:1e8a36be-58ac-4c49-80c9-153b04302630"]},{"error_code":null,"evidence_refs":["urn:acef:rec:e0e128dc-3f2a-4938-a560-3c544ae14fd4"],"message":null,"outcome":"passed","profile_id":"eu-gpai-code-of-practice-2025","provision_id":"gpai-copyright-2","rule_id":"gpai-c2-scope-present","rule_severity":"warning","subject_scope":["urn:acef:sub:1e8a36be-58ac-4c49-80c9-153b04302630"]}],"structural_errors":[],"template_digests":{"eu-gpai-code-of-practice-2025:1.0.0":"sha256:4bda2c555fa9f8b753cc96352f0e94f07a77d2e2824cb6cffdb7c90a300aa06b"},"timestamp":"2026-06-17T18:04:18Z","versioning":{"assessment_version":"1.0.0","core_version":"1.0.0"}}
+{
+  "assessment_id": "urn:acef:asx:71039b51-f5a5-47a1-95d5-e54fff2bc834",
+  "assessor": {
+    "name": "acef-validator",
+    "organization": "AI Commons",
+    "version": "0.1.0"
+  },
+  "evaluation_instant": "2026-03-15T12:00:00Z",
+  "evidence_bundle_ref": {
+    "content_hash": "sha256:936b6b543575aea4d8eb112927f355d40bed879441a39c7b7f690b2354f1f3ed",
+    "package_id": "urn:acef:pkg:c2280927-d17d-46b0-93e1-b73c4aae9f33"
+  },
+  "integrity": null,
+  "profiles_evaluated": [
+    "eu-gpai-code-of-practice-2025:1.1.0"
+  ],
+  "provision_summary": [
+    {
+      "evidence_refs": [
+        "urn:acef:rec:ba25d463-d93a-42f6-bd6e-fdc684f25424"
+      ],
+      "fail_count": 0,
+      "profile_id": "eu-gpai-code-of-practice-2025",
+      "provision_id": "gpai-copyright-1",
+      "provision_outcome": "satisfied",
+      "skipped_count": 0,
+      "subject_scope": [
+        "urn:acef:sub:1e8a36be-58ac-4c49-80c9-153b04302630"
+      ],
+      "warning_count": 0
+    },
+    {
+      "evidence_refs": [
+        "urn:acef:rec:e0e128dc-3f2a-4938-a560-3c544ae14fd4"
+      ],
+      "fail_count": 0,
+      "profile_id": "eu-gpai-code-of-practice-2025",
+      "provision_id": "gpai-copyright-2",
+      "provision_outcome": "satisfied",
+      "skipped_count": 0,
+      "subject_scope": [
+        "urn:acef:sub:1e8a36be-58ac-4c49-80c9-153b04302630"
+      ],
+      "warning_count": 0
+    },
+    {
+      "evidence_refs": [
+        "urn:acef:rec:40dee884-a354-4ed3-abcd-cc57b3fbb73d"
+      ],
+      "fail_count": 0,
+      "profile_id": "eu-gpai-code-of-practice-2025",
+      "provision_id": "gpai-transparency-1",
+      "provision_outcome": "satisfied",
+      "skipped_count": 0,
+      "subject_scope": [
+        "urn:acef:sub:1e8a36be-58ac-4c49-80c9-153b04302630"
+      ],
+      "warning_count": 0
+    },
+    {
+      "evidence_refs": [
+        "urn:acef:rec:40dee884-a354-4ed3-abcd-cc57b3fbb73d"
+      ],
+      "fail_count": 0,
+      "profile_id": "eu-gpai-code-of-practice-2025",
+      "provision_id": "gpai-transparency-2",
+      "provision_outcome": "satisfied",
+      "skipped_count": 0,
+      "subject_scope": [
+        "urn:acef:sub:1e8a36be-58ac-4c49-80c9-153b04302630"
+      ],
+      "warning_count": 0
+    }
+  ],
+  "results": [
+    {
+      "error_code": null,
+      "evidence_refs": [
+        "urn:acef:rec:40dee884-a354-4ed3-abcd-cc57b3fbb73d"
+      ],
+      "message": null,
+      "outcome": "passed",
+      "profile_id": "eu-gpai-code-of-practice-2025",
+      "provision_id": "gpai-transparency-1",
+      "rule_id": "gpai-t1-data-provenance",
+      "rule_severity": "fail",
+      "subject_scope": [
+        "urn:acef:sub:1e8a36be-58ac-4c49-80c9-153b04302630"
+      ]
+    },
+    {
+      "error_code": null,
+      "evidence_refs": [
+        "urn:acef:rec:40dee884-a354-4ed3-abcd-cc57b3fbb73d"
+      ],
+      "message": null,
+      "outcome": "passed",
+      "profile_id": "eu-gpai-code-of-practice-2025",
+      "provision_id": "gpai-transparency-1",
+      "rule_id": "gpai-t1-source-type",
+      "rule_severity": "fail",
+      "subject_scope": [
+        "urn:acef:sub:1e8a36be-58ac-4c49-80c9-153b04302630"
+      ]
+    },
+    {
+      "error_code": null,
+      "evidence_refs": [
+        "urn:acef:rec:40dee884-a354-4ed3-abcd-cc57b3fbb73d"
+      ],
+      "message": null,
+      "outcome": "passed",
+      "profile_id": "eu-gpai-code-of-practice-2025",
+      "provision_id": "gpai-transparency-1",
+      "rule_id": "gpai-t1-training-summary",
+      "rule_severity": "fail",
+      "subject_scope": [
+        "urn:acef:sub:1e8a36be-58ac-4c49-80c9-153b04302630"
+      ]
+    },
+    {
+      "error_code": null,
+      "evidence_refs": [
+        "urn:acef:rec:40dee884-a354-4ed3-abcd-cc57b3fbb73d"
+      ],
+      "message": null,
+      "outcome": "passed",
+      "profile_id": "eu-gpai-code-of-practice-2025",
+      "provision_id": "gpai-transparency-1",
+      "rule_id": "gpai-t1-modalities-present",
+      "rule_severity": "warning",
+      "subject_scope": [
+        "urn:acef:sub:1e8a36be-58ac-4c49-80c9-153b04302630"
+      ]
+    },
+    {
+      "error_code": null,
+      "evidence_refs": [
+        "urn:acef:rec:40dee884-a354-4ed3-abcd-cc57b3fbb73d"
+      ],
+      "message": null,
+      "outcome": "passed",
+      "profile_id": "eu-gpai-code-of-practice-2025",
+      "provision_id": "gpai-transparency-1",
+      "rule_id": "gpai-t1-entity-linked",
+      "rule_severity": "warning",
+      "subject_scope": [
+        "urn:acef:sub:1e8a36be-58ac-4c49-80c9-153b04302630"
+      ]
+    },
+    {
+      "error_code": null,
+      "evidence_refs": [
+        "urn:acef:rec:40dee884-a354-4ed3-abcd-cc57b3fbb73d"
+      ],
+      "message": null,
+      "outcome": "passed",
+      "profile_id": "eu-gpai-code-of-practice-2025",
+      "provision_id": "gpai-transparency-2",
+      "rule_id": "gpai-t2-data-provenance",
+      "rule_severity": "fail",
+      "subject_scope": [
+        "urn:acef:sub:1e8a36be-58ac-4c49-80c9-153b04302630"
+      ]
+    },
+    {
+      "error_code": null,
+      "evidence_refs": [
+        "urn:acef:rec:40dee884-a354-4ed3-abcd-cc57b3fbb73d"
+      ],
+      "message": null,
+      "outcome": "passed",
+      "profile_id": "eu-gpai-code-of-practice-2025",
+      "provision_id": "gpai-transparency-2",
+      "rule_id": "gpai-t2-source-uris",
+      "rule_severity": "fail",
+      "subject_scope": [
+        "urn:acef:sub:1e8a36be-58ac-4c49-80c9-153b04302630"
+      ]
+    },
+    {
+      "error_code": null,
+      "evidence_refs": [
+        "urn:acef:rec:40dee884-a354-4ed3-abcd-cc57b3fbb73d"
+      ],
+      "message": null,
+      "outcome": "passed",
+      "profile_id": "eu-gpai-code-of-practice-2025",
+      "provision_id": "gpai-transparency-2",
+      "rule_id": "gpai-t2-acquisition-method",
+      "rule_severity": "warning",
+      "subject_scope": [
+        "urn:acef:sub:1e8a36be-58ac-4c49-80c9-153b04302630"
+      ]
+    },
+    {
+      "error_code": null,
+      "evidence_refs": [
+        "urn:acef:rec:40dee884-a354-4ed3-abcd-cc57b3fbb73d"
+      ],
+      "message": null,
+      "outcome": "passed",
+      "profile_id": "eu-gpai-code-of-practice-2025",
+      "provision_id": "gpai-transparency-2",
+      "rule_id": "gpai-t2-dataset-linked",
+      "rule_severity": "warning",
+      "subject_scope": [
+        "urn:acef:sub:1e8a36be-58ac-4c49-80c9-153b04302630"
+      ]
+    },
+    {
+      "error_code": null,
+      "evidence_refs": [
+        "urn:acef:rec:ba25d463-d93a-42f6-bd6e-fdc684f25424"
+      ],
+      "message": null,
+      "outcome": "passed",
+      "profile_id": "eu-gpai-code-of-practice-2025",
+      "provision_id": "gpai-copyright-1",
+      "rule_id": "gpai-c1-copyright-reservation",
+      "rule_severity": "fail",
+      "subject_scope": [
+        "urn:acef:sub:1e8a36be-58ac-4c49-80c9-153b04302630"
+      ]
+    },
+    {
+      "error_code": null,
+      "evidence_refs": [
+        "urn:acef:rec:ba25d463-d93a-42f6-bd6e-fdc684f25424"
+      ],
+      "message": null,
+      "outcome": "passed",
+      "profile_id": "eu-gpai-code-of-practice-2025",
+      "provision_id": "gpai-copyright-1",
+      "rule_id": "gpai-c1-opt-out-method",
+      "rule_severity": "fail",
+      "subject_scope": [
+        "urn:acef:sub:1e8a36be-58ac-4c49-80c9-153b04302630"
+      ]
+    },
+    {
+      "error_code": null,
+      "evidence_refs": [
+        "urn:acef:rec:ba25d463-d93a-42f6-bd6e-fdc684f25424"
+      ],
+      "message": null,
+      "outcome": "passed",
+      "profile_id": "eu-gpai-code-of-practice-2025",
+      "provision_id": "gpai-copyright-1",
+      "rule_id": "gpai-c1-compliance-date",
+      "rule_severity": "warning",
+      "subject_scope": [
+        "urn:acef:sub:1e8a36be-58ac-4c49-80c9-153b04302630"
+      ]
+    },
+    {
+      "error_code": null,
+      "evidence_refs": [
+        "urn:acef:rec:ba25d463-d93a-42f6-bd6e-fdc684f25424"
+      ],
+      "message": null,
+      "outcome": "passed",
+      "profile_id": "eu-gpai-code-of-practice-2025",
+      "provision_id": "gpai-copyright-1",
+      "rule_id": "gpai-c1-entity-linked",
+      "rule_severity": "warning",
+      "subject_scope": [
+        "urn:acef:sub:1e8a36be-58ac-4c49-80c9-153b04302630"
+      ]
+    },
+    {
+      "error_code": null,
+      "evidence_refs": [
+        "urn:acef:rec:e0e128dc-3f2a-4938-a560-3c544ae14fd4"
+      ],
+      "message": null,
+      "outcome": "passed",
+      "profile_id": "eu-gpai-code-of-practice-2025",
+      "provision_id": "gpai-copyright-2",
+      "rule_id": "gpai-c2-license-record",
+      "rule_severity": "fail",
+      "subject_scope": [
+        "urn:acef:sub:1e8a36be-58ac-4c49-80c9-153b04302630"
+      ]
+    },
+    {
+      "error_code": null,
+      "evidence_refs": [
+        "urn:acef:rec:e0e128dc-3f2a-4938-a560-3c544ae14fd4"
+      ],
+      "message": null,
+      "outcome": "passed",
+      "profile_id": "eu-gpai-code-of-practice-2025",
+      "provision_id": "gpai-copyright-2",
+      "rule_id": "gpai-c2-licensor-present",
+      "rule_severity": "warning",
+      "subject_scope": [
+        "urn:acef:sub:1e8a36be-58ac-4c49-80c9-153b04302630"
+      ]
+    },
+    {
+      "error_code": null,
+      "evidence_refs": [
+        "urn:acef:rec:e0e128dc-3f2a-4938-a560-3c544ae14fd4"
+      ],
+      "message": null,
+      "outcome": "passed",
+      "profile_id": "eu-gpai-code-of-practice-2025",
+      "provision_id": "gpai-copyright-2",
+      "rule_id": "gpai-c2-scope-present",
+      "rule_severity": "warning",
+      "subject_scope": [
+        "urn:acef:sub:1e8a36be-58ac-4c49-80c9-153b04302630"
+      ]
+    }
+  ],
+  "structural_errors": [],
+  "template_digests": {
+    "eu-gpai-code-of-practice-2025:1.1.0": "sha256:feceafce6265e7ffc2d4297a9e24e4f1b400d26f41de58784fb9a141c1923f55"
+  },
+  "timestamp": "2026-06-17T18:04:18Z",
+  "versioning": {
+    "assessment_version": "1.0.0",
+    "core_version": "1.0.0"
+  }
+}

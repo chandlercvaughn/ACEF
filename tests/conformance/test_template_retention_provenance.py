@@ -153,7 +153,10 @@ def test_cited_retention_names_its_source(template_id: str) -> None:
 
 # Unconditional Art. 12 match, for CITATION fields where no prose exemption
 # is warranted.
-_ART12_ANY = re.compile(r"art(?:icle)?\.?\s*12\b|(?<![\w-])article-12(?![\w-])", re.IGNORECASE)
+_ART12_ANY = re.compile(
+    r"(?<![\w-])art(?:icle)?\.?\s*12\b|(?<![\w-])article-12(?![\w-])",
+    re.IGNORECASE,
+)
 
 _ART12_CITATION = re.compile(
     r"art(?:icle)?\.?\s*12\b(?!\s*\(1\)\s*logs)|(?<![\w-])article-12(?![\w-])",
@@ -331,3 +334,42 @@ def test_every_committed_manifest_pins_a_live_template_version() -> None:
             if pid in live and declared != live[pid]:
                 stale.append(f"{manifest.relative_to(_ROOT)}: {pid} declares {declared}")
     assert not stale, "manifests pin superseded template versions:\n  " + "\n  ".join(stale)
+
+
+def test_every_committed_assessment_matches_its_bundle_identity() -> None:
+    """A committed assessment must reference the bundle it actually describes.
+
+    roborev on 29a7cfc: after the manifests and hash indexes changed, the six
+    golden assessments still carried the PREVIOUS
+    `evidence_bundle_ref.content_hash`, so each referenced a bundle identity
+    that no longer existed. 19 test-vector assessments were likewise left
+    declaring template version 1.0.0.
+    """
+    from acef.integrity import compute_bundle_digest
+
+    live = {tid: load_template(tid).version for tid in ALL_TEMPLATE_IDS}
+    stale: list[str] = []
+    for assessment_path in sorted(_ROOT.glob("**/*.acef-assessment.json")):
+        if "/venv/" in str(assessment_path):
+            continue
+        bundle = Path(str(assessment_path).replace(".acef-assessment.json", ""))
+        hashes = bundle / "hashes" / "content-hashes.json"
+        data = json.loads(assessment_path.read_text(encoding="utf-8"))
+        rel = assessment_path.relative_to(_ROOT)
+
+        if hashes.exists():
+            expected = compute_bundle_digest(json.loads(hashes.read_text(encoding="utf-8")))
+            declared = (data.get("evidence_bundle_ref") or {}).get("content_hash")
+            if declared and declared != expected:
+                stale.append(f"{rel}: evidence_bundle_ref.content_hash is stale")
+
+        for entry in data.get("profiles_evaluated") or []:
+            tid = str(entry).split(":")[0]
+            if tid in live and entry != f"{tid}:{live[tid]}":
+                stale.append(f"{rel}: profiles_evaluated has {entry}")
+        for key in data.get("template_digests") or {}:
+            tid = str(key).split(":")[0]
+            if tid in live and key != f"{tid}:{live[tid]}":
+                stale.append(f"{rel}: template_digests has {key}")
+
+    assert not stale, "committed assessments are stale:\n  " + "\n  ".join(stale)

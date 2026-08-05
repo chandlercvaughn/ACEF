@@ -1,1 +1,13 @@
-{"class":"offline-deterministic","disposition":"fail","emitted_codes":["ACEF-032","ACEF-081","ACEF-084"],"vector":"fail-multi-profile-missing-member-081"}
+{
+  "class": "offline-deterministic",
+  "disposition": "fail",
+  "emitted_codes": [
+    "ACEF-032",
+    "ACEF-081",
+    "ACEF-084"
+  ],
+  "vector": "fail-multi-profile-missing-member-081",
+  "evidence_bundle_ref": {
+    "content_hash": "sha256:4c27987748039fbc0bc6e6d82ae4754a8d61a65f3cfe8cff2b5f75db0812c26d"
+  }
+}

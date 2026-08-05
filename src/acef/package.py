@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Any, Concatenate, ParamSpec, TypeVar, cast
 
 from pydantic import ValidationError
 
-from acef.errors import ACEFError, ACEFSchemaError
+from acef.errors import ACEFError, ACEFProfileError, ACEFSchemaError
 from acef.integrity import (
     canonicalize,
     path_nfc_utf8_problem,
@@ -1625,7 +1625,14 @@ class Package:
         if template_version is None:
             try:
                 _resolved_template_version = load_template(profile_id).version
-            except ACEFError:
+            except ACEFProfileError as exc:
+                # ONLY a genuinely unknown profile falls back. A known template
+                # that fails to load — malformed JSON, or an ACEF-034 retention
+                # invariant — must surface, not be silently relabelled as a
+                # third-party id and stamped 1.0.0; registry corruption would
+                # otherwise produce bundles pinning a version that never existed.
+                if exc.code != "ACEF-030":
+                    raise
                 _resolved_template_version = "1.0.0"
         else:
             _resolved_template_version = template_version
